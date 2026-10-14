@@ -1,0 +1,15 @@
+/target/
+
+.env
+.env.local
+*.local
+
+*.db
+*.db-wal
+*.db-shm
+*.tmp
+
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

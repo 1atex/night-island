@@ -1,0 +1,151 @@
+use std::cell::RefCell;
+use std::mem::size_of;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+use windows::UI::Color;
+use windows::UI::Composition::Desktop::DesktopWindowTarget;
+use windows::UI::Composition::{
+    AnimationIterationBehavior, CompositionAnimation, CompositionColorBrush, CompositionPathGeometry,
+    CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual,
+};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
+use windows::Win32::System::WinRT::{
+    CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
+    RO_INIT_SINGLETHREADED, RoInitialize,
+};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, GetKeyState, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, TME_LEAVE,
+    TRACKMOUSEEVENT, TrackMouseEvent, UnregisterHotKey, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME,
+    VK_LEFT, VK_MENU, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_UP,
+};
+use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::{Interface, Result, h, w};
+
+use crate::data::clips::{self, Clip, Reminder, ShelfItem, Store};
+use crate::data::settings::{Edge, Placement, Settings, Style};
+use crate::platform::apps;
+use crate::platform::audio;
+use crate::platform::autostart;
+use crate::platform::capture;
+use crate::platform::dnd;
+use crate::platform::downloads;
+use crate::platform::media;
+use crate::platform::privacy;
+use crate::platform::recognize;
+use crate::platform::recorder;
+use crate::platform::system::{self, RadioSwitch};
+use crate::platform::volume;
+use crate::services::agy;
+use crate::services::discord;
+use crate::services::everything;
+use crate::services::lyrics;
+use crate::services::spotify;
+use crate::services::weather;
+use crate::tools::cmd;
+use crate::tools::edit;
+use crate::tools::remind;
+use crate::tools::texttools;
+use crate::ui::characters::{self, Character, Reaction};
+use crate::ui::gfx::{Gpu, Layer};
+use crate::ui::overlay;
+use crate::ui::tray;
+use crate::view;
+use windows_numerics::{Vector2, Vector3};
+
+mod appearance;
+mod character;
+mod demo;
+mod editing;
+mod geometry;
+mod hotkeys;
+mod input;
+mod liquid;
+mod lyric;
+mod motion;
+mod pill;
+mod startup;
+mod tabs;
+mod timers;
+mod window;
+
+use self::{
+    appearance::*, character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*,
+    tabs::ClipboardState, timers::Timer, window::*,
+};
+pub use startup::run;
+
+static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
+
+#[derive(Clone, Copy, PartialEq)]
+enum State {
+    Collapsed,
+    Expanded,
+    Collapsing,
+    Hiding,
+    Hidden,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Win {
+    Strip,
+    Small,
+    Big,
+}
+
+struct App {
+    hwnd: HWND,
+    scale: f32,
+    compositor: Compositor,
+    geometry: CompositionRoundedRectangleGeometry,
+    state: State,
+    win: Win,
+    pointer: Pointer,
+    settings: Settings,
+    dpi_scale: f32,
+    _target: DesktopWindowTarget,
+    _visual: ContainerVisual,
+    backdrop: SpriteVisual,
+    tint: SpriteVisual,
+    ui: view::UiState,
+    store: Option<Store>,
+    clipboard: ClipboardState,
+    shelf: Vec<ShelfItem>,
+    popup_open: bool,
+    overlay: Option<overlay::Overlay>,
+    want_dock_dialog: bool,
+    reminders: Vec<Reminder>,
+    recording: Option<recorder::Recording>,
+    notice_link: Option<std::path::PathBuf>,
+    pet: Pet,
+    prev_foreground: HWND,
+    cw: f32,
+    pending_high_surrogate: Option<u16>,
+    music: MusicBars,
+    gaming: bool,
+    gpu: Gpu,
+    liquid: Liquid,
+    ears: [Layer; 2],
+    collapsed: Layer,
+    expanded: Layer,
+}
+
+thread_local! {
+    static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+}
+
+fn with_app(f: impl FnOnce(&mut App)) {
+    APP.with(|cell| {
+        if let Ok(mut guard) = cell.try_borrow_mut()
+            && let Some(app) = guard.as_mut()
+        {
+            f(app);
+        }
+    });
+}
