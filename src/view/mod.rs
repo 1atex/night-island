@@ -56,12 +56,11 @@ pub enum Tab {
     Record,
     Agy,
     Controls,
-    Integrations,
     Theme,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 13] = [
+pub const TABS: [(Tab, char, &str); 12] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Shelf, '\u{E838}', "Shelf"),
@@ -72,7 +71,6 @@ pub const TABS: [(Tab, char, &str); 13] = [
     (Tab::Record, '\u{E7C8}', "Record"),
     (Tab::Agy, '\u{E943}', "AGY"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
-    (Tab::Integrations, '\u{E71B}', "Integrations"),
     (Tab::Theme, '\u{E790}', "Theme"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];

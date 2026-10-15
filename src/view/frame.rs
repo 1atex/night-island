@@ -2,7 +2,6 @@ use crate::view::*;
 
 pub fn tab_in_bar(cfg: &Settings, tab: Tab, name: &str) -> bool {
     match tab {
-        Tab::Integrations => false,
         Tab::Home | Tab::Settings => true,
         _ => !cfg.tab_hidden(name),
     }
@@ -91,7 +90,7 @@ pub fn paint_expanded(
         if rect.2 <= rect.0 {
             continue;
         }
-        let selected = tab == ui.tab || (tab == Tab::Settings && ui.tab == Tab::Integrations);
+        let selected = tab == ui.tab;
         let radius = (rect.3 - rect.1) / 2.0;
         if selected {
             p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.16))?;
@@ -147,7 +146,6 @@ pub fn paint_expanded(
     match ui.tab {
         Tab::Home => paint_home(p, pill, scale, ui)?,
         Tab::Weather => paint_weather(p, pill, scale, ui)?,
-        Tab::Integrations => paint_integrations(p, pill, scale, ui)?,
         Tab::Agy => paint_agy(p, pill, scale, ui)?,
         Tab::Theme => paint_theme(p, pill, scale, ui)?,
         Tab::Clipboard => paint_clipboard(p, pill, scale, ui, clips)?,
@@ -177,7 +175,6 @@ mod tests {
         };
         assert!(tab_in_bar(&all_hidden, Tab::Home, "Home"));
         assert!(tab_in_bar(&all_hidden, Tab::Settings, "Settings"));
-        assert!(!tab_in_bar(&all_hidden, Tab::Integrations, "Integrations"));
         assert!(!tab_in_bar(&all_hidden, Tab::Note, "Note"));
         assert!(tab_in_bar(&Settings::default(), Tab::Note, "Note"));
     }

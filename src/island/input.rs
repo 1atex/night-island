@@ -222,15 +222,6 @@ impl App {
                 view::ThemeHit::Panel(i) => 820 + i,
                 view::ThemeHit::Accent(i) => 840 + i,
             })
-        } else if self.ui.tab == view::Tab::Integrations {
-            match view::hit_int(pill, self.scale, fx, fy, self.ui.discord.status == discord::Status::Connected) {
-                Some(view::IntHit::Discord) => Some(400),
-                Some(view::IntHit::Spotify) => Some(401),
-                Some(view::IntHit::DiscordMute) => Some(402),
-                Some(view::IntHit::DiscordDeaf) => Some(403),
-                Some(view::IntHit::DiscordOverlay) => Some(404),
-                None => None,
-            }
         } else if self.ui.tab == view::Tab::Home {
             let has_media = !self.ui.media.title.is_empty();
             match view::hit_home(
@@ -327,7 +318,6 @@ impl App {
             view::Tab::Home => self.click_home(x, y),
             view::Tab::Weather => self.click_weather(x, y),
             view::Tab::Agy => self.click_agy(x, y),
-            view::Tab::Integrations => self.click_integrations(x, y),
             view::Tab::Theme => self.click_theme(x, y),
             view::Tab::Settings => {}
         }

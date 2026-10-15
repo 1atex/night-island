@@ -49,15 +49,6 @@ pub fn save(c: &Config) {
     }
 }
 
-pub fn ensure_template() -> Option<PathBuf> {
-    let path = config_path()?;
-    if !path.exists() {
-        fs::create_dir_all(path.parent()?).ok()?;
-        fs::write(&path, serde_json::to_string_pretty(&Config::default()).ok()?).ok()?;
-    }
-    Some(path)
-}
-
 pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut buf = vec![0u8; len];
     unsafe {

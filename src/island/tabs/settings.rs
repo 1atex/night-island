@@ -40,11 +40,7 @@ impl App {
                 self.pointer.slider = Some(id);
                 self.drag_slider(x);
             }
-            view::SetHit::Button => {
-                if id == view::Sid::OpenIntegrations {
-                    self.select_tab(view::Tab::Integrations);
-                }
-            }
+            view::SetHit::Button => {}
         }
     }
 

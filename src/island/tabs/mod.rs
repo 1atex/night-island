@@ -44,9 +44,6 @@ impl App {
             self.refresh_home();
             spotify::refresh();
         }
-        if tab == view::Tab::Integrations {
-            spotify::reload_status();
-        }
         if tab == view::Tab::Agy {
             self.reload_agy();
         }

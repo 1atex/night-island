@@ -17,7 +17,8 @@ impl App {
             self.notify_for(Notice::Integrations, '\u{E8BD}', &text, 5000);
         }
         self.sync_overlay();
-        if matches!(self.ui.tab, view::Tab::Integrations | view::Tab::Home) {
+        self.render_settings_win();
+        if self.ui.tab == view::Tab::Home {
             self.repaint_expanded();
         }
     }
@@ -97,57 +98,9 @@ impl App {
             return;
         }
         self.ui.spotify = now;
-        if matches!(self.ui.tab, view::Tab::Home | view::Tab::Integrations) {
+        self.render_settings_win();
+        if self.ui.tab == view::Tab::Home {
             self.repaint_expanded();
-        }
-    }
-
-    pub(in crate::island) fn click_integrations(&mut self, x: i32, y: i32) {
-        let pill = self.pill_rect(true);
-        if view::int_fields_visible(&self.ui)
-            && let Some(field) = view::hit_int_field(pill, self.scale, x as f32, y as f32)
-        {
-            self.ui.int.focus = field;
-            self.begin_edit();
-            if let Some(layout) = self.active_layout() {
-                let (_, inner) = view::int_fields(pill, self.scale)[field as usize];
-                let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
-                self.edit_mut().click(&layout, x as f32 - inner.0, 4.0, shift);
-            }
-            return self.repaint_expanded();
-        }
-        if self.ui.editing {
-            self.end_edit(false);
-        }
-        let connected = self.ui.discord.status == discord::Status::Connected;
-        match view::hit_int(pill, self.scale, x as f32, y as f32, connected) {
-            Some(view::IntHit::Spotify) => {}
-            Some(view::IntHit::Discord) => {
-                match self.ui.discord.status {
-                    discord::Status::NoConfig => self.save_credentials(),
-                    discord::Status::Idle | discord::Status::Error(_) => discord::connect(),
-                    discord::Status::NotRunning | discord::Status::Connected => discord::disconnect(),
-                    discord::Status::Authorizing => {}
-                }
-                return;
-            }
-            Some(view::IntHit::DiscordOverlay) => return self.toggle_overlay(),
-            Some(view::IntHit::DiscordMute) => return discord::set_mute(!self.ui.discord.self_mute),
-            Some(view::IntHit::DiscordDeaf) => return discord::set_deaf(!self.ui.discord.self_deaf),
-            None => return,
-        }
-        match self.ui.spotify.status {
-            spotify::Status::NoClientId => {
-                if let Some(path) = crate::services::integrations::ensure_template() {
-                    cmd::shell_open(&path.to_string_lossy(), None);
-                }
-            }
-            spotify::Status::Disconnected | spotify::Status::Error(_) => {
-                spotify::reload_status();
-                spotify::connect();
-            }
-            spotify::Status::Connected => spotify::disconnect(),
-            spotify::Status::Connecting => {}
         }
     }
 

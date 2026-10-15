@@ -36,7 +36,6 @@ pub enum Sid {
     TabAgy,
     TabControls,
     TabTheme,
-    OpenIntegrations,
     NotifyMic,
     NotifyDownloads,
     NotifyCapture,

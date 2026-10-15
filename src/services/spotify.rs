@@ -89,6 +89,22 @@ fn client_id() -> Option<String> {
     (!id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(id)
 }
 
+pub fn own_client_id() -> String {
+    integrations::load().spotify_client_id
+}
+
+pub fn set_client_id(id: &str) -> bool {
+    let id = id.trim();
+    if id.len() > 64 || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return false;
+    }
+    let mut c = integrations::load();
+    c.spotify_client_id = id.to_string();
+    integrations::save(&c);
+    reload_status();
+    true
+}
+
 pub fn init(hwnd: HWND) {
     HWND_RAW.store(hwnd.0 as isize, Ordering::Relaxed);
     reload_status();

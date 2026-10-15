@@ -47,7 +47,7 @@ impl App {
         if self.extra_field().is_some() {
             self.set_timer(Timer::Geo, 450);
         }
-        if self.int_field().is_some() || self.extra_field().is_some() {
+        if self.extra_field().is_some() {
             self.ui.caret_on = true;
             self.set_timer(Timer::Caret, CARET_BLINK_MS);
             return self.repaint_expanded();

@@ -153,6 +153,34 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Track title" => "Название трека",
         "Synced lyrics" => "Текст песни",
         "Tabs" => "Вкладки",
+        "AI" => "Нейросети",
+        "Own Client ID" => "Свой Client ID",
+        "Optional: your Spotify app" => "По желанию: ваше приложение Spotify",
+        "Save the Client ID" => "Сохранить Client ID",
+        "Client ID saved" => "Client ID сохранён",
+        "That does not look like a Client ID" => "Это не похоже на Client ID",
+        "Mute the microphone" => "Выключить микрофон",
+        "Unmute the microphone" => "Включить микрофон",
+        "Undeafen" => "Включить звук",
+        "Show the call overlay" => "Показать оверлей звонка",
+        "Hide the call overlay" => "Скрыть оверлей звонка",
+        "Discord must be running; you will see an Authorize prompt inside it." => {
+            "Discord должен быть запущен: в нём появится запрос на авторизацию."
+        }
+        "discord.com/developers: New Application, OAuth2: Redirect http://127.0.0.1," => {
+            "discord.com/developers: New Application, OAuth2: Redirect http://127.0.0.1,"
+        }
+        "App Testers: add yourself. The credentials stay on this computer." => {
+            "App Testers: добавьте себя. Данные хранятся только на этом компьютере."
+        }
+        "Shuffle, repeat and likes for the playing track." => "Перемешивание, повтор и лайки для играющего трека.",
+        "Connections to AI services will live here." => "Здесь будут подключения к нейросетям.",
+        "Planned: Claude, OpenAI-compatible servers and Gemini, each with its own key." => {
+            "В планах: Claude, OpenAI-совместимые серверы и Gemini, у каждого свой ключ."
+        }
+        "Keys will be stored encrypted for your Windows account, like the Spotify token." => {
+            "Ключи будут храниться зашифрованными для вашего аккаунта Windows, как токен Spotify."
+        }
         "Wrong layout" => "Не та раскладка",
         "UPPER" => "ВЕРХНИЙ",
         "lower" => "нижний",
@@ -309,7 +337,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Waiting for the browser…" => "Жду браузер…",
         "Coming soon" => "Скоро",
         "Needs a Client ID" => "Нужен Client ID",
-        "Shuffle, repeat and likes for the playing track." => "Перемешивание, повтор и лайки для играющего трека.",
         "Create an app at developer.spotify.com," => "Создай приложение на developer.spotify.com,",
         "add the Redirect URI http://127.0.0.1:8898/callback" => "добавь Redirect URI http://127.0.0.1:8898/callback",
         "and put its Client ID into the settings file." => "и впиши его Client ID в файл настроек.",

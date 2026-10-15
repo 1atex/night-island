@@ -27,10 +27,11 @@ pub(in crate::island) enum Timer {
     Game = 23,
     Lyric = 24,
     LockKey = 25,
+    SwCaret = 26,
 }
 
 impl Timer {
-    const ALL: [Timer; 25] = [
+    const ALL: [Timer; 26] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -56,6 +57,7 @@ impl Timer {
         Timer::Game,
         Timer::Lyric,
         Timer::LockKey,
+        Timer::SwCaret,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -95,6 +97,7 @@ impl App {
             Timer::Game => self.on_game_timer(),
             Timer::Lyric => self.lyric_tick(),
             Timer::LockKey => self.report_lockkeys(),
+            Timer::SwCaret => self.sw_caret_tick(),
             Timer::Geo => {
                 if self.ui.tab == view::Tab::Weather && self.ui.editing {
                     weather::search(self.hwnd, &self.ui.city.input.text());

@@ -120,13 +120,12 @@ impl App {
                 || self.remind_active()
                 || self.rename_active()
                 || self.clip_search()
-                || self.int_field().is_some()
                 || self.extra_field().is_some() =>
             {
                 return;
             }
             0x0D if self.ui.tab == view::Tab::Agy && unsafe { GetKeyState(VK_SHIFT.0 as i32) } >= 0 => return,
-            0x09 if self.int_field().is_some() || self.extra_field().is_some() => return,
+            0x09 if self.extra_field().is_some() => return,
             0x0D => '\n',
             0x09 => '\t',
             0xD800..=0xDBFF => {
@@ -186,16 +185,6 @@ impl App {
         }
         let hwnd = self.hwnd;
         let layout = self.active_layout();
-        let int = self.int_field();
-        if int.is_some() {
-            if vk == VK_RETURN.0 {
-                return self.save_credentials();
-            }
-            if vk == 0x09 {
-                self.ui.int.focus = 1 - self.ui.int.focus;
-                return self.repaint_expanded();
-            }
-        }
         if self.ui.tab == view::Tab::Agy && vk == VK_RETURN.0 && !shift {
             return self.send_agy();
         }
@@ -203,14 +192,12 @@ impl App {
         if extra.is_some() && vk == VK_RETURN.0 {
             return self.save_city();
         }
-        let single = command || self.clip_search() || int.is_some() || extra.is_some();
+        let single = command || self.clip_search() || extra.is_some();
         let n = if command {
             &mut self.ui.cmd.input
         } else if let Some(k) = extra {
             let _ = k;
             &mut self.ui.city.input
-        } else if let Some(i) = int {
-            if i == 0 { &mut self.ui.int.id } else { &mut self.ui.int.secret }
         } else if single {
             &mut self.ui.clip.query
         } else {
@@ -261,10 +248,6 @@ impl App {
         self.note_changed();
     }
 
-    pub(in crate::island) fn int_field(&self) -> Option<u8> {
-        (self.ui.tab == view::Tab::Integrations && !self.ui.cmd.open && self.ui.editing).then_some(self.ui.int.focus)
-    }
-
     pub(in crate::island) fn extra_field(&self) -> Option<u8> {
         if self.ui.cmd.open || !self.ui.editing {
             return None;
@@ -281,8 +264,6 @@ impl App {
         } else if let Some(k) = self.extra_field() {
             let _ = k;
             &mut self.ui.city.input
-        } else if let Some(i) = self.int_field() {
-            if i == 0 { &mut self.ui.int.id } else { &mut self.ui.int.secret }
         } else if self.clip_search() {
             &mut self.ui.clip.query
         } else {
@@ -300,14 +281,6 @@ impl App {
                 13.0 * self.scale,
             )
             .ok();
-        }
-        if let Some(i) = self.int_field() {
-            let text = if i == 0 {
-                self.ui.int.id.text()
-            } else {
-                "\u{2022}".repeat(self.ui.int.secret.text().chars().count())
-            };
-            return crate::ui::gfx::make_layout(self.gpu.dwrite(), &text, 100_000.0, 13.0 * self.scale).ok();
         }
         if self.clip_search() {
             return crate::ui::gfx::make_layout(
