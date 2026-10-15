@@ -26,7 +26,7 @@ impl App {
         let text = self.ui.agy.input.text();
         if agy::send(self.hwnd, &chat, &text, self.settings.agy_auto) {
             self.ui.agy.input.set_text("");
-            self.show_notice('\u{E943}', "AGY: sent");
+            self.notify(Notice::Agy, '\u{E943}', "AGY: sent");
             self.ui.agy.jobs = agy::jobs();
             self.load_history(false);
             self.start_agy_timer();
@@ -119,7 +119,7 @@ impl App {
                 } else {
                     format!("AGY · {title}: error")
                 };
-                self.show_notice_for(if *ok { '\u{E73E}' } else { '\u{E783}' }, &text, 7000);
+                self.notify_for(Notice::Agy, if *ok { '\u{E73E}' } else { '\u{E783}' }, &text, 7000);
                 told = true;
             }
         }

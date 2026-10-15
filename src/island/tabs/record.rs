@@ -33,7 +33,7 @@ impl App {
         if let Some(r) = &self.recording {
             r.stop();
             self.kill_timer(Timer::Rec);
-            self.show_notice('\u{E714}', "Saving the recording…");
+            self.notify(Notice::Recording, '\u{E714}', "Saving the recording…");
         }
     }
 
@@ -57,14 +57,16 @@ impl App {
                     Some(note) => format!("Saved · {note}"),
                     None => "Recording saved".to_string(),
                 };
-                self.show_notice_for('\u{E714}', &text, if notes.is_empty() { 3000 } else { 5000 });
-                self.notice_link = Some(path);
+                if self.settings.notify.recording {
+                    self.show_notice_for('\u{E714}', &text, if notes.is_empty() { 3000 } else { 5000 });
+                    self.notice_link = Some(path);
+                }
             }
             Some(recorder::Finished::Failed(why)) => {
                 let why: String = why.chars().take(60).collect();
-                self.show_notice_for('\u{E783}', &format!("Recording failed: {why}"), 5000);
+                self.notify_for(Notice::Recording, '\u{E783}', &format!("Recording failed: {why}"), 5000);
             }
-            None => self.show_notice('\u{E783}', "Recording failed"),
+            None => self.notify(Notice::Recording, '\u{E783}', "Recording failed"),
         }
         self.update_eq();
         self.repaint_collapsed();
@@ -78,19 +80,19 @@ impl App {
         match capture::take_outcome() {
             Some(capture::Outcome::Screenshot(path)) => {
                 let text = if path.is_some() { "Screenshot copied and saved" } else { "Screenshot copied" };
-                self.show_notice('\u{E722}', text);
+                self.notify(Notice::Capture, '\u{E722}', text);
             }
-            Some(capture::Outcome::Color(hex)) => self.show_notice('\u{EB52}', &format!("{hex} copied")),
+            Some(capture::Outcome::Color(hex)) => self.notify(Notice::Capture, '\u{EB52}', &format!("{hex} copied")),
             Some(capture::Outcome::Ocr(bgra, w, h)) => {
-                self.show_notice('\u{E8D2}', "Reading text…");
+                self.notify(Notice::Capture, '\u{E8D2}', "Reading text…");
                 recognize::spawn(recognize::Kind::Ocr, self.hwnd, bgra, w, h);
             }
             Some(capture::Outcome::Qr(bgra, w, h)) => {
-                self.show_notice('\u{E8D2}', "Looking for a QR code…");
+                self.notify(Notice::Capture, '\u{E8D2}', "Looking for a QR code…");
                 recognize::spawn(recognize::Kind::Qr, self.hwnd, bgra, w, h);
             }
             Some(capture::Outcome::Record(rect)) => self.begin_recording(rect),
-            Some(capture::Outcome::Failed) => self.show_notice('\u{E783}', "Capture failed"),
+            Some(capture::Outcome::Failed) => self.notify(Notice::Capture, '\u{E783}', "Capture failed"),
             Some(capture::Outcome::Cancelled) | None => {}
         }
     }
@@ -104,10 +106,10 @@ impl App {
                     recognize::Kind::Ocr => format!("Text copied ({} characters)", text.chars().count()),
                     recognize::Kind::Qr => "QR code copied".to_string(),
                 };
-                self.show_notice('\u{E8C8}', &label);
+                self.notify(Notice::Capture, '\u{E8C8}', &label);
             }
-            (recognize::Kind::Ocr, None) => self.show_notice('\u{E783}', "No text found"),
-            (recognize::Kind::Qr, None) => self.show_notice('\u{E783}', "No QR code found"),
+            (recognize::Kind::Ocr, None) => self.notify(Notice::Capture, '\u{E783}', "No text found"),
+            (recognize::Kind::Qr, None) => self.notify(Notice::Capture, '\u{E783}', "No QR code found"),
         }
     }
 

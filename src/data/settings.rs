@@ -121,6 +121,7 @@ pub struct Settings {
     pub music_title: bool,
     pub music_lyrics: bool,
     pub hidden_tabs: Vec<String>,
+    pub notify: NotifySettings,
     pub spike_color: bool,
     pub record_format: RecordFormat,
     pub record_fps: u32,
@@ -174,6 +175,7 @@ impl Default for Settings {
             music_title: false,
             music_lyrics: false,
             hidden_tabs: vec!["AGY".to_string()],
+            notify: NotifySettings::default(),
             spike_color: true,
             record_format: RecordFormat::Mp4,
             record_fps: 30,
@@ -202,6 +204,71 @@ impl Default for Settings {
 
 fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Notice {
+    Mic,
+    Download,
+    Capture,
+    Recording,
+    Agy,
+    Integrations,
+    Error,
+    Clipboard,
+    LockKeys,
+    Battery,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct NotifySettings {
+    pub mic: bool,
+    pub downloads: bool,
+    pub capture: bool,
+    pub recording: bool,
+    pub agy: bool,
+    pub integrations: bool,
+    pub errors: bool,
+    pub clipboard: bool,
+    pub clipboard_text: bool,
+    pub lock_keys: bool,
+    pub battery: bool,
+}
+
+impl Default for NotifySettings {
+    fn default() -> Self {
+        Self {
+            mic: true,
+            downloads: true,
+            capture: true,
+            recording: true,
+            agy: true,
+            integrations: true,
+            errors: true,
+            clipboard: false,
+            clipboard_text: false,
+            lock_keys: false,
+            battery: false,
+        }
+    }
+}
+
+impl NotifySettings {
+    pub fn on(&self, notice: Notice) -> bool {
+        match notice {
+            Notice::Mic => self.mic,
+            Notice::Download => self.downloads,
+            Notice::Capture => self.capture,
+            Notice::Recording => self.recording,
+            Notice::Agy => self.agy,
+            Notice::Integrations => self.integrations,
+            Notice::Error => self.errors,
+            Notice::Clipboard => self.clipboard,
+            Notice::LockKeys => self.lock_keys,
+            Notice::Battery => self.battery,
+        }
+    }
 }
 
 pub const HIDEABLE_TABS: [&str; 10] =
@@ -298,6 +365,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notices_keep_their_old_defaults_and_read_partial_files() {
+        let n = NotifySettings::default();
+        assert!(n.on(Notice::Mic) && n.on(Notice::Download) && n.on(Notice::Error));
+        assert!(!n.on(Notice::Clipboard) && !n.on(Notice::LockKeys) && !n.on(Notice::Battery) && !n.clipboard_text);
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.notify, n);
+        let partial: Settings = serde_json::from_str(r#"{"notify":{"lock_keys":true,"mic":false}}"#).unwrap();
+        assert!(partial.notify.lock_keys && !partial.notify.mic && partial.notify.downloads);
+    }
 
     #[test]
     fn hidden_tabs_are_validated_and_toggle() {

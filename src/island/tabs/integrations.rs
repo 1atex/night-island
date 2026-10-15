@@ -14,7 +14,7 @@ impl App {
         self.ui.discord = now;
         if new_note {
             let text = if body.is_empty() { title } else { format!("{title}: {body}") };
-            self.show_notice_for('\u{E8BD}', &text, 5000);
+            self.notify_for(Notice::Integrations, '\u{E8BD}', &text, 5000);
         }
         self.sync_overlay();
         if matches!(self.ui.tab, view::Tab::Integrations | view::Tab::Home) {

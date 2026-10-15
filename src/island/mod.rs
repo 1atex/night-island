@@ -29,13 +29,14 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Interface, Result, h, w};
 
 use crate::data::clips::{self, Clip, Reminder, ShelfItem, Store};
-use crate::data::settings::{Edge, Placement, Settings, Style};
+use crate::data::settings::{Edge, Notice, Placement, Settings, Style};
 use crate::platform::apps;
 use crate::platform::audio;
 use crate::platform::autostart;
 use crate::platform::capture;
 use crate::platform::dnd;
 use crate::platform::downloads;
+use crate::platform::lockkeys;
 use crate::platform::media;
 use crate::platform::privacy;
 use crate::platform::recognize;
@@ -115,6 +116,8 @@ struct App {
     backdrop: SpriteVisual,
     tint: SpriteVisual,
     settings_win: Option<HWND>,
+    power_last: Option<(u8, bool)>,
+    lock_pending: Vec<u16>,
     ui: view::UiState,
     store: Option<Store>,
     clipboard: ClipboardState,
@@ -140,6 +143,10 @@ struct App {
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+}
+
+fn with_app_value<T>(f: impl FnOnce(&App) -> T) -> Option<T> {
+    APP.with(|cell| cell.try_borrow().ok().and_then(|guard| guard.as_ref().map(f)))
 }
 
 fn with_app(f: impl FnOnce(&mut App)) {

@@ -13,8 +13,14 @@ impl App {
         self.repaint_collapsed();
     }
 
-    pub(in crate::island) fn show_notice(&mut self, glyph: char, text: &str) {
-        self.show_notice_for(glyph, text, NOTICE_MS);
+    pub(in crate::island) fn notify(&mut self, kind: Notice, glyph: char, text: &str) {
+        self.notify_for(kind, glyph, text, NOTICE_MS);
+    }
+
+    pub(in crate::island) fn notify_for(&mut self, kind: Notice, glyph: char, text: &str, ms: u32) {
+        if self.settings.notify.on(kind) {
+            self.show_notice_for(glyph, text, ms);
+        }
     }
 
     pub(in crate::island) fn show_notice_for(&mut self, glyph: char, text: &str, ms: u32) {
@@ -26,12 +32,45 @@ impl App {
         self.set_timer(Timer::Notice, ms);
     }
 
+    pub(in crate::island) fn on_lockkey(&mut self, vk: usize) {
+        let vk = vk as u16;
+        if !self.lock_pending.contains(&vk) {
+            self.lock_pending.push(vk);
+        }
+        self.set_timer(Timer::LockKey, 40);
+    }
+
+    pub(in crate::island) fn report_lockkeys(&mut self) {
+        for vk in std::mem::take(&mut self.lock_pending) {
+            let on = lockkeys::state(vk);
+            if let Some(text) = lockkeys::describe(usize::from(vk), on) {
+                self.notify_for(Notice::LockKeys, if on { '\u{E72E}' } else { '\u{E785}' }, text, 1200);
+            }
+        }
+    }
+
+    pub(in crate::island) fn on_power(&mut self) {
+        const LOW_PERCENT: u8 = 15;
+        let Some((percent, charging)) = view::battery() else { return };
+        let Some((was_percent, was_charging)) = self.power_last.replace((percent, charging)) else { return };
+        if charging != was_charging {
+            let text = if charging { "Charger connected" } else { "Charger disconnected" };
+            let glyph = if charging { '\u{E83E}' } else { '\u{E83F}' };
+            let message = format!("{} · {percent}%", crate::ui::i18n::tr(text));
+            self.notify_for(Notice::Battery, glyph, &message, 2200);
+        } else if !charging && percent <= LOW_PERCENT && was_percent > LOW_PERCENT {
+            let message = format!("{} · {percent}%", crate::ui::i18n::tr("Battery low"));
+            self.notify_for(Notice::Battery, '\u{E850}', &message, 4000);
+        }
+    }
+
     pub(in crate::island) fn toggle_mic(&mut self) {
         let Some(muted) = volume::mic_toggle() else {
-            return self.show_notice('\u{E720}', "No microphone found");
+            return self.notify(Notice::Error, '\u{E720}', "No microphone found");
         };
         self.ui.mic_muted = Some(muted);
-        self.show_notice(
+        self.notify(
+            Notice::Mic,
             if muted { '\u{F781}' } else { '\u{E720}' },
             if muted { "Microphone muted" } else { "Microphone on" },
         );
@@ -69,8 +108,10 @@ impl App {
                 }
                 downloads::Event::Done(path) => {
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.show_notice_for('\u{E73E}', &format!("Downloaded {name}"), 7000);
-                    self.notice_link = Some(path);
+                    if self.settings.notify.on(Notice::Download) {
+                        self.show_notice_for('\u{E73E}', &format!("Downloaded {name}"), 7000);
+                        self.notice_link = Some(path);
+                    }
                 }
             }
         }

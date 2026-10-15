@@ -78,6 +78,9 @@ pub fn run() -> Result<()> {
         media::start(hwnd);
         downloads::start(hwnd);
         privacy::start(hwnd);
+        if with_app_value(|a| a.settings.notify.lock_keys).unwrap_or(false) {
+            lockkeys::start(hwnd);
+        }
         match (weather_lat, weather_lon) {
             (Some(lat), Some(lon)) => weather::set_place(&weather_city, lat, lon),
             _ => weather::set_city(&weather_city),
@@ -188,6 +191,8 @@ impl App {
             scale,
             dpi_scale,
             settings_win: None,
+            power_last: view::battery(),
+            lock_pending: Vec::new(),
             settings,
             win: Win::Small,
             compositor,

@@ -105,6 +105,13 @@ impl App {
                     self.repaint_collapsed();
                 }
                 Character => self.apply_character(),
+                NotifyLockKeys => {
+                    if self.settings.notify.lock_keys {
+                        lockkeys::start(self.hwnd);
+                    } else {
+                        lockkeys::stop();
+                    }
+                }
                 MusicEq | MusicTitle | MusicLyrics | PillWeather | PillBattery | SpikeColor | Spikes => {
                     self.update_eq();
                     self.repaint_collapsed();

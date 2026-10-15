@@ -4,6 +4,7 @@ pub mod autostart;
 pub mod capture;
 pub mod dnd;
 pub mod downloads;
+pub mod lockkeys;
 pub mod media;
 pub mod privacy;
 pub mod recognize;

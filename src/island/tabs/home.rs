@@ -178,7 +178,7 @@ impl App {
                 store.dock_remove(item.id);
             }
             self.reload_dock();
-            self.show_notice('\u{E783}', "File not found");
+            self.notify(Notice::Error, '\u{E783}', "File not found");
             self.repaint_expanded();
         }
     }

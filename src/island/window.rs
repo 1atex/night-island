@@ -161,6 +161,17 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_weather());
             LRESULT(0)
         }
+        lockkeys::WM_LOCKKEY => {
+            let vk = wparam.0;
+            with_app(|a| a.on_lockkey(vk));
+            LRESULT(0)
+        }
+        WM_POWERBROADCAST => {
+            if wparam.0 as u32 == PBT_APMPOWERSTATUSCHANGE {
+                with_app(|a| a.on_power());
+            }
+            LRESULT(1)
+        }
         lyrics::WM_LYRICS => {
             with_app(|a| a.on_lyrics());
             LRESULT(0)

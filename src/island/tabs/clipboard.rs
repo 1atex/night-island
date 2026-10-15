@@ -103,5 +103,34 @@ impl App {
         if self.ui.tab == view::Tab::Clipboard {
             self.repaint_expanded();
         }
+        if self.settings.notify.clipboard {
+            let message = copy_message(&text, self.settings.notify.clipboard_text);
+            self.notify_for(Notice::Clipboard, '\u{E8C8}', &message, 1400);
+        }
+    }
+}
+
+fn copy_message(text: &str, show_text: bool) -> String {
+    let count = text.chars().count();
+    if !show_text {
+        return format!("Copied ({count} characters)");
+    }
+    let line: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect();
+    let more = if count > line.chars().count() { "…" } else { "" };
+    format!("Copied: {line}{more}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_message;
+
+    #[test]
+    fn the_copy_message_hides_the_text_unless_asked() {
+        assert_eq!(copy_message("hunter2", false), "Copied (7 characters)");
+        assert_eq!(copy_message("hunter2", true), "Copied: hunter2");
+        let long = format!("line one\nline\ttwo {}", "x".repeat(100));
+        let message = copy_message(&long, true);
+        assert!(message.starts_with("Copied: line one line two xxx") && message.ends_with('…'));
+        assert!(!message.contains('\n') && message.chars().count() < 60);
     }
 }

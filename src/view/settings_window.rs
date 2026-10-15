@@ -46,15 +46,30 @@ const PILL: [(Sid, &str, Kind); 7] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
+const NOTIFICATIONS: [(Sid, &str, Kind); 11] = [
+    (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
+    (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
+    (Sid::NotifyCapture, "Screenshots, text and QR", Kind::Toggle),
+    (Sid::NotifyRecording, "Screen recording", Kind::Toggle),
+    (Sid::NotifyAgy, "AGY", Kind::Toggle),
+    (Sid::NotifyIntegrations, "Discord and Spotify", Kind::Toggle),
+    (Sid::NotifyErrors, "Errors and limits", Kind::Toggle),
+    (Sid::NotifyClipboard, "Copied to the clipboard", Kind::Toggle),
+    (Sid::NotifyClipboardText, "Show the copied text", Kind::Toggle),
+    (Sid::NotifyLockKeys, "Caps, Num and Scroll Lock", Kind::Toggle),
+    (Sid::NotifyBattery, "Charger and low battery", Kind::Toggle),
+];
+
 const INTEGRATIONS: [(Sid, &str, Kind); 1] = [(Sid::OpenIntegrations, "Integrations", Kind::Button)];
 
 const ABOUT: [(Sid, &str, Kind); 1] = [(Sid::OpenLogs, "Logs folder", Kind::Button)];
 
-pub const GROUPS: [Group; 7] = [
+pub const GROUPS: [Group; 8] = [
     Group { glyph: '\u{E713}', name: "General", rows: &GENERAL },
     Group { glyph: '\u{E80F}', name: "Island", rows: &ISLAND },
     Group { glyph: '\u{E790}', name: "Appearance", rows: &APPEARANCE },
     Group { glyph: '\u{E8D6}', name: "Pill and music", rows: &PILL },
+    Group { glyph: '\u{EA8F}', name: "Notifications", rows: &NOTIFICATIONS },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &INTEGRATIONS },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT },

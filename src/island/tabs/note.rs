@@ -139,7 +139,7 @@ impl App {
         let parent = self.ui.notes.target_folder();
         let name = crate::ui::i18n::tr(if folder { "New folder" } else { "New note" });
         let Some(id) = self.store.as_ref().and_then(|s| s.note_add(parent, folder, &name)) else {
-            return self.show_notice('\u{E783}', "Notes limit reached");
+            return self.notify(Notice::Error, '\u{E783}', "Notes limit reached");
         };
         if let Some(p) = parent {
             self.ui.notes.expanded.insert(p);
