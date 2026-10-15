@@ -70,6 +70,7 @@ mod liquid;
 mod lyric;
 mod motion;
 mod pill;
+mod settings_win;
 mod startup;
 mod tabs;
 mod timers;
@@ -113,6 +114,7 @@ struct App {
     _visual: ContainerVisual,
     backdrop: SpriteVisual,
     tint: SpriteVisual,
+    settings_win: Option<HWND>,
     ui: view::UiState,
     store: Option<Store>,
     clipboard: ClipboardState,

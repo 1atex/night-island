@@ -36,6 +36,7 @@ pub enum Sid {
     TabControls,
     TabTheme,
     OpenIntegrations,
+    OpenLogs,
     SpikeColor,
     Spikes,
     Character,
@@ -63,53 +64,6 @@ pub(in crate::view) enum Kind {
     Button,
 }
 
-pub(in crate::view) const ROWS: [(Sid, &str, Kind); 18] = [
-    (Sid::Language, "Language", Kind::Segment(["Русский", "English"])),
-    (Sid::Weather, "Weather", Kind::Toggle),
-    (Sid::AgyAuto, "AGY auto-approve", Kind::Toggle),
-    (Sid::Placement, "Placement", Kind::Segment(["Floating", "Docked"])),
-    (Sid::Edge, "Edge", Kind::Cycle),
-    (Sid::Style, "Shape", Kind::Segment(["Flat", "Liquid"])),
-    (Sid::Character, "Character", Kind::Cycle),
-    (Sid::Size, "Size", Kind::Slider),
-    (Sid::LiquidReach, "Liquid reach", Kind::Slider),
-    (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
-    (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
-    (Sid::OpenDelay, "Open delay", Kind::Slider),
-    (Sid::CloseDelay, "Close delay", Kind::Slider),
-    (Sid::OpenSpeed, "Open speed", Kind::Slider),
-    (Sid::CloseSpeed, "Close speed", Kind::Slider),
-    (Sid::AutoHide, "Auto-hide", Kind::Toggle),
-    (Sid::Acrylic, "Acrylic blur", Kind::Toggle),
-    (Sid::Capture, "Hide in screenshots", Kind::Toggle),
-];
-
-pub(in crate::view) const ROWS_PILL: [(Sid, &str, Kind); 10] = [
-    (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
-    (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
-    (Sid::MusicEq, "Equalizer", Kind::Toggle),
-    (Sid::MusicTitle, "Track title", Kind::Toggle),
-    (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
-    (Sid::Spikes, "Edge spikes", Kind::Toggle),
-    (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
-    (Sid::Autostart, "Start with Windows", Kind::Toggle),
-    (Sid::CaptureSelf, "Hide island in my captures", Kind::Toggle),
-    (Sid::GameMode, "Game mode", Kind::Toggle),
-];
-
-pub(in crate::view) const ROWS_TABS: [(Sid, &str, Kind); 10] = [
-    (Sid::TabClipboard, "Clipboard", Kind::Toggle),
-    (Sid::TabShelf, "Shelf", Kind::Toggle),
-    (Sid::TabText, "Text", Kind::Toggle),
-    (Sid::TabNote, "Note", Kind::Toggle),
-    (Sid::TabWeather, "Weather", Kind::Toggle),
-    (Sid::TabRecord, "Record", Kind::Toggle),
-    (Sid::TabAgy, "AGY", Kind::Toggle),
-    (Sid::TabControls, "Controls", Kind::Toggle),
-    (Sid::TabTheme, "Theme", Kind::Toggle),
-    (Sid::OpenIntegrations, "Integrations", Kind::Button),
-];
-
 pub(in crate::view) fn tab_toggle_name(id: Sid) -> Option<&'static str> {
     Some(match id {
         Sid::TabClipboard => "Clipboard",
@@ -124,8 +78,6 @@ pub(in crate::view) fn tab_toggle_name(id: Sid) -> Option<&'static str> {
         _ => return None,
     })
 }
-
-pub const SETTINGS_PAGES: u8 = 3;
 
 pub(in crate::view) const RECORD_ROWS: [(Sid, &str, Kind); 4] = [
     (Sid::RecFormat, "Format", Kind::Segment(["MP4", "GIF"])),
@@ -145,46 +97,12 @@ pub(in crate::view) const THEME_ROWS: [(Sid, &str, Kind); 8] = [
     (Sid::AccentSat, "Accent saturation", Kind::Slider),
 ];
 
-pub(in crate::view) fn rows_for(tab: Tab, page: u8) -> &'static [(Sid, &'static str, Kind)] {
+pub(in crate::view) fn rows_for(tab: Tab) -> &'static [(Sid, &'static str, Kind)] {
     match tab {
         Tab::Record => &RECORD_ROWS,
         Tab::Theme => &THEME_ROWS,
-        _ if page == 1 => &ROWS_PILL,
-        _ if page >= 2 => &ROWS_TABS,
-        _ => &ROWS,
+        _ => &[],
     }
-}
-
-pub fn hit_pager(pill: Rect, scale: f32, px: f32, py: f32) -> Option<bool> {
-    let (row, _) = setting_row(pill, scale, 18);
-    if !inside(row, px, py) {
-        return None;
-    }
-    Some(px > (row.0 + row.2) / 2.0)
-}
-
-pub(in crate::view) fn paint_pager(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
-    let (row, _) = setting_row(pill, scale, 18);
-    p.fill_round_rect(
-        (row.0, row.1 + 2.0 * scale, row.2, row.3 - 2.0 * scale),
-        10.0 * scale,
-        rgba(1.0, 1.0, 1.0, 0.06),
-    )?;
-    p.glyph('\u{E76B}', (row.0, row.1, row.0 + 34.0 * scale, row.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
-    p.glyph('\u{E76C}', (row.2 - 34.0 * scale, row.1, row.2, row.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
-    let name = match ui.settings_page {
-        0 => "Settings",
-        1 => "Pill and music",
-        _ => "Tabs",
-    };
-    p.text(
-        &format!("{}  ·  {}/{SETTINGS_PAGES}", crate::ui::i18n::tr(name), ui.settings_page + 1),
-        (row.0 + 34.0 * scale, row.1, row.2 - 34.0 * scale, row.3),
-        12.0 * scale,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_TEXT_ALIGNMENT_CENTER,
-        WHITE,
-    )
 }
 
 pub(in crate::view) const SET_ROW_H: f32 = 30.0;
@@ -395,14 +313,14 @@ pub enum SetHit {
     Button,
 }
 
-pub fn slider_track(pill: Rect, scale: f32, id: Sid, tab: Tab, page: u8) -> Option<(f32, f32)> {
-    let index = rows_for(tab, page).iter().position(|r| r.0 == id)?;
+pub fn slider_track(pill: Rect, scale: f32, id: Sid, tab: Tab) -> Option<(f32, f32)> {
+    let index = rows_for(tab).iter().position(|r| r.0 == id)?;
     let (_, ctl) = setting_row(pill, scale, index);
     Some((ctl.0 + 4.0 * scale, ctl.2 - 54.0 * scale))
 }
 
-pub fn hit_setting(pill: Rect, scale: f32, px: f32, py: f32, tab: Tab, page: u8) -> Option<(Sid, SetHit)> {
-    for (i, (id, _, kind)) in rows_for(tab, page).iter().enumerate() {
+pub fn hit_setting(pill: Rect, scale: f32, px: f32, py: f32, tab: Tab) -> Option<(Sid, SetHit)> {
+    for (i, (id, _, kind)) in rows_for(tab).iter().enumerate() {
         let (row, ctl) = setting_row(pill, scale, i);
         if !inside(row, px, py) || px < ctl.0 - 6.0 * scale {
             continue;
@@ -575,11 +493,6 @@ pub(in crate::view) fn paint_theme(p: &Painter, pill: Rect, scale: f32, ui: &UiS
     Ok(())
 }
 
-pub(in crate::view) fn paint_settings(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
-    paint_rows(p, pill, scale, ui, rows_for(Tab::Settings, ui.settings_page))?;
-    paint_pager(p, pill, scale, ui)
-}
-
 pub(in crate::view) fn track_color(id: Sid, t: f32, c: &Settings) -> Option<(f32, f32, f32)> {
     use crate::ui::theme::hsv;
     Some(match id {
@@ -599,7 +512,6 @@ pub(in crate::view) fn paint_rows(
     ui: &UiState,
     rows: &[(Sid, &str, Kind)],
 ) -> Result<()> {
-    let accent = acc(1.0);
     for (i, (id, label, kind)) in rows.iter().enumerate() {
         let (row, ctl) = setting_row(pill, scale, i);
         p.text(
@@ -610,117 +522,124 @@ pub(in crate::view) fn paint_rows(
             DWRITE_TEXT_ALIGNMENT_LEADING,
             rgba(1.0, 1.0, 1.0, 0.85),
         )?;
-        let cy = (ctl.1 + ctl.3) / 2.0;
-        match kind {
-            Kind::Segment(opts) => {
-                let selected = segment_value(*id, &ui.cfg);
-                p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
-                let half = (ctl.2 - ctl.0) / 2.0;
-                for (n, text) in opts.iter().enumerate() {
-                    let r = (ctl.0 + n as f32 * half, ctl.1, ctl.0 + (n + 1) as f32 * half, ctl.3);
-                    if n == selected {
-                        p.fill_round_rect(
-                            (r.0 + 2.0 * scale, r.1 + 2.0 * scale, r.2 - 2.0 * scale, r.3 - 2.0 * scale),
-                            7.0 * scale,
-                            acc(0.35),
-                        )?;
-                    }
-                    let alpha = if n == selected { 1.0 } else { 0.6 };
-                    p.text(
-                        text,
-                        r,
-                        12.0 * scale,
-                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                        DWRITE_TEXT_ALIGNMENT_CENTER,
-                        rgba(1.0, 1.0, 1.0, alpha),
-                    )?;
-                }
-            }
-            Kind::Cycle => {
-                p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
-                let arrow = 26.0 * scale;
-                p.glyph('\u{E76B}', (ctl.0, ctl.1, ctl.0 + arrow, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
-                p.glyph('\u{E76C}', (ctl.2 - arrow, ctl.1, ctl.2, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
-                p.text(
-                    cycle_name(*id, &ui.cfg),
-                    (ctl.0 + arrow, ctl.1, ctl.2 - arrow, ctl.3),
-                    12.0 * scale,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    DWRITE_TEXT_ALIGNMENT_CENTER,
-                    WHITE,
-                )?;
-            }
-            Kind::Slider => {
-                let (tl, tr) = (ctl.0 + 4.0 * scale, ctl.2 - 54.0 * scale);
-                let (min, max, _) = slider_range(*id);
-                let v = slider_value(*id, &ui.cfg);
-                let norm = ((v - min) / (max - min)).clamp(0.0, 1.0);
-                let x = tl + (tr - tl) * norm;
-                if track_color(*id, 0.0, &ui.cfg).is_some() {
-                    const SEGMENTS: usize = 32;
-                    let seg = (tr - tl) / SEGMENTS as f32;
-                    for k in 0..SEGMENTS {
-                        let (r, g, b) =
-                            track_color(*id, (k as f32 + 0.5) / SEGMENTS as f32, &ui.cfg).unwrap_or((0.5, 0.5, 0.5));
-                        let (left, right) = (tl + k as f32 * seg, tl + (k + 1) as f32 * seg + 0.6);
-                        if k == 0 || k == SEGMENTS - 1 {
-                            p.fill_round_rect(
-                                (left, cy - 4.0 * scale, right, cy + 4.0 * scale),
-                                4.0 * scale,
-                                rgba(r, g, b, 1.0),
-                            )?;
-                        } else {
-                            p.fill_rect((left, cy - 4.0 * scale, right, cy + 4.0 * scale), rgba(r, g, b, 1.0))?;
-                        }
-                    }
-                } else {
+        paint_control(p, scale, &ui.cfg, *id, *kind, ctl)?;
+    }
+    Ok(())
+}
+
+pub(in crate::view) fn paint_control(
+    p: &Painter,
+    scale: f32,
+    cfg: &Settings,
+    id: Sid,
+    kind: Kind,
+    ctl: Rect,
+) -> Result<()> {
+    let accent = acc(1.0);
+    let cy = (ctl.1 + ctl.3) / 2.0;
+    match kind {
+        Kind::Segment(opts) => {
+            let selected = segment_value(id, cfg);
+            p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+            let half = (ctl.2 - ctl.0) / 2.0;
+            for (n, text) in opts.iter().enumerate() {
+                let r = (ctl.0 + n as f32 * half, ctl.1, ctl.0 + (n + 1) as f32 * half, ctl.3);
+                if n == selected {
                     p.fill_round_rect(
-                        (tl, cy - 2.0 * scale, tr, cy + 2.0 * scale),
-                        2.0 * scale,
-                        rgba(1.0, 1.0, 1.0, 0.18),
+                        (r.0 + 2.0 * scale, r.1 + 2.0 * scale, r.2 - 2.0 * scale, r.3 - 2.0 * scale),
+                        7.0 * scale,
+                        acc(0.35),
                     )?;
-                    p.fill_round_rect((tl, cy - 2.0 * scale, x, cy + 2.0 * scale), 2.0 * scale, accent)?;
                 }
-                p.fill_round_rect(
-                    (x - 7.0 * scale, cy - 7.0 * scale, x + 7.0 * scale, cy + 7.0 * scale),
-                    7.0 * scale,
-                    WHITE,
-                )?;
+                let alpha = if n == selected { 1.0 } else { 0.6 };
                 p.text(
-                    &slider_text(*id, v),
-                    (tr + 10.0 * scale, ctl.1, ctl.2, ctl.3),
-                    12.0 * scale,
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_TEXT_ALIGNMENT_TRAILING,
-                    rgba(1.0, 1.0, 1.0, 0.7),
-                )?;
-            }
-            Kind::Button => {
-                p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
-                p.text(
-                    "Open",
-                    (ctl.0, ctl.1, ctl.2 - 26.0 * scale, ctl.3),
+                    text,
+                    r,
                     12.0 * scale,
                     DWRITE_FONT_WEIGHT_SEMI_BOLD,
                     DWRITE_TEXT_ALIGNMENT_CENTER,
-                    WHITE,
-                )?;
-                p.glyph(
-                    '\u{E76C}',
-                    (ctl.2 - 26.0 * scale, ctl.1, ctl.2, ctl.3),
-                    12.0 * scale,
-                    rgba(1.0, 1.0, 1.0, 0.75),
+                    rgba(1.0, 1.0, 1.0, alpha),
                 )?;
             }
-            Kind::Toggle => {
-                let on = toggle_value(*id, &ui.cfg);
-                let (w, h) = (40.0 * scale, 22.0 * scale);
-                let track = (ctl.2 - w, cy - h / 2.0, ctl.2, cy + h / 2.0);
-                p.fill_round_rect(track, h / 2.0, if on { acc(0.9) } else { rgba(1.0, 1.0, 1.0, 0.16) })?;
-                let knob = 16.0 * scale;
-                let kx = if on { track.2 - knob - 3.0 * scale } else { track.0 + 3.0 * scale };
-                p.fill_round_rect((kx, cy - knob / 2.0, kx + knob, cy + knob / 2.0), knob / 2.0, WHITE)?;
+        }
+        Kind::Cycle => {
+            p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+            let arrow = 26.0 * scale;
+            p.glyph('\u{E76B}', (ctl.0, ctl.1, ctl.0 + arrow, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
+            p.glyph('\u{E76C}', (ctl.2 - arrow, ctl.1, ctl.2, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
+            p.text(
+                cycle_name(id, cfg),
+                (ctl.0 + arrow, ctl.1, ctl.2 - arrow, ctl.3),
+                12.0 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+                WHITE,
+            )?;
+        }
+        Kind::Slider => {
+            let (tl, tr) = (ctl.0 + 4.0 * scale, ctl.2 - 54.0 * scale);
+            let (min, max, _) = slider_range(id);
+            let v = slider_value(id, cfg);
+            let norm = ((v - min) / (max - min)).clamp(0.0, 1.0);
+            let x = tl + (tr - tl) * norm;
+            if track_color(id, 0.0, cfg).is_some() {
+                const SEGMENTS: usize = 32;
+                let seg = (tr - tl) / SEGMENTS as f32;
+                for k in 0..SEGMENTS {
+                    let (r, g, b) = track_color(id, (k as f32 + 0.5) / SEGMENTS as f32, cfg).unwrap_or((0.5, 0.5, 0.5));
+                    let (left, right) = (tl + k as f32 * seg, tl + (k + 1) as f32 * seg + 0.6);
+                    if k == 0 || k == SEGMENTS - 1 {
+                        p.fill_round_rect(
+                            (left, cy - 4.0 * scale, right, cy + 4.0 * scale),
+                            4.0 * scale,
+                            rgba(r, g, b, 1.0),
+                        )?;
+                    } else {
+                        p.fill_rect((left, cy - 4.0 * scale, right, cy + 4.0 * scale), rgba(r, g, b, 1.0))?;
+                    }
+                }
+            } else {
+                p.fill_round_rect(
+                    (tl, cy - 2.0 * scale, tr, cy + 2.0 * scale),
+                    2.0 * scale,
+                    rgba(1.0, 1.0, 1.0, 0.18),
+                )?;
+                p.fill_round_rect((tl, cy - 2.0 * scale, x, cy + 2.0 * scale), 2.0 * scale, accent)?;
             }
+            p.fill_round_rect(
+                (x - 7.0 * scale, cy - 7.0 * scale, x + 7.0 * scale, cy + 7.0 * scale),
+                7.0 * scale,
+                WHITE,
+            )?;
+            p.text(
+                &slider_text(id, v),
+                (tr + 10.0 * scale, ctl.1, ctl.2, ctl.3),
+                12.0 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_TRAILING,
+                rgba(1.0, 1.0, 1.0, 0.7),
+            )?;
+        }
+        Kind::Button => {
+            p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+            p.text(
+                "Open",
+                (ctl.0, ctl.1, ctl.2 - 26.0 * scale, ctl.3),
+                12.0 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+                WHITE,
+            )?;
+            p.glyph('\u{E76C}', (ctl.2 - 26.0 * scale, ctl.1, ctl.2, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
+        }
+        Kind::Toggle => {
+            let on = toggle_value(id, cfg);
+            let (w, h) = (40.0 * scale, 22.0 * scale);
+            let track = (ctl.2 - w, cy - h / 2.0, ctl.2, cy + h / 2.0);
+            p.fill_round_rect(track, h / 2.0, if on { acc(0.9) } else { rgba(1.0, 1.0, 1.0, 0.16) })?;
+            let knob = 16.0 * scale;
+            let kx = if on { track.2 - knob - 3.0 * scale } else { track.0 + 3.0 * scale };
+            p.fill_round_rect((kx, cy - knob / 2.0, kx + knob, cy + knob / 2.0), knob / 2.0, WHITE)?;
         }
     }
     Ok(())

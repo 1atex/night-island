@@ -19,16 +19,7 @@ impl App {
 
     pub(in crate::island) fn click_settings(&mut self, x: i32, y: i32) {
         let pill = self.pill_rect(true);
-        if self.ui.tab == view::Tab::Settings && view::hit_pager(pill, self.scale, x as f32, y as f32).is_some() {
-            let next = view::hit_pager(pill, self.scale, x as f32, y as f32) == Some(true);
-            let pages = view::SETTINGS_PAGES;
-            self.ui.settings_page =
-                if next { (self.ui.settings_page + 1) % pages } else { (self.ui.settings_page + pages - 1) % pages };
-            return self.repaint_expanded();
-        }
-        let Some((id, hit)) =
-            view::hit_setting(pill, self.scale, x as f32, y as f32, self.ui.tab, self.ui.settings_page)
-        else {
+        let Some((id, hit)) = view::hit_setting(pill, self.scale, x as f32, y as f32, self.ui.tab) else {
             return;
         };
         match hit {
@@ -60,7 +51,7 @@ impl App {
     pub(in crate::island) fn drag_slider(&mut self, x: i32) {
         let Some(id) = self.pointer.slider else { return };
         let pill = self.pill_rect(true);
-        let Some((left, right)) = view::slider_track(pill, self.scale, id, self.ui.tab, self.ui.settings_page) else {
+        let Some((left, right)) = view::slider_track(pill, self.scale, id, self.ui.tab) else {
             return;
         };
         let norm = (x as f32 - left) / (right - left).max(1.0);

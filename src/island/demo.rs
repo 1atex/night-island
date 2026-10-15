@@ -94,9 +94,13 @@ pub(in crate::island) fn apply(hwnd: HWND) {
                 a.ui.city.input.set_text(&q);
                 weather::search(a.hwnd, &q);
             }
-            if let Some(page) = std::env::var("NI_DEBUG_PAGE").ok().and_then(|v| v.parse::<u8>().ok()) {
-                a.ui.settings_page = page;
-                a.repaint_expanded();
+            if let Ok(group) = std::env::var("NI_DEBUG_SWIN") {
+                a.open_settings_window();
+                a.ui.sw.group = group.parse().unwrap_or(0);
+                if let Ok(q) = std::env::var("NI_DEBUG_SWIN_Q") {
+                    a.ui.sw.search = q;
+                }
+                a.render_settings_win();
             }
             if let Ok(needle) = std::env::var("NI_DEBUG_AGY")
                 && let Some(chat) = a.ui.agy.chats.iter().find(|c| c.title.contains(&needle)).cloned()

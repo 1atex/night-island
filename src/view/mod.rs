@@ -29,6 +29,7 @@ mod note;
 mod pill;
 mod record;
 mod settings;
+mod settings_window;
 mod shelf;
 mod text;
 mod weather;
@@ -37,7 +38,7 @@ mod widgets;
 use self::shelf::*;
 pub use self::{
     agy::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*, integrations::*, note::*, pill::*,
-    record::*, settings::*, text::*, weather::*, widgets::*,
+    record::*, settings::*, settings_window::*, text::*, weather::*, widgets::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);
@@ -93,6 +94,7 @@ pub struct UiState {
     pub caret_on: bool,
     pub media: Media,
     pub lyric: LyricUi,
+    pub sw: SwUi,
     pub privacy: Privacy,
     pub mic_muted: Option<bool>,
     pub notice: Option<(char, String)>,
@@ -113,7 +115,6 @@ pub struct UiState {
     pub discord: crate::services::discord::State,
     pub int: IntegrationsUi,
     pub city: CityUi,
-    pub settings_page: u8,
     pub agy: AgyUi,
 }
 
@@ -137,6 +138,7 @@ impl UiState {
             caret_on: true,
             media: Media::default(),
             lyric: LyricUi::default(),
+            sw: SwUi::default(),
             privacy: Privacy::default(),
             mic_muted: None,
             notice: None,
@@ -153,7 +155,6 @@ impl UiState {
             weather: None,
             spotify: crate::services::spotify::State::default(),
             discord: crate::services::discord::State::default(),
-            settings_page: 0,
         }
     }
 }

@@ -151,7 +151,7 @@ impl App {
     pub(in crate::island) fn apply_menu_choice(&mut self, id: usize) {
         match id {
             tray::ID_TOGGLE => self.toggle(),
-            tray::ID_SETTINGS => return self.open_tab(view::Tab::Settings),
+            tray::ID_SETTINGS => return self.open_settings_window(),
             tray::ID_AUTOSTART => autostart::set(!autostart::enabled()),
             tray::ID_RESET_POS => {
                 self.settings.float_pos = None;

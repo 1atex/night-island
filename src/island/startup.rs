@@ -187,6 +187,7 @@ impl App {
             hwnd,
             scale,
             dpi_scale,
+            settings_win: None,
             settings,
             win: Win::Small,
             compositor,

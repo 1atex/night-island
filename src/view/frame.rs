@@ -155,7 +155,7 @@ pub fn paint_expanded(
         Tab::Shelf => paint_shelf(p, pill, scale, ui, shelf)?,
         Tab::Note => paint_note(p, pill, scale, ui)?,
         Tab::Text => paint_text(p, pill, scale, ui)?,
-        Tab::Settings => paint_settings(p, pill, scale, ui)?,
+        Tab::Settings => {}
         Tab::Record => paint_record(p, pill, scale, ui)?,
     }
     Ok(())

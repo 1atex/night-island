@@ -297,6 +297,9 @@ impl App {
             return;
         }
         if let Some(i) = view::hit_tab(pill, self.scale, x as f32, y as f32, &self.ui) {
+            if view::TABS[i].0 == view::Tab::Settings {
+                return self.open_settings_window();
+            }
             if self.ui.tab != view::TABS[i].0 {
                 self.ui.clip.hover = None;
                 self.ui.hover_ctl = None;
@@ -311,13 +314,13 @@ impl App {
             view::Tab::Shelf => self.click_shelf(x, y),
             view::Tab::Note => self.click_note(x, y),
             view::Tab::Text => self.click_text(x, y),
-            view::Tab::Settings => self.click_settings(x, y),
             view::Tab::Record => self.click_record(x, y),
             view::Tab::Home => self.click_home(x, y),
             view::Tab::Weather => self.click_weather(x, y),
             view::Tab::Agy => self.click_agy(x, y),
             view::Tab::Integrations => self.click_integrations(x, y),
             view::Tab::Theme => self.click_theme(x, y),
+            view::Tab::Settings => {}
         }
     }
 
