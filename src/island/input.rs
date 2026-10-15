@@ -183,7 +183,11 @@ impl App {
         } else {
             None
         };
-        let hover_text = if self.ui.tab == view::Tab::Text { view::hit_text(pill, self.scale, fx, fy) } else { None };
+        let hover_text = if self.ui.tab == view::Tab::Text {
+            view::hit_text(pill, self.scale, fx, fy, self.settings.dev_tools)
+        } else {
+            None
+        };
         let hover_act = if self.ui.tab == view::Tab::Home && self.ui.home.dev_menu.is_some() {
             let count = self.ui.home.dev_menu.as_ref().map_or(0, |m| m.0.len());
             match view::hit_menu(pill, self.scale, fx, fy, count) {

@@ -6,8 +6,12 @@ impl App {
             return self.repaint_expanded();
         }
         let pill = self.pill_rect(true);
-        match view::hit_text(pill, self.scale, x as f32, y as f32) {
-            Some(view::TextHit::Chip(i)) => self.run_text_op(texttools::OPS[i].0),
+        match view::hit_text(pill, self.scale, x as f32, y as f32, self.settings.dev_tools) {
+            Some(view::TextHit::Chip(i)) => {
+                if let Some((op, _)) = texttools::ops(self.settings.dev_tools).get(i) {
+                    self.run_text_op(*op);
+                }
+            }
             Some(view::TextHit::Action(i)) => self.run_text_action(i),
             None => self.click_note(x, y),
         }
@@ -16,8 +20,24 @@ impl App {
     pub(in crate::island) fn run_text_op(&mut self, op: texttools::Op) {
         let selection = self.ui.text.input.selected_text();
         let source = selection.clone().unwrap_or_else(|| self.ui.text.input.text());
-        if source.is_empty() {
+        if source.is_empty() && !texttools::works_on_empty(op) {
             self.ui.text.status = "Nothing to convert".into();
+            return self.repaint_expanded();
+        }
+        if op == texttools::Op::Count {
+            let s = texttools::stats(&source);
+            let tr = crate::ui::i18n::tr;
+            self.ui.text.status = format!(
+                "{} {} · {} {} · {} {} · {} {}",
+                s.chars,
+                tr("chars"),
+                s.words,
+                tr("words"),
+                s.lines,
+                tr("lines"),
+                s.bytes,
+                tr("bytes")
+            );
             return self.repaint_expanded();
         }
         if op == texttools::Op::Qr {
@@ -65,9 +85,15 @@ impl App {
                     self.plain_paste();
                 }
             }
-            _ => {
+            3 => {
                 self.ui.text.input.set_text("");
                 self.ui.text.status.clear();
+            }
+            _ => {
+                self.settings.dev_tools = !self.settings.dev_tools;
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.ui.text.hover = None;
             }
         }
         self.repaint_expanded();

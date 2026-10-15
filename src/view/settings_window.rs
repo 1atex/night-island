@@ -6,7 +6,7 @@ pub struct Group {
     pub(in crate::view) rows: &'static [(Sid, &'static str, Kind)],
 }
 
-const GENERAL: [(Sid, &str, Kind); 8] = [
+const GENERAL: [(Sid, &str, Kind); 9] = [
     (Sid::Language, "Language", Kind::Segment(["Русский", "English"])),
     (Sid::Weather, "Weather", Kind::Toggle),
     (Sid::Autostart, "Start with Windows", Kind::Toggle),
@@ -15,6 +15,7 @@ const GENERAL: [(Sid, &str, Kind); 8] = [
     (Sid::Capture, "Hide in screenshots", Kind::Toggle),
     (Sid::CaptureSelf, "Hide island in my captures", Kind::Toggle),
     (Sid::AgyAuto, "AGY auto-approve", Kind::Toggle),
+    (Sid::DevTools, "Developer tools", Kind::Toggle),
 ];
 
 const ISLAND: [(Sid, &str, Kind); 9] = [

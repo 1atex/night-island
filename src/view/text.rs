@@ -14,19 +14,21 @@ pub enum TextHit {
     Action(usize),
 }
 
-pub const TEXT_ACTIONS: [&str; 4] = ["Paste clipboard", "Copy", "Paste to window", "Clear"];
+pub const TEXT_ACTIONS: [&str; 5] = ["Paste clipboard", "Copy", "Paste to window", "Clear", "Developer"];
 
-pub(in crate::view) const TEXT_FIELD_H: f32 = 70.0;
+pub const DEV_ACTION: usize = 4;
 
-pub(in crate::view) const CHIP_TOP: f32 = 158.0;
+pub(in crate::view) const TEXT_FIELD_H: f32 = 88.0;
 
-pub(in crate::view) const CHIP_H: f32 = 30.0;
+pub(in crate::view) const CHIP_TOP: f32 = 174.0;
 
-pub(in crate::view) const CHIP_GAP: f32 = 6.0;
+pub(in crate::view) const CHIP_H: f32 = 26.0;
+
+pub(in crate::view) const CHIP_GAP: f32 = 4.0;
+
+pub(in crate::view) const ACTION_H: f32 = 30.0;
 
 pub(in crate::view) const CHIP_COLS: usize = 5;
-
-pub(in crate::view) const ACTION_TOP: f32 = 268.0;
 
 pub fn text_frame(pill: Rect, scale: f32) -> (Rect, Rect) {
     let (x, y, w, _) = pill;
@@ -47,17 +49,17 @@ pub(in crate::view) fn chip_rect(pill: Rect, scale: f32, i: usize) -> Rect {
 }
 
 pub(in crate::view) fn action_rect(pill: Rect, scale: f32, i: usize) -> Rect {
-    let (x, y, w, _) = pill;
+    let (x, y, w, h) = pill;
     let n = TEXT_ACTIONS.len();
     let (side, gap) = (SIDE_PAD * scale, 8.0 * scale);
     let bw = (w - 2.0 * side - (n - 1) as f32 * gap) / n as f32;
     let left = x + side + i as f32 * (bw + gap);
-    let top = y + ACTION_TOP * scale;
-    (left, top, left + bw, top + CHIP_H * scale)
+    let bottom = y + h - LIST_BOTTOM_PAD * scale;
+    (left, bottom - ACTION_H * scale, left + bw, bottom)
 }
 
-pub fn hit_text(pill: Rect, scale: f32, px: f32, py: f32) -> Option<TextHit> {
-    if let Some(i) = (0..OPS.len()).find(|&i| inside(chip_rect(pill, scale, i), px, py)) {
+pub fn hit_text(pill: Rect, scale: f32, px: f32, py: f32, developer: bool) -> Option<TextHit> {
+    if let Some(i) = (0..ops(developer).len()).find(|&i| inside(chip_rect(pill, scale, i), px, py)) {
         return Some(TextHit::Chip(i));
     }
     (0..TEXT_ACTIONS.len()).find(|&i| inside(action_rect(pill, scale, i), px, py)).map(TextHit::Action)
@@ -125,7 +127,7 @@ pub(in crate::view) fn paint_text(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     if let Some((modules, side)) = &ui.text.qr {
         return paint_qr(p, pill, scale, modules, *side);
     }
-    for (i, (_, label)) in OPS.iter().enumerate() {
+    for (i, (_, label)) in ops(ui.cfg.dev_tools).iter().enumerate() {
         let r = chip_rect(pill, scale, i);
         let alpha = if ui.text.hover == Some(TextHit::Chip(i)) { 0.13 } else { 0.06 };
         p.fill_round_rect(r, 9.0 * scale, rgba(1.0, 1.0, 1.0, alpha))?;
@@ -134,7 +136,13 @@ pub(in crate::view) fn paint_text(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     for (i, label) in TEXT_ACTIONS.iter().enumerate() {
         let r = action_rect(pill, scale, i);
         let hovered = ui.text.hover == Some(TextHit::Action(i));
-        let alpha = if hovered { 0.34 } else { 0.2 };
+        let on = i == DEV_ACTION && ui.cfg.dev_tools;
+        let alpha = match (on, hovered) {
+            (true, true) => 0.75,
+            (true, false) => 0.6,
+            (false, true) => 0.34,
+            (false, false) => 0.2,
+        };
         p.fill_round_rect(r, 9.0 * scale, acc(alpha))?;
         p.text(label, r, 12.5 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
     }

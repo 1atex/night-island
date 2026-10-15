@@ -14,7 +14,7 @@ use crate::platform::system::Radios;
 use crate::services::weather::Sky;
 use crate::tools::cmd;
 use crate::tools::edit::{self, TextEdit};
-use crate::tools::texttools::OPS;
+use crate::tools::texttools::ops;
 use crate::ui::gfx::{Painter, WHITE, rgba};
 
 mod agy;
