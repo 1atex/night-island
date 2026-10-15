@@ -60,11 +60,12 @@ pub const GROUPS: [Group; 7] = [
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT },
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 9] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 10] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabShelf, "Shelf", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
     (Sid::TabNote, "Note", Kind::Toggle),
+    (Sid::TabReminders, "Reminders", Kind::Toggle),
     (Sid::TabWeather, "Weather", Kind::Toggle),
     (Sid::TabRecord, "Record", Kind::Toggle),
     (Sid::TabAgy, "AGY", Kind::Toggle),

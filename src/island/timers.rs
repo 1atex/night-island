@@ -135,6 +135,7 @@ impl App {
             Timer::Paste => self.on_paste_timer(),
             Timer::Disarm => {
                 self.ui.armed = None;
+                self.ui.notes.armed_delete = false;
                 self.repaint_expanded();
             }
             Timer::Clock => {

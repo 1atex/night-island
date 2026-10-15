@@ -8,6 +8,7 @@ mod home;
 mod integrations;
 mod note;
 mod record;
+mod remind;
 mod settings;
 mod shelf;
 mod text;
@@ -17,13 +18,13 @@ pub(in crate::island) use self::clipboard::ClipboardState;
 
 impl App {
     pub(in crate::island) fn select_tab(&mut self, tab: view::Tab) {
-        if tab != self.ui.tab || !matches!(tab, view::Tab::Note | view::Tab::Text) {
+        if tab != self.ui.tab || !matches!(tab, view::Tab::Note | view::Tab::Text | view::Tab::Remind) {
             self.end_edit(true);
         }
+        self.ui.notes.armed_delete = false;
         self.ui.tab = tab;
         self.ui.home.dev_menu = None;
         self.ui.text.qr = None;
-        self.ui.remind.focus = false;
         self.refresh_reminder_labels();
         if tab == view::Tab::Text
             && self.ui.text.input.is_empty()

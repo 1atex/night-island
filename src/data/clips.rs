@@ -31,7 +31,7 @@ pub struct Reminder {
 const MAX_REMINDERS: i64 = 100;
 
 pub struct Store {
-    conn: Connection,
+    pub(super) conn: Connection,
 }
 
 impl Store {
@@ -42,7 +42,15 @@ impl Store {
     }
 
     pub fn open() -> Option<Self> {
-        let conn = Connection::open(Self::path()?).ok()?;
+        Self::with_connection(Connection::open(Self::path()?).ok()?)
+    }
+
+    #[cfg(test)]
+    pub fn in_memory() -> Option<Self> {
+        Self::with_connection(Connection::open_in_memory().ok()?)
+    }
+
+    fn with_connection(conn: Connection) -> Option<Self> {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=NORMAL;
@@ -74,6 +82,7 @@ impl Store {
              );",
         )
         .ok()?;
+        super::notes::init(&conn).ok()?;
         Some(Self { conn })
     }
 
@@ -130,17 +139,6 @@ impl Store {
 
     pub fn reminder_set_due(&self, id: i64, due: i64) {
         let _ = self.conn.execute("UPDATE reminders SET due = ?2 WHERE id = ?1", params![id, due]);
-    }
-
-    pub fn note_load(&self) -> String {
-        self.conn.query_row("SELECT text FROM notes WHERE id = 1", [], |r| r.get(0)).unwrap_or_default()
-    }
-
-    pub fn note_save(&self, text: &str) {
-        let _ = self.conn.execute(
-            "INSERT INTO notes (id, text) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET text = excluded.text",
-            params![text],
-        );
     }
 
     pub fn dock(&self) -> Vec<ShelfItem> {

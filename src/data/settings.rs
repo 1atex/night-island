@@ -204,8 +204,8 @@ fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
 }
 
-pub const HIDEABLE_TABS: [&str; 9] =
-    ["Clipboard", "Shelf", "Text", "Note", "Weather", "Record", "AGY", "Controls", "Theme"];
+pub const HIDEABLE_TABS: [&str; 10] =
+    ["Clipboard", "Shelf", "Text", "Note", "Reminders", "Weather", "Record", "AGY", "Controls", "Theme"];
 
 impl Settings {
     pub fn tab_hidden(&self, name: &str) -> bool {

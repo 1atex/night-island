@@ -176,7 +176,9 @@ impl App {
             _ => None,
         };
         let hover_ctl = if self.ui.tab == view::Tab::Controls { view::hit_ctl(pill, self.scale, fx, fy) } else { None };
-        let hover_rem = if self.ui.tab == view::Tab::Note {
+        let hover_note =
+            if self.ui.tab == view::Tab::Note { view::hit_note_tree(pill, self.scale, fx, fy, &self.ui) } else { None };
+        let hover_rem = if self.ui.tab == view::Tab::Remind {
             view::hit_remind(pill, self.scale, fx, fy, self.ui.remind.list.len())
         } else {
             None
@@ -264,8 +266,10 @@ impl App {
             || hover_ctl != self.ui.hover_ctl
             || hover_text != self.ui.text.hover
             || hover_rem != self.ui.remind.hover
+            || hover_note != self.ui.notes.hover
         {
             self.ui.remind.hover = hover_rem;
+            self.ui.notes.hover = hover_note;
             self.ui.text.hover = hover_text;
             self.ui.hover_tab = hover_tab;
             self.ui.clip.hover = hover_clip;
@@ -313,6 +317,7 @@ impl App {
             view::Tab::Controls => self.click_ctl(x, y),
             view::Tab::Shelf => self.click_shelf(x, y),
             view::Tab::Note => self.click_note(x, y),
+            view::Tab::Remind => self.click_remind(x, y),
             view::Tab::Text => self.click_text(x, y),
             view::Tab::Record => self.click_record(x, y),
             view::Tab::Home => self.click_home(x, y),
@@ -346,6 +351,9 @@ impl App {
         } else {
             view::clip_rows(self.pill_rect(true), self.scale)
         };
+        if self.ui.tab == view::Tab::Note && self.cursor_over_tree() {
+            return self.scroll_tree(delta);
+        }
         if matches!(self.ui.tab, view::Tab::Note | view::Tab::Text) {
             let Some(layout) = self.note_layout() else { return };
             let inner = self.note_inner();
@@ -415,6 +423,7 @@ impl App {
             | self.ui.hover_ctl.take().is_some()
             | self.ui.text.hover.take().is_some()
             | self.ui.remind.hover.take().is_some()
+            | self.ui.notes.hover.take().is_some()
             | self.ui.home.hover_act.take().is_some()
             | std::mem::take(&mut self.ui.hover_pin);
         if had_hover {

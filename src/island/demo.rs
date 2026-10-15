@@ -94,6 +94,32 @@ pub(in crate::island) fn apply(hwnd: HWND) {
                 a.ui.city.input.set_text(&q);
                 weather::search(a.hwnd, &q);
             }
+            if std::env::var_os("NI_DEBUG_NOTES").is_some()
+                && let Some(store) = &a.store
+            {
+                let work = store.note_add(None, true, "Work");
+                let plan = store.note_add(work, false, "Sprint plan");
+                store.note_add(work, false, "Meeting notes");
+                let old = store.note_add(work, true, "Archive");
+                store.note_add(old, false, "2025 goals");
+                store.note_add(None, true, "Ideas");
+                store.note_add(None, false, "Shopping list");
+                if let Some(id) = plan {
+                    store.note_set_text(
+                        id,
+                        "Sprint 14
+- settings window
+- notes with folders
+- reminders picker",
+                    );
+                }
+                a.reload_notes();
+                if let Some(id) = plan {
+                    a.open_note(id);
+                }
+                a.ui.notes.expanded.extend(a.ui.notes.items.iter().filter(|i| i.folder).map(|i| i.id));
+                a.repaint_expanded();
+            }
             if let Ok(group) = std::env::var("NI_DEBUG_SWIN") {
                 a.open_settings_window();
                 a.ui.sw.group = group.parse().unwrap_or(0);

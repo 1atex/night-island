@@ -11,6 +11,8 @@ impl App {
             view::agy_input(pill, self.scale, self.ui.agy.input_h.get())
         } else if self.remind_active() {
             view::remind_frame(pill, self.scale)
+        } else if self.rename_active() {
+            view::rename_frame(pill, self.scale, &self.ui).unwrap_or_else(|| view::note_frame(pill, self.scale))
         } else {
             view::note_frame(pill, self.scale)
         }
@@ -20,7 +22,8 @@ impl App {
         match self.ui.tab {
             view::Tab::Text => &self.ui.text.input,
             view::Tab::Agy => &self.ui.agy.input,
-            _ if self.ui.remind.focus => &self.ui.remind.input,
+            view::Tab::Remind => &self.ui.remind.input,
+            view::Tab::Note if self.ui.notes.renaming.is_some() => &self.ui.notes.name_input,
             _ => &self.ui.note,
         }
     }
@@ -29,7 +32,8 @@ impl App {
         match self.ui.tab {
             view::Tab::Text => &mut self.ui.text.input,
             view::Tab::Agy => &mut self.ui.agy.input,
-            _ if self.ui.remind.focus => &mut self.ui.remind.input,
+            view::Tab::Remind => &mut self.ui.remind.input,
+            view::Tab::Note if self.ui.notes.renaming.is_some() => &mut self.ui.notes.name_input,
             _ => &mut self.ui.note,
         }
     }
@@ -61,6 +65,7 @@ impl App {
         self.ui.editing = false;
         self.pointer.selecting = false;
         self.kill_timer(Timer::Caret);
+        self.finish_rename(true);
         self.save_note();
         unsafe {
             let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
@@ -113,6 +118,7 @@ impl App {
             }
             0x0D if self.ui.cmd.open
                 || self.remind_active()
+                || self.rename_active()
                 || self.clip_search()
                 || self.int_field().is_some()
                 || self.extra_field().is_some() =>
@@ -173,6 +179,10 @@ impl App {
         }
         if self.remind_active() && vk == VK_RETURN.0 {
             return self.add_reminder();
+        }
+        if self.rename_active() && (vk == VK_RETURN.0 || vk == VK_ESCAPE.0) {
+            self.finish_rename(vk == VK_RETURN.0);
+            return self.end_edit(true);
         }
         let hwnd = self.hwnd;
         let layout = self.active_layout();

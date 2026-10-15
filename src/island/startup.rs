@@ -263,8 +263,7 @@ impl App {
         app.reload_shelf();
         app.reload_dock();
         app.reload_reminders();
-        let note = app.store.as_ref().map(Store::note_load).unwrap_or_default();
-        app.ui.note.set_text(&note);
+        app.init_notes();
         app.update_offsets();
         app.repaint();
         app.schedule_clock();

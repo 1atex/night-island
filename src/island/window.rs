@@ -47,6 +47,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.pointer.drag_from = None;
                 a.pointer.selecting = false;
                 a.pointer.vol_drag = false;
+                a.finish_note_drag();
                 a.mouse_up();
                 a.finish_seek();
                 a.finish_slider();

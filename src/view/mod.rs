@@ -28,6 +28,7 @@ mod integrations;
 mod note;
 mod pill;
 mod record;
+mod remind;
 mod settings;
 mod settings_window;
 mod shelf;
@@ -38,7 +39,7 @@ mod widgets;
 use self::shelf::*;
 pub use self::{
     agy::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*, integrations::*, note::*, pill::*,
-    record::*, settings::*, settings_window::*, text::*, weather::*, widgets::*,
+    record::*, remind::*, settings::*, settings_window::*, text::*, weather::*, widgets::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);
@@ -50,6 +51,7 @@ pub enum Tab {
     Shelf,
     Text,
     Note,
+    Remind,
     Weather,
     Record,
     Agy,
@@ -59,12 +61,13 @@ pub enum Tab {
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 12] = [
+pub const TABS: [(Tab, char, &str); 13] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Shelf, '\u{E838}', "Shelf"),
     (Tab::Text, '\u{E8E9}', "Text"),
     (Tab::Note, '\u{E70B}', "Note"),
+    (Tab::Remind, '\u{E916}', "Reminders"),
     (Tab::Weather, '\u{E706}', "Weather"),
     (Tab::Record, '\u{E7C8}', "Record"),
     (Tab::Agy, '\u{E943}', "AGY"),
@@ -94,6 +97,7 @@ pub struct UiState {
     pub caret_on: bool,
     pub media: Media,
     pub lyric: LyricUi,
+    pub notes: NotesUi,
     pub sw: SwUi,
     pub privacy: Privacy,
     pub mic_muted: Option<bool>,
@@ -138,6 +142,7 @@ impl UiState {
             caret_on: true,
             media: Media::default(),
             lyric: LyricUi::default(),
+            notes: NotesUi::default(),
             sw: SwUi::default(),
             privacy: Privacy::default(),
             mic_muted: None,
