@@ -23,6 +23,16 @@ pub fn pct(s: &str) -> String {
 }
 
 pub fn request(method: &str, url: &str, bearer: Option<&str>, form: Option<&str>) -> Option<Response> {
+    request_as(method, url, bearer, form, None)
+}
+
+pub fn request_as(
+    method: &str,
+    url: &str,
+    bearer: Option<&str>,
+    form: Option<&str>,
+    agent: Option<&str>,
+) -> Option<Response> {
     let verb = match method {
         "GET" => HttpMethod::Get().ok()?,
         "POST" => HttpMethod::Post().ok()?,
@@ -32,6 +42,9 @@ pub fn request(method: &str, url: &str, bearer: Option<&str>, form: Option<&str>
     };
     let client = HttpClient::new().ok()?;
     let message = HttpRequestMessage::Create(&verb, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
+    if let Some(agent) = agent {
+        message.Headers().ok()?.UserAgent().ok()?.TryParseAdd(&HSTRING::from(agent)).ok()?;
+    }
     if let Some(token) = bearer {
         let value =
             HttpCredentialsHeaderValue::CreateFromSchemeWithToken(&HSTRING::from("Bearer"), &HSTRING::from(token))

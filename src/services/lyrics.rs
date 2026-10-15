@@ -1,4 +1,6 @@
 use std::ffi::c_void;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,6 +20,16 @@ const MAX_LINE_CHARS: usize = 160;
 const MAX_SOURCE_LINES: usize = 6000;
 const MAX_CANDIDATES: usize = 20;
 const CACHE_TRACKS: usize = 24;
+const USER_AGENT: &str = "NightIsland/0.1 (https://gitlab.night-watchers.com/Shurik24/night-island)";
+const RETRY_WAITS: [Duration; 5] = [
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+];
+const DISK_FILES_MAX: usize = 600;
+const DISK_FILE_MAX_BYTES: u64 = 200_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
@@ -57,6 +69,13 @@ pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>) {
     let (title, artist) = (title.to_string(), artist.to_string());
     let mine = LATEST.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
+        let wake = || unsafe {
+            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_LYRICS, WPARAM(0), LPARAM(0));
+        };
+        if let Some(lines) = disk_get(&title, &artist) {
+            remember((title, artist), Some(lines));
+            return wake();
+        }
         std::thread::sleep(DEBOUNCE);
         if LATEST.load(Ordering::SeqCst) != mine {
             return;
@@ -64,7 +83,18 @@ pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>) {
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
-        let lines = match fetch(&title, &artist, secs) {
+        let mut found = fetch(&title, &artist, secs);
+        for wait in RETRY_WAITS {
+            if !matches!(found, Found::Offline) {
+                break;
+            }
+            std::thread::sleep(wait);
+            if LATEST.load(Ordering::SeqCst) != mine {
+                return;
+            }
+            found = fetch(&title, &artist, secs);
+        }
+        let lines = match found {
             Found::Lines(l) => {
                 crate::log_debug!("lyrics found ({} lines)", l.len());
                 Some(l)
@@ -74,14 +104,15 @@ pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>) {
                 None
             }
             Found::Offline => {
-                crate::log_warn!("lyrics lookup failed (offline or server error)");
+                crate::log_warn!("lyrics lookup failed (offline, rate limited or server error)");
                 return;
             }
         };
-        remember((title, artist), lines);
-        unsafe {
-            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_LYRICS, WPARAM(0), LPARAM(0));
+        if let Some(l) = &lines {
+            disk_put(&title, &artist, l);
         }
+        remember((title, artist), lines);
+        wake();
     });
 }
 
@@ -90,7 +121,8 @@ fn fetch(title: &str, artist: &str, secs: Option<u32>) -> Found {
     if let Some(s) = secs {
         url.push_str(&format!("&duration={s}"));
     }
-    match http::request("GET", &url, None, None) {
+    let mut limited = false;
+    match http::request_as("GET", &url, None, None, Some(USER_AGENT)) {
         None => return Found::Offline,
         Some(r) if r.status == 200 => {
             if let Some(lines) = synced_from_record(&r.body) {
@@ -98,17 +130,86 @@ fn fetch(title: &str, artist: &str, secs: Option<u32>) -> Found {
             }
         }
         Some(r) if r.status == 404 => {}
-        Some(r) if r.status >= 500 || r.status == 429 => return Found::Offline,
+        Some(r) if r.status >= 500 || r.status == 429 => {
+            crate::log_debug!("exact lookup answered {}", r.status);
+            limited = true;
+        }
         Some(_) => {}
     }
     let url =
         format!("{BASE}/api/search?track_name={}&artist_name={}", http::pct(title), http::pct(first_artist(artist)));
-    match http::request("GET", &url, None, None) {
+    match http::request_as("GET", &url, None, None, Some(USER_AGENT)) {
         None => Found::Offline,
-        Some(r) if r.status == 200 => pick(&r.body, secs).map_or(Found::Missing, Found::Lines),
+        Some(r) if r.status == 200 => {
+            pick(&r.body, secs).map_or(if limited { Found::Offline } else { Found::Missing }, Found::Lines)
+        }
         Some(r) if r.status >= 500 || r.status == 429 => Found::Offline,
         Some(_) => Found::Missing,
     }
+}
+
+fn disk_dir() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("NightIsland").join("lyrics"))
+}
+
+fn disk_file(title: &str, artist: &str) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(title.as_bytes());
+    hash.update([0]);
+    hash.update(artist.as_bytes());
+    let hex: String = hash.finalize().iter().take(16).map(|b| format!("{b:02x}")).collect();
+    Some(disk_dir()?.join(format!("{hex}.lrc")))
+}
+
+fn disk_get(title: &str, artist: &str) -> Option<Lines> {
+    let path = disk_file(title, artist)?;
+    if fs::metadata(&path).ok()?.len() > DISK_FILE_MAX_BYTES {
+        return None;
+    }
+    let lines = parse_lrc(&fs::read_to_string(path).ok()?);
+    (lines.len() >= 2).then(|| Arc::new(lines))
+}
+
+fn disk_put(title: &str, artist: &str, lines: &[Line]) {
+    let Some(path) = disk_file(title, artist) else { return };
+    let Some(dir) = path.parent() else { return };
+    if fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let text = to_lrc(lines);
+    if text.len() as u64 <= DISK_FILE_MAX_BYTES {
+        let tmp = path.with_extension("tmp");
+        if fs::write(&tmp, text).is_ok() {
+            let _ = fs::rename(&tmp, &path);
+        }
+    }
+    prune(dir);
+}
+
+fn prune(dir: &std::path::Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "lrc"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if files.len() <= DISK_FILES_MAX {
+        return;
+    }
+    files.sort();
+    for (_, path) in files.iter().take(files.len() - DISK_FILES_MAX) {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn to_lrc(lines: &[Line]) -> String {
+    let mut out = String::new();
+    for l in lines {
+        let (m, s, cs) = (l.ms / 60_000, l.ms / 1000 % 60, l.ms % 1000 / 10);
+        out.push_str(&format!("[{m:02}:{s:02}.{cs:02}]{}\n", l.text));
+    }
+    out
 }
 
 fn first_artist(artist: &str) -> &str {
@@ -277,6 +378,16 @@ mod tests {
         assert_eq!(pick(body, Some(200)).unwrap()[0].text, "c");
         assert!(pick(body, Some(100)).is_none());
         assert!(pick("not json", None).is_none());
+    }
+
+    #[test]
+    fn lrc_round_trips_and_file_names_hide_the_text() {
+        let lines = parse_lrc("[01:02.50]one\n[00:05.00]two");
+        assert_eq!(parse_lrc(&to_lrc(&lines)), lines);
+        let name = disk_file("Some Song", "Some Artist").unwrap();
+        let name = name.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.ends_with(".lrc") && name.len() == 36 && !name.to_lowercase().contains("song"));
+        assert_ne!(disk_file("a", "bc"), disk_file("ab", "c"));
     }
 
     #[test]
