@@ -64,7 +64,7 @@ fn remember(key: Key, lines: Option<Lines>) {
     }
 }
 
-pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>) {
+pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>, shared: bool) {
     let raw = hwnd.0 as isize;
     let (title, artist) = (title.to_string(), artist.to_string());
     let mine = LATEST.fetch_add(1, Ordering::SeqCst) + 1;
@@ -82,6 +82,17 @@ pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>) {
         }
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
+        }
+        let id = crate::services::sync::lyrics_id(&artist, &title);
+        if shared && let Some(lrc) = crate::services::sync::fetch_lrc(&id) {
+            let lines = parse_lrc(&lrc);
+            if lines.len() >= 2 {
+                let lines = Arc::new(lines);
+                crate::log_debug!("lyrics from the shared cache ({} lines)", lines.len());
+                disk_put(&title, &artist, &lines);
+                remember((title, artist), Some(lines));
+                return wake();
+            }
         }
         let mut found = fetch(&title, &artist, secs);
         for wait in RETRY_WAITS {
@@ -111,8 +122,12 @@ pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>) {
         if let Some(l) = &lines {
             disk_put(&title, &artist, l);
         }
+        let to_share = lines.clone().filter(|_| shared);
         remember((title, artist), lines);
         wake();
+        if let Some(l) = to_share {
+            crate::services::sync::upload(id, to_lrc(&l), plain_text(&l));
+        }
     });
 }
 
@@ -201,6 +216,10 @@ fn prune(dir: &std::path::Path) {
     for (_, path) in files.iter().take(files.len() - DISK_FILES_MAX) {
         let _ = fs::remove_file(path);
     }
+}
+
+fn plain_text(lines: &[Line]) -> String {
+    lines.iter().filter(|l| !l.text.is_empty()).map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n")
 }
 
 fn to_lrc(lines: &[Line]) -> String {

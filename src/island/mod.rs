@@ -49,6 +49,7 @@ use crate::services::discord;
 use crate::services::everything;
 use crate::services::lyrics;
 use crate::services::spotify;
+use crate::services::update;
 use crate::services::weather;
 use crate::tools::cmd;
 use crate::tools::edit;

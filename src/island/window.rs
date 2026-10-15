@@ -172,6 +172,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             }
             LRESULT(1)
         }
+        update::WM_UPDATE => {
+            with_app(|a| a.on_update());
+            LRESULT(0)
+        }
         ai::WM_AI => {
             with_app(|a| a.on_ai());
             LRESULT(0)

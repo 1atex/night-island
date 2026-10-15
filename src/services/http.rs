@@ -1,7 +1,7 @@
 use windows::Foundation::Uri;
-use windows::Storage::Streams::UnicodeEncoding;
+use windows::Storage::Streams::{DataReader, DataWriter, InMemoryRandomAccessStream, UnicodeEncoding};
 use windows::Web::Http::Headers::HttpCredentialsHeaderValue;
-use windows::Web::Http::{HttpClient, HttpMethod, HttpRequestMessage, HttpStringContent};
+use windows::Web::Http::{HttpBufferContent, HttpClient, HttpMethod, HttpRequestMessage, HttpStringContent};
 use windows::core::HSTRING;
 
 const MAX_BODY_CHARS: usize = 600_000;
@@ -64,6 +64,67 @@ pub fn request_as(
     let status = reply.StatusCode().ok()?.0 as u16;
     let body = reply.Content().ok()?.ReadAsStringAsync().ok()?.join().ok()?.to_string();
     Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
+}
+
+pub struct BytesReply {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+pub fn get_bytes(url: &str, max_bytes: usize, agent: Option<&str>) -> Option<BytesReply> {
+    send_bytes("GET", url, &[], "", max_bytes, agent)
+}
+
+pub fn send_bytes(
+    method: &str,
+    url: &str,
+    body: &[u8],
+    content_type: &str,
+    max_bytes: usize,
+    agent: Option<&str>,
+) -> Option<BytesReply> {
+    let verb = match method {
+        "GET" => HttpMethod::Get().ok()?,
+        "POST" => HttpMethod::Post().ok()?,
+        "PUT" => HttpMethod::Put().ok()?,
+        _ => return None,
+    };
+    let client = HttpClient::new().ok()?;
+    let message = HttpRequestMessage::Create(&verb, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
+    if let Some(agent) = agent {
+        message.Headers().ok()?.UserAgent().ok()?.TryParseAdd(&HSTRING::from(agent)).ok()?;
+    }
+    if !body.is_empty() {
+        let stream = InMemoryRandomAccessStream::new().ok()?;
+        let writer = DataWriter::CreateDataWriter(&stream).ok()?;
+        writer.WriteBytes(body).ok()?;
+        let content = HttpBufferContent::CreateFromBuffer(&writer.DetachBuffer().ok()?).ok()?;
+        content
+            .Headers()
+            .ok()?
+            .TryAppendWithoutValidation(&HSTRING::from("Content-Type"), &HSTRING::from(content_type))
+            .ok()?;
+        message.SetContent(&content).ok()?;
+    }
+    let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
+    let status = reply.StatusCode().ok()?.0 as u16;
+    let content = reply.Content().ok()?;
+    if let Ok(len) = content.Headers().and_then(|h| h.ContentLength())
+        && let Ok(len) = len.Value()
+        && len > max_bytes as u64
+    {
+        return None;
+    }
+    let buffer = content.ReadAsBufferAsync().ok()?.join().ok()?;
+    let len = buffer.Length().ok()? as usize;
+    if len > max_bytes {
+        return None;
+    }
+    let mut bytes = vec![0u8; len];
+    if len > 0 {
+        DataReader::FromBuffer(&buffer).ok()?.ReadBytes(&mut bytes).ok()?;
+    }
+    Some(BytesReply { status, body: bytes })
 }
 
 pub fn post_json(url: &str, headers: &[(&str, &str)], body: &str, agent: Option<&str>) -> Option<Response> {

@@ -2,7 +2,18 @@ use crate::island::*;
 
 pub fn run() -> Result<()> {
     unsafe {
-        let _mutex = CreateMutexW(None, false, w!("Local\\NightIsland.SingleInstance"))?;
+        let mut _mutex = CreateMutexW(None, false, w!("Local\\NightIsland.SingleInstance"))?;
+        let updated = std::env::args().any(|a| a == "--updated");
+        let mut waited = 0;
+        while updated
+            && waited < 50
+            && windows::Win32::Foundation::GetLastError() == windows::Win32::Foundation::ERROR_ALREADY_EXISTS
+        {
+            let _ = windows::Win32::Foundation::CloseHandle(_mutex);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            _mutex = CreateMutexW(None, false, w!("Local\\NightIsland.SingleInstance"))?;
+            waited += 1;
+        }
         if windows::Win32::Foundation::GetLastError() == windows::Win32::Foundation::ERROR_ALREADY_EXISTS {
             if let Ok(existing) = FindWindowW(w!("NightIsland.Window"), None) {
                 let _ = PostMessageW(Some(existing), WM_SHOW, WPARAM(0), LPARAM(0));
@@ -12,6 +23,7 @@ pub fn run() -> Result<()> {
 
         crate::data::log::init();
         crate::log_info!("starting Night Island {}", env!("CARGO_PKG_VERSION"));
+        update::clean_up_after_update();
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         RoInitialize(RO_INIT_SINGLETHREADED)?;
         let _dispatcher = CreateDispatcherQueueController(DispatcherQueueOptions {
@@ -62,6 +74,7 @@ pub fn run() -> Result<()> {
         crate::ui::i18n::set_ru(settings.language == crate::data::settings::Language::Ru);
         let dpi_scale = GetDpiForWindow(hwnd) as f32 / 96.0;
         ai::configure(&settings.ai);
+        update::configure(settings.update_check, settings.update_beta);
         let mut app = App::new(hwnd, dpi_scale, settings)?;
         app.place(Win::Small);
         app.apply_capture();
@@ -79,6 +92,7 @@ pub fn run() -> Result<()> {
         media::start(hwnd);
         downloads::start(hwnd);
         privacy::start(hwnd);
+        update::start_background(hwnd);
         if with_app_value(|a| a.settings.notify.lock_keys).unwrap_or(false) {
             lockkeys::start(hwnd);
         }

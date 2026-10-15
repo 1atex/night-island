@@ -101,6 +101,9 @@ impl App {
                     self.repaint_collapsed();
                 }
                 Character => self.apply_character(),
+                UpdateCheck | UpdateBeta => {
+                    update::configure(self.settings.update_check, self.settings.update_beta);
+                }
                 AiProvider => {
                     ai::configure(&self.settings.ai);
                     self.sync_ai_fields();

@@ -278,6 +278,28 @@ impl App {
                     spotify::connect();
                 }
             },
+            view::Act::UpdateCheck => {
+                update::configure(self.settings.update_check, self.settings.update_beta);
+                update::check(self.hwnd);
+            }
+            view::Act::UpdateDownload => {
+                if let update::Status::Available(found) = update::state() {
+                    update::download(self.hwnd, found);
+                }
+            }
+            view::Act::UpdateInstall => {
+                if let update::Status::Ready(_, path) = update::state() {
+                    match update::install(&path) {
+                        Ok(()) => unsafe {
+                            let _ = PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+                        },
+                        Err(e) => {
+                            crate::log_warn!("could not install the update: {e}");
+                            self.notify(Notice::Error, '\u{E783}', "The update could not be installed");
+                        }
+                    }
+                }
+            }
             view::Act::AiSave => self.save_ai(),
             view::Act::AiRemoveKey => {
                 ai::remove_key(self.settings.ai.provider);

@@ -92,6 +92,18 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn on_update(&mut self) {
+        let now = update::state();
+        if let update::Status::Available(found) = &now
+            && self.ui.update != now
+        {
+            let text = format!("{} {}", crate::ui::i18n::tr("New version available"), found.version);
+            self.notify_for(Notice::Update, '\u{E895}', &text, 6000);
+        }
+        self.ui.update = now;
+        self.render_settings_win();
+    }
+
     pub(in crate::island) fn on_spotify(&mut self) {
         let now = spotify::state();
         if now == self.ui.spotify {

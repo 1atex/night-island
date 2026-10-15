@@ -26,7 +26,7 @@ impl App {
                 Some(None) => {}
                 None => {
                     let secs = media::progress().map(|(_, len)| len.round() as u32).filter(|s| *s > 0);
-                    lyrics::request(self.hwnd, &key.0, &key.1, secs);
+                    lyrics::request(self.hwnd, &key.0, &key.1, secs, self.settings.shared_lyrics);
                 }
             }
         }

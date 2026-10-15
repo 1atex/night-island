@@ -38,17 +38,18 @@ const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
 ];
 
-const PILL: [(Sid, &str, Kind); 7] = [
+const PILL: [(Sid, &str, Kind); 8] = [
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
+    (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 12] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 13] = [
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
     (Sid::NotifyCapture, "Screenshots, text and QR", Kind::Toggle),
@@ -61,13 +62,18 @@ const NOTIFICATIONS: [(Sid, &str, Kind); 12] = [
     (Sid::NotifyLockKeys, "Caps, Num and Scroll Lock", Kind::Toggle),
     (Sid::NotifyBattery, "Charger and low battery", Kind::Toggle),
     (Sid::NotifyAi, "AI answers", Kind::Toggle),
+    (Sid::NotifyUpdate, "New version available", Kind::Toggle),
 ];
 
 const AI: [(Sid, &str, Kind); 1] = [(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle)];
 
 const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
 
-const ABOUT: [(Sid, &str, Kind); 1] = [(Sid::OpenLogs, "Logs folder", Kind::Button)];
+const ABOUT: [(Sid, &str, Kind); 3] = [
+    (Sid::UpdateCheck, "Check for updates", Kind::Toggle),
+    (Sid::UpdateBeta, "Receive beta versions", Kind::Toggle),
+    (Sid::OpenLogs, "Logs folder", Kind::Button),
+];
 
 const ROWS_TABS_ONLY: [(Sid, &str, Kind); 10] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
@@ -91,7 +97,7 @@ pub const GROUPS: [Group; 9] = [
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items) },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items) },
-    Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: None },
+    Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items) },
 ];
 
 pub const SW_SIZE: (f32, f32) = (940.0, 620.0);
@@ -126,6 +132,9 @@ pub enum Act {
     SpotifySaveId,
     AiSave,
     AiRemoveKey,
+    UpdateCheck,
+    UpdateDownload,
+    UpdateInstall,
 }
 
 #[derive(Default)]
@@ -154,6 +163,7 @@ pub(in crate::view) enum Item {
     Field(Field, &'static str, &'static str),
     Button(Act, String, bool),
     Note(&'static str),
+    Text(String),
 }
 
 impl Item {
@@ -162,7 +172,7 @@ impl Item {
             Item::Heading(_) => HEADING_H,
             Item::Row(..) | Item::Field(..) | Item::Button(..) => ROW_H,
             Item::Service { .. } => SERVICE_H,
-            Item::Note(_) => NOTE_H,
+            Item::Note(_) | Item::Text(_) => NOTE_H,
         }
     }
 }
@@ -236,6 +246,42 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     }
     out.push(Item::Field(Field::SpotifyId, "Own Client ID", "Optional: your Spotify app"));
     out.push(Item::Button(Act::SpotifySaveId, "Save the Client ID".into(), true));
+    out
+}
+
+fn about_items(ui: &UiState) -> Vec<Item> {
+    use crate::services::update::{self, Status as U};
+    let mut out = vec![Item::Heading("About"), Item::Text(format!("Night Island {}", update::CURRENT))];
+    let line = match &ui.update {
+        U::Unknown | U::NotConfigured if !update::configured() => {
+            "Updates are off: this build has no release key".to_string()
+        }
+        U::Unknown | U::NotConfigured => "Not checked yet".to_string(),
+        U::Checking => "Checking…".to_string(),
+        U::UpToDate => "You have the latest version".to_string(),
+        U::Available(f) => format!("Version {} is available", f.version),
+        U::Downloading(f) => format!("Downloading version {}…", f.version),
+        U::Ready(f, _) => format!("Version {} is downloaded and checked", f.version),
+        U::Failed(why) => why.clone(),
+    };
+    out.push(Item::Text(line));
+    let busy = matches!(ui.update, U::Checking | U::Downloading(_));
+    out.push(Item::Button(Act::UpdateCheck, "Check now".into(), update::configured() && !busy));
+    match &ui.update {
+        U::Available(f) => {
+            if let Some(first) = f.notes.lines().next().filter(|l| !l.trim().is_empty()) {
+                out.push(Item::Text(first.chars().take(110).collect()));
+            }
+            out.push(Item::Button(Act::UpdateDownload, format!("Download version {}", f.version), true));
+        }
+        U::Ready(f, _) => {
+            out.push(Item::Button(Act::UpdateInstall, format!("Install version {} and restart", f.version), true));
+        }
+        _ => {}
+    }
+    for &(id, label, kind) in &ABOUT {
+        out.push(Item::Row(id, label, kind));
+    }
     out
 }
 
@@ -596,6 +642,16 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         DWRITE_FONT_WEIGHT_SEMI_BOLD,
                         DWRITE_TEXT_ALIGNMENT_CENTER,
                         rgba(1.0, 1.0, 1.0, if enabled { 1.0 } else { 0.4 }),
+                    )?;
+                }
+                Item::Text(text) => {
+                    p.text(
+                        &text,
+                        (l.content.0, top, l.content.2, top + NOTE_H * scale),
+                        12.5 * scale,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, 0.75),
                     )?;
                 }
                 Item::Note(text) => {

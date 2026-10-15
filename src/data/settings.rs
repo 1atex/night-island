@@ -121,6 +121,9 @@ pub struct Settings {
     pub music_title: bool,
     pub music_lyrics: bool,
     pub dev_tools: bool,
+    pub shared_lyrics: bool,
+    pub update_check: bool,
+    pub update_beta: bool,
     pub ai: AiSettings,
     pub hidden_tabs: Vec<String>,
     pub notify: NotifySettings,
@@ -177,6 +180,9 @@ impl Default for Settings {
             music_title: false,
             music_lyrics: false,
             dev_tools: false,
+            shared_lyrics: false,
+            update_check: true,
+            update_beta: false,
             ai: AiSettings::default(),
             hidden_tabs: vec!["AGY".to_string()],
             notify: NotifySettings::default(),
@@ -316,6 +322,7 @@ pub enum Notice {
     LockKeys,
     Battery,
     Ai,
+    Update,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -333,6 +340,7 @@ pub struct NotifySettings {
     pub lock_keys: bool,
     pub battery: bool,
     pub ai: bool,
+    pub update: bool,
 }
 
 impl Default for NotifySettings {
@@ -350,6 +358,7 @@ impl Default for NotifySettings {
             lock_keys: false,
             battery: false,
             ai: true,
+            update: true,
         }
     }
 }
@@ -368,6 +377,7 @@ impl NotifySettings {
             Notice::LockKeys => self.lock_keys,
             Notice::Battery => self.battery,
             Notice::Ai => self.ai,
+            Notice::Update => self.update,
         }
     }
 }

@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package nightisland.v1;
+
+message Release {
+  string version = 1;
+  bool beta = 2;
+  string url = 3;
+  bytes sha256 = 4;
+  uint64 size = 5;
+  string notes = 6;
+  int64 signed_at = 7;
+  string channel = 8;
+  string os = 9;
+}
+
+message SignedRelease {
+  bytes release = 1;
+  bytes signature = 2;
+}
+
+message Lyrics {
+  string lrc = 1;
+  string plain = 2;
+}
+
+message LyricsReply {
+  bool found = 1;
+  Lyrics lyrics = 2;
+}
+
+message LyricsPut {
+  bytes id = 1;
+  Lyrics lyrics = 2;
+  bytes client_key = 3;
+  bytes signature = 4;
+}

@@ -5,5 +5,8 @@ pub mod everything;
 pub mod http;
 pub mod integrations;
 pub mod lyrics;
+pub mod proto;
 pub mod spotify;
+pub mod sync;
+pub mod update;
 pub mod weather;
