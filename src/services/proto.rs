@@ -20,6 +20,8 @@ pub struct Release {
     pub channel: String,
     #[prost(string, tag = "9")]
     pub os: String,
+    #[prost(string, tag = "10")]
+    pub app: String,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -76,6 +78,7 @@ mod tests {
             ("Release", "signed_at", 7),
             ("Release", "channel", 8),
             ("Release", "os", 9),
+            ("Release", "app", 10),
             ("SignedRelease", "release", 1),
             ("SignedRelease", "signature", 2),
             ("Lyrics", "lrc", 1),

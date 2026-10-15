@@ -70,6 +70,7 @@ fn sign(args: &[String]) -> Result<(), String> {
         signed_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
         channel,
         os: OS.into(),
+        app: arg(args, "--app").unwrap_or_else(|| "night-island".into()),
     };
     let bytes = release.encode_to_vec();
     let mut message = DOMAIN.to_vec();

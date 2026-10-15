@@ -12,6 +12,7 @@ message Release {
   int64 signed_at = 7;
   string channel = 8;
   string os = 9;
+  string app = 10;
 }
 
 message SignedRelease {

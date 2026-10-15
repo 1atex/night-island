@@ -16,6 +16,7 @@ pub const WM_UPDATE: u32 = WM_APP + 22;
 
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 pub const OS: &str = "windows-x64";
+pub const APP: &str = "night-island";
 const HOST: &str = "backend.night-watchers.com";
 const DOMAIN: &[u8] = b"night-island/release/v1\0";
 const RELEASE_KEY_HEX: &str = include_str!("../../proto/release_public_key.txt");
@@ -119,6 +120,9 @@ pub fn verify(signed: &SignedRelease, key: &VerifyingKey, want_channel: &str) ->
     message.extend_from_slice(&signed.release);
     key.verify_strict(&message, &Signature::from_bytes(&signature)).map_err(|_| "Bad signature")?;
     let release = Release::decode(signed.release.as_slice()).map_err(|_| "Bad release")?;
+    if release.app != APP {
+        return Err("Release is for another program");
+    }
     if release.channel != want_channel || release.os != OS {
         return Err("Release is for another channel or system");
     }
@@ -280,6 +284,7 @@ mod tests {
             signed_at: 1_760_000_000,
             channel: "stable".into(),
             os: OS.into(),
+            app: APP.into(),
         }
     }
 
@@ -337,6 +342,8 @@ mod tests {
         let ok = |r: Release| verify(&sign(&r, &key()), &key().verifying_key(), "stable");
         assert!(ok(Release { channel: "beta".into(), ..release() }).is_err(), "a beta cannot pose as stable");
         assert!(ok(Release { os: "linux".into(), ..release() }).is_err());
+        assert_eq!(ok(Release { app: "night-shell".into(), ..release() }), Err("Release is for another program"));
+        assert_eq!(ok(Release { app: String::new(), ..release() }), Err("Release is for another program"));
         for bad_url in [
             "http://backend.night-watchers.com/x.exe",
             "https://evil.example/x.exe",
