@@ -26,6 +26,16 @@ pub enum Sid {
     MusicEq,
     MusicTitle,
     MusicLyrics,
+    TabClipboard,
+    TabShelf,
+    TabText,
+    TabNote,
+    TabWeather,
+    TabRecord,
+    TabAgy,
+    TabControls,
+    TabTheme,
+    OpenIntegrations,
     SpikeColor,
     Spikes,
     Character,
@@ -50,6 +60,7 @@ pub(in crate::view) enum Kind {
     Cycle,
     Slider,
     Toggle,
+    Button,
 }
 
 pub(in crate::view) const ROWS: [(Sid, &str, Kind); 18] = [
@@ -86,6 +97,36 @@ pub(in crate::view) const ROWS_PILL: [(Sid, &str, Kind); 10] = [
     (Sid::GameMode, "Game mode", Kind::Toggle),
 ];
 
+pub(in crate::view) const ROWS_TABS: [(Sid, &str, Kind); 10] = [
+    (Sid::TabClipboard, "Clipboard", Kind::Toggle),
+    (Sid::TabShelf, "Shelf", Kind::Toggle),
+    (Sid::TabText, "Text", Kind::Toggle),
+    (Sid::TabNote, "Note", Kind::Toggle),
+    (Sid::TabWeather, "Weather", Kind::Toggle),
+    (Sid::TabRecord, "Record", Kind::Toggle),
+    (Sid::TabAgy, "AGY", Kind::Toggle),
+    (Sid::TabControls, "Controls", Kind::Toggle),
+    (Sid::TabTheme, "Theme", Kind::Toggle),
+    (Sid::OpenIntegrations, "Integrations", Kind::Button),
+];
+
+pub(in crate::view) fn tab_toggle_name(id: Sid) -> Option<&'static str> {
+    Some(match id {
+        Sid::TabClipboard => "Clipboard",
+        Sid::TabShelf => "Shelf",
+        Sid::TabText => "Text",
+        Sid::TabNote => "Note",
+        Sid::TabWeather => "Weather",
+        Sid::TabRecord => "Record",
+        Sid::TabAgy => "AGY",
+        Sid::TabControls => "Controls",
+        Sid::TabTheme => "Theme",
+        _ => return None,
+    })
+}
+
+pub const SETTINGS_PAGES: u8 = 3;
+
 pub(in crate::view) const RECORD_ROWS: [(Sid, &str, Kind); 4] = [
     (Sid::RecFormat, "Format", Kind::Segment(["MP4", "GIF"])),
     (Sid::RecFps, "Frame rate", Kind::Slider),
@@ -109,6 +150,7 @@ pub(in crate::view) fn rows_for(tab: Tab, page: u8) -> &'static [(Sid, &'static 
         Tab::Record => &RECORD_ROWS,
         Tab::Theme => &THEME_ROWS,
         _ if page == 1 => &ROWS_PILL,
+        _ if page >= 2 => &ROWS_TABS,
         _ => &ROWS,
     }
 }
@@ -130,9 +172,13 @@ pub(in crate::view) fn paint_pager(p: &Painter, pill: Rect, scale: f32, ui: &UiS
     )?;
     p.glyph('\u{E76B}', (row.0, row.1, row.0 + 34.0 * scale, row.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
     p.glyph('\u{E76C}', (row.2 - 34.0 * scale, row.1, row.2, row.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
-    let name = if ui.settings_page == 0 { "Settings" } else { "Pill and music" };
+    let name = match ui.settings_page {
+        0 => "Settings",
+        1 => "Pill and music",
+        _ => "Tabs",
+    };
     p.text(
-        &format!("{}  ·  {}/2", crate::ui::i18n::tr(name), ui.settings_page + 1),
+        &format!("{}  ·  {}/{SETTINGS_PAGES}", crate::ui::i18n::tr(name), ui.settings_page + 1),
         (row.0 + 34.0 * scale, row.1, row.2 - 34.0 * scale, row.3),
         12.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
@@ -249,6 +295,9 @@ pub fn toggle_get(id: Sid, c: &Settings) -> bool {
 }
 
 pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
+    if let Some(name) = tab_toggle_name(id) {
+        return !c.tab_hidden(name);
+    }
     match id {
         Sid::AutoHide => c.auto_hide,
         Sid::Acrylic => c.acrylic,
@@ -272,6 +321,9 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
 }
 
 pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
+    if let Some(name) = tab_toggle_name(id) {
+        return c.set_tab_hidden(name, !on);
+    }
     match id {
         Sid::AutoHide => c.auto_hide = on,
         Sid::Acrylic => c.acrylic = on,
@@ -340,6 +392,7 @@ pub enum SetHit {
     Option(usize),
     Slider,
     Toggle,
+    Button,
 }
 
 pub fn slider_track(pill: Rect, scale: f32, id: Sid, tab: Tab, page: u8) -> Option<(f32, f32)> {
@@ -364,6 +417,7 @@ pub fn hit_setting(pill: Rect, scale: f32, px: f32, py: f32, tab: Tab, page: u8)
                 Kind::Cycle => SetHit::Option(usize::from(px > (ctl.0 + ctl.2) / 2.0)),
                 Kind::Slider => SetHit::Slider,
                 Kind::Toggle => SetHit::Toggle,
+                Kind::Button => SetHit::Button,
             },
         ));
     }
@@ -639,6 +693,23 @@ pub(in crate::view) fn paint_rows(
                     DWRITE_FONT_WEIGHT_NORMAL,
                     DWRITE_TEXT_ALIGNMENT_TRAILING,
                     rgba(1.0, 1.0, 1.0, 0.7),
+                )?;
+            }
+            Kind::Button => {
+                p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+                p.text(
+                    "Open",
+                    (ctl.0, ctl.1, ctl.2 - 26.0 * scale, ctl.3),
+                    12.0 * scale,
+                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                    DWRITE_TEXT_ALIGNMENT_CENTER,
+                    WHITE,
+                )?;
+                p.glyph(
+                    '\u{E76C}',
+                    (ctl.2 - 26.0 * scale, ctl.1, ctl.2, ctl.3),
+                    12.0 * scale,
+                    rgba(1.0, 1.0, 1.0, 0.75),
                 )?;
             }
             Kind::Toggle => {

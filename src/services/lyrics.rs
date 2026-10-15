@@ -65,9 +65,18 @@ pub fn request(hwnd: HWND, title: &str, artist: &str, secs: Option<u32>) {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
         let lines = match fetch(&title, &artist, secs) {
-            Found::Lines(l) => Some(l),
-            Found::Missing => None,
-            Found::Offline => return,
+            Found::Lines(l) => {
+                crate::log_debug!("lyrics found ({} lines)", l.len());
+                Some(l)
+            }
+            Found::Missing => {
+                crate::log_debug!("no synced lyrics for the track");
+                None
+            }
+            Found::Offline => {
+                crate::log_warn!("lyrics lookup failed (offline or server error)");
+                return;
+            }
         };
         remember((title, artist), lines);
         unsafe {

@@ -10,6 +10,8 @@ pub fn run() -> Result<()> {
             return Ok(());
         }
 
+        crate::data::log::init();
+        crate::log_info!("starting Night Island {}", env!("CARGO_PKG_VERSION"));
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         RoInitialize(RO_INIT_SINGLETHREADED)?;
         let _dispatcher = CreateDispatcherQueueController(DispatcherQueueOptions {

@@ -30,7 +30,7 @@ impl App {
                 && fx >= pill.0
                 && fx < pill.0 + pill.2;
             if in_header
-                && view::hit_tab(pill, self.scale, fx, fy, self.ui.tab).is_none()
+                && view::hit_tab(pill, self.scale, fx, fy, &self.ui).is_none()
                 && !view::hit_pin(pill, self.scale, fx, fy)
             {
                 let mut pt = windows::Win32::Foundation::POINT::default();
@@ -163,7 +163,7 @@ impl App {
             }
             return;
         }
-        let hover_tab = view::hit_tab(pill, self.scale, fx, fy, self.ui.tab);
+        let hover_tab = view::hit_tab(pill, self.scale, fx, fy, &self.ui);
         let hover_clip = match self.ui.tab {
             view::Tab::Clipboard => {
                 let visible = self.clipboard.clips.len().saturating_sub(self.ui.clip.scroll);
@@ -296,7 +296,7 @@ impl App {
             self.repaint_expanded();
             return;
         }
-        if let Some(i) = view::hit_tab(pill, self.scale, x as f32, y as f32, self.ui.tab) {
+        if let Some(i) = view::hit_tab(pill, self.scale, x as f32, y as f32, &self.ui) {
             if self.ui.tab != view::TABS[i].0 {
                 self.ui.clip.hover = None;
                 self.ui.hover_ctl = None;

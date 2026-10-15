@@ -1,12 +1,24 @@
 use crate::view::*;
 
-pub fn tab_rects(pill: Rect, scale: f32, active: Tab) -> [Rect; TABS.len()] {
+pub fn tab_in_bar(cfg: &Settings, tab: Tab, name: &str) -> bool {
+    match tab {
+        Tab::Integrations => false,
+        Tab::Home | Tab::Settings => true,
+        _ => !cfg.tab_hidden(name),
+    }
+}
+
+pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
+    let active = ui.tab;
     let (x, y, w, _) = pill;
     let (bh, gap, icon_w) = (36.0 * scale, 1.0 * scale, 32.0 * scale);
     let y0 = y + 12.0 * scale;
     let mut left = x + 12.0 * scale;
     std::array::from_fn(|i| {
         let (tab, _, name) = TABS[i];
+        if !tab_in_bar(&ui.cfg, tab, name) {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
         if tab == Tab::Settings {
             let r = x + w - 12.0 * scale;
             return (r - icon_w, y0, r, y0 + bh);
@@ -22,8 +34,8 @@ pub fn tab_rects(pill: Rect, scale: f32, active: Tab) -> [Rect; TABS.len()] {
     })
 }
 
-pub fn hit_tab(pill: Rect, scale: f32, px: f32, py: f32, active: Tab) -> Option<usize> {
-    tab_rects(pill, scale, active).iter().position(|&(l, t, r, b)| px >= l && px < r && py >= t && py < b)
+pub fn hit_tab(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<usize> {
+    tab_rects(pill, scale, ui).iter().position(|&(l, t, r, b)| px >= l && px < r && py >= t && py < b)
 }
 
 pub fn pin_rect(pill: Rect, scale: f32) -> Rect {
@@ -47,7 +59,7 @@ pub(in crate::view) fn privacy_chip(pill: Rect, scale: f32, ui: &UiState) -> Opt
     let pin = pin_rect(pill, scale);
     let right = pin.0 - 4.0 * scale;
     let mut width = (46.0 + crate::ui::i18n::tr(label).chars().count() as f32 * 8.6) * scale;
-    let tabs_end = tab_rects(pill, scale, ui.tab)
+    let tabs_end = tab_rects(pill, scale, ui)
         .iter()
         .zip(TABS)
         .filter(|(_, t)| t.0 != Tab::Settings)
@@ -74,9 +86,12 @@ pub fn paint_expanded(
         return paint_command(p, pill, scale, ui);
     }
 
-    for (i, rect) in tab_rects(pill, scale, ui.tab).iter().enumerate() {
+    for (i, rect) in tab_rects(pill, scale, ui).iter().enumerate() {
         let (tab, glyph, name) = TABS[i];
-        let selected = tab == ui.tab;
+        if rect.2 <= rect.0 {
+            continue;
+        }
+        let selected = tab == ui.tab || (tab == Tab::Settings && ui.tab == Tab::Integrations);
         let radius = (rect.3 - rect.1) / 2.0;
         if selected {
             p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.16))?;
@@ -144,4 +159,25 @@ pub fn paint_expanded(
         Tab::Record => paint_record(p, pill, scale, ui)?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_hideable_tab_exists_and_the_fixed_ones_stay() {
+        for name in crate::data::settings::HIDEABLE_TABS {
+            assert!(TABS.iter().any(|t| t.2 == name), "{name} is not a tab");
+        }
+        let all_hidden = Settings {
+            hidden_tabs: crate::data::settings::HIDEABLE_TABS.map(String::from).to_vec(),
+            ..Settings::default()
+        };
+        assert!(tab_in_bar(&all_hidden, Tab::Home, "Home"));
+        assert!(tab_in_bar(&all_hidden, Tab::Settings, "Settings"));
+        assert!(!tab_in_bar(&all_hidden, Tab::Integrations, "Integrations"));
+        assert!(!tab_in_bar(&all_hidden, Tab::Note, "Note"));
+        assert!(tab_in_bar(&Settings::default(), Tab::Note, "Note"));
+    }
 }

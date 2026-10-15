@@ -355,7 +355,10 @@ pub fn start(hwnd: HWND, enabled: bool) {
                         }
                         REFRESH
                     }
-                    None => RETRY,
+                    None => {
+                        crate::log_warn!("weather update failed, retrying later");
+                        RETRY
+                    }
                 }
             } else {
                 Duration::from_secs(24 * 3600)

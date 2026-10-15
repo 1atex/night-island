@@ -20,7 +20,10 @@ impl App {
     pub(in crate::island) fn click_settings(&mut self, x: i32, y: i32) {
         let pill = self.pill_rect(true);
         if self.ui.tab == view::Tab::Settings && view::hit_pager(pill, self.scale, x as f32, y as f32).is_some() {
-            self.ui.settings_page = 1 - self.ui.settings_page.min(1);
+            let next = view::hit_pager(pill, self.scale, x as f32, y as f32) == Some(true);
+            let pages = view::SETTINGS_PAGES;
+            self.ui.settings_page =
+                if next { (self.ui.settings_page + 1) % pages } else { (self.ui.settings_page + pages - 1) % pages };
             return self.repaint_expanded();
         }
         let Some((id, hit)) =
@@ -45,6 +48,11 @@ impl App {
             view::SetHit::Slider => {
                 self.pointer.slider = Some(id);
                 self.drag_slider(x);
+            }
+            view::SetHit::Button => {
+                if id == view::Sid::OpenIntegrations {
+                    self.select_tab(view::Tab::Integrations);
+                }
             }
         }
     }

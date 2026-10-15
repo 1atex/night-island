@@ -239,7 +239,10 @@ pub fn start(hwnd: HWND) {
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
-        let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else { return };
+        let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else {
+            crate::log_error!("media session manager is unavailable");
+            return;
+        };
         loop {
             let now = fetch(&manager);
             let changed = {

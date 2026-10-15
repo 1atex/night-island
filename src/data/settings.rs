@@ -120,6 +120,7 @@ pub struct Settings {
     pub music_eq: bool,
     pub music_title: bool,
     pub music_lyrics: bool,
+    pub hidden_tabs: Vec<String>,
     pub spike_color: bool,
     pub record_format: RecordFormat,
     pub record_fps: u32,
@@ -172,6 +173,7 @@ impl Default for Settings {
             music_eq: true,
             music_title: false,
             music_lyrics: false,
+            hidden_tabs: vec!["AGY".to_string()],
             spike_color: true,
             record_format: RecordFormat::Mp4,
             record_fps: 30,
@@ -202,21 +204,39 @@ fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
 }
 
+pub const HIDEABLE_TABS: [&str; 9] =
+    ["Clipboard", "Shelf", "Text", "Note", "Weather", "Record", "AGY", "Controls", "Theme"];
+
 impl Settings {
+    pub fn tab_hidden(&self, name: &str) -> bool {
+        self.hidden_tabs.iter().any(|t| t == name)
+    }
+
+    pub fn set_tab_hidden(&mut self, name: &str, hidden: bool) {
+        let Some(known) = HIDEABLE_TABS.iter().find(|t| **t == name) else { return };
+        self.hidden_tabs.retain(|t| t != known);
+        if hidden {
+            self.hidden_tabs.push((*known).to_string());
+        }
+    }
+
     fn path() -> Option<PathBuf> {
         let dir = PathBuf::from(std::env::var_os("APPDATA")?).join("NightIsland");
         Some(dir.join("settings.json"))
     }
 
     pub fn load() -> Self {
-        let mut s = Self::path()
-            .and_then(|p| fs::File::open(p).ok())
-            .and_then(|f| {
-                let mut buf = String::new();
-                f.take(MAX_FILE_BYTES).read_to_string(&mut buf).ok()?;
-                serde_json::from_str::<Settings>(&buf).ok()
-            })
-            .unwrap_or_default();
+        let file = Self::path().and_then(|p| fs::File::open(p).ok());
+        let existed = file.is_some();
+        let parsed = file.and_then(|f| {
+            let mut buf = String::new();
+            f.take(MAX_FILE_BYTES).read_to_string(&mut buf).ok()?;
+            serde_json::from_str::<Settings>(&buf).ok()
+        });
+        if existed && parsed.is_none() {
+            crate::log_warn!("settings.json is unreadable, using defaults");
+        }
+        let mut s = parsed.unwrap_or_default();
         s.sanitize();
         s
     }
@@ -224,6 +244,13 @@ impl Settings {
     pub fn sanitize(&mut self) {
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
+        let mut seen: Vec<String> = Vec::new();
+        for t in &self.hidden_tabs {
+            if HIDEABLE_TABS.contains(&t.as_str()) && !seen.contains(t) {
+                seen.push(t.clone());
+            }
+        }
+        self.hidden_tabs = seen;
         self.record_fps = self.record_fps.clamp(10, 60);
         self.pill_opacity = clamp_f(self.pill_opacity, 0.2, 1.0, 1.0);
         let valid = |v: Option<f64>, lim: f64| v.filter(|x| x.is_finite() && x.abs() <= lim);
@@ -262,8 +289,8 @@ impl Settings {
         }
         let Ok(json) = serde_json::to_string_pretty(self) else { return };
         let tmp = path.with_extension("json.tmp");
-        if fs::write(&tmp, json).is_ok() {
-            let _ = fs::rename(&tmp, &path);
+        if fs::write(&tmp, json).is_err() || fs::rename(&tmp, &path).is_err() {
+            crate::log_warn!("could not save settings.json");
         }
     }
 }
@@ -271,6 +298,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_tabs_are_validated_and_toggle() {
+        let mut s: Settings = serde_json::from_str(r#"{"hidden_tabs":["AGY","AGY","Home","evil","Note"]}"#).unwrap();
+        s.sanitize();
+        assert_eq!(s.hidden_tabs, ["AGY", "Note"]);
+        assert!(Settings::default().tab_hidden("AGY"), "AGY starts hidden");
+        s.set_tab_hidden("AGY", false);
+        s.set_tab_hidden("Home", true);
+        assert_eq!(s.hidden_tabs, ["Note"]);
+    }
 
     #[test]
     fn hostile_values_are_clamped() {

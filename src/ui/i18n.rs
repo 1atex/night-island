@@ -152,6 +152,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Battery on the pill" => "Батарея на пилюле",
         "Track title" => "Название трека",
         "Synced lyrics" => "Текст песни",
+        "Tabs" => "Вкладки",
+        "Open" => "Открыть",
         "Spike tips in track colour" => "Кончики в цвет трека",
         "Hidden" => "Скрыта",
         "Icon only" => "Значок",
