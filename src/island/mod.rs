@@ -44,6 +44,7 @@ use crate::platform::recorder;
 use crate::platform::system::{self, RadioSwitch};
 use crate::platform::volume;
 use crate::services::agy;
+use crate::services::ai;
 use crate::services::discord;
 use crate::services::everything;
 use crate::services::lyrics;

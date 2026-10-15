@@ -121,6 +121,7 @@ pub struct Settings {
     pub music_title: bool,
     pub music_lyrics: bool,
     pub dev_tools: bool,
+    pub ai: AiSettings,
     pub hidden_tabs: Vec<String>,
     pub notify: NotifySettings,
     pub spike_color: bool,
@@ -176,6 +177,7 @@ impl Default for Settings {
             music_title: false,
             music_lyrics: false,
             dev_tools: false,
+            ai: AiSettings::default(),
             hidden_tabs: vec!["AGY".to_string()],
             notify: NotifySettings::default(),
             spike_color: true,
@@ -208,6 +210,99 @@ fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AiProvider {
+    #[default]
+    Claude,
+    OpenAi,
+    Gemini,
+}
+
+impl AiProvider {
+    pub fn id(self) -> &'static str {
+        match self {
+            AiProvider::Claude => "claude",
+            AiProvider::OpenAi => "openai",
+            AiProvider::Gemini => "gemini",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            AiProvider::Claude => "Claude",
+            AiProvider::OpenAi => "OpenAI-compatible",
+            AiProvider::Gemini => "Gemini",
+        }
+    }
+
+    pub fn step(self, forward: bool) -> Self {
+        const ALL: [AiProvider; 3] = [AiProvider::Claude, AiProvider::OpenAi, AiProvider::Gemini];
+        let at = ALL.iter().position(|p| *p == self).unwrap_or(0);
+        ALL[(at + if forward { 1 } else { ALL.len() - 1 }) % ALL.len()]
+    }
+
+    pub fn default_model(self) -> &'static str {
+        match self {
+            AiProvider::Claude => "claude-haiku-5-5",
+            AiProvider::OpenAi => "gpt-4o-mini",
+            AiProvider::Gemini => "gemini-2.0-flash",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct AiSettings {
+    pub provider: AiProvider,
+    pub claude_model: String,
+    pub openai_model: String,
+    pub openai_base: String,
+    pub gemini_model: String,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            provider: AiProvider::Claude,
+            claude_model: AiProvider::Claude.default_model().into(),
+            openai_model: AiProvider::OpenAi.default_model().into(),
+            openai_base: "https://api.openai.com/v1".into(),
+            gemini_model: AiProvider::Gemini.default_model().into(),
+        }
+    }
+}
+
+impl AiSettings {
+    pub fn model(&self, provider: AiProvider) -> &str {
+        match provider {
+            AiProvider::Claude => &self.claude_model,
+            AiProvider::OpenAi => &self.openai_model,
+            AiProvider::Gemini => &self.gemini_model,
+        }
+    }
+
+    pub fn set_model(&mut self, provider: AiProvider, model: &str) {
+        let model = model.trim().to_string();
+        match provider {
+            AiProvider::Claude => self.claude_model = model,
+            AiProvider::OpenAi => self.openai_model = model,
+            AiProvider::Gemini => self.gemini_model = model,
+        }
+    }
+
+    pub fn sanitize(&mut self) {
+        use crate::services::ai::{clean_base, valid_model};
+        let d = AiSettings::default();
+        for provider in [AiProvider::Claude, AiProvider::OpenAi, AiProvider::Gemini] {
+            if !valid_model(self.model(provider), provider) {
+                self.set_model(provider, d.model(provider));
+            }
+        }
+        self.openai_base = clean_base(&self.openai_base).unwrap_or(d.openai_base);
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Notice {
     Mic,
@@ -220,6 +315,7 @@ pub enum Notice {
     Clipboard,
     LockKeys,
     Battery,
+    Ai,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -236,6 +332,7 @@ pub struct NotifySettings {
     pub clipboard_text: bool,
     pub lock_keys: bool,
     pub battery: bool,
+    pub ai: bool,
 }
 
 impl Default for NotifySettings {
@@ -252,6 +349,7 @@ impl Default for NotifySettings {
             clipboard_text: false,
             lock_keys: false,
             battery: false,
+            ai: true,
         }
     }
 }
@@ -269,6 +367,7 @@ impl NotifySettings {
             Notice::Clipboard => self.clipboard,
             Notice::LockKeys => self.lock_keys,
             Notice::Battery => self.battery,
+            Notice::Ai => self.ai,
         }
     }
 }
@@ -320,6 +419,7 @@ impl Settings {
             }
         }
         self.hidden_tabs = seen;
+        self.ai.sanitize();
         self.record_fps = self.record_fps.clamp(10, 60);
         self.pill_opacity = clamp_f(self.pill_opacity, 0.2, 1.0, 1.0);
         let valid = |v: Option<f64>, lim: f64| v.filter(|x| x.is_finite() && x.abs() <= lim);
@@ -377,6 +477,19 @@ mod tests {
         assert_eq!(old.notify, n);
         let partial: Settings = serde_json::from_str(r#"{"notify":{"lock_keys":true,"mic":false}}"#).unwrap();
         assert!(partial.notify.lock_keys && !partial.notify.mic && partial.notify.downloads);
+    }
+
+    #[test]
+    fn hostile_ai_settings_fall_back_to_defaults() {
+        let json = r#"{"ai":{"provider":"gemini","gemini_model":"../x?y","claude_model":"claude-3","openai_base":"http://evil.example/v1"}}"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.sanitize();
+        assert_eq!(s.ai.provider, AiProvider::Gemini);
+        assert_eq!(s.ai.gemini_model, AiProvider::Gemini.default_model());
+        assert_eq!(s.ai.claude_model, "claude-3");
+        assert_eq!(s.ai.openai_base, "https://api.openai.com/v1");
+        assert_eq!(AiProvider::Claude.step(true), AiProvider::OpenAi);
+        assert_eq!(AiProvider::Claude.step(false), AiProvider::Gemini);
     }
 
     #[test]

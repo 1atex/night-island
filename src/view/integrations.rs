@@ -5,6 +5,10 @@ pub struct IntegrationsUi {
     pub id: TextEdit,
     pub secret: TextEdit,
     pub spotify_id: TextEdit,
+    pub ai_key: TextEdit,
+    pub ai_model: TextEdit,
+    pub ai_base: TextEdit,
+    pub ai_key_saved: bool,
 }
 
 pub fn discord_fields_ok(ui: &UiState) -> bool {

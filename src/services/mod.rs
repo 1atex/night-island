@@ -1,4 +1,5 @@
 pub mod agy;
+pub mod ai;
 pub mod discord;
 pub mod everything;
 pub mod http;

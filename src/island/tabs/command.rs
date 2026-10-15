@@ -3,6 +3,7 @@ use crate::island::*;
 impl App {
     pub(in crate::island) fn refresh_cmd(&mut self) {
         self.ui.cmd.items = cmd::search(self.hwnd, &self.ui.cmd.input.text());
+        self.ui.cmd.ai_pending = false;
         self.ui.cmd.sel = 0;
         self.ui.armed = None;
     }
@@ -55,6 +56,23 @@ impl App {
                 cmd::shell_open(&url, None);
                 self.close_command(false);
             }
+            cmd::Action::Ask(question) => {
+                let question = question.clone();
+                if ai::ask(self.hwnd, &question) {
+                    self.ui.cmd.items = vec![cmd::ai_thinking_item()];
+                    self.ui.cmd.ai_pending = true;
+                    self.repaint_expanded();
+                }
+            }
+            cmd::Action::OpenAiSettings => {
+                self.close_command(false);
+                self.open_settings_window();
+                if let Some(group) = view::GROUPS.iter().position(|g| g.name == "AI") {
+                    self.ui.sw.group = group;
+                    self.ui.sw.scroll = 0.0;
+                    self.render_settings_win();
+                }
+            }
             cmd::Action::System(ctl) => {
                 let ctl = *ctl;
                 if view::needs_confirm(ctl) && self.ui.armed != Some(index) {
@@ -65,6 +83,22 @@ impl App {
                 self.run_ctl(ctl);
             }
         }
+    }
+
+    pub(in crate::island) fn on_ai(&mut self) {
+        let Some(answer) = ai::take_result() else { return };
+        if self.ui.cmd.open && self.ui.cmd.ai_pending {
+            self.ui.cmd.ai_pending = false;
+            self.ui.cmd.items = cmd::ai_answer_items(answer);
+            self.ui.cmd.sel = 0;
+            return self.repaint_expanded();
+        }
+        let (glyph, text) = match answer {
+            Ok(text) => ('\u{E99A}', text.split_whitespace().collect::<Vec<_>>().join(" ")),
+            Err(why) => ('\u{E783}', why),
+        };
+        let short: String = text.chars().take(70).collect();
+        self.notify_for(Notice::Ai, glyph, &format!("AI: {short}"), 7000);
     }
 
     pub(in crate::island) fn click_cmd(&mut self, x: i32, y: i32) {

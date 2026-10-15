@@ -49,6 +49,8 @@ pub enum Sid {
     NotifyBattery,
     OpenLogs,
     DevTools,
+    AiProvider,
+    NotifyAi,
     SpikeColor,
     Spikes,
     Character,
@@ -241,6 +243,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::MusicTitle => c.music_title,
         Sid::MusicLyrics => c.music_lyrics,
         Sid::DevTools => c.dev_tools,
+        Sid::NotifyAi => c.notify.ai,
         Sid::NotifyMic => c.notify.mic,
         Sid::NotifyDownloads => c.notify.downloads,
         Sid::NotifyCapture => c.notify.capture,
@@ -279,6 +282,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::MusicTitle => c.music_title = on,
         Sid::MusicLyrics => c.music_lyrics = on,
         Sid::DevTools => c.dev_tools = on,
+        Sid::NotifyAi => c.notify.ai = on,
         Sid::NotifyMic => c.notify.mic = on,
         Sid::NotifyDownloads => c.notify.downloads = on,
         Sid::NotifyCapture => c.notify.capture = on,
@@ -314,6 +318,7 @@ pub(in crate::view) fn segment_value(id: Sid, c: &Settings) -> usize {
 pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
     match id {
         Sid::Character => c.character = c.character.step(forward),
+        Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
         Sid::Edge => {
             c.dock_edge = c.dock_edge.step(forward);
@@ -326,6 +331,7 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
 pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
     match id {
         Sid::Character => c.character.name(),
+        Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
         _ => "",

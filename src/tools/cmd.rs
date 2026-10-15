@@ -15,6 +15,8 @@ pub enum Action {
     Copy(String),
     System(Ctl),
     Web(String),
+    Ask(String),
+    OpenAiSettings,
 }
 
 pub struct Item {
@@ -49,6 +51,101 @@ const SYSTEM: [(&str, Ctl); 20] = [
 ];
 
 pub const FILE_PREFIX: char = '/';
+
+pub const AI_PREFIX: char = '?';
+
+const ANSWER_LINE: usize = 70;
+
+fn plain_item(glyph: char, title: &str, hint: &str, action: Action) -> Item {
+    Item { icon: None, glyph, title: title.to_string(), hint: hint.to_string(), action }
+}
+
+fn ai_items(question: &str) -> Vec<Item> {
+    use crate::services::ai;
+    let provider = ai::active_provider();
+    let q = question.trim();
+    if !ai::has_key(provider) {
+        return vec![plain_item(
+            '\u{E99A}',
+            "AI is not set up",
+            "Open Settings, AI: add a key",
+            Action::OpenAiSettings,
+        )];
+    }
+    if q.is_empty() {
+        return vec![plain_item(
+            '\u{E99A}',
+            "Type your question after the ?",
+            provider.name(),
+            Action::Copy(String::new()),
+        )];
+    }
+    vec![plain_item(
+        '\u{E99A}',
+        &format!("Ask {}: {q}", provider.name()),
+        "AI · Enter to send",
+        Action::Ask(q.to_string()),
+    )]
+}
+
+pub fn ai_thinking_item() -> Item {
+    plain_item('\u{E99A}', "Thinking…", crate::services::ai::active_provider().name(), Action::Copy(String::new()))
+}
+
+pub fn ai_answer_items(answer: Result<String, String>) -> Vec<Item> {
+    match answer {
+        Err(why) => vec![plain_item('\u{E783}', &why, "AI", Action::Copy(String::new()))],
+        Ok(text) => {
+            let lines = wrap(&text, ANSWER_LINE);
+            let shown = lines.len().min(MAX_ITEMS);
+            let mut items: Vec<Item> = lines
+                .iter()
+                .take(shown)
+                .enumerate()
+                .map(|(i, line)| {
+                    let hint = if i == 0 { "AI answer · Enter to copy" } else { "" };
+                    plain_item(if i == 0 { '\u{E99A}' } else { ' ' }, line, hint, Action::Copy(text.clone()))
+                })
+                .collect();
+            if lines.len() > shown
+                && let Some(last) = items.last_mut()
+            {
+                last.title.push('…');
+            }
+            items
+        }
+    }
+}
+
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for paragraph in text.lines() {
+        let mut line = String::new();
+        for word in paragraph.split_whitespace() {
+            let mut word = word;
+            while word.chars().count() > width {
+                if !line.is_empty() {
+                    lines.push(std::mem::take(&mut line));
+                }
+                let cut = word.char_indices().nth(width).map_or(word.len(), |(i, _)| i);
+                lines.push(word[..cut].to_string());
+                word = &word[cut..];
+            }
+            let extra = usize::from(!line.is_empty());
+            if line.chars().count() + extra + word.chars().count() > width {
+                lines.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    lines
+}
 
 fn files(own: windows::Win32::Foundation::HWND, query: &str) -> Vec<Item> {
     use crate::services::everything::{self, Error};
@@ -112,6 +209,9 @@ pub fn search(own: windows::Win32::Foundation::HWND, query: &str) -> Vec<Item> {
     }
     if let Some(rest) = q.strip_prefix(FILE_PREFIX) {
         return files(own, rest);
+    }
+    if let Some(rest) = q.strip_prefix(AI_PREFIX) {
+        return ai_items(rest);
     }
     let mut items = Vec::new();
 
@@ -221,6 +321,26 @@ mod tests {
         let items = search(Default::default(), "2+2");
         assert!(matches!(items.first().map(|i| &i.action), Some(Action::Copy(t)) if t == "4"));
         assert!(matches!(items.last().map(|i| &i.action), Some(Action::Web(_))));
+    }
+
+    #[test]
+    fn answers_wrap_to_rows_and_keep_the_whole_text_for_copying() {
+        let lines = wrap("one two three four five six", 12);
+        assert_eq!(lines, ["one two", "three four", "five six"]);
+        assert_eq!(wrap("abcdefghij", 4), ["abcd", "efgh", "ij"]);
+        assert_eq!(wrap("a\n\nb", 10), ["a", "b"]);
+        let items = ai_answer_items(Ok("word ".repeat(200)));
+        assert_eq!(items.len(), MAX_ITEMS);
+        assert!(items.last().unwrap().title.ends_with('…'));
+        assert!(items.iter().all(|i| matches!(&i.action, Action::Copy(t) if t.len() > 500)));
+        assert!(matches!(&ai_answer_items(Err("no".into()))[0].action, Action::Copy(t) if t.is_empty()));
+    }
+
+    #[test]
+    fn a_question_mark_goes_to_the_ai_rows() {
+        let items = search(Default::default(), "? what is rust");
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0].action, Action::OpenAiSettings | Action::Ask(_)));
     }
 
     #[test]

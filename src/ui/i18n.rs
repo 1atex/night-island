@@ -153,6 +153,46 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Track title" => "Название трека",
         "Synced lyrics" => "Текст песни",
         "Tabs" => "Вкладки",
+        "Service" => "Сервис",
+        "OpenAI-compatible" => "OpenAI-совместимый",
+        "AI answers" => "Ответы нейросети",
+        "API key" => "API-ключ",
+        "Model" => "Модель",
+        "Server address" => "Адрес сервера",
+        "Key saved" => "Ключ сохранён",
+        "No key yet" => "Ключа пока нет",
+        "Saved: type a new one to replace it" => "Сохранён: введите новый, чтобы заменить",
+        "Paste the key here" => "Вставьте ключ сюда",
+        "Remove the saved key" => "Удалить сохранённый ключ",
+        "Ask in the command bar (Alt+Space): start with ?, for example  ? what is DPAPI" => {
+            "Спрашивайте в командной строке (Alt+Пробел): начните с ?, например  ? что такое DPAPI"
+        }
+        "The key is stored encrypted for your Windows account and is never shown again." => {
+            "Ключ хранится зашифрованным для вашего аккаунта Windows и больше не показывается."
+        }
+        "OpenAI-compatible: OpenAI, OpenRouter, or a local server such as LM Studio." => {
+            "OpenAI-совместимые: OpenAI, OpenRouter или локальный сервер, например LM Studio."
+        }
+        "That does not look like an API key" => "Это не похоже на API-ключ",
+        "That model name is not valid" => "Недопустимое имя модели",
+        "The server address must be https:// (or local http://)" => {
+            "Адрес сервера: https:// (или http:// только для этого компьютера)"
+        }
+        "AI settings saved" => "Настройки нейросети сохранены",
+        "The key was rejected" => "Ключ не принят",
+        "Too many requests, try again later" => "Слишком много запросов, попробуйте позже",
+        "The reply was not understood" => "Ответ не удалось разобрать",
+        "The answer was empty" => "Ответ пустой",
+        "No key is saved for this service" => "Для этого сервиса не сохранён ключ",
+        "The model or the server address in the settings is not valid" => {
+            "Модель или адрес сервера в настройках недопустимы"
+        }
+        "No connection to the service" => "Нет связи с сервисом",
+        "Thinking…" => "Думаю…",
+        "AI is not set up" => "Нейросеть не настроена",
+        "Open Settings, AI: add a key" => "Откройте Настройки, Нейросети: добавьте ключ",
+        "Type your question after the ?" => "Напишите вопрос после ?",
+        "AI answer · Enter to copy" => "Ответ нейросети · Enter скопирует",
         "AI" => "Нейросети",
         "Own Client ID" => "Свой Client ID",
         "Optional: your Spotify app" => "По желанию: ваше приложение Spotify",

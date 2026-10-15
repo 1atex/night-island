@@ -48,7 +48,7 @@ const PILL: [(Sid, &str, Kind); 7] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 11] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 12] = [
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
     (Sid::NotifyCapture, "Screenshots, text and QR", Kind::Toggle),
@@ -60,9 +60,12 @@ const NOTIFICATIONS: [(Sid, &str, Kind); 11] = [
     (Sid::NotifyClipboardText, "Show the copied text", Kind::Toggle),
     (Sid::NotifyLockKeys, "Caps, Num and Scroll Lock", Kind::Toggle),
     (Sid::NotifyBattery, "Charger and low battery", Kind::Toggle),
+    (Sid::NotifyAi, "AI answers", Kind::Toggle),
 ];
 
 const AI: [(Sid, &str, Kind); 1] = [(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle)];
+
+const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
 
 const ABOUT: [(Sid, &str, Kind); 1] = [(Sid::OpenLogs, "Logs folder", Kind::Button)];
 
@@ -108,6 +111,9 @@ pub enum Field {
     DiscordId,
     DiscordSecret,
     SpotifyId,
+    AiKey,
+    AiModel,
+    AiBase,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -118,6 +124,8 @@ pub enum Act {
     DiscordOverlay,
     SpotifyMain,
     SpotifySaveId,
+    AiSave,
+    AiRemoveKey,
 }
 
 #[derive(Default)]
@@ -231,11 +239,34 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
-fn ai_items(_ui: &UiState) -> Vec<Item> {
-    let mut out = vec![Item::Heading("AI")];
-    out.push(Item::Note("Connections to AI services will live here."));
-    out.push(Item::Note("Planned: Claude, OpenAI-compatible servers and Gemini, each with its own key."));
-    out.push(Item::Note("Keys will be stored encrypted for your Windows account, like the Spotify token."));
+fn ai_items(ui: &UiState) -> Vec<Item> {
+    use crate::data::settings::AiProvider;
+    let provider = ui.cfg.ai.provider;
+    let saved = ui.int.ai_key_saved;
+    let (id, label, kind) = AI_PROVIDER;
+    let mut out = vec![Item::Heading("AI"), Item::Row(id, label, kind)];
+    out.push(Item::Service {
+        name: provider.name(),
+        glyph: '\u{E99A}',
+        status: if saved { "Key saved".into() } else { "No key yet".into() },
+        live: saved,
+    });
+    out.push(Item::Field(
+        Field::AiKey,
+        "API key",
+        if saved { "Saved: type a new one to replace it" } else { "Paste the key here" },
+    ));
+    out.push(Item::Field(Field::AiModel, "Model", provider.default_model()));
+    if provider == AiProvider::OpenAi {
+        out.push(Item::Field(Field::AiBase, "Server address", "https://api.openai.com/v1"));
+    }
+    out.push(Item::Button(Act::AiSave, "Save".into(), true));
+    if saved {
+        out.push(Item::Button(Act::AiRemoveKey, "Remove the saved key".into(), true));
+    }
+    out.push(Item::Note("Ask in the command bar (Alt+Space): start with ?, for example  ? what is DPAPI"));
+    out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
+    out.push(Item::Note("OpenAI-compatible: OpenAI, OpenRouter, or a local server such as LM Studio."));
     for &(id, label, kind) in &AI {
         out.push(Item::Row(id, label, kind));
     }
@@ -387,6 +418,9 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::DiscordId => &ui.int.id,
         Field::DiscordSecret => &ui.int.secret,
         Field::SpotifyId => &ui.int.spotify_id,
+        Field::AiKey => &ui.int.ai_key,
+        Field::AiModel => &ui.int.ai_model,
+        Field::AiBase => &ui.int.ai_base,
     }
 }
 
@@ -498,8 +532,11 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                 Item::Service { name, glyph, status, live } => {
                     let d = 38.0 * scale;
                     let circle = (row.0, top + 8.0 * scale, row.0 + d, top + 8.0 * scale + d);
-                    let colour =
-                        if name == "Discord" { rgba(0.35, 0.4, 0.95, 1.0) } else { rgba(0.12, 0.84, 0.38, 1.0) };
+                    let colour = match name {
+                        "Discord" => rgba(0.35, 0.4, 0.95, 1.0),
+                        "Spotify" => rgba(0.12, 0.84, 0.38, 1.0),
+                        _ => acc(0.9),
+                    };
                     p.fill_round_rect(circle, d / 2.0, colour)?;
                     p.glyph(glyph, circle, 17.0 * scale, WHITE)?;
                     p.text(
@@ -535,7 +572,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         ctl,
                         inner,
                         field_edit(ui, field),
-                        field == Field::DiscordSecret,
+                        matches!(field, Field::DiscordSecret | Field::AiKey),
                         hint,
                         ui.sw.field == Some(field),
                         ui.sw.caret_on,

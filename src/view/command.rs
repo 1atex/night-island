@@ -6,6 +6,7 @@ pub struct CommandUi {
     pub input: TextEdit,
     pub items: Vec<cmd::Item>,
     pub sel: usize,
+    pub ai_pending: bool,
 }
 
 pub const CMD_FONT: f32 = 18.0;
@@ -92,7 +93,7 @@ pub(in crate::view) fn paint_command(p: &Painter, pill: Rect, scale: f32, ui: &U
     if ui.cmd.items.is_empty() {
         let (x, y, w, _) = pill;
         return p.text(
-            "Apps  ·  2+2  ·  10 km to mi  ·  lock  ·  wifi  ·  /files",
+            "Apps  ·  2+2  ·  10 km to mi  ·  lock  ·  wifi  ·  /files  ·  ?ask AI",
             (x, y + CMD_LIST_TOP * scale, x + w, y + (CMD_LIST_TOP + 40.0) * scale),
             13.0 * scale,
             DWRITE_FONT_WEIGHT_NORMAL,

@@ -61,6 +61,7 @@ pub fn run() -> Result<()> {
         let (weather_lat, weather_lon) = (settings.weather_lat, settings.weather_lon);
         crate::ui::i18n::set_ru(settings.language == crate::data::settings::Language::Ru);
         let dpi_scale = GetDpiForWindow(hwnd) as f32 / 96.0;
+        ai::configure(&settings.ai);
         let mut app = App::new(hwnd, dpi_scale, settings)?;
         app.place(Win::Small);
         app.apply_capture();

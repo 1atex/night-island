@@ -101,6 +101,10 @@ impl App {
                     self.repaint_collapsed();
                 }
                 Character => self.apply_character(),
+                AiProvider => {
+                    ai::configure(&self.settings.ai);
+                    self.sync_ai_fields();
+                }
                 NotifyLockKeys => {
                     if self.settings.notify.lock_keys {
                         lockkeys::start(self.hwnd);

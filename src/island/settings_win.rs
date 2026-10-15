@@ -80,6 +80,7 @@ impl App {
             self.settings_win = Some(hwnd);
             self.ui.sw = view::SwUi::default();
             self.ui.int.spotify_id.set_text(&spotify::own_client_id());
+            self.sync_ai_fields();
             spotify::reload_status();
             let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = SetForegroundWindow(hwnd);
@@ -195,6 +196,9 @@ impl App {
             view::Field::DiscordId => &mut self.ui.int.id,
             view::Field::DiscordSecret => &mut self.ui.int.secret,
             view::Field::SpotifyId => &mut self.ui.int.spotify_id,
+            view::Field::AiKey => &mut self.ui.int.ai_key,
+            view::Field::AiModel => &mut self.ui.int.ai_model,
+            view::Field::AiBase => &mut self.ui.int.ai_base,
         })
     }
 
@@ -202,7 +206,11 @@ impl App {
         let Some((_, inner)) = view::sw_field_rects(self.sw_size(), self.dpi_scale, &self.ui, field) else { return };
         let shown = {
             let text = view::field_edit(&self.ui, field).text();
-            if field == view::Field::DiscordSecret { "\u{2022}".repeat(text.chars().count()) } else { text }
+            if matches!(field, view::Field::DiscordSecret | view::Field::AiKey) {
+                "\u{2022}".repeat(text.chars().count())
+            } else {
+                text
+            }
         };
         let Ok(layout) = crate::ui::gfx::make_layout(self.gpu.dwrite(), &shown, 100_000.0, 13.0 * self.dpi_scale)
         else {
@@ -212,6 +220,43 @@ impl App {
         if let Some(n) = self.sw_edit_mut() {
             n.click(&layout, x as f32 - inner.0, 4.0, shift);
         }
+    }
+
+    pub(in crate::island) fn sync_ai_fields(&mut self) {
+        let provider = self.settings.ai.provider;
+        self.ui.int.ai_model.set_text(self.settings.ai.model(provider));
+        self.ui.int.ai_base.set_text(&self.settings.ai.openai_base);
+        self.ui.int.ai_key.set_text("");
+        self.ui.int.ai_key_saved = ai::has_key(provider);
+    }
+
+    fn save_ai(&mut self) {
+        let provider = self.settings.ai.provider;
+        let key = self.ui.int.ai_key.text();
+        if !key.trim().is_empty() && !ai::save_key(provider, &key) {
+            return self.notify(Notice::Error, '\u{E783}', "That does not look like an API key");
+        }
+        let model = self.ui.int.ai_model.text().trim().to_string();
+        let model = if model.is_empty() { provider.default_model().to_string() } else { model };
+        if !ai::valid_model(&model, provider) {
+            return self.notify(Notice::Error, '\u{E783}', "That model name is not valid");
+        }
+        if provider == crate::data::settings::AiProvider::OpenAi {
+            let Some(base) = ai::clean_base(&self.ui.int.ai_base.text()) else {
+                return self.notify(
+                    Notice::Error,
+                    '\u{E783}',
+                    "The server address must be https:// (or local http://)",
+                );
+            };
+            self.settings.ai.openai_base = base;
+        }
+        self.settings.ai.set_model(provider, &model);
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        ai::configure(&self.settings.ai);
+        self.sync_ai_fields();
+        self.notify(Notice::Integrations, '\u{E73E}', "AI settings saved");
     }
 
     fn sw_act(&mut self, act: view::Act) {
@@ -233,6 +278,11 @@ impl App {
                     spotify::connect();
                 }
             },
+            view::Act::AiSave => self.save_ai(),
+            view::Act::AiRemoveKey => {
+                ai::remove_key(self.settings.ai.provider);
+                self.sync_ai_fields();
+            }
             view::Act::SpotifySaveId => {
                 if spotify::set_client_id(&self.ui.int.spotify_id.text()) {
                     self.notify(Notice::Integrations, '\u{E73E}', "Client ID saved");
@@ -246,7 +296,8 @@ impl App {
     fn sw_row(&mut self, id: view::Sid, hit: view::SetHit, x: i32) {
         match hit {
             view::SetHit::Option(n) => {
-                if matches!(id, view::Sid::Character | view::Sid::Edge | view::Sid::PillBattery) {
+                if matches!(id, view::Sid::Character | view::Sid::Edge | view::Sid::PillBattery | view::Sid::AiProvider)
+                {
                     view::cycle_set(id, &mut self.settings, n == 1);
                 } else {
                     view::segment_set(id, &mut self.settings, n);
@@ -341,7 +392,7 @@ impl App {
     }
 
     fn on_sw_field_char(&mut self, unit: u16) {
-        const MAX_FIELD_CHARS: usize = 200;
+        const MAX_FIELD_CHARS: usize = 400;
         let Some(field) = self.ui.sw.field else { return };
         let hwnd = self.settings_win.unwrap_or(self.hwnd);
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
@@ -352,8 +403,11 @@ impl App {
                 self.sw_focus(next);
             }
             0x0D => {
-                let act =
-                    if field == view::Field::SpotifyId { view::Act::SpotifySaveId } else { view::Act::DiscordMain };
+                let act = match field {
+                    view::Field::SpotifyId => view::Act::SpotifySaveId,
+                    view::Field::AiKey | view::Field::AiModel | view::Field::AiBase => view::Act::AiSave,
+                    _ => view::Act::DiscordMain,
+                };
                 self.sw_act(act);
             }
             0x08 => {
@@ -367,7 +421,7 @@ impl App {
                 }
             }
             0x03 | 0x18 => {
-                if field != view::Field::DiscordSecret
+                if !matches!(field, view::Field::DiscordSecret | view::Field::AiKey)
                     && let Some(n) = self.sw_edit_mut()
                     && let Some(text) = n.selected_text()
                 {
