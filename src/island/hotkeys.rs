@@ -3,55 +3,22 @@ use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
 
 pub(in crate::island) const GAME_POLL_MS: u32 = 2000;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(in crate::island) enum Hotkey {
-    Toggle = 1,
-    Clipboard = 2,
-    PlainPaste = 3,
-    Command = 4,
-    Mic = 5,
-    ShotArea = 6,
-    ShotFull = 7,
-    Picker = 8,
-    Ocr = 9,
-    Qr = 10,
-    Rec = 11,
-}
+pub(in crate::island) use crate::data::keys::Hotkey;
 
-const BINDINGS: [(Hotkey, HOT_KEY_MODIFIERS, u32); 11] = [
-    (Hotkey::Toggle, CTRL_ALT, 'I' as u32),
-    (Hotkey::Clipboard, CTRL_ALT, 'V' as u32),
-    (Hotkey::PlainPaste, CTRL_ALT_SHIFT, 'V' as u32),
-    (Hotkey::Command, MOD_ALT, VK_SPACE.0 as u32),
-    (Hotkey::Mic, CTRL_ALT, 'M' as u32),
-    (Hotkey::ShotArea, CTRL_ALT, 'S' as u32),
-    (Hotkey::ShotFull, CTRL_ALT_SHIFT, 'S' as u32),
-    (Hotkey::Picker, CTRL_ALT, 'C' as u32),
-    (Hotkey::Ocr, CTRL_ALT, 'O' as u32),
-    (Hotkey::Qr, CTRL_ALT, 'Q' as u32),
-    (Hotkey::Rec, CTRL_ALT, 'R' as u32),
-];
-const CTRL_ALT: HOT_KEY_MODIFIERS = HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_ALT.0);
-const CTRL_ALT_SHIFT: HOT_KEY_MODIFIERS = HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_ALT.0 | MOD_SHIFT.0);
-
-impl Hotkey {
-    pub(in crate::island) fn from_id(id: i32) -> Option<Hotkey> {
-        BINDINGS.iter().map(|b| b.0).find(|h| *h as i32 == id)
-    }
-}
-
-pub(in crate::island) fn register_hotkeys(hwnd: HWND) {
-    for (key, mods, vk) in BINDINGS {
-        unsafe {
-            let _ = RegisterHotKey(Some(hwnd), key as i32, mods | MOD_NOREPEAT, vk);
-        }
-    }
+pub(in crate::island) fn register_hotkeys(hwnd: HWND, settings: &Settings) -> Vec<Hotkey> {
+    Hotkey::ALL
+        .into_iter()
+        .filter(|h| {
+            let c = settings.combo(*h);
+            unsafe { RegisterHotKey(Some(hwnd), *h as i32, HOT_KEY_MODIFIERS(c.mods) | MOD_NOREPEAT, c.vk).is_err() }
+        })
+        .collect()
 }
 
 pub(in crate::island) fn unregister_hotkeys(hwnd: HWND) {
-    for (key, _, _) in BINDINGS {
+    for h in Hotkey::ALL {
         unsafe {
-            let _ = UnregisterHotKey(Some(hwnd), key as i32);
+            let _ = UnregisterHotKey(Some(hwnd), h as i32);
         }
     }
 }
@@ -126,22 +93,61 @@ impl App {
         self.gaming = on;
         if on {
             unregister_hotkeys(self.hwnd);
-            self.kill_timer(Timer::Expand);
-            self.kill_timer(Timer::Liquid);
-            self.stop_idle();
-            self.set_bump_visible(false);
-            self.update_eq();
-            unsafe {
-                let _ = ShowWindow(self.hwnd, SW_HIDE);
-            }
+            self.hide_window();
         } else {
-            unsafe {
-                let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+            register_hotkeys(self.hwnd, &self.settings);
+            if !self.pill_hidden {
+                self.show_window();
             }
-            register_hotkeys(self.hwnd);
-            self.update_eq();
-            self.start_liquid();
-            self.repaint_collapsed();
+        }
+    }
+
+    fn hide_window(&mut self) {
+        self.kill_timer(Timer::Expand);
+        self.kill_timer(Timer::Liquid);
+        self.stop_idle();
+        self.set_bump_visible(false);
+        self.update_eq();
+        unsafe {
+            let _ = ShowWindow(self.hwnd, SW_HIDE);
+        }
+    }
+
+    fn show_window(&mut self) {
+        unsafe {
+            let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+        }
+        self.update_eq();
+        self.start_liquid();
+        self.repaint_collapsed();
+    }
+
+    pub(in crate::island) fn hide_pill_for_a_while(&mut self) {
+        if self.gaming {
+            return;
+        }
+        if self.pill_hidden {
+            return self.restore_pill();
+        }
+        if self.state == State::Expanded {
+            self.collapse();
+            if self.state == State::Expanded {
+                return;
+            }
+        }
+        self.pill_hidden = true;
+        self.hide_window();
+        self.set_timer(Timer::PillBack, self.settings.hide_pill_secs * 1000);
+    }
+
+    pub(in crate::island) fn restore_pill(&mut self) {
+        if !self.pill_hidden {
+            return;
+        }
+        self.pill_hidden = false;
+        self.kill_timer(Timer::PillBack);
+        if !self.gaming {
+            self.show_window();
         }
     }
 }

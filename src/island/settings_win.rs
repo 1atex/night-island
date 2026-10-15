@@ -150,6 +150,14 @@ impl App {
 
     pub(in crate::island) fn on_sw_down(&mut self, x: i32, y: i32) {
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
+        self.ui.sw.quiet_sys = false;
+        let waiting = self.ui.sw.capturing;
+        if waiting.is_some() {
+            self.end_rebind();
+            if hit == waiting.map(|h| view::SwHit::Act(view::Act::Rebind(h))) {
+                return self.render_settings_win();
+            }
+        }
         if let Some(view::SwHit::Field(field)) = hit {
             self.sw_focus(Some(field));
             self.sw_click_field(field, x);
@@ -259,8 +267,100 @@ impl App {
         self.notify(Notice::Integrations, '\u{E73E}', "AI settings saved");
     }
 
+    fn begin_rebind(&mut self, hotkey: Hotkey) {
+        self.ui.sw.capturing = Some(hotkey);
+        unregister_hotkeys(self.hwnd);
+    }
+
+    pub(in crate::island) fn end_rebind(&mut self) {
+        if self.ui.sw.capturing.take().is_some() && !self.gaming {
+            register_hotkeys(self.hwnd, &self.settings);
+        }
+    }
+
+    fn reapply_hotkeys(&mut self) -> Vec<Hotkey> {
+        if self.gaming {
+            return Vec::new();
+        }
+        unregister_hotkeys(self.hwnd);
+        register_hotkeys(self.hwnd, &self.settings)
+    }
+
+    fn keys_changed(&mut self) {
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        self.render_settings_win();
+    }
+
+    fn capture_key(&mut self, hotkey: Hotkey, vk: u16) {
+        use crate::data::keys::{ALT, CTRL, Combo, SHIFT, WIN, valid_vk};
+        let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetKeyState(k.0 as i32) < 0 };
+        let vk32 = u32::from(vk);
+        if matches!(vk32, 0x10..=0x12 | 0x5B | 0x5C | 0xA0..=0xA5) {
+            return;
+        }
+        let mut mods = 0;
+        for (bit, key) in [(CTRL, VK_CONTROL), (ALT, VK_MENU), (SHIFT, VK_SHIFT)] {
+            if down(key) {
+                mods |= bit;
+            }
+        }
+        if unsafe { GetKeyState(0x5B) < 0 || GetKeyState(0x5C) < 0 } {
+            mods |= WIN;
+        }
+        if down(VK_MENU) {
+            self.ui.sw.quiet_sys = true;
+        }
+        if vk32 == u32::from(VK_ESCAPE.0) {
+            self.end_rebind();
+            return self.render_settings_win();
+        }
+        let combo = if mods == 0 && vk32 == u32::from(VK_DELETE.0) {
+            hotkey.default_combo()
+        } else if mods == 0 || !valid_vk(vk32) {
+            let why = if mods == 0 { "Add Ctrl, Alt, Shift or Win" } else { "That key cannot be used" };
+            return self.notify(Notice::Error, '\u{E783}', why);
+        } else {
+            Combo::new(mods, vk32)
+        };
+        if let Some(other) = self.settings.hotkey_using(hotkey, combo) {
+            return self.notify(Notice::Error, '\u{E783}', &format!("Already used by: {}", other.label()));
+        }
+        self.set_hotkey(hotkey, combo);
+    }
+
+    fn set_hotkey(&mut self, hotkey: Hotkey, combo: crate::data::keys::Combo) {
+        let old = self.settings.combo(hotkey);
+        self.settings.set_combo(hotkey, combo);
+        self.ui.sw.capturing = None;
+        if self.reapply_hotkeys().contains(&hotkey) {
+            self.settings.set_combo(hotkey, old);
+            self.reapply_hotkeys();
+            self.notify(Notice::Error, '\u{E783}', "Another program already uses these keys");
+        }
+        self.keys_changed();
+    }
+
     fn sw_act(&mut self, act: view::Act) {
         match act {
+            view::Act::Rebind(hotkey) => self.begin_rebind(hotkey),
+            view::Act::KeysReset => {
+                self.settings.keys.clear();
+                self.reapply_hotkeys();
+                self.keys_changed();
+            }
+            view::Act::LyricsAppAdd => {
+                let source = self.ui.media.source.clone();
+                if self.settings.add_lyrics_app(&source) {
+                    self.lyrics_apps_changed();
+                }
+            }
+            view::Act::LyricsAppRemove(i) => {
+                if i < self.settings.lyrics_apps.len() {
+                    self.settings.lyrics_apps.remove(i);
+                    self.lyrics_apps_changed();
+                }
+            }
             view::Act::DiscordMain => match self.ui.discord.status {
                 discord::Status::NoConfig => self.save_credentials(),
                 discord::Status::Idle | discord::Status::Error(_) => discord::connect(),
@@ -313,6 +413,14 @@ impl App {
                 }
             }
         }
+    }
+
+    fn lyrics_apps_changed(&mut self) {
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        self.ui.lyric = view::LyricUi::default();
+        self.update_eq();
+        self.repaint_collapsed();
     }
 
     fn sw_row(&mut self, id: view::Sid, hit: view::SetHit, x: i32) {
@@ -488,26 +596,33 @@ impl App {
         self.render_settings_win();
     }
 
-    pub(in crate::island) fn on_sw_keydown(&mut self, vk: u16) {
+    pub(in crate::island) fn on_sw_keydown(&mut self, vk: u16) -> bool {
+        if let Some(hotkey) = self.ui.sw.capturing {
+            self.capture_key(hotkey, vk);
+            return true;
+        }
+        self.ui.sw.quiet_sys = false;
         if self.ui.sw.field.is_none() {
-            return;
+            return false;
         }
         let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetKeyState(k.0 as i32) < 0 };
         let (ctrl, shift) = (down(VK_CONTROL), down(VK_SHIFT));
-        let Some(n) = self.sw_edit_mut() else { return };
+        let Some(n) = self.sw_edit_mut() else { return false };
         match vk {
             v if v == VK_LEFT.0 => n.left(shift, ctrl),
             v if v == VK_RIGHT.0 => n.right(shift, ctrl),
             v if v == VK_HOME.0 => n.caret_to_start(shift),
             v if v == VK_END.0 => n.caret_to_end(shift),
             v if v == VK_DELETE.0 => n.delete(ctrl),
-            _ => return,
+            _ => return false,
         }
         self.ui.sw.caret_on = true;
         self.render_settings_win();
+        true
     }
 
     pub(in crate::island) fn on_sw_destroyed(&mut self) {
+        self.end_rebind();
         self.kill_timer(Timer::SwCaret);
         self.settings_win = None;
         self.pointer.slider = None;
@@ -547,10 +662,26 @@ extern "system" fn sw_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             with_app(|a| a.on_sw_wheel(delta));
             LRESULT(0)
         }
-        WM_KEYDOWN => {
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
             let vk = wparam.0 as u16;
-            with_app(|a| a.on_sw_keydown(vk));
+            let mut taken = false;
+            with_app(|a| taken = a.on_sw_keydown(vk));
+            if msg == WM_SYSKEYDOWN && !taken {
+                return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+            }
             LRESULT(0)
+        }
+        WM_SYSCHAR | WM_SYSKEYUP => {
+            let mut quiet = false;
+            with_app(|a| quiet = a.ui.sw.quiet_sys);
+            if quiet { LRESULT(0) } else { unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) } }
+        }
+        WM_KILLFOCUS => {
+            with_app(|a| {
+                a.end_rebind();
+                a.render_settings_win();
+            });
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         WM_CHAR => {
             let mut close = false;

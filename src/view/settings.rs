@@ -71,6 +71,7 @@ pub enum Sid {
     Capture,
     CaptureSelf,
     GameMode,
+    HidePillSecs,
 }
 
 #[derive(Clone, Copy)]
@@ -159,6 +160,7 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
         Sid::CloseDelay => (0.0, 3000.0, 50.0),
         Sid::OpenSpeed | Sid::CloseSpeed => (0.4, 2.5, 0.1),
         Sid::RecFps => (10.0, 60.0, 5.0),
+        Sid::HidePillSecs => (5.0, 10.0, 1.0),
         _ => (0.0, 1.0, 0.01),
     }
 }
@@ -181,6 +183,7 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
         Sid::OpenSpeed => c.open_speed,
         Sid::CloseSpeed => c.close_speed,
         Sid::RecFps => c.record_fps as f32,
+        Sid::HidePillSecs => c.hide_pill_secs as f32,
         _ => 0.0,
     }
 }
@@ -197,6 +200,7 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
         Sid::OpenDelay | Sid::CloseDelay => format!("{v:.0} ms"),
         Sid::OpenSpeed | Sid::CloseSpeed => format!("{v:.1}×"),
         Sid::RecFps => format!("{v:.0} fps"),
+        Sid::HidePillSecs => format!("{v:.0} s"),
         _ => String::new(),
     }
 }
@@ -222,6 +226,7 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
         Sid::OpenSpeed => c.open_speed = v,
         Sid::CloseSpeed => c.close_speed = v,
         Sid::RecFps => c.record_fps = v as u32,
+        Sid::HidePillSecs => c.hide_pill_secs = v as u32,
         _ => {}
     }
     c.sanitize();

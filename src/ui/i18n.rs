@@ -313,6 +313,34 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Search settings" => "Поиск по настройкам",
         "Open" => "Открыть",
         "Spike tips in track colour" => "Кончики в цвет трека",
+        "Keys" => "Клавиши",
+        "Open or close the island" => "Открыть или закрыть остров",
+        "Clipboard history" => "История буфера",
+        "Paste as plain text" => "Вставить как простой текст",
+        "Command bar" => "Командная строка",
+        "Microphone on or off" => "Микрофон вкл/выкл",
+        "Screenshot of an area" => "Снимок области",
+        "Screenshot of the screen" => "Снимок экрана",
+        "Hide the pill for a few seconds" => "Спрятать пилюлю на пару секунд",
+        "Hide the pill for" => "Прятать пилюлю на",
+        "Press the new keys…" => "Нажмите новые клавиши…",
+        "Click a key, then press the new combination with Ctrl, Alt, Shift or Win." => {
+            "Нажмите на клавишу, затем новое сочетание с Ctrl, Alt, Shift или Win."
+        }
+        "Esc cancels, Delete brings the default back." => "Esc отменяет, Delete возвращает стандартное.",
+        "Reset all keys" => "Сбросить все клавиши",
+        "Add Ctrl, Alt, Shift or Win" => "Добавьте Ctrl, Alt, Shift или Win",
+        "That key cannot be used" => "Эту клавишу нельзя использовать",
+        "Another program already uses these keys" => "Эти клавиши уже заняты другой программой",
+        "Players for lyrics" => "Плееры для текстов песен",
+        "Any player. Add one to take lyrics only from the players you trust." => {
+            "Любой плеер. Добавьте плеер, чтобы брать тексты только у доверенных."
+        }
+        "Lyrics are looked up only while one of these plays." => {
+            "Тексты ищутся, только пока играет один из этих плееров."
+        }
+        "Add the player (start playing first)" => "Добавить плеер (сначала включите музыку)",
+        "Remove" => "Убрать",
         "Hidden" => "Скрыта",
         "Icon only" => "Значок",
         "With percent" => "С процентами",
@@ -411,7 +439,9 @@ fn phrase(s: &str) -> Option<&'static str> {
     })
 }
 
-const PREFIXES: [(&str, &str); 7] = [
+const PREFIXES: [(&str, &str); 9] = [
+    ("Add the player ", "Добавить плеер "),
+    ("Already used by: ", "Уже занято: "),
     ("Downloaded ", "Скачано "),
     ("Downloading ", "Загрузка "),
     ("Recording failed: ", "Запись не удалась: "),

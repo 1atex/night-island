@@ -1,4 +1,5 @@
 pub mod clips;
+pub mod keys;
 pub mod log;
 pub mod notes;
 pub mod settings;
