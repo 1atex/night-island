@@ -179,7 +179,7 @@ impl App {
         let hover_note =
             if self.ui.tab == view::Tab::Note { view::hit_note_tree(pill, self.scale, fx, fy, &self.ui) } else { None };
         let hover_rem = if self.ui.tab == view::Tab::Remind {
-            view::hit_remind(pill, self.scale, fx, fy, self.ui.remind.list.len())
+            view::hit_remind(pill, self.scale, fx, fy, self.ui.remind.list.len(), self.ui.remind.scroll)
         } else {
             None
         };
@@ -353,6 +353,9 @@ impl App {
         };
         if self.ui.tab == view::Tab::Note && self.cursor_over_tree() {
             return self.scroll_tree(delta);
+        }
+        if self.ui.tab == view::Tab::Remind {
+            return self.wheel_remind(delta);
         }
         if matches!(self.ui.tab, view::Tab::Note | view::Tab::Text) {
             let Some(layout) = self.note_layout() else { return };

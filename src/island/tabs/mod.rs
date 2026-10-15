@@ -22,6 +22,10 @@ impl App {
             self.end_edit(true);
         }
         self.ui.notes.armed_delete = false;
+        if tab == view::Tab::Remind && tab != self.ui.tab {
+            self.reset_picker();
+            self.ui.remind.status.clear();
+        }
         self.ui.tab = tab;
         self.ui.home.dev_menu = None;
         self.ui.text.qr = None;

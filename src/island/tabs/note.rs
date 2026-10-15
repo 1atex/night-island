@@ -337,7 +337,7 @@ impl App {
         }
     }
 
-    fn cursor_client(&self) -> Option<(f32, f32)> {
+    pub(in crate::island) fn cursor_client(&self) -> Option<(f32, f32)> {
         let mut pt = windows::Win32::Foundation::POINT::default();
         unsafe {
             if GetCursorPos(&mut pt).is_err()

@@ -154,6 +154,24 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Synced lyrics" => "Текст песни",
         "Tabs" => "Вкладки",
         "Reminders" => "Напоминания",
+        "+5 min" => "+5 мин",
+        "+15 min" => "+15 мин",
+        "+30 min" => "+30 мин",
+        "+1 hour" => "+1 час",
+        "+2 hours" => "+2 часа",
+        "Tomorrow 9:00" => "Завтра 9:00",
+        "Tomorrow" => "Завтра",
+        "Set" => "Поставить",
+        "What to remind?  or type a time: in 30 min call mom" => {
+            "О чём напомнить?  или время текстом: через 30 мин позвонить маме"
+        }
+        "Pick a time, or press Enter to use the time in the text" => {
+            "Выберите время или нажмите Enter, чтобы взять время из текста"
+        }
+        "No time in the text: pick one above, or start with in 30 min · 18:30" => {
+            "В тексте нет времени: выберите его выше или начните с «через 30 мин» · 18:30"
+        }
+        "That time does not exist" => "Такого времени не существует",
         "New note" => "Новая заметка",
         "New folder" => "Новая папка",
         "Notes limit reached" => "Достигнут лимит заметок",
