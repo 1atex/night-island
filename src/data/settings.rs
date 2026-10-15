@@ -1,10 +1,14 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::data::keys::{Combo, Hotkey};
 use crate::ui::characters::Character;
+
+const MAX_LYRICS_APPS: usize = 20;
 
 const MAX_FILE_BYTES: u64 = 64 * 1024;
 
@@ -149,6 +153,9 @@ pub struct Settings {
     pub close_delay_ms: u32,
     pub open_speed: f32,
     pub close_speed: f32,
+    pub keys: BTreeMap<String, Combo>,
+    pub hide_pill_secs: u32,
+    pub lyrics_apps: Vec<String>,
 }
 
 impl Default for Settings {
@@ -208,12 +215,19 @@ impl Default for Settings {
             close_delay_ms: 400,
             open_speed: 1.0,
             close_speed: 1.0,
+            keys: BTreeMap::new(),
+            hide_pill_secs: 7,
+            lyrics_apps: Vec::new(),
         }
     }
 }
 
 fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
+}
+
+fn clean_app_name(name: &str) -> String {
+    name.chars().filter(|c| !c.is_control()).take(40).collect::<String>().trim().to_uppercase()
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -398,6 +412,52 @@ impl Settings {
         }
     }
 
+    pub fn combo(&self, hotkey: Hotkey) -> Combo {
+        self.keys.get(hotkey.key()).copied().unwrap_or_else(|| hotkey.default_combo())
+    }
+
+    pub fn set_combo(&mut self, hotkey: Hotkey, combo: Combo) {
+        if combo == hotkey.default_combo() {
+            self.keys.remove(hotkey.key());
+        } else {
+            self.keys.insert(hotkey.key().to_string(), combo);
+        }
+    }
+
+    pub fn hotkey_using(&self, hotkey: Hotkey, combo: Combo) -> Option<Hotkey> {
+        Hotkey::ALL.into_iter().find(|h| *h != hotkey && self.combo(*h) == combo)
+    }
+
+    pub fn lyrics_app_allowed(&self, source: &str) -> bool {
+        self.lyrics_apps.is_empty() || self.lyrics_apps.iter().any(|a| a.eq_ignore_ascii_case(source))
+    }
+
+    pub fn add_lyrics_app(&mut self, source: &str) -> bool {
+        let name = clean_app_name(source);
+        if name.is_empty() || self.lyrics_apps.len() >= MAX_LYRICS_APPS || self.lyrics_apps.contains(&name) {
+            return false;
+        }
+        self.lyrics_apps.push(name);
+        true
+    }
+
+    fn sanitize_keys(&mut self) {
+        let known: Vec<&str> = Hotkey::ALL.iter().map(|h| h.key()).collect();
+        self.keys.retain(|name, combo| known.contains(&name.as_str()) && combo.valid());
+        let mut seen: Vec<Combo> = Vec::new();
+        for h in Hotkey::ALL {
+            let combo = self.combo(h);
+            if seen.contains(&combo) {
+                self.keys.remove(h.key());
+                if seen.contains(&self.combo(h)) {
+                    self.keys.clear();
+                    return;
+                }
+            }
+            seen.push(self.combo(h));
+        }
+    }
+
     fn path() -> Option<PathBuf> {
         let dir = PathBuf::from(std::env::var_os("APPDATA")?).join("NightIsland");
         Some(dir.join("settings.json"))
@@ -458,6 +518,16 @@ impl Settings {
         self.close_delay_ms = self.close_delay_ms.clamp(0, 3000);
         self.open_speed = clamp_f(self.open_speed, 0.4, 2.5, d.open_speed);
         self.close_speed = clamp_f(self.close_speed, 0.4, 2.5, d.close_speed);
+        self.hide_pill_secs = self.hide_pill_secs.clamp(5, 10);
+        self.sanitize_keys();
+        let mut apps: Vec<String> = Vec::new();
+        for a in &self.lyrics_apps {
+            let name = clean_app_name(a);
+            if !name.is_empty() && !apps.contains(&name) && apps.len() < MAX_LYRICS_APPS {
+                apps.push(name);
+            }
+        }
+        self.lyrics_apps = apps;
     }
 
     pub fn save(&self) {
@@ -511,6 +581,45 @@ mod tests {
         s.set_tab_hidden("AGY", false);
         s.set_tab_hidden("Home", true);
         assert_eq!(s.hidden_tabs, ["Note"]);
+    }
+
+    #[test]
+    fn hotkeys_default_change_and_survive_a_hostile_file() {
+        let mut s = Settings::default();
+        assert_eq!(s.combo(Hotkey::HidePill), Hotkey::HidePill.default_combo());
+        let c = Combo::new(crate::data::keys::CTRL | crate::data::keys::SHIFT, 'H' as u32);
+        s.set_combo(Hotkey::HidePill, c);
+        assert_eq!(s.combo(Hotkey::HidePill), c);
+        assert_eq!(s.hotkey_using(Hotkey::Mic, c), Some(Hotkey::HidePill));
+        s.set_combo(Hotkey::HidePill, Hotkey::HidePill.default_combo());
+        assert!(s.keys.is_empty());
+
+        let json = r#"{"keys":{"toggle":{"mods":0,"vk":69},"bogus":{"mods":2,"vk":69},
+            "mic":{"mods":2,"vk":69},"hide_pill":{"mods":2,"vk":70}},"hide_pill_secs":99}"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.sanitize();
+        assert_eq!(s.combo(Hotkey::Toggle), Hotkey::Toggle.default_combo());
+        assert!(!s.keys.contains_key("bogus"));
+        assert_eq!(s.combo(Hotkey::Mic), Combo::new(2, 69));
+        assert_eq!(s.combo(Hotkey::HidePill), Combo::new(2, 70));
+        assert_eq!(s.hide_pill_secs, 10);
+
+        let json = r#"{"keys":{"mic":{"mods":2,"vk":69}}}"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.sanitize();
+        assert_eq!(s.combo(Hotkey::Mic), Hotkey::Mic.default_combo());
+    }
+
+    #[test]
+    fn trusted_lyric_players() {
+        let mut s = Settings::default();
+        assert!(s.lyrics_app_allowed("SPOTIFY") && s.lyrics_app_allowed(""));
+        assert!(s.add_lyrics_app(" spotify "));
+        assert!(!s.add_lyrics_app("SPOTIFY") && !s.add_lyrics_app("  "));
+        assert!(s.lyrics_app_allowed("Spotify") && !s.lyrics_app_allowed("CHROME") && !s.lyrics_app_allowed(""));
+        let mut s: Settings = serde_json::from_str(r#"{"lyrics_apps":["a","A","","b\u0007"]}"#).unwrap();
+        s.sanitize();
+        assert_eq!(s.lyrics_apps, ["A", "B"]);
     }
 
     #[test]

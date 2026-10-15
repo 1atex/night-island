@@ -85,7 +85,10 @@ pub fn run() -> Result<()> {
         APP.with(|cell| *cell.borrow_mut() = Some(app));
 
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        register_hotkeys(hwnd);
+        let failed = with_app_value(|a| register_hotkeys(hwnd, &a.settings)).unwrap_or_default();
+        if !failed.is_empty() {
+            crate::log_warn!("hotkeys taken by another program: {failed:?}");
+        }
         #[cfg(feature = "demo")]
         demo::apply(hwnd);
         apps::start_indexing();
@@ -230,6 +233,7 @@ impl App {
             cw: COLLAPSED.0,
             pending_high_surrogate: None,
             gaming: false,
+            pill_hidden: false,
             gpu,
             ears,
             collapsed,

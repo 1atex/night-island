@@ -102,10 +102,20 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_HOTKEY => {
             match Hotkey::from_id(wparam.0 as i32) {
-                Some(Hotkey::Toggle) => with_app(|a| a.toggle()),
-                Some(Hotkey::Clipboard) => with_app(|a| a.open_tab(view::Tab::Clipboard)),
+                Some(Hotkey::Toggle) => with_app(|a| {
+                    a.restore_pill();
+                    a.toggle();
+                }),
+                Some(Hotkey::Clipboard) => with_app(|a| {
+                    a.restore_pill();
+                    a.open_tab(view::Tab::Clipboard);
+                }),
                 Some(Hotkey::PlainPaste) => with_app(|a| a.plain_paste()),
-                Some(Hotkey::Command) => with_app(|a| a.toggle_command()),
+                Some(Hotkey::Command) => with_app(|a| {
+                    a.restore_pill();
+                    a.toggle_command();
+                }),
+                Some(Hotkey::HidePill) => with_app(|a| a.hide_pill_for_a_while()),
                 Some(Hotkey::Mic) => with_app(|a| a.toggle_mic()),
                 Some(Hotkey::ShotArea) => with_app(|a| a.capture(capture::Mode::Area)),
                 Some(Hotkey::ShotFull) => with_app(|a| capture::fullscreen(a.hwnd)),

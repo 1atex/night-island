@@ -10,10 +10,11 @@ const MIN_WAIT_MS: u32 = 120;
 impl App {
     pub(in crate::island) fn update_lyrics(&mut self, visible: bool) {
         let m = &self.ui.media;
-        let wanted = self.settings.music_lyrics && m.playing && !m.title.is_empty();
+        let allowed = self.settings.lyrics_app_allowed(&m.source);
+        let wanted = self.settings.music_lyrics && allowed && m.playing && !m.title.is_empty();
         if !wanted {
             self.kill_timer(Timer::Lyric);
-            if !self.settings.music_lyrics || m.title.is_empty() {
+            if !self.settings.music_lyrics || !allowed || m.title.is_empty() {
                 self.ui.lyric = view::LyricUi::default();
             }
             return;
@@ -49,7 +50,10 @@ impl App {
 
     pub(in crate::island) fn on_lyrics(&mut self) {
         let Some((title, artist)) = self.ui.lyric.key.clone() else { return };
-        if !self.settings.music_lyrics || self.ui.lyric.lines.is_some() {
+        if !self.settings.music_lyrics
+            || !self.settings.lyrics_app_allowed(&self.ui.media.source)
+            || self.ui.lyric.lines.is_some()
+        {
             return;
         }
         let Some(Some(lines)) = lyrics::cached(&title, &artist) else { return };

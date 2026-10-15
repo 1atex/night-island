@@ -1,3 +1,4 @@
+use crate::data::keys::Hotkey;
 use crate::services::{discord, spotify};
 use crate::view::*;
 
@@ -19,7 +20,8 @@ const GENERAL: [(Sid, &str, Kind); 8] = [
     (Sid::DevTools, "Developer tools", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 9] = [
+const ISLAND: [(Sid, &str, Kind); 10] = [
+    (Sid::HidePillSecs, "Hide the pill for", Kind::Slider),
     (Sid::Placement, "Placement", Kind::Segment(["Floating", "Docked"])),
     (Sid::Edge, "Edge", Kind::Cycle),
     (Sid::Style, "Shape", Kind::Segment(["Flat", "Liquid"])),
@@ -88,13 +90,14 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 10] = [
     (Sid::TabTheme, "Theme", Kind::Toggle),
 ];
 
-pub const GROUPS: [Group; 9] = [
+pub const GROUPS: [Group; 10] = [
     Group { glyph: '\u{E713}', name: "General", rows: &GENERAL, custom: None },
     Group { glyph: '\u{E80F}', name: "Island", rows: &ISLAND, custom: None },
     Group { glyph: '\u{E790}', name: "Appearance", rows: &APPEARANCE, custom: None },
-    Group { glyph: '\u{E8D6}', name: "Pill and music", rows: &PILL, custom: None },
+    Group { glyph: '\u{E8D6}', name: "Pill and music", rows: &PILL, custom: Some(pill_items) },
     Group { glyph: '\u{EA8F}', name: "Notifications", rows: &NOTIFICATIONS, custom: None },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None },
+    Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items) },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items) },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items) },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items) },
@@ -135,6 +138,10 @@ pub enum Act {
     UpdateCheck,
     UpdateDownload,
     UpdateInstall,
+    Rebind(Hotkey),
+    KeysReset,
+    LyricsAppAdd,
+    LyricsAppRemove(usize),
 }
 
 #[derive(Default)]
@@ -146,6 +153,8 @@ pub struct SwUi {
     pub drag: Option<Sid>,
     pub field: Option<Field>,
     pub caret_on: bool,
+    pub capturing: Option<Hotkey>,
+    pub quiet_sys: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -162,6 +171,7 @@ pub(in crate::view) enum Item {
     Service { name: &'static str, glyph: char, status: String, live: bool },
     Field(Field, &'static str, &'static str),
     Button(Act, String, bool),
+    Pair(Act, String, String, bool),
     Note(&'static str),
     Text(String),
 }
@@ -170,7 +180,7 @@ impl Item {
     fn height(&self) -> f32 {
         match self {
             Item::Heading(_) => HEADING_H,
-            Item::Row(..) | Item::Field(..) | Item::Button(..) => ROW_H,
+            Item::Row(..) | Item::Field(..) | Item::Button(..) | Item::Pair(..) => ROW_H,
             Item::Service { .. } => SERVICE_H,
             Item::Note(_) | Item::Text(_) => NOTE_H,
         }
@@ -246,6 +256,43 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     }
     out.push(Item::Field(Field::SpotifyId, "Own Client ID", "Optional: your Spotify app"));
     out.push(Item::Button(Act::SpotifySaveId, "Save the Client ID".into(), true));
+    out
+}
+
+fn pill_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![Item::Heading("Pill and music")];
+    out.extend(PILL.iter().map(|&(id, label, kind)| Item::Row(id, label, kind)));
+    out.push(Item::Heading("Players for lyrics"));
+    let apps = &ui.cfg.lyrics_apps;
+    if apps.is_empty() {
+        out.push(Item::Note("Any player. Add one to take lyrics only from the players you trust."));
+    } else {
+        out.push(Item::Note("Lyrics are looked up only while one of these plays."));
+    }
+    for (i, app) in apps.iter().enumerate() {
+        out.push(Item::Pair(Act::LyricsAppRemove(i), app.clone(), "Remove".into(), false));
+    }
+    let source = &ui.media.source;
+    let can_add = !source.is_empty() && !apps.iter().any(|a| a.eq_ignore_ascii_case(source));
+    let label = if source.is_empty() {
+        "Add the player (start playing first)".into()
+    } else {
+        format!("Add the player {source}")
+    };
+    out.push(Item::Button(Act::LyricsAppAdd, label, can_add));
+    out
+}
+
+fn key_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![Item::Heading("Keys")];
+    for h in Hotkey::ALL {
+        let capturing = ui.sw.capturing == Some(h);
+        let text = if capturing { "Press the new keys…".to_string() } else { ui.cfg.combo(h).text() };
+        out.push(Item::Pair(Act::Rebind(h), h.label().into(), text, capturing));
+    }
+    out.push(Item::Note("Click a key, then press the new combination with Ctrl, Alt, Shift or Win."));
+    out.push(Item::Note("Esc cancels, Delete brings the default back."));
+    out.push(Item::Button(Act::KeysReset, "Reset all keys".into(), !ui.cfg.keys.is_empty()));
     out
 }
 
@@ -421,6 +468,7 @@ pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> O
             }
             Item::Field(field, ..) if inside(ctl, px, py) => return Some(SwHit::Field(field)),
             Item::Button(act, _, enabled) if enabled && inside(ctl, px, py) => return Some(SwHit::Act(act)),
+            Item::Pair(act, ..) if inside(ctl, px, py) => return Some(SwHit::Act(act)),
             _ => {}
         }
     }
@@ -642,6 +690,30 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         DWRITE_FONT_WEIGHT_SEMI_BOLD,
                         DWRITE_TEXT_ALIGNMENT_CENTER,
                         rgba(1.0, 1.0, 1.0, if enabled { 1.0 } else { 0.4 }),
+                    )?;
+                }
+                Item::Pair(act, label, button, active) => {
+                    p.text(
+                        &label,
+                        label_area,
+                        14.0 * scale,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, 0.9),
+                    )?;
+                    if active {
+                        p.fill_round_rect(ctl, 11.0 * scale, acc(0.45))?;
+                    } else {
+                        let fill = if ui.sw.hover == Some(SwHit::Act(act)) { 0.2 } else { 0.12 };
+                        p.fill_round_rect(ctl, 11.0 * scale, rgba(1.0, 1.0, 1.0, fill))?;
+                    }
+                    p.text(
+                        &button,
+                        ctl,
+                        13.5 * scale,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                        DWRITE_TEXT_ALIGNMENT_CENTER,
+                        WHITE,
                     )?;
                 }
                 Item::Text(text) => {
