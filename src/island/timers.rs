@@ -31,10 +31,11 @@ pub(in crate::island) enum Timer {
     PillBack = 27,
     GhostHold = 28,
     Activity = 29,
+    Settle = 30,
 }
 
 impl Timer {
-    const ALL: [Timer; 29] = [
+    const ALL: [Timer; 30] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -64,6 +65,7 @@ impl Timer {
         Timer::PillBack,
         Timer::GhostHold,
         Timer::Activity,
+        Timer::Settle,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -107,6 +109,7 @@ impl App {
             Timer::PillBack => self.restore_pill(),
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),
+            Timer::Settle => self.settle_layers(),
             Timer::Geo => {
                 if self.ui.tab == view::Tab::Weather && self.ui.editing {
                     weather::search(self.hwnd, &self.ui.city.input.text());

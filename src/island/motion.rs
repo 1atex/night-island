@@ -70,6 +70,7 @@ impl App {
         self.state = State::Expanded;
         self.update_eq();
         self.sync_metrics();
+        self.set_timer(Timer::Settle, self.open_ms() as u32 + 80);
         let _ = self.animate_to(true, false);
         if matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.select_tab(self.ui.tab);
@@ -103,6 +104,7 @@ impl App {
         self.schedule_autohide();
         self.start_liquid();
         self.update_eq();
+        self.repaint_collapsed();
         self.settle_layers();
         self.sync_metrics();
     }
