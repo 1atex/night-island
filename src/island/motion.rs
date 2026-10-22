@@ -69,6 +69,7 @@ impl App {
         }
         self.state = State::Expanded;
         self.update_eq();
+        self.sync_metrics();
         let _ = self.animate_to(true, false);
         if matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.select_tab(self.ui.tab);
@@ -102,6 +103,37 @@ impl App {
         self.schedule_autohide();
         self.start_liquid();
         self.update_eq();
+        self.settle_layers();
+        self.sync_metrics();
+    }
+
+    pub(in crate::island) fn settle_layers(&self) {
+        let expanded = match self.state {
+            State::Expanded => true,
+            State::Collapsed => false,
+            _ => return,
+        };
+        let open_tint = if self.settings.acrylic { self.settings.tint_open } else { TINT_OPEN_NO_BLUR };
+        let tint_want = if expanded { open_tint } else { self.settings.pill_opacity };
+        let layers = [
+            ("collapsed", &self.collapsed.sprite, if expanded { 0.0 } else { 1.0 }),
+            ("expanded", &self.expanded.sprite, if expanded { 1.0 } else { 0.0 }),
+            ("character", &self.pet.char_layer.sprite, if expanded { 0.0 } else { 1.0 }),
+        ];
+        for (name, sprite, want) in layers {
+            let have = sprite.Opacity().unwrap_or(want);
+            if (have - want).abs() > 0.02 {
+                crate::log_warn!("layer {name} stuck at opacity {have:.2}, should be {want:.2}; fixed");
+                let _ = sprite.StopAnimation(h!("Opacity"));
+                let _ = sprite.SetOpacity(want);
+            }
+        }
+        let have = self.tint.Opacity().unwrap_or(tint_want);
+        if (have - tint_want).abs() > 0.02 {
+            crate::log_warn!("tint stuck at opacity {have:.2}, should be {tint_want:.2}; fixed");
+            let _ = self.tint.StopAnimation(h!("Opacity"));
+            let _ = self.tint.SetOpacity(tint_want);
+        }
     }
 
     pub(in crate::island) fn schedule_autohide(&self) {

@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+
+use crate::data::usage::UseKind;
 use std::ffi::c_void;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -106,43 +108,119 @@ fn running_images() -> HashSet<String> {
     out
 }
 
-fn capability_in_use(capability: &str, running: &HashSet<String>) -> bool {
-    let Some(key) = open(&format!(r"{BASE}\{capability}"), KEY_READ) else { return false };
-    let mut used = false;
+fn app_name(sub: &str, desktop: bool) -> String {
+    if desktop {
+        let path = sub.replace('#', "\\");
+        let file = path.rsplit('\\').next().unwrap_or(&path);
+        return file.strip_suffix(".exe").or_else(|| file.strip_suffix(".EXE")).unwrap_or(file).to_string();
+    }
+    let package = sub.split('_').next().unwrap_or(sub);
+    package.rsplit('.').next().unwrap_or(package).to_string()
+}
+
+fn capability_users(capability: &str, running: &HashSet<String>) -> Vec<String> {
+    let Some(key) = open(&format!(r"{BASE}\{capability}"), KEY_READ) else { return Vec::new() };
+    let mut users = Vec::new();
     for sub in subkeys(key) {
         if sub == "NonPackaged" {
             if let Some(inner) = open(&format!(r"{BASE}\{capability}\NonPackaged"), KEY_READ) {
-                used |= subkeys(inner)
-                    .iter()
-                    .any(|s| in_use_at(inner, s) && running.contains(&s.replace('#', "\\").to_lowercase()));
+                for s in subkeys(inner) {
+                    if in_use_at(inner, &s) && running.contains(&s.replace('#', "\\").to_lowercase()) {
+                        users.push(app_name(&s, true));
+                    }
+                }
                 unsafe {
                     let _ = RegCloseKey(inner);
                 }
             }
-        } else {
-            used |= in_use_at(key, &sub);
-        }
-        if used {
-            break;
+        } else if in_use_at(key, &sub) {
+            users.push(app_name(&sub, false));
         }
     }
     unsafe {
         let _ = RegCloseKey(key);
     }
-    used
+    users
 }
 
-fn compute() -> Privacy {
+const SCREEN_CAPABILITIES: [&str; 2] = ["graphicsCaptureProgrammatic", "graphicsCaptureWithoutBorder"];
+
+fn compute() -> (Privacy, Vec<(UseKind, String)>) {
     let running = running_images();
-    Privacy { mic: capability_in_use("microphone", &running), cam: capability_in_use("webcam", &running) }
+    let mic = capability_users("microphone", &running);
+    let cam = capability_users("webcam", &running);
+    let privacy = Privacy { mic: !mic.is_empty(), cam: !cam.is_empty() };
+    let mut users: Vec<(UseKind, String)> = Vec::new();
+    users.extend(mic.into_iter().map(|a| (UseKind::Mic, a)));
+    users.extend(cam.into_iter().map(|a| (UseKind::Cam, a)));
+    for capability in SCREEN_CAPABILITIES {
+        users.extend(
+            capability_users(capability, &running)
+                .into_iter()
+                .filter(|a| !a.eq_ignore_ascii_case("night-island"))
+                .map(|a| (UseKind::Screen, a)),
+        );
+    }
+    users.sort_by(|a, b| (a.0 as u8, &a.1).cmp(&(b.0 as u8, &b.1)));
+    users.dedup();
+    (privacy, users)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UseEvent {
+    pub kind: UseKind,
+    pub app: String,
+    pub started: bool,
+    pub at: i64,
+}
+
+static USERS: Mutex<Vec<(UseKind, String)>> = Mutex::new(Vec::new());
+static EVENTS: Mutex<Vec<UseEvent>> = Mutex::new(Vec::new());
+
+pub fn take_events() -> Vec<UseEvent> {
+    EVENTS.lock().map(|mut e| std::mem::take(&mut *e)).unwrap_or_default()
+}
+
+fn diff(before: &[(UseKind, String)], now: &[(UseKind, String)], at: i64) -> Vec<UseEvent> {
+    let ended = before.iter().filter(|u| !now.contains(u)).map(|(k, a)| UseEvent {
+        kind: *k,
+        app: a.clone(),
+        started: false,
+        at,
+    });
+    let started = now.iter().filter(|u| !before.contains(u)).map(|(k, a)| UseEvent {
+        kind: *k,
+        app: a.clone(),
+        started: true,
+        at,
+    });
+    ended.chain(started).collect()
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
 pub fn start(hwnd: HWND) {
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
-        let post = |p: Privacy| {
+        let post = |(p, users): (Privacy, Vec<(UseKind, String)>)| {
             let changed = SNAPSHOT.lock().map(|mut g| std::mem::replace(&mut *g, p) != p).unwrap_or(false);
-            if changed {
+            let events = match USERS.lock() {
+                Ok(mut before) => {
+                    let events = diff(&before, &users, unix_now());
+                    *before = users;
+                    events
+                }
+                Err(_) => Vec::new(),
+            };
+            let news = !events.is_empty();
+            if news && let Ok(mut queue) = EVENTS.lock() {
+                queue.extend(events);
+                let excess = queue.len().saturating_sub(200);
+                queue.drain(..excess);
+            }
+            if changed || news {
                 unsafe {
                     let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_PRIVACY, WPARAM(0), LPARAM(0));
                 }
@@ -150,25 +228,59 @@ pub fn start(hwnd: HWND) {
         };
         post(compute());
 
-        let (Some(mic), Some(cam)) =
-            (open(&format!(r"{BASE}\microphone"), KEY_NOTIFY), open(&format!(r"{BASE}\webcam"), KEY_NOTIFY))
-        else {
+        let mut keys: Vec<HKEY> = Vec::new();
+        let mut events = Vec::new();
+        for capability in ["microphone", "webcam"].into_iter().chain(SCREEN_CAPABILITIES) {
+            if let Some(key) = open(&format!(r"{BASE}\{capability}"), KEY_NOTIFY)
+                && let Ok(event) = unsafe { CreateEventW(None, false, false, None) }
+            {
+                keys.push(key);
+                events.push(event);
+            }
+        }
+        if events.len() < 2 {
             return;
-        };
-        let (Ok(e_mic), Ok(e_cam)) =
-            (unsafe { CreateEventW(None, false, false, None) }, unsafe { CreateEventW(None, false, false, None) })
-        else {
-            return;
-        };
+        }
         let filter = REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_CHANGE_NAME;
         loop {
             unsafe {
-                let _ = RegNotifyChangeKeyValue(mic, true, filter, Some(e_mic), true);
-                let _ = RegNotifyChangeKeyValue(cam, true, filter, Some(e_cam), true);
-                WaitForMultipleObjects(&[e_mic, e_cam], false, INFINITE);
+                for (key, event) in keys.iter().zip(&events) {
+                    let _ = RegNotifyChangeKeyValue(*key, true, filter, Some(*event), true);
+                }
+                WaitForMultipleObjects(&events, false, INFINITE);
             }
             std::thread::sleep(Duration::from_millis(150));
             post(compute());
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_names_are_readable() {
+        assert_eq!(app_name("C:#Program Files#Google#Chrome#chrome.exe", true), "chrome");
+        assert_eq!(app_name("Microsoft.WindowsCamera_8wekyb3d8bbwe", false), "WindowsCamera");
+        assert_eq!(app_name("plain", false), "plain");
+    }
+
+    #[test]
+    fn a_change_of_users_makes_events() {
+        let a = (UseKind::Mic, "zoom".to_string());
+        let b = (UseKind::Screen, "obs".to_string());
+        let events = diff(std::slice::from_ref(&a), std::slice::from_ref(&b), 7);
+        assert_eq!(events.len(), 2);
+        assert!(!events[0].started && events[0].app == "zoom");
+        assert!(events[1].started && events[1].kind == UseKind::Screen && events[1].at == 7);
+        assert!(diff(std::slice::from_ref(&a), std::slice::from_ref(&a), 7).is_empty());
+    }
+
+    #[test]
+    #[ignore = "reads this computer's registry"]
+    fn lists_current_users() {
+        let (privacy, users) = compute();
+        println!("mic {} cam {} users {users:?}", privacy.mic, privacy.cam);
+    }
 }

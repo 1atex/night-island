@@ -92,10 +92,11 @@ pub enum Hotkey {
     Qr = 10,
     Rec = 11,
     HidePill = 12,
+    Dictate = 13,
 }
 
 impl Hotkey {
-    pub const ALL: [Hotkey; 12] = [
+    pub const ALL: [Hotkey; 13] = [
         Hotkey::Toggle,
         Hotkey::Clipboard,
         Hotkey::PlainPaste,
@@ -108,6 +109,7 @@ impl Hotkey {
         Hotkey::Qr,
         Hotkey::Rec,
         Hotkey::HidePill,
+        Hotkey::Dictate,
     ];
 
     pub fn from_id(id: i32) -> Option<Hotkey> {
@@ -128,6 +130,7 @@ impl Hotkey {
             Hotkey::Qr => "qr",
             Hotkey::Rec => "rec",
             Hotkey::HidePill => "hide_pill",
+            Hotkey::Dictate => "dictate",
         }
     }
 
@@ -145,6 +148,7 @@ impl Hotkey {
             Hotkey::Qr => "QR code",
             Hotkey::Rec => "Screen recording",
             Hotkey::HidePill => "Hide the pill for a few seconds",
+            Hotkey::Dictate => "Dictate by voice",
         }
     }
 
@@ -163,6 +167,7 @@ impl Hotkey {
             Hotkey::Qr => (CTRL | ALT, 'Q' as u32),
             Hotkey::Rec => (CTRL | ALT, 'R' as u32),
             Hotkey::HidePill => (CTRL, 'E' as u32),
+            Hotkey::Dictate => (CTRL | ALT, 'D' as u32),
         };
         Combo::new(mods, vk)
     }

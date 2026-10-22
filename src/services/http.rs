@@ -153,6 +153,41 @@ pub fn post_json(url: &str, headers: &[(&str, &str)], body: &str, agent: Option<
     Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
 }
 
+pub fn post_bytes(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+    content_type: &str,
+    agent: Option<&str>,
+) -> Option<Response> {
+    let client = HttpClient::new().ok()?;
+    let message =
+        HttpRequestMessage::Create(&HttpMethod::Post().ok()?, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
+    let sent = message.Headers().ok()?;
+    if let Some(agent) = agent {
+        sent.UserAgent().ok()?.TryParseAdd(&HSTRING::from(agent)).ok()?;
+    }
+    for (name, value) in headers {
+        if !sent.TryAppendWithoutValidation(&HSTRING::from(*name), &HSTRING::from(*value)).ok()? {
+            return None;
+        }
+    }
+    let stream = InMemoryRandomAccessStream::new().ok()?;
+    let writer = DataWriter::CreateDataWriter(&stream).ok()?;
+    writer.WriteBytes(body).ok()?;
+    let content = HttpBufferContent::CreateFromBuffer(&writer.DetachBuffer().ok()?).ok()?;
+    content
+        .Headers()
+        .ok()?
+        .TryAppendWithoutValidation(&HSTRING::from("Content-Type"), &HSTRING::from(content_type))
+        .ok()?;
+    message.SetContent(&content).ok()?;
+    let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
+    let status = reply.StatusCode().ok()?.0 as u16;
+    let body = reply.Content().ok()?.ReadAsStringAsync().ok()?.join().ok()?.to_string();
+    Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

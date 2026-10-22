@@ -76,6 +76,8 @@ impl App {
                         });
                     }
                 }
+                ActivityTrack => self.start_activity(),
+                MetricsInterval => self.sync_metrics(),
                 AutoHide => {
                     if self.settings.auto_hide {
                         self.schedule_autohide();
@@ -115,7 +117,7 @@ impl App {
                         lockkeys::stop();
                     }
                 }
-                MusicEq | MusicTitle | MusicLyrics | PillWeather | PillBattery | SpikeColor | Spikes => {
+                MusicEq | MusicTitle | MusicCover | MusicLyrics | PillWeather | PillBattery | SpikeColor | Spikes => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }
@@ -124,6 +126,7 @@ impl App {
         }
         self.ui.cfg = self.settings.clone();
         self.repaint_expanded();
+        self.settle_layers();
         if self.pointer.slider.is_none() {
             self.settings.save();
         }

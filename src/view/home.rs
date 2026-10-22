@@ -9,6 +9,7 @@ pub struct HomeUi {
     pub vol_track: bool,
     pub app_vol: f32,
     pub hover_act: Option<usize>,
+    pub edit: bool,
 }
 
 impl Default for HomeUi {
@@ -22,6 +23,7 @@ impl Default for HomeUi {
             vol_track: Default::default(),
             app_vol: 1.0,
             hover_act: Default::default(),
+            edit: false,
         }
     }
 }
@@ -37,6 +39,8 @@ pub const HOME_ACTIONS: [(char, &str); 8] = [
     ('\u{E721}', "Command"),
 ];
 
+const _: () = assert!(HOME_ACTIONS.len() == crate::data::settings::HOME_ACTION_COUNT);
+
 pub(in crate::view) const HOME_TOP: f32 = 58.0;
 
 pub(in crate::view) const GRID_COL_W: f32 = 124.0;
@@ -45,38 +49,67 @@ pub(in crate::view) const GRID_ROW_H: f32 = 46.0;
 
 pub(in crate::view) const GRID_GAP: f32 = 8.0;
 
-pub(in crate::view) fn grid_left(pill: Rect, scale: f32) -> f32 {
+pub fn home_wide(ui: &UiState) -> bool {
+    !ui.home.edit && ui.cfg.home_actions.is_empty()
+}
+
+pub(in crate::view) fn slot_action(ui: &UiState, slot: usize) -> Option<usize> {
+    if ui.home.edit {
+        (slot < HOME_ACTIONS.len()).then_some(slot)
+    } else {
+        ui.cfg.home_actions.get(slot).map(|&id| usize::from(id))
+    }
+}
+
+fn slot_count(ui: &UiState) -> usize {
+    if ui.home.edit { HOME_ACTIONS.len() } else { ui.cfg.home_actions.len().min(HOME_ACTIONS.len()) }
+}
+
+pub(in crate::view) fn grid_left(pill: Rect, scale: f32, wide: bool) -> f32 {
     let (x, _, w, _) = pill;
-    x + w - SIDE_PAD * scale + 4.0 * scale - (2.0 * GRID_COL_W + GRID_GAP) * scale
+    let right = x + w - SIDE_PAD * scale + 4.0 * scale;
+    if wide { right + 12.0 * scale } else { right - (2.0 * GRID_COL_W + GRID_GAP) * scale }
 }
 
 pub(in crate::view) fn action_tile(pill: Rect, scale: f32, i: usize) -> Rect {
     let (_, y, _, _) = pill;
     let (col, row) = ((i % 2) as f32, (i / 2) as f32);
-    let left = grid_left(pill, scale) + col * (GRID_COL_W + GRID_GAP) * scale;
+    let left = grid_left(pill, scale, false) + col * (GRID_COL_W + GRID_GAP) * scale;
     let top = y + (HOME_TOP + row * (GRID_ROW_H + GRID_GAP)) * scale;
     (left, top, left + GRID_COL_W * scale, top + GRID_ROW_H * scale)
 }
 
-pub(in crate::view) fn media_card(pill: Rect, scale: f32) -> Rect {
+pub(in crate::view) fn media_card(pill: Rect, scale: f32, wide: bool) -> Rect {
     let (x, y, _, _) = pill;
     let left = x + (SIDE_PAD - 4.0) * scale;
-    (left, y + HOME_TOP * scale, grid_left(pill, scale) - 12.0 * scale, y + (HOME_TOP + 154.0) * scale)
+    (left, y + HOME_TOP * scale, grid_left(pill, scale, wide) - 12.0 * scale, y + (HOME_TOP + 154.0) * scale)
 }
 
-pub(in crate::view) fn volume_row(pill: Rect, scale: f32) -> Rect {
-    let card = media_card(pill, scale);
+pub(in crate::view) fn volume_row(pill: Rect, scale: f32, wide: bool) -> Rect {
+    let card = media_card(pill, scale, wide);
     (card.0, card.3 + 8.0 * scale, card.2, card.3 + (8.0 + 46.0) * scale)
 }
 
-pub fn volume_track(pill: Rect, scale: f32) -> (f32, f32, f32) {
-    let row = volume_row(pill, scale);
-    (row.0 + 44.0 * scale, row.0 + 150.0 * scale, (row.1 + row.3) / 2.0)
+pub fn volume_track(pill: Rect, scale: f32, wide: bool) -> (f32, f32, f32) {
+    let row = volume_row(pill, scale, wide);
+    let length = if wide { 250.0 } else { 150.0 };
+    (row.0 + 44.0 * scale, row.0 + length * scale, (row.1 + row.3) / 2.0)
 }
 
-pub(in crate::view) fn device_chip(pill: Rect, scale: f32) -> Rect {
-    let row = volume_row(pill, scale);
-    (row.0 + 192.0 * scale, row.1 + 8.0 * scale, row.2 - 8.0 * scale, row.3 - 8.0 * scale)
+pub(in crate::view) fn device_chip(pill: Rect, scale: f32, wide: bool) -> Rect {
+    let row = volume_row(pill, scale, wide);
+    let left = row.0 + if wide { 292.0 } else { 192.0 } * scale;
+    let right = (row.2 - (8.0 + EDIT_BTN + 6.0) * scale).max(left + 40.0 * scale);
+    (left, row.1 + 8.0 * scale, right, row.3 - 8.0 * scale)
+}
+
+const EDIT_BTN: f32 = 30.0;
+
+pub(in crate::view) fn edit_button(pill: Rect, scale: f32, wide: bool) -> Rect {
+    let row = volume_row(pill, scale, wide);
+    let size = EDIT_BTN * scale;
+    let right = row.2 - 8.0 * scale;
+    (right - size, (row.1 + row.3) / 2.0 - size / 2.0, right, (row.1 + row.3) / 2.0 + size / 2.0)
 }
 
 pub(in crate::view) const MENU_ROW_H: f32 = 30.0;
@@ -87,8 +120,8 @@ pub fn menu_visible(count: usize) -> usize {
     count.min(MENU_MAX_ROWS)
 }
 
-pub fn menu_rect(pill: Rect, scale: f32, count: usize) -> Rect {
-    let chip = device_chip(pill, scale);
+pub fn menu_rect(pill: Rect, scale: f32, count: usize, wide: bool) -> Rect {
+    let chip = device_chip(pill, scale, wide);
     let width = 300.0 * scale;
     let right = chip.2;
     let left = (right - width).max(pill.0 + 8.0 * scale);
@@ -101,8 +134,8 @@ pub(in crate::view) fn menu_row(frame: Rect, scale: f32, i: usize) -> Rect {
     (frame.0 + 6.0 * scale, top, frame.2 - 6.0 * scale, top + MENU_ROW_H * scale)
 }
 
-pub fn hit_menu(pill: Rect, scale: f32, px: f32, py: f32, count: usize) -> Option<Option<usize>> {
-    let frame = menu_rect(pill, scale, count);
+pub fn hit_menu(pill: Rect, scale: f32, px: f32, py: f32, count: usize, wide: bool) -> Option<Option<usize>> {
+    let frame = menu_rect(pill, scale, count, wide);
     if !inside(frame, px, py) {
         return None;
     }
@@ -111,7 +144,7 @@ pub fn hit_menu(pill: Rect, scale: f32, px: f32, py: f32, count: usize) -> Optio
 
 pub(in crate::view) fn paint_menu(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let Some((items, scroll)) = &ui.home.dev_menu else { return Ok(()) };
-    let frame = menu_rect(pill, scale, items.len());
+    let frame = menu_rect(pill, scale, items.len(), home_wide(ui));
     p.fill_round_rect(frame, 16.0 * scale, rgba(0.07, 0.07, 0.09, 0.98))?;
     p.stroke_round_rect(frame, 16.0 * scale, 1.0 * scale, rgba(1.0, 1.0, 1.0, 0.14))?;
     for (i, d) in items.iter().skip(*scroll).take(menu_visible(items.len())).enumerate() {
@@ -262,8 +295,8 @@ pub fn dock_path(ui: &UiState, i: usize) -> Option<&str> {
     ui.home.dock.get(i).map(|d| d.path.as_str())
 }
 
-pub(in crate::view) fn media_btn(pill: Rect, scale: f32, i: usize) -> Rect {
-    let card = media_card(pill, scale);
+pub(in crate::view) fn media_btn(pill: Rect, scale: f32, i: usize, wide: bool) -> Rect {
+    let card = media_card(pill, scale, wide);
     let (bw, gap) = ([34.0, 42.0, 34.0][i] * scale, 22.0 * scale);
     let total = 34.0 * 2.0 * scale + 42.0 * scale + 2.0 * gap;
     let mut left = card.0 + (card.2 - card.0 - total) / 2.0;
@@ -288,20 +321,14 @@ pub enum HomeHit {
     DockAdd,
     Seek(f32),
     VolumeIcon,
+    Edit,
+    Player,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn hit_home(
-    pill: Rect,
-    scale: f32,
-    px: f32,
-    py: f32,
-    has_media: bool,
-    spotify: bool,
-    strip: bool,
-    dock: usize,
-) -> Option<HomeHit> {
-    if let Some(hit) = hit_dock(pill, scale, px, py, strip, dock) {
+pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<HomeHit> {
+    let (has_media, spotify, strip) = (!ui.media.title.is_empty(), spotify_active(ui), discord_strip(ui));
+    let wide = home_wide(ui);
+    if let Some(hit) = hit_dock(pill, scale, px, py, strip, ui.home.dock.len()) {
         return Some(hit);
     }
     if strip {
@@ -311,53 +338,71 @@ pub fn hit_home(
             }
         }
     }
-    if spotify && let Some(i) = (0..3).find(|&i| inside(extra_btn(pill, scale, i), px, py)) {
+    if spotify && let Some(i) = (0..3).find(|&i| inside(extra_btn(pill, scale, i, wide), px, py)) {
         return Some(HomeHit::Extra(i));
     }
-    if has_media && let Some(i) = (0..3).find(|&i| inside(media_btn(pill, scale, i), px, py)) {
+    if has_media && ui.media.players >= 2 && inside(player_btn(pill, scale, wide), px, py) {
+        return Some(HomeHit::Player);
+    }
+    if has_media && let Some(i) = (0..3).find(|&i| inside(media_btn(pill, scale, i, wide), px, py)) {
         return Some(HomeHit::Media(i));
     }
     if has_media {
-        let (l, r, y) = seek_track(pill, scale);
+        let (l, r, y) = seek_track(pill, scale, wide);
         if px >= l - 6.0 * scale && px <= r + 6.0 * scale && (py - y).abs() < 10.0 * scale {
             return Some(HomeHit::Seek(((px - l) / (r - l).max(1.0)).clamp(0.0, 1.0)));
         }
     }
-    if let Some(i) = (0..HOME_ACTIONS.len()).find(|&i| inside(action_tile(pill, scale, i), px, py)) {
-        return Some(HomeHit::Action(i));
+    if let Some(id) = (0..slot_count(ui))
+        .find(|&slot| inside(action_tile(pill, scale, slot), px, py))
+        .and_then(|slot| slot_action(ui, slot))
+    {
+        return Some(HomeHit::Action(id));
     }
-    let row = volume_row(pill, scale);
+    if inside(edit_button(pill, scale, wide), px, py) {
+        return Some(HomeHit::Edit);
+    }
+    let row = volume_row(pill, scale, wide);
     if inside((row.0 + 2.0 * scale, row.1, row.0 + 42.0 * scale, row.3), px, py) {
         return Some(HomeHit::VolumeIcon);
     }
-    let (tl, tr, cy) = volume_track(pill, scale);
+    let (tl, tr, cy) = volume_track(pill, scale, wide);
     if px >= tl - 10.0 * scale && px <= tr + 10.0 * scale && (py - cy).abs() < 14.0 * scale {
         return Some(HomeHit::Volume);
     }
-    inside(device_chip(pill, scale), px, py).then_some(HomeHit::Device)
+    inside(device_chip(pill, scale, wide), px, py).then_some(HomeHit::Device)
 }
 
-pub fn seek_track(pill: Rect, scale: f32) -> (f32, f32, f32) {
-    let card = media_card(pill, scale);
+pub fn seek_track(pill: Rect, scale: f32, wide: bool) -> (f32, f32, f32) {
+    let card = media_card(pill, scale, wide);
     (card.0 + 16.0 * scale, card.2 - 16.0 * scale, card.1 + 100.0 * scale)
 }
 
-pub(in crate::view) fn extra_btn(pill: Rect, scale: f32, i: usize) -> Rect {
-    let card = media_card(pill, scale);
+pub(in crate::view) fn extra_btn(pill: Rect, scale: f32, i: usize, wide: bool) -> Rect {
+    let card = media_card(pill, scale, wide);
     let size = 30.0 * scale;
     match i {
         0 => {
-            let prev = media_btn(pill, scale, 0);
+            let prev = media_btn(pill, scale, 0, wide);
             let cy = (prev.1 + prev.3) / 2.0;
             (prev.0 - 18.0 * scale - size, cy - size / 2.0, prev.0 - 18.0 * scale, cy + size / 2.0)
         }
         1 => {
-            let next = media_btn(pill, scale, 2);
+            let next = media_btn(pill, scale, 2, wide);
             let cy = (next.1 + next.3) / 2.0;
             (next.2 + 18.0 * scale, cy - size / 2.0, next.2 + 18.0 * scale + size, cy + size / 2.0)
         }
-        _ => (card.2 - 14.0 * scale - size, card.1 + 10.0 * scale, card.2 - 14.0 * scale, card.1 + 10.0 * scale + size),
+        _ => {
+            let right = card.2 - 14.0 * scale - size - 6.0 * scale;
+            (right - size, card.1 + 10.0 * scale, right, card.1 + 10.0 * scale + size)
+        }
     }
+}
+
+pub(in crate::view) fn player_btn(pill: Rect, scale: f32, wide: bool) -> Rect {
+    let card = media_card(pill, scale, wide);
+    let size = 30.0 * scale;
+    (card.2 - 14.0 * scale - size, card.1 + 10.0 * scale, card.2 - 14.0 * scale, card.1 + 10.0 * scale + size)
 }
 
 pub fn spotify_active(ui: &UiState) -> bool {
@@ -372,7 +417,8 @@ pub(in crate::view) fn mmss(secs: f32) -> String {
 }
 
 pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
-    let card = media_card(pill, scale);
+    let wide = home_wide(ui);
+    let card = media_card(pill, scale, wide);
     p.fill_round_rect(card, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
     let (cl, ct, cr, cb) = card;
     let pad = 16.0 * scale;
@@ -473,6 +519,21 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
                 rgba(1.0, 1.0, 1.0, 0.55),
             )?;
         }
+        if ui.media.players >= 2 {
+            let btn = player_btn(pill, scale, wide);
+            if ui.home.hover_act == Some(560) {
+                p.fill_round_rect(btn, 15.0 * scale, rgba(1.0, 1.0, 1.0, 0.14))?;
+            }
+            p.glyph('\u{E8AB}', btn, 15.0 * scale, rgba(1.0, 1.0, 1.0, 0.7))?;
+            p.text(
+                &ui.media.players.to_string(),
+                (btn.0, btn.3 - 12.0 * scale, btn.2 - 2.0 * scale, btn.3 + 2.0 * scale),
+                10.0 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_TRAILING,
+                accent,
+            )?;
+        }
         if spotify_active(ui) {
             let accent_on = accent;
             let off = rgba(1.0, 1.0, 1.0, 0.55);
@@ -485,15 +546,15 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
             ];
             for (i, (glyph, on)) in items.iter().enumerate() {
                 if ui.home.hover_act == Some(510 + i) {
-                    p.fill_round_rect(extra_btn(pill, scale, i), 15.0 * scale, rgba(1.0, 1.0, 1.0, 0.14))?;
+                    p.fill_round_rect(extra_btn(pill, scale, i, wide), 15.0 * scale, rgba(1.0, 1.0, 1.0, 0.14))?;
                 }
-                p.glyph(*glyph, extra_btn(pill, scale, i), 15.0 * scale, if *on { accent_on } else { off })?;
+                p.glyph(*glyph, extra_btn(pill, scale, i, wide), 15.0 * scale, if *on { accent_on } else { off })?;
             }
         }
         for (i, g) in
             ['\u{E892}', if ui.media.playing { '\u{E769}' } else { '\u{E768}' }, '\u{E893}'].iter().enumerate()
         {
-            let r = media_btn(pill, scale, i);
+            let r = media_btn(pill, scale, i, wide);
             let hover = ui.home.hover_act == Some(500 + i);
             if hover && i != 1 {
                 p.fill_round_rect(r, 17.0 * scale, rgba(1.0, 1.0, 1.0, 0.16))?;
@@ -507,7 +568,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         }
     }
 
-    let row = volume_row(pill, scale);
+    let row = volume_row(pill, scale, wide);
     p.fill_round_rect(row, 16.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
     let level = if ui.home.vol_track { ui.home.app_vol } else { ui.home.vol };
     let tint = if ui.home.vol_track {
@@ -529,7 +590,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         p.fill_round_rect(icon_box, 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.14))?;
     }
     p.glyph(icon, icon_box, 15.0 * scale, if ui.home.vol_track { tint } else { rgba(1.0, 1.0, 1.0, 0.8) })?;
-    let (tl, tr, cy) = volume_track(pill, scale);
+    let (tl, tr, cy) = volume_track(pill, scale, wide);
     let x = tl + (tr - tl) * level.clamp(0.0, 1.0);
     p.fill_round_rect((tl, cy - 2.0 * scale, tr, cy + 2.0 * scale), 2.0 * scale, rgba(1.0, 1.0, 1.0, 0.2))?;
     p.fill_round_rect((tl, cy - 2.0 * scale, x, cy + 2.0 * scale), 2.0 * scale, tint)?;
@@ -543,7 +604,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         rgba(1.0, 1.0, 1.0, 0.75),
     )?;
     if !ui.home.device.is_empty() {
-        let chip = device_chip(pill, scale);
+        let chip = device_chip(pill, scale, wide);
         let hover = ui.home.hover_act == Some(100);
         p.fill_round_rect(chip, 12.0 * scale, rgba(1.0, 1.0, 1.0, if hover { 0.16 } else { 0.1 }))?;
         p.glyph(
@@ -562,24 +623,52 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         )?;
     }
 
-    for (i, (glyph, label)) in HOME_ACTIONS.iter().enumerate() {
-        let r = action_tile(pill, scale, i);
-        let recording = i == 6 && ui.recording_secs.is_some();
+    let edit = edit_button(pill, scale, wide);
+    if ui.home.edit {
+        p.fill_round_rect(edit, 12.0 * scale, acc(if ui.home.hover_act == Some(550) { 0.55 } else { 0.4 }))?;
+    } else if ui.home.hover_act == Some(550) {
+        p.fill_round_rect(edit, 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.14))?;
+    }
+    p.glyph(
+        if ui.home.edit { '\u{E73E}' } else { '\u{E70F}' },
+        edit,
+        14.0 * scale,
+        rgba(1.0, 1.0, 1.0, if ui.home.edit { 1.0 } else { 0.6 }),
+    )?;
+
+    for slot in 0..slot_count(ui) {
+        let Some(id) = slot_action(ui, slot) else { continue };
+        let (glyph, label) = HOME_ACTIONS[id];
+        let r = action_tile(pill, scale, slot);
+        let chosen = ui.cfg.home_actions.contains(&(id as u8));
+        let recording = id == 6 && ui.recording_secs.is_some() && !ui.home.edit;
+        let hovered = ui.home.hover_act == Some(id);
         let bg = if recording {
             rgba(1.0, 0.3, 0.3, 0.3)
-        } else if ui.home.hover_act == Some(i) {
+        } else if ui.home.edit && chosen {
+            acc(if hovered { 0.45 } else { 0.32 })
+        } else if hovered {
             rgba(1.0, 1.0, 1.0, 0.15)
         } else {
-            rgba(1.0, 1.0, 1.0, 0.08)
+            rgba(1.0, 1.0, 1.0, if ui.home.edit { 0.05 } else { 0.08 })
         };
         p.fill_round_rect(r, 16.0 * scale, bg)?;
-        p.glyph(*glyph, (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3), 17.0 * scale, rgba(1.0, 1.0, 1.0, 0.9))?;
+        if ui.home.edit && chosen {
+            p.stroke_round_rect(r, 16.0 * scale, 1.2 * scale, acc(0.8))?;
+        }
+        let dim = if ui.home.edit && !chosen { 0.5 } else { 1.0 };
+        p.glyph(
+            glyph,
+            (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
+            17.0 * scale,
+            rgba(1.0, 1.0, 1.0, 0.9 * dim),
+        )?;
         p.text_wrapped(
             if recording { "Stop recording" } else { label },
             (r.0 + 40.0 * scale, r.1 + 2.0 * scale, r.2 - 6.0 * scale, r.3 - 2.0 * scale),
             12.5 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            WHITE,
+            rgba(1.0, 1.0, 1.0, dim),
         )?;
     }
 

@@ -1,13 +1,17 @@
+pub mod activity;
 pub mod apps;
 pub mod audio;
 pub mod autostart;
 pub mod capture;
+pub mod dictation;
 pub mod dnd;
 pub mod downloads;
 pub mod lockkeys;
 pub mod media;
+pub mod metrics;
 pub mod privacy;
 pub mod recognize;
 pub mod recorder;
+pub mod steam;
 pub mod system;
 pub mod volume;

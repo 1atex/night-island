@@ -155,7 +155,7 @@ impl App {
     pub(in crate::island) fn update_eq(&mut self) {
         let visible = self.state == State::Collapsed
             && !self.gaming
-            && !self.pill_hidden
+            && (!self.pill_hidden || self.ghosted)
             && self.ui.media.playing
             && self.ui.volume.is_none()
             && self.ui.downloading.is_none()

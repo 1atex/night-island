@@ -17,7 +17,9 @@ use crate::tools::edit::{self, TextEdit};
 use crate::tools::texttools::ops;
 use crate::ui::gfx::{Painter, WHITE, rgba};
 
+mod activity;
 mod agy;
+mod chat;
 mod clipboard;
 mod command;
 mod controls;
@@ -25,8 +27,10 @@ mod discord;
 mod frame;
 mod home;
 mod integrations;
+mod metrics;
 mod note;
 mod pill;
+mod privacy;
 mod record;
 mod remind;
 mod settings;
@@ -38,8 +42,9 @@ mod widgets;
 
 use self::shelf::*;
 pub use self::{
-    agy::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*, integrations::*, note::*, pill::*,
-    record::*, remind::*, settings::*, settings_window::*, text::*, weather::*, widgets::*,
+    activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
+    integrations::*, metrics::*, note::*, pill::*, privacy::*, record::*, remind::*, settings::*, settings_window::*,
+    text::*, weather::*, widgets::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);
@@ -55,12 +60,16 @@ pub enum Tab {
     Weather,
     Record,
     Agy,
+    Chat,
+    Privacy,
+    Activity,
+    System,
     Controls,
     Theme,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 12] = [
+pub const TABS: [(Tab, char, &str); 16] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Shelf, '\u{E838}', "Shelf"),
@@ -70,6 +79,10 @@ pub const TABS: [(Tab, char, &str); 12] = [
     (Tab::Weather, '\u{E706}', "Weather"),
     (Tab::Record, '\u{E7C8}', "Record"),
     (Tab::Agy, '\u{E943}', "AGY"),
+    (Tab::Chat, '\u{E8F2}', "Chat"),
+    (Tab::Privacy, '\u{EA18}', "Privacy"),
+    (Tab::Activity, '\u{E823}', "Activity"),
+    (Tab::System, '\u{E9D9}', "System"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
     (Tab::Theme, '\u{E790}', "Theme"),
     (Tab::Settings, '\u{E713}', "Settings"),
@@ -119,6 +132,11 @@ pub struct UiState {
     pub int: IntegrationsUi,
     pub city: CityUi,
     pub agy: AgyUi,
+    pub chat: ChatUi,
+    pub privacy_log: PrivacyUi,
+    pub activity: ActivityUi,
+    pub metrics: MetricsUi,
+    pub agents: Vec<crate::services::agents::Session>,
 }
 
 impl UiState {
@@ -126,6 +144,11 @@ impl UiState {
         Self {
             tab: Tab::Home,
             agy: AgyUi::default(),
+            chat: ChatUi::default(),
+            privacy_log: PrivacyUi::default(),
+            activity: ActivityUi::default(),
+            metrics: MetricsUi::default(),
+            agents: Vec::new(),
             cmd: CommandUi::default(),
             remind: RemindUi::default(),
             int: IntegrationsUi::default(),

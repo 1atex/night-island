@@ -6,7 +6,8 @@ impl App {
             return self.repaint_expanded();
         }
         let pill = self.pill_rect(true);
-        match view::hit_text(pill, self.scale, x as f32, y as f32, self.settings.dev_tools) {
+        let scroll = self.ui.text.chip_scroll;
+        match view::hit_text(pill, self.scale, x as f32, y as f32, self.settings.dev_tools, scroll) {
             Some(view::TextHit::Chip(i)) => {
                 if let Some((op, _)) = texttools::ops(self.settings.dev_tools).get(i) {
                     self.run_text_op(*op);
@@ -94,6 +95,7 @@ impl App {
                 self.ui.cfg = self.settings.clone();
                 self.settings.save();
                 self.ui.text.hover = None;
+                self.ui.text.chip_scroll = 0;
             }
         }
         self.repaint_expanded();

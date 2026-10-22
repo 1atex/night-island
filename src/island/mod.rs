@@ -30,19 +30,25 @@ use windows::core::{Interface, Result, h, w};
 
 use crate::data::clips::{self, Clip, Reminder, ShelfItem, Store};
 use crate::data::settings::{Edge, Notice, Placement, Settings, Style};
+use crate::data::usage::UseKind;
+use crate::platform::activity;
 use crate::platform::apps;
 use crate::platform::audio;
 use crate::platform::autostart;
 use crate::platform::capture;
+use crate::platform::dictation;
 use crate::platform::dnd;
 use crate::platform::downloads;
 use crate::platform::lockkeys;
 use crate::platform::media;
+use crate::platform::metrics;
 use crate::platform::privacy;
 use crate::platform::recognize;
 use crate::platform::recorder;
+use crate::platform::steam;
 use crate::platform::system::{self, RadioSwitch};
 use crate::platform::volume;
+use crate::services::agents;
 use crate::services::agy;
 use crate::services::ai;
 use crate::services::discord;
@@ -77,6 +83,7 @@ mod settings_win;
 mod startup;
 mod tabs;
 mod timers;
+mod voice;
 mod window;
 
 use self::{
@@ -137,6 +144,10 @@ struct App {
     music: MusicBars,
     gaming: bool,
     pill_hidden: bool,
+    metrics_on: Option<u32>,
+    steam_game: Option<(u32, std::time::Instant)>,
+    ghosted: bool,
+    root: ContainerVisual,
     gpu: Gpu,
     liquid: Liquid,
     ears: [Layer; 2],

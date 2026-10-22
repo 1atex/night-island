@@ -9,6 +9,8 @@ impl App {
             view::text_frame(pill, self.scale)
         } else if self.ui.tab == view::Tab::Agy {
             view::agy_input(pill, self.scale, self.ui.agy.input_h.get())
+        } else if self.ui.tab == view::Tab::Chat {
+            view::agy_input(pill, self.scale, self.ui.chat.input_h.get())
         } else if self.remind_active() {
             view::remind_frame(pill, self.scale)
         } else if self.rename_active() {
@@ -22,6 +24,7 @@ impl App {
         match self.ui.tab {
             view::Tab::Text => &self.ui.text.input,
             view::Tab::Agy => &self.ui.agy.input,
+            view::Tab::Chat => &self.ui.chat.input,
             view::Tab::Remind => &self.ui.remind.input,
             view::Tab::Note if self.ui.notes.renaming.is_some() => &self.ui.notes.name_input,
             _ => &self.ui.note,
@@ -32,6 +35,7 @@ impl App {
         match self.ui.tab {
             view::Tab::Text => &mut self.ui.text.input,
             view::Tab::Agy => &mut self.ui.agy.input,
+            view::Tab::Chat => &mut self.ui.chat.input,
             view::Tab::Remind => &mut self.ui.remind.input,
             view::Tab::Note if self.ui.notes.renaming.is_some() => &mut self.ui.notes.name_input,
             _ => &mut self.ui.note,
@@ -124,7 +128,11 @@ impl App {
             {
                 return;
             }
-            0x0D if self.ui.tab == view::Tab::Agy && unsafe { GetKeyState(VK_SHIFT.0 as i32) } >= 0 => return,
+            0x0D if matches!(self.ui.tab, view::Tab::Agy | view::Tab::Chat)
+                && unsafe { GetKeyState(VK_SHIFT.0 as i32) } >= 0 =>
+            {
+                return;
+            }
             0x09 if self.extra_field().is_some() => return,
             0x0D => '\n',
             0x09 => '\t',
@@ -187,6 +195,9 @@ impl App {
         let layout = self.active_layout();
         if self.ui.tab == view::Tab::Agy && vk == VK_RETURN.0 && !shift {
             return self.send_agy();
+        }
+        if self.ui.tab == view::Tab::Chat && vk == VK_RETURN.0 && !shift {
+            return self.send_chat();
         }
         let extra = self.extra_field();
         if extra.is_some() && vk == VK_RETURN.0 {

@@ -234,6 +234,10 @@ impl App {
             pending_high_surrogate: None,
             gaming: false,
             pill_hidden: false,
+            metrics_on: None,
+            steam_game: None,
+            ghosted: false,
+            root,
             gpu,
             ears,
             collapsed,
@@ -284,6 +288,16 @@ impl App {
         app.ui.char_inset = if app.settings.character == Character::None { 0.0 } else { CHAR_INSET };
         app.ui.mic_muted = volume::mic_muted();
         app.reload_clips();
+        if let Some(store) = &app.store {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            store.close_open_uses(now as i64);
+        }
+        app.start_activity();
+        app.sync_metrics();
+        app.ui.agents = agents::sessions();
+        agents::watch(hwnd);
+        app.init_steam();
+        steam::watch(hwnd);
         app.reload_shelf();
         app.reload_dock();
         app.reload_reminders();

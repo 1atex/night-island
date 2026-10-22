@@ -6,6 +6,7 @@ use rusqlite::{Connection, params};
 const MAX_TEXT_BYTES: usize = 256 * 1024;
 const MAX_UNPINNED: i64 = 200;
 const LIST_LIMIT: i64 = 100;
+const LIST_PREVIEW_CHARS: i64 = 2000;
 
 #[derive(Clone)]
 pub struct Clip {
@@ -83,20 +84,30 @@ impl Store {
         )
         .ok()?;
         super::notes::init(&conn).ok()?;
+        super::usage::init(&conn).ok()?;
         Some(Self { conn })
     }
 
     pub fn recent(&self) -> Vec<Clip> {
-        let Ok(mut stmt) =
-            self.conn.prepare_cached("SELECT id, text, pinned FROM clips ORDER BY pinned DESC, ts DESC LIMIT ?1")
+        let Ok(mut stmt) = self
+            .conn
+            .prepare_cached("SELECT id, substr(text, 1, ?1), pinned FROM clips ORDER BY pinned DESC, ts DESC LIMIT ?2")
         else {
             return Vec::new();
         };
-        stmt.query_map(params![LIST_LIMIT], |r| {
+        stmt.query_map(params![LIST_PREVIEW_CHARS, LIST_LIMIT], |r| {
             Ok(Clip { id: r.get(0)?, text: r.get(1)?, pinned: r.get::<_, i64>(2)? != 0 })
         })
         .map(|rows| rows.flatten().collect())
         .unwrap_or_default()
+    }
+
+    pub fn text(&self, id: i64) -> Option<String> {
+        self.conn.query_row("SELECT text FROM clips WHERE id = ?1", params![id], |r| r.get(0)).ok()
+    }
+
+    pub fn clear_unpinned(&self) {
+        let _ = self.conn.execute("DELETE FROM clips WHERE pinned = 0", []);
     }
 
     pub fn add(&self, text: &str) {
@@ -387,5 +398,33 @@ pub mod sys {
         unsafe {
             SendInput(&inputs, size_of::<INPUT>() as i32);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_list_keeps_a_preview_and_the_whole_text_is_read_by_id() {
+        let store = Store::in_memory().unwrap();
+        let long = "я".repeat(LIST_PREVIEW_CHARS as usize + 500);
+        store.add(&long);
+        let list = store.recent();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].text.chars().count(), LIST_PREVIEW_CHARS as usize);
+        assert_eq!(store.text(list[0].id).unwrap(), long);
+    }
+
+    #[test]
+    fn clearing_keeps_only_the_pinned_entries() {
+        let store = Store::in_memory().unwrap();
+        store.add("one");
+        store.add("two");
+        let one = store.recent().into_iter().find(|c| c.text == "one").unwrap();
+        store.toggle_pin(one.id);
+        store.clear_unpinned();
+        let left: Vec<String> = store.recent().into_iter().map(|c| c.text).collect();
+        assert_eq!(left, ["one"]);
     }
 }

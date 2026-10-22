@@ -1,16 +1,22 @@
 use crate::island::*;
 
+mod activity;
+mod agents;
 mod agy;
+mod chat;
 mod clipboard;
 mod command;
 mod controls;
 mod home;
 mod integrations;
+mod metrics;
 mod note;
+mod privacy;
 mod record;
 mod remind;
 mod settings;
 mod shelf;
+mod steam;
 mod text;
 mod weather;
 
@@ -28,6 +34,7 @@ impl App {
         }
         self.ui.tab = tab;
         self.ui.home.dev_menu = None;
+        self.ui.home.edit = false;
         self.ui.text.qr = None;
         self.refresh_reminder_labels();
         if tab == view::Tab::Text
@@ -46,6 +53,16 @@ impl App {
         }
         if tab == view::Tab::Agy {
             self.reload_agy();
+        }
+        if tab == view::Tab::Chat {
+            self.refresh_chat();
+        }
+        if tab == view::Tab::Privacy {
+            self.reload_uses();
+        }
+        self.sync_metrics();
+        if tab == view::Tab::Activity {
+            self.reload_activity();
         }
         self.repaint_expanded();
     }

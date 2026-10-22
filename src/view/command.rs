@@ -7,6 +7,7 @@ pub struct CommandUi {
     pub items: Vec<cmd::Item>,
     pub sel: usize,
     pub ai_pending: bool,
+    pub files_shown: bool,
 }
 
 pub const CMD_FONT: f32 = 18.0;

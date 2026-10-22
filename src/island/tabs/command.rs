@@ -2,7 +2,16 @@ use crate::island::*;
 
 impl App {
     pub(in crate::island) fn refresh_cmd(&mut self) {
-        self.ui.cmd.items = cmd::search(self.hwnd, &self.ui.cmd.input.text());
+        let text = self.ui.cmd.input.text();
+        if cmd::is_file_search(&text) && self.ui.cmd.files_shown {
+            cmd::start_file_search(self.hwnd, &text);
+        } else {
+            self.ui.cmd.files_shown = false;
+            if !cmd::is_file_search(&text) {
+                everything::cancel();
+            }
+            self.ui.cmd.items = cmd::search(self.hwnd, &text);
+        }
         self.ui.cmd.ai_pending = false;
         self.ui.cmd.sel = 0;
         self.ui.armed = None;
@@ -66,12 +75,7 @@ impl App {
             }
             cmd::Action::OpenAiSettings => {
                 self.close_command(false);
-                self.open_settings_window();
-                if let Some(group) = view::GROUPS.iter().position(|g| g.name == "AI") {
-                    self.ui.sw.group = group;
-                    self.ui.sw.scroll = 0.0;
-                    self.render_settings_win();
-                }
+                self.open_ai_settings();
             }
             cmd::Action::System(ctl) => {
                 let ctl = *ctl;
@@ -83,6 +87,18 @@ impl App {
                 self.run_ctl(ctl);
             }
         }
+    }
+
+    pub(in crate::island) fn on_files(&mut self) {
+        let Some(answer) = everything::take_result() else { return };
+        if !self.ui.cmd.open || !cmd::is_file_search(&self.ui.cmd.input.text()) {
+            return;
+        }
+        self.ui.cmd.items = cmd::file_items(answer);
+        self.ui.cmd.files_shown = true;
+        self.ui.cmd.sel = 0;
+        self.ui.armed = None;
+        self.repaint_expanded();
     }
 
     pub(in crate::island) fn on_ai(&mut self) {

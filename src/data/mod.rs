@@ -3,3 +3,4 @@ pub mod keys;
 pub mod log;
 pub mod notes;
 pub mod settings;
+pub mod usage;

@@ -108,10 +108,14 @@ pub fn lyric_visible(ui: &UiState) -> bool {
     ui.cfg.music_lyrics && ui.lyric.lines.is_some()
 }
 
+pub fn cover_visible(ui: &UiState) -> bool {
+    ui.cfg.music_cover && ui.media.cover.is_some()
+}
+
 pub fn music_pill(ui: &UiState) -> bool {
     ui.media.playing
         && !ui.media.title.is_empty()
-        && (ui.cfg.music_eq || ui.cfg.music_title || lyric_visible(ui))
+        && (ui.cfg.music_eq || ui.cfg.music_title || cover_visible(ui) || lyric_visible(ui))
         && ui.notice.is_none()
         && ui.volume.is_none()
         && ui.downloading.is_none()
@@ -119,7 +123,10 @@ pub fn music_pill(ui: &UiState) -> bool {
 
 pub fn row_pill(ui: &UiState) -> bool {
     music_pill(ui)
-        || (ui.recording_secs.is_some() && ui.notice.is_none() && ui.volume.is_none() && ui.downloading.is_none())
+        || ((ui.recording_secs.is_some() || pill_metrics_on(&ui.cfg) || agents_active(ui))
+            && ui.notice.is_none()
+            && ui.volume.is_none()
+            && ui.downloading.is_none())
 }
 
 pub(in crate::view) fn rec_slot(secs: u32) -> f32 {
@@ -134,6 +141,8 @@ pub(in crate::view) fn rec_time(secs: u32) -> String {
     }
 }
 
+pub(in crate::view) const COVER_SLOT: f32 = 26.0;
+
 pub(in crate::view) const WEATHER_SLOT: f32 = 62.0;
 
 pub(in crate::view) const BARS_SLOT: f32 = 63.0;
@@ -145,6 +154,30 @@ pub(in crate::view) const LYRIC_SLOT: f32 = 176.0;
 pub const LYRIC_SLOT_MAX: f32 = 320.0;
 
 pub const LYRIC_PITCH: f32 = 19.0;
+
+pub fn agents_active(ui: &UiState) -> bool {
+    use crate::services::agents::State;
+    ui.agents.iter().any(|s| matches!(s.state, State::Working | State::Waiting))
+}
+
+fn agent_label(ui: &UiState) -> (String, windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F) {
+    use crate::services::agents::{Agent, State};
+    let active: Vec<_> = ui.agents.iter().filter(|s| matches!(s.state, State::Working | State::Waiting)).collect();
+    let waiting = active.iter().any(|s| s.state == State::Waiting);
+    let color = if waiting { rgba(1.0, 0.75, 0.3, 1.0) } else { rgba(0.45, 0.8, 1.0, 1.0) };
+    let text = match active.as_slice() {
+        [one] => match one.agent {
+            Agent::Claude => "Claude".to_string(),
+            Agent::Codex => "Codex".to_string(),
+        },
+        many => format!("×{}", many.len()),
+    };
+    (if waiting { format!("{text} !") } else { text }, color)
+}
+
+pub(in crate::view) const AGENT_SLOT: f32 = 78.0;
+
+pub(in crate::view) const METRICS_CHAR_W: f32 = 6.6;
 
 pub(in crate::view) const CLOCK_SLOT: f32 = 54.0;
 
@@ -160,11 +193,14 @@ pub(in crate::view) fn battery_slot(ui: &UiState) -> Option<f32> {
 }
 
 pub struct MusicSlots {
+    pub cover: Option<(f32, f32)>,
     pub weather: Option<(f32, f32)>,
     pub bars: Option<(f32, f32)>,
     pub title: Option<(f32, f32)>,
     pub lyric: Option<(f32, f32)>,
     pub rec: Option<(f32, f32)>,
+    pub metrics: Option<(f32, f32)>,
+    pub agent: Option<(f32, f32)>,
     pub clock: (f32, f32),
     pub battery: Option<(f32, f32)>,
     pub width: f32,
@@ -174,12 +210,15 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let shift = ui.char_inset + indicators_width(ui, 1.0);
     let weather = (ui.cfg.pill_weather && ui.weather.is_some()).then_some(WEATHER_SLOT);
     let music = music_pill(ui);
+    let cover = (music && cover_visible(ui)).then_some(COVER_SLOT);
     let bars = (music && ui.cfg.music_eq).then_some(BARS_SLOT);
     let title = (music && ui.cfg.music_title).then_some(TITLE_SLOT);
     let lyric = (music && lyric_visible(ui)).then_some(ui.lyric.width.max(LYRIC_SLOT));
     let rec = ui.recording_secs.map(rec_slot);
+    let agent = agents_active(ui).then_some(AGENT_SLOT);
+    let metrics = pill_metrics_on(&ui.cfg).then(|| pill_chars(&ui.cfg.metrics_pill) as f32 * METRICS_CHAR_W + 4.0);
     let battery = battery_slot(ui);
-    let widths = [weather, bars, title, lyric, rec, Some(CLOCK_SLOT), battery];
+    let widths = [cover, weather, bars, title, lyric, rec, agent, metrics, Some(CLOCK_SLOT), battery];
     let count = widths.iter().flatten().count() as f32;
     let content: f32 = widths.iter().flatten().sum::<f32>() + SLOT_GAP * (count - 1.0).max(0.0);
     let width = (32.0 + shift + content).max(200.0);
@@ -192,14 +231,17 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
             slot
         })
     };
+    let cover = place(cover);
     let weather = place(weather);
     let bars = place(bars);
     let title = place(title);
     let lyric = place(lyric);
     let rec = place(rec);
+    let agent = place(agent);
+    let metrics = place(metrics);
     let clock = place(Some(CLOCK_SLOT)).unwrap_or((0.0, 0.0));
     let battery = place(battery);
-    MusicSlots { weather, bars, title, lyric, rec, clock, battery, width }
+    MusicSlots { cover, weather, bars, title, lyric, rec, agent, metrics, clock, battery, width }
 }
 
 pub(in crate::view) fn downloading_label(name: &str) -> String {
@@ -354,6 +396,11 @@ pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Res
     };
     if row_pill(ui) {
         let slots = music_slots(ui, scale, w);
+        if let (Some((off, width)), Some(cover)) = (slots.cover, &ui.media.cover) {
+            let side = width.min(h - 10.0 * scale);
+            let top = y + (h - side) / 2.0;
+            p.image((x + off, top, x + off + side, top + side), 6.0 * scale, cover.size, &cover.bgra)?;
+        }
         if let Some((off, _)) = slots.weather {
             weather_at(x + off + 10.0 * scale)?;
         }
@@ -384,6 +431,30 @@ pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Res
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_TEXT_ALIGNMENT_LEADING,
                 rgba(1.0, 0.55, 0.55, 1.0),
+            )?;
+        }
+        if let Some((off, width)) = slots.agent {
+            let (label, color) = agent_label(ui);
+            let cy = y + h / 2.0;
+            p.fill_ellipse(x + off + 5.0 * scale, cy, 8.0 * scale, 8.0 * scale, rgba(color.r, color.g, color.b, 0.2))?;
+            p.fill_ellipse(x + off + 5.0 * scale, cy, 4.0 * scale, 4.0 * scale, color)?;
+            p.text(
+                &label,
+                (x + off + 15.0 * scale, y, x + off + width, y + h),
+                12.0 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                color,
+            )?;
+        }
+        if let Some((off, width)) = slots.metrics {
+            p.text(
+                &ui.metrics.pill,
+                (x + off, y, x + off + width, y + h),
+                11.5 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                rgba(1.0, 1.0, 1.0, 0.85),
             )?;
         }
         p.text(

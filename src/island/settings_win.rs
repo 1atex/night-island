@@ -355,6 +355,37 @@ impl App {
                     self.lyrics_apps_changed();
                 }
             }
+            view::Act::Agent(i) => {
+                if let Some(agent) = agents::Agent::ALL.get(i).copied() {
+                    let result =
+                        if agents::connected(agent) { agents::disconnect(agent) } else { agents::connect(agent) };
+                    if let Err(why) = result {
+                        self.notify_for(Notice::Error, '\u{E783}', why, 5000);
+                    }
+                }
+            }
+            view::Act::Metric(i) => {
+                if let Some(metric) = metrics::Metric::ALL.get(i) {
+                    let key = metric.key().to_string();
+                    let on_tab = self.settings.metrics_tab.contains(&key);
+                    let on_pill = self.settings.metrics_pill.contains(&key);
+                    let (to_tab, to_pill) = match (on_tab, on_pill) {
+                        (false, false) => (true, false),
+                        (true, false) => (false, true),
+                        (false, true) => (true, true),
+                        (true, true) => (false, false),
+                    };
+                    for (list, on) in
+                        [(&mut self.settings.metrics_tab, to_tab), (&mut self.settings.metrics_pill, to_pill)]
+                    {
+                        list.retain(|k| *k != key);
+                        if on {
+                            list.push(key.clone());
+                        }
+                    }
+                    self.metrics_changed();
+                }
+            }
             view::Act::LyricsAppRemove(i) => {
                 if i < self.settings.lyrics_apps.len() {
                     self.settings.lyrics_apps.remove(i);
@@ -413,6 +444,16 @@ impl App {
                 }
             }
         }
+    }
+
+    fn metrics_changed(&mut self) {
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        if let Some(sample) = metrics::latest() {
+            self.ui.metrics.pill = view::pill_text(&sample, &self.settings.metrics_pill);
+        }
+        self.sync_metrics();
+        self.repaint_collapsed();
     }
 
     fn lyrics_apps_changed(&mut self) {

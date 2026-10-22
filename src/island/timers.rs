@@ -29,10 +29,12 @@ pub(in crate::island) enum Timer {
     LockKey = 25,
     SwCaret = 26,
     PillBack = 27,
+    GhostHold = 28,
+    Activity = 29,
 }
 
 impl Timer {
-    const ALL: [Timer; 27] = [
+    const ALL: [Timer; 29] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -60,6 +62,8 @@ impl Timer {
         Timer::LockKey,
         Timer::SwCaret,
         Timer::PillBack,
+        Timer::GhostHold,
+        Timer::Activity,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -101,6 +105,8 @@ impl App {
             Timer::LockKey => self.report_lockkeys(),
             Timer::SwCaret => self.sw_caret_tick(),
             Timer::PillBack => self.restore_pill(),
+            Timer::GhostHold => self.ghost_hold_tick(),
+            Timer::Activity => self.on_activity_timer(),
             Timer::Geo => {
                 if self.ui.tab == view::Tab::Weather && self.ui.editing {
                     weather::search(self.hwnd, &self.ui.city.input.text());
@@ -145,6 +151,9 @@ impl App {
             Timer::Disarm => {
                 self.ui.armed = None;
                 self.ui.notes.armed_delete = false;
+                self.ui.clip.clear_armed = false;
+                self.ui.privacy_log.clear_armed = false;
+                self.ui.activity.clear_armed = false;
                 self.repaint_expanded();
             }
             Timer::Clock => {

@@ -184,13 +184,13 @@ impl App {
             None
         };
         let hover_text = if self.ui.tab == view::Tab::Text {
-            view::hit_text(pill, self.scale, fx, fy, self.settings.dev_tools)
+            view::hit_text(pill, self.scale, fx, fy, self.settings.dev_tools, self.ui.text.chip_scroll)
         } else {
             None
         };
         let hover_act = if self.ui.tab == view::Tab::Home && self.ui.home.dev_menu.is_some() {
             let count = self.ui.home.dev_menu.as_ref().map_or(0, |m| m.0.len());
-            match view::hit_menu(pill, self.scale, fx, fy, count) {
+            match view::hit_menu(pill, self.scale, fx, fy, count, view::home_wide(&self.ui)) {
                 Some(Some(i)) => Some(300 + i),
                 _ => None,
             }
@@ -210,6 +210,22 @@ impl App {
                 Some(view::AgyHit::Back) => Some(1101),
                 _ => None,
             }
+        } else if self.ui.tab == view::Tab::Privacy {
+            let button = view::usage_clear_button(pill, self.scale);
+            (fx >= button.0 && fx < button.2 && fy >= button.1 && fy < button.3).then_some(1300)
+        } else if self.ui.tab == view::Tab::Activity {
+            match view::hit_activity(pill, self.scale, fx, fy, self.settings.activity_track) {
+                Some(view::ActivityHit::Clear) => Some(1301),
+                Some(view::ActivityHit::TurnOn) => Some(1310),
+                _ => None,
+            }
+        } else if self.ui.tab == view::Tab::Chat {
+            match view::hit_chat(pill, self.scale, fx, fy, &self.ui) {
+                Some(view::ChatHit::Send) => Some(1200),
+                Some(view::ChatHit::New) => Some(1201),
+                Some(view::ChatHit::Setup) => Some(1210),
+                _ => None,
+            }
         } else if self.ui.tab == view::Tab::Weather {
             match view::hit_city_match(pill, self.scale, fx, fy, self.ui.city.matches.len(), self.ui.weather.is_some())
             {
@@ -223,17 +239,7 @@ impl App {
                 view::ThemeHit::Accent(i) => 840 + i,
             })
         } else if self.ui.tab == view::Tab::Home {
-            let has_media = !self.ui.media.title.is_empty();
-            match view::hit_home(
-                pill,
-                self.scale,
-                fx,
-                fy,
-                has_media,
-                view::spotify_active(&self.ui),
-                view::discord_strip(&self.ui),
-                self.ui.home.dock.len(),
-            ) {
+            match view::hit_home(pill, self.scale, fx, fy, &self.ui) {
                 Some(view::HomeHit::Action(i)) => Some(i),
                 Some(view::HomeHit::Device) => Some(100),
                 Some(view::HomeHit::Media(i)) => Some(500 + i),
@@ -245,6 +251,8 @@ impl App {
                 Some(view::HomeHit::Dock(i)) => Some(600 + i),
                 Some(view::HomeHit::DockAdd) => Some(700),
                 Some(view::HomeHit::VolumeIcon) => Some(530),
+                Some(view::HomeHit::Edit) => Some(550),
+                Some(view::HomeHit::Player) => Some(560),
                 _ => None,
             }
         } else {
@@ -295,6 +303,9 @@ impl App {
             self.repaint_expanded();
             return;
         }
+        if view::hit_mic_chip(pill, self.scale, &self.ui, x as f32, y as f32) {
+            return self.toggle_mic();
+        }
         if let Some(i) = view::hit_tab(pill, self.scale, x as f32, y as f32, &self.ui) {
             if view::TABS[i].0 == view::Tab::Settings {
                 return self.open_settings_window();
@@ -318,6 +329,10 @@ impl App {
             view::Tab::Home => self.click_home(x, y),
             view::Tab::Weather => self.click_weather(x, y),
             view::Tab::Agy => self.click_agy(x, y),
+            view::Tab::Chat => self.click_chat(x, y),
+            view::Tab::Privacy => self.click_privacy(x, y),
+            view::Tab::Activity => self.click_activity(x, y),
+            view::Tab::System => {}
             view::Tab::Theme => self.click_theme(x, y),
             view::Tab::Settings => {}
         }
@@ -340,8 +355,15 @@ impl App {
             self.ui.agy.hist = (self.ui.agy.hist + step).clamp(0.0, self.ui.agy.max.get());
             return self.repaint_expanded();
         }
+        if self.ui.tab == view::Tab::Chat {
+            let step = 54.0 * self.scale * if delta > 0 { 1.0 } else { -1.0 };
+            self.ui.chat.hist = (self.ui.chat.hist + step).clamp(0.0, self.ui.chat.max.get());
+            return self.repaint_expanded();
+        }
         let rows = if self.ui.tab == view::Tab::Agy {
             view::agy_rows()
+        } else if self.ui.tab == view::Tab::Privacy {
+            view::privacy_rows(self.pill_rect(true), self.scale)
         } else {
             view::clip_rows(self.pill_rect(true), self.scale)
         };
@@ -350,6 +372,20 @@ impl App {
         }
         if self.ui.tab == view::Tab::Remind {
             return self.wheel_remind(delta);
+        }
+        if self.ui.tab == view::Tab::Text
+            && let Some((x, y)) = self.cursor_client()
+            && view::over_text_side(self.pill_rect(true), self.scale, x, y)
+        {
+            let max = view::chip_scroll_max(self.pill_rect(true), self.scale, self.settings.dev_tools);
+            let scroll = &mut self.ui.text.chip_scroll;
+            let next = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(max) };
+            if next != *scroll {
+                *scroll = next;
+                self.ui.text.hover = None;
+                self.repaint_expanded();
+            }
+            return;
         }
         if matches!(self.ui.tab, view::Tab::Note | view::Tab::Text) {
             let Some(layout) = self.note_layout() else { return };
@@ -367,6 +403,7 @@ impl App {
             view::Tab::Clipboard => (self.clipboard.clips.len(), &mut self.ui.clip.scroll),
             view::Tab::Shelf => (self.shelf.len(), &mut self.ui.shelf_scroll),
             view::Tab::Agy => (self.ui.agy.chats.len(), &mut self.ui.agy.scroll),
+            view::Tab::Privacy => (self.ui.privacy_log.rows.len(), &mut self.ui.privacy_log.scroll),
             _ => return,
         };
         let max = len.saturating_sub(rows);
@@ -405,7 +442,9 @@ impl App {
         self.kill_timer(Timer::Autohide);
         if self.state != State::Expanded {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
-            if hidden || self.on_pill(x, y) {
+            let over_mic = self.state == State::Collapsed
+                && view::hit_mic_dot(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32);
+            if !over_mic && (hidden || self.on_pill(x, y)) {
                 self.set_timer(Timer::Expand, self.settings.open_delay_ms.max(1));
             } else {
                 self.kill_timer(Timer::Expand);

@@ -1,12 +1,15 @@
+use std::ffi::c_void;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, MSG, MsgWaitForMultipleObjects, PM_NOREMOVE, PeekMessageW, QS_SENDMESSAGE, SendMessageW, WM_COPYDATA,
+    FindWindowW, PostMessageW, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_APP, WM_COPYDATA,
 };
 use windows::core::{PCWSTR, w};
+
+pub const WM_FILES: u32 = WM_APP + 23;
 
 const REPLY_ID: usize = 0x4E49_5345;
 const QUERY2W: usize = 18;
@@ -24,6 +27,8 @@ pub enum Error {
     NotRunning,
     Failed,
 }
+
+pub type Answer = Result<Vec<Hit>, Error>;
 
 static REPLY: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 static AWAITING: AtomicBool = AtomicBool::new(false);
@@ -75,7 +80,42 @@ pub fn parse_reply(b: &[u8]) -> Vec<Hit> {
     out
 }
 
-pub fn search(own: HWND, query: &str, limit: u32) -> Result<Vec<Hit>, Error> {
+static LATEST: AtomicU64 = AtomicU64::new(0);
+static DONE: Mutex<Option<(u64, Answer)>> = Mutex::new(None);
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+pub fn start(own: HWND, query: &str, limit: u32) {
+    let id = LATEST.fetch_add(1, Ordering::SeqCst) + 1;
+    let (raw, query) = (own.0 as isize, query.to_string());
+    std::thread::spawn(move || {
+        let _turn = ONE_AT_A_TIME.lock();
+        if LATEST.load(Ordering::SeqCst) != id {
+            return;
+        }
+        let own = HWND(raw as *mut c_void);
+        let result = ask(own, &query, limit);
+        if LATEST.load(Ordering::SeqCst) != id {
+            return;
+        }
+        if let Ok(mut done) = DONE.lock() {
+            *done = Some((id, result));
+        }
+        unsafe {
+            let _ = PostMessageW(Some(own), WM_FILES, WPARAM(0), LPARAM(0));
+        }
+    });
+}
+
+pub fn cancel() {
+    LATEST.fetch_add(1, Ordering::SeqCst);
+}
+
+pub fn take_result() -> Option<Answer> {
+    let (id, result) = DONE.lock().ok()?.take()?;
+    (id == LATEST.load(Ordering::SeqCst)).then_some(result)
+}
+
+fn ask(own: HWND, query: &str, limit: u32) -> Answer {
     let target = everything_window().ok_or(Error::NotRunning)?;
     let query: String = query.chars().filter(|c| *c != '\0').take(MAX_QUERY).collect();
 
@@ -95,15 +135,20 @@ pub fn search(own: HWND, query: &str, limit: u32) -> Result<Vec<Hit>, Error> {
     AWAITING.store(true, Ordering::Release);
     let cds = COPYDATASTRUCT { dwData: QUERY2W, cbData: payload.len() as u32, lpData: payload.as_mut_ptr().cast() };
     let accepted = unsafe {
-        SendMessageW(target, WM_COPYDATA, Some(WPARAM(own.0 as usize)), Some(LPARAM(&cds as *const _ as isize)))
+        SendMessageTimeoutW(
+            target,
+            WM_COPYDATA,
+            WPARAM(own.0 as usize),
+            LPARAM(&cds as *const _ as isize),
+            SMTO_ABORTIFHUNG,
+            1500,
+            None,
+        )
     };
     let started = std::time::Instant::now();
-    while accepted.0 != 0 && !GOT.load(Ordering::Acquire) && started.elapsed() < std::time::Duration::from_millis(400) {
-        unsafe {
-            MsgWaitForMultipleObjects(None, false, 10, QS_SENDMESSAGE);
-            let mut msg = MSG::default();
-            let _ = PeekMessageW(&mut msg, Some(own), WM_COPYDATA, WM_COPYDATA, PM_NOREMOVE);
-        }
+    while accepted.0 != 0 && !GOT.load(Ordering::Acquire) && started.elapsed() < std::time::Duration::from_millis(1500)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(3));
     }
     AWAITING.store(false, Ordering::Release);
     if accepted.0 == 0 || !GOT.load(Ordering::Acquire) {
@@ -204,7 +249,24 @@ mod live {
                 None,
             )
             .unwrap();
-            let hits = search(hwnd, "notepad.exe", 5).expect("everything answered");
+            let raw = hwnd.0 as isize;
+            let worker = std::thread::spawn(move || ask(HWND(raw as *mut std::ffi::c_void), "notepad.exe", 5));
+            while !worker.is_finished() {
+                let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
+                while windows::Win32::UI::WindowsAndMessaging::PeekMessageW(
+                    &mut msg,
+                    None,
+                    0,
+                    0,
+                    windows::Win32::UI::WindowsAndMessaging::PM_REMOVE,
+                )
+                .as_bool()
+                {
+                    windows::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            let hits = worker.join().unwrap().expect("everything answered");
             for h in &hits {
                 println!("{} folder={}", h.path, h.folder);
             }

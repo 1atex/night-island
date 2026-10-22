@@ -5,6 +5,7 @@ pub(in crate::island) const VOLUME_OVERLAY_MS: u32 = 1300;
 
 impl App {
     pub(in crate::island) fn on_privacy(&mut self) {
+        self.log_privacy_events();
         let now = privacy::snapshot();
         if now == self.ui.privacy {
             return;
@@ -74,7 +75,7 @@ impl App {
             if muted { '\u{F781}' } else { '\u{E720}' },
             if muted { "Microphone muted" } else { "Microphone on" },
         );
-        if self.state == State::Expanded && self.ui.tab == view::Tab::Controls {
+        if self.state == State::Expanded {
             self.repaint_expanded();
         }
     }

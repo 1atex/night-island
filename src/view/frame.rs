@@ -70,6 +70,10 @@ pub(in crate::view) fn privacy_chip(pill: Rect, scale: f32, ui: &UiState) -> Opt
     Some(((right - width, pin.1 + 2.0 * scale, right, pin.3 - 2.0 * scale), glyph, label))
 }
 
+pub fn hit_mic_chip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bool {
+    privacy_chip(pill, scale, ui).is_some_and(|(rect, _, label)| label == "Microphone" && inside(rect, px, py))
+}
+
 pub fn paint_expanded(
     p: &Painter,
     pill: Rect,
@@ -124,12 +128,18 @@ pub fn paint_expanded(
         rgba(1.0, 1.0, 1.0, if ui.pinned { 1.0 } else { 0.62 }),
     )?;
     if let Some((chip, glyph, label)) = privacy_chip(pill, scale, ui) {
-        p.fill_round_rect(chip, (chip.3 - chip.1) / 2.0, rgba(1.0, 0.62, 0.2, 0.2))?;
+        let muted = label == "Microphone" && ui.mic_muted == Some(true);
+        let (fill, icon, text) = if muted {
+            (rgba(1.0, 0.3, 0.3, 0.2), rgba(1.0, 0.45, 0.45, 1.0), rgba(1.0, 0.5, 0.5, 1.0))
+        } else {
+            (rgba(1.0, 0.62, 0.2, 0.2), rgba(1.0, 0.7, 0.3, 1.0), rgba(1.0, 0.72, 0.35, 1.0))
+        };
+        p.fill_round_rect(chip, (chip.3 - chip.1) / 2.0, fill)?;
         p.glyph(
-            glyph,
+            if muted { '\u{F781}' } else { glyph },
             (chip.0 + 4.0 * scale, chip.1, chip.0 + 32.0 * scale, chip.3),
             14.0 * scale,
-            rgba(1.0, 0.7, 0.3, 1.0),
+            icon,
         )?;
         if chip.2 - chip.0 > 60.0 * scale {
             p.text(
@@ -138,7 +148,7 @@ pub fn paint_expanded(
                 13.0 * scale,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_TEXT_ALIGNMENT_LEADING,
-                rgba(1.0, 0.72, 0.35, 1.0),
+                text,
             )?;
         }
     }
@@ -147,6 +157,10 @@ pub fn paint_expanded(
         Tab::Home => paint_home(p, pill, scale, ui)?,
         Tab::Weather => paint_weather(p, pill, scale, ui)?,
         Tab::Agy => paint_agy(p, pill, scale, ui)?,
+        Tab::Chat => paint_chat(p, pill, scale, ui)?,
+        Tab::Privacy => paint_privacy(p, pill, scale, ui)?,
+        Tab::Activity => paint_activity(p, pill, scale, ui)?,
+        Tab::System => paint_system(p, pill, scale, ui)?,
         Tab::Theme => paint_theme(p, pill, scale, ui)?,
         Tab::Clipboard => paint_clipboard(p, pill, scale, ui, clips)?,
         Tab::Controls => paint_controls(p, pill, scale, ui)?,

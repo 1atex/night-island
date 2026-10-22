@@ -1,7 +1,10 @@
 use crate::island::*;
+use windows::Win32::Foundation::COLORREF;
 use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
 
 pub(in crate::island) const GAME_POLL_MS: u32 = 2000;
+
+const GHOST_POLL_MS: u32 = 60;
 
 pub(in crate::island) use crate::data::keys::Hotkey;
 
@@ -96,7 +99,7 @@ impl App {
             self.hide_window();
         } else {
             register_hotkeys(self.hwnd, &self.settings);
-            if !self.pill_hidden {
+            if !self.pill_hidden || self.ghosted {
                 self.show_window();
             }
         }
@@ -136,6 +139,16 @@ impl App {
             }
         }
         self.pill_hidden = true;
+        if self.settings.ghost_mode {
+            self.ghosted = true;
+            self.apply_ghost(true);
+            if self.settings.ghost_hold {
+                self.set_timer(Timer::GhostHold, GHOST_POLL_MS);
+            } else {
+                self.set_timer(Timer::PillBack, self.settings.hide_pill_secs * 1000);
+            }
+            return;
+        }
         self.hide_window();
         self.set_timer(Timer::PillBack, self.settings.hide_pill_secs * 1000);
     }
@@ -146,8 +159,52 @@ impl App {
         }
         self.pill_hidden = false;
         self.kill_timer(Timer::PillBack);
+        self.kill_timer(Timer::GhostHold);
+        if self.ghosted {
+            self.ghosted = false;
+            return self.apply_ghost(false);
+        }
         if !self.gaming {
             self.show_window();
         }
+    }
+
+    pub(in crate::island) fn ghost_hold_tick(&mut self) {
+        if !self.ghosted {
+            return;
+        }
+        let vk = self.settings.combo(Hotkey::HidePill).vk as i32;
+        let down = unsafe { GetAsyncKeyState(vk) } < 0;
+        if down {
+            self.set_timer(Timer::GhostHold, GHOST_POLL_MS);
+        } else {
+            self.restore_pill();
+        }
+    }
+
+    fn apply_ghost(&mut self, on: bool) {
+        let target = if on { self.settings.ghost_opacity } else { 1.0 };
+        if let Ok(fade) = self.compositor.CreateScalarKeyFrameAnimation() {
+            let _ = fade.InsertKeyFrame(1.0, target);
+            let _ = fade.SetDuration(Duration::from_millis(180).into());
+            let _ = self.root.StartAnimation(h!("Opacity"), &fade);
+        }
+        let through = on && self.settings.ghost_click_through;
+        unsafe {
+            let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
+            let bits = (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0) as isize;
+            let styled = if through { ex | bits } else { ex & !bits };
+            if styled != ex {
+                SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, styled);
+            }
+            if through {
+                let _ = SetLayeredWindowAttributes(self.hwnd, COLORREF(0), 255, LWA_ALPHA);
+            }
+        }
+        if through {
+            self.kill_timer(Timer::Expand);
+            self.kill_timer(Timer::Collapse);
+        }
+        self.pointer.tracking = false;
     }
 }

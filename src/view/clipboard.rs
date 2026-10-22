@@ -5,7 +5,10 @@ pub struct ClipUi {
     pub query: TextEdit,
     pub scroll: usize,
     pub hover: Option<ClipHit>,
+    pub clear_armed: bool,
 }
+
+const CLEAR_W: f32 = 84.0;
 
 pub(in crate::view) const LIST_TOP: f32 = 66.0;
 
@@ -64,8 +67,30 @@ pub(in crate::view) fn preview(text: &str) -> String {
 
 pub fn clip_search_frame(pill: Rect, scale: f32) -> (Rect, Rect) {
     let (x, y, w, _) = pill;
-    let frame = (x + SIDE_PAD * scale, y + 54.0 * scale, x + w - SIDE_PAD * scale, y + 84.0 * scale);
+    let right = x + w - SIDE_PAD * scale - (CLEAR_W + 8.0) * scale;
+    let frame = (x + SIDE_PAD * scale, y + 54.0 * scale, right, y + 84.0 * scale);
     (frame, (frame.0 + 34.0 * scale, frame.1, frame.2 - 12.0 * scale, frame.3))
+}
+
+pub fn clip_clear_rect(pill: Rect, scale: f32) -> Rect {
+    let (x, y, w, _) = pill;
+    let right = x + w - SIDE_PAD * scale;
+    (right - CLEAR_W * scale, y + 54.0 * scale, right, y + 84.0 * scale)
+}
+
+fn paint_clip_clear(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    let rect = clip_clear_rect(pill, scale);
+    let armed = ui.clip.clear_armed;
+    let fill = if armed { rgba(1.0, 0.35, 0.35, 0.28) } else { rgba(1.0, 1.0, 1.0, 0.07) };
+    p.fill_round_rect(rect, 12.0 * scale, fill)?;
+    p.text(
+        if armed { "Sure?" } else { "Clear" },
+        rect,
+        13.0 * scale,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_TEXT_ALIGNMENT_CENTER,
+        rgba(1.0, 1.0, 1.0, if armed { 1.0 } else { 0.75 }),
+    )
 }
 
 pub(in crate::view) fn paint_clip_search(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
@@ -120,6 +145,7 @@ pub(in crate::view) fn paint_clipboard(
     clips: &[Clip],
 ) -> Result<()> {
     paint_clip_search(p, pill, scale, ui)?;
+    paint_clip_clear(p, pill, scale, ui)?;
     if clips.is_empty() {
         let (x, y, w, h) = pill;
         return p.text(
