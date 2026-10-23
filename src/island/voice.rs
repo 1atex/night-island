@@ -58,11 +58,77 @@ impl App {
         }
     }
 
+    fn start_voice_command(&mut self, command: &str) {
+        if command.is_empty() {
+            return self.show_notice_for('\u{E720}', "Say a command after the name", 2200);
+        }
+        if ai::ask_command(self.hwnd, command) {
+            self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
+        } else {
+            self.notify_for(Notice::Error, '\u{E783}', "Another request is running, try again in a moment", 3500);
+        }
+    }
+
+    pub(in crate::island) fn on_voice_command(&mut self) {
+        let Some(answer) = ai::take_command_result() else { return };
+        self.clear_notice();
+        let reply = match answer {
+            Ok(reply) => reply,
+            Err(why) => {
+                let short: String = why.chars().take(70).collect();
+                return self.notify_for(Notice::Error, '\u{E783}', &short, 4500);
+            }
+        };
+        match voicecmd::parse(&reply) {
+            voicecmd::Command::Media(what) => {
+                media::control(match what {
+                    voicecmd::Media::PlayPause => media::Control::PlayPause,
+                    voicecmd::Media::Next => media::Control::Next,
+                    voicecmd::Media::Previous => media::Control::Previous,
+                });
+                self.show_notice_for('\u{E768}', "Done", 1500);
+            }
+            voicecmd::Command::Control(what) => {
+                self.run_ctl(match what {
+                    voicecmd::Toggle::Mic => view::Ctl::Mic,
+                    voicecmd::Toggle::WiFi => view::Ctl::WiFi,
+                    voicecmd::Toggle::Bluetooth => view::Ctl::Bluetooth,
+                    voicecmd::Toggle::Theme => view::Ctl::Theme,
+                    voicecmd::Toggle::Lock => view::Ctl::Lock,
+                });
+                self.show_notice_for('\u{E73E}', "Done", 1500);
+            }
+            voicecmd::Command::Remind(phrase) => match remind::parse(&phrase, chrono::Local::now()) {
+                Some(parsed) => {
+                    let text = if parsed.text.is_empty() { "Reminder".to_string() } else { parsed.text };
+                    self.store_reminder(parsed.due, &text);
+                    self.show_notice_for(
+                        '\u{E916}',
+                        &format!("{} · {}", remind::describe(parsed.due, chrono::Local::now()), text),
+                        3500,
+                    );
+                }
+                None => self.notify_for(Notice::Error, '\u{E783}', "No time in that command", 3500),
+            },
+            voicecmd::Command::Answer(text) => {
+                let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
+                self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);
+            }
+            voicecmd::Command::Unknown => {
+                self.notify_for(Notice::Error, '\u{E783}', "That command is not something I can do by voice", 3500);
+            }
+        }
+    }
+
     pub(in crate::island) fn on_transcribed(&mut self) {
         let Some(answer) = ai::take_transcript() else { return };
         self.clear_notice();
         match answer {
             Ok(text) => {
+                let wakes = voicecmd::wake_words(&self.settings.ai.voice_wake);
+                if let Some(command) = voicecmd::strip_wake(&text, &wakes) {
+                    return self.start_voice_command(&command);
+                }
                 if self.settings.voice_paste {
                     self.clipboard.own_clip_seq = clips::sys::write_and_paste(self.hwnd, &text);
                 } else {

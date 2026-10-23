@@ -60,7 +60,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Write something, it saves itself" => "Пиши — сохраняется само",
         "Remind me…  e.g. in 30 min call mom" => "Напомни…  например, через 30 мин позвонить маме",
         "Reminder" => "Напоминание",
-        "Done" => "Готово",
         "Snooze 10 min" => "Отложить на 10 мин",
         "Snooze 1 hour" => "Отложить на час",
         "Record an area" => "Записать область",
@@ -518,8 +517,30 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Paste dictated text" => "Вставлять надиктованное",
         "Listening… press the keys again" => "Слушаю… нажмите клавиши ещё раз",
         "Recognizing…" => "Распознаю…",
-        "Dictation needs Gemini or an OpenAI-compatible service" => {
-            "Для диктовки нужен Gemini или OpenAI-совместимый сервис"
+        "Dictation needs Gemini, an OpenAI-compatible service or a separate speech service" => {
+            "Для диктовки нужен Gemini, OpenAI-совместимый сервис или отдельный сервис речи"
+        }
+        "Save a key for the speech service first" => "Сначала сохраните ключ сервиса речи",
+        "Separate speech service" => "Отдельный сервис речи",
+        "Voice command name" => "Имя для голосовых команд",
+        "Save command name" => "Сохранить имя",
+        "Command name saved" => "Имя сохранено",
+        "Dictate the name first: \"Island, next track\", \"Island, remind me in 10 min\". Empty: off." => {
+            "Скажите имя первым: «Айленд, следующий трек», «Айленд, напомни через 10 минут». Пусто: выключено."
+        }
+        "Up to 5 names of up to 24 characters, separated by commas" => "До 5 имён по 24 символа, через запятую",
+        "Say a command after the name" => "Скажите команду после имени",
+        "Done" => "Готово",
+        "No time in that command" => "В команде нет времени",
+        "That command is not something I can do by voice" => "Это я голосом сделать не могу",
+        "Speech API key" => "Ключ API речи",
+        "Speech model" => "Модель речи",
+        "Speech server address" => "Адрес сервера речи",
+        "Save speech service" => "Сохранить сервис речи",
+        "Remove the speech key" => "Удалить ключ сервиса речи",
+        "Speech service saved" => "Сервис речи сохранён",
+        "Any OpenAI-compatible /audio/transcriptions server: OpenAI, Groq, your own Whisper." => {
+            "Любой OpenAI-совместимый сервер /audio/transcriptions: OpenAI, Groq, свой Whisper."
         }
         "The microphone could not be opened" => "Не удалось открыть микрофон",
         "Too short, nothing was recorded" => "Слишком коротко, ничего не записано",

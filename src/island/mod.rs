@@ -61,6 +61,7 @@ use crate::tools::cmd;
 use crate::tools::edit;
 use crate::tools::remind;
 use crate::tools::texttools;
+use crate::tools::voicecmd;
 use crate::ui::characters::{self, Character, Reaction};
 use crate::ui::gfx::{Gpu, Layer};
 use crate::ui::overlay;

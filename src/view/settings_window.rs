@@ -145,6 +145,7 @@ pub enum Field {
     VoiceKey,
     VoiceModel,
     VoiceBase,
+    WakeWord,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -159,6 +160,7 @@ pub enum Act {
     AiRemoveKey,
     VoiceSave,
     VoiceRemoveKey,
+    WakeSave,
     UpdateCheck,
     UpdateDownload,
     UpdateInstall,
@@ -437,6 +439,11 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
     for &(id, label, kind) in &AI {
         out.push(Item::Row(id, label, kind));
     }
+    out.push(Item::Field(Field::WakeWord, "Voice command name", "Island, Айленд"));
+    out.push(Item::Button(Act::WakeSave, "Save command name".into(), true));
+    out.push(Item::Note(
+        "Dictate the name first: \"Island, next track\", \"Island, remind me in 10 min\". Empty: off.",
+    ));
     if ui.cfg.ai.voice_separate {
         let saved = ui.int.voice_key_saved;
         out.push(Item::Field(
@@ -607,6 +614,7 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::VoiceKey => &ui.int.voice_key,
         Field::VoiceModel => &ui.int.voice_model,
         Field::VoiceBase => &ui.int.voice_base,
+        Field::WakeWord => &ui.int.wake,
     }
 }
 

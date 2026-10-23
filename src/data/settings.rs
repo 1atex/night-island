@@ -308,6 +308,7 @@ pub struct AiSettings {
     pub voice_separate: bool,
     pub voice_base: String,
     pub voice_model: String,
+    pub voice_wake: String,
 }
 
 impl Default for AiSettings {
@@ -321,6 +322,7 @@ impl Default for AiSettings {
             voice_separate: false,
             voice_base: "https://api.openai.com/v1".into(),
             voice_model: "whisper-1".into(),
+            voice_wake: "Island".into(),
         }
     }
 }
@@ -356,6 +358,7 @@ impl AiSettings {
         if !valid_model(&self.voice_model, AiProvider::OpenAi) {
             self.voice_model = d.voice_model;
         }
+        self.voice_wake = crate::tools::voicecmd::clean_wake_setting(&self.voice_wake).unwrap_or(d.voice_wake);
     }
 }
 

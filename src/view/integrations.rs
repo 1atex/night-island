@@ -13,6 +13,7 @@ pub struct IntegrationsUi {
     pub voice_model: TextEdit,
     pub voice_base: TextEdit,
     pub voice_key_saved: bool,
+    pub wake: TextEdit,
 }
 
 pub fn discord_fields_ok(ui: &UiState) -> bool {

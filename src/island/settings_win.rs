@@ -210,6 +210,7 @@ impl App {
             view::Field::VoiceKey => &mut self.ui.int.voice_key,
             view::Field::VoiceModel => &mut self.ui.int.voice_model,
             view::Field::VoiceBase => &mut self.ui.int.voice_base,
+            view::Field::WakeWord => &mut self.ui.int.wake,
         })
     }
 
@@ -243,6 +244,19 @@ impl App {
         self.ui.int.voice_base.set_text(&self.settings.ai.voice_base);
         self.ui.int.voice_key.set_text("");
         self.ui.int.voice_key_saved = ai::has_voice_key();
+        self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
+    }
+
+    fn save_wake(&mut self) {
+        let Some(wake) = crate::tools::voicecmd::clean_wake_setting(&self.ui.int.wake.text()) else {
+            return self.notify(Notice::Error, '\u{E783}', "Up to 5 names of up to 24 characters, separated by commas");
+        };
+        self.settings.ai.voice_wake = wake;
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        ai::configure(&self.settings.ai);
+        self.sync_ai_fields();
+        self.notify(Notice::Integrations, '\u{E73E}', "Command name saved");
     }
 
     fn save_voice(&mut self) {
@@ -462,6 +476,7 @@ impl App {
             }
             view::Act::AiSave => self.save_ai(),
             view::Act::VoiceSave => self.save_voice(),
+            view::Act::WakeSave => self.save_wake(),
             view::Act::VoiceRemoveKey => {
                 ai::remove_voice_key();
                 self.sync_ai_fields();
@@ -612,6 +627,7 @@ impl App {
                     view::Field::SpotifyId => view::Act::SpotifySaveId,
                     view::Field::AiKey | view::Field::AiModel | view::Field::AiBase => view::Act::AiSave,
                     view::Field::VoiceKey | view::Field::VoiceModel | view::Field::VoiceBase => view::Act::VoiceSave,
+                    view::Field::WakeWord => view::Act::WakeSave,
                     _ => view::Act::DiscordMain,
                 };
                 self.sw_act(act);
