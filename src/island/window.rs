@@ -123,6 +123,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 Some(Hotkey::Ocr) => with_app(|a| a.capture(capture::Mode::Ocr)),
                 Some(Hotkey::Qr) => with_app(|a| a.capture(capture::Mode::Qr)),
                 Some(Hotkey::Rec) => with_app(|a| a.toggle_recording()),
+                Some(Hotkey::Dictate) => with_app(|a| a.toggle_dictation()),
                 _ => {}
             }
             LRESULT(0)
@@ -184,6 +185,34 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         update::WM_UPDATE => {
             with_app(|a| a.on_update());
+            LRESULT(0)
+        }
+        everything::WM_FILES => {
+            with_app(|a| a.on_files());
+            LRESULT(0)
+        }
+        steam::WM_STEAM => {
+            with_app(|a| a.on_steam());
+            LRESULT(0)
+        }
+        agents::WM_AGENT => {
+            with_app(|a| a.on_agent());
+            LRESULT(0)
+        }
+        metrics::WM_METRICS => {
+            with_app(|a| a.on_metrics());
+            LRESULT(0)
+        }
+        dictation::WM_VOICE => {
+            with_app(|a| a.on_voice());
+            LRESULT(0)
+        }
+        ai::WM_TRANSCRIBED => {
+            with_app(|a| a.on_transcribed());
+            LRESULT(0)
+        }
+        ai::WM_CHAT => {
+            with_app(|a| a.on_chat());
             LRESULT(0)
         }
         ai::WM_AI => {

@@ -13,6 +13,21 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let (bh, gap, icon_w) = (36.0 * scale, 1.0 * scale, 32.0 * scale);
     let y0 = y + 12.0 * scale;
     let mut left = x + 12.0 * scale;
+    let pin_left = x + w - 78.0 * scale;
+    let chip = if ui.privacy.cam || ui.privacy.mic { 42.0 * scale } else { 0.0 };
+    let room = pin_left - 6.0 * scale - chip - left;
+    let shown = TABS.iter().filter(|(t, _, n)| *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n)).count() as f32;
+    let label = |name: &str| (crate::ui::i18n::tr(name).chars().count() as f32 * 8.6 + 8.0) * scale;
+    let active_extra = TABS
+        .iter()
+        .find(|(t, _, n)| *t == active && *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n))
+        .map_or(0.0, |(_, _, n)| label(n));
+    let gaps = (shown - 1.0).max(0.0) * gap;
+    let bare_w = if shown * icon_w + gaps + active_extra > room {
+        icon_w * ((room - active_extra - gaps) / (shown * icon_w)).clamp(0.6, 1.0)
+    } else {
+        icon_w
+    };
     std::array::from_fn(|i| {
         let (tab, _, name) = TABS[i];
         if !tab_in_bar(&ui.cfg, tab, name) {
@@ -22,11 +37,7 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
             let r = x + w - 12.0 * scale;
             return (r - icon_w, y0, r, y0 + bh);
         }
-        let width = if tab == active {
-            icon_w + (crate::ui::i18n::tr(name).chars().count() as f32 * 8.6 + 8.0) * scale
-        } else {
-            icon_w
-        };
+        let width = if tab == active { icon_w + label(name) } else { bare_w };
         let rect = (left, y0, left + width, y0 + bh);
         left += width + gap;
         rect
@@ -68,6 +79,10 @@ pub(in crate::view) fn privacy_chip(pill: Rect, scale: f32, ui: &UiState) -> Opt
         width = 38.0 * scale;
     }
     Some(((right - width, pin.1 + 2.0 * scale, right, pin.3 - 2.0 * scale), glyph, label))
+}
+
+pub fn hit_mic_chip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bool {
+    privacy_chip(pill, scale, ui).is_some_and(|(rect, _, label)| label == "Microphone" && inside(rect, px, py))
 }
 
 pub fn paint_expanded(
@@ -124,12 +139,18 @@ pub fn paint_expanded(
         rgba(1.0, 1.0, 1.0, if ui.pinned { 1.0 } else { 0.62 }),
     )?;
     if let Some((chip, glyph, label)) = privacy_chip(pill, scale, ui) {
-        p.fill_round_rect(chip, (chip.3 - chip.1) / 2.0, rgba(1.0, 0.62, 0.2, 0.2))?;
+        let muted = label == "Microphone" && ui.mic_muted == Some(true);
+        let (fill, icon, text) = if muted {
+            (rgba(1.0, 0.3, 0.3, 0.2), rgba(1.0, 0.45, 0.45, 1.0), rgba(1.0, 0.5, 0.5, 1.0))
+        } else {
+            (rgba(1.0, 0.62, 0.2, 0.2), rgba(1.0, 0.7, 0.3, 1.0), rgba(1.0, 0.72, 0.35, 1.0))
+        };
+        p.fill_round_rect(chip, (chip.3 - chip.1) / 2.0, fill)?;
         p.glyph(
-            glyph,
+            if muted { '\u{F781}' } else { glyph },
             (chip.0 + 4.0 * scale, chip.1, chip.0 + 32.0 * scale, chip.3),
             14.0 * scale,
-            rgba(1.0, 0.7, 0.3, 1.0),
+            icon,
         )?;
         if chip.2 - chip.0 > 60.0 * scale {
             p.text(
@@ -138,7 +159,7 @@ pub fn paint_expanded(
                 13.0 * scale,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_TEXT_ALIGNMENT_LEADING,
-                rgba(1.0, 0.72, 0.35, 1.0),
+                text,
             )?;
         }
     }
@@ -147,6 +168,10 @@ pub fn paint_expanded(
         Tab::Home => paint_home(p, pill, scale, ui)?,
         Tab::Weather => paint_weather(p, pill, scale, ui)?,
         Tab::Agy => paint_agy(p, pill, scale, ui)?,
+        Tab::Chat => paint_chat(p, pill, scale, ui)?,
+        Tab::Privacy => paint_privacy(p, pill, scale, ui)?,
+        Tab::Activity => paint_activity(p, pill, scale, ui)?,
+        Tab::System => paint_system(p, pill, scale, ui)?,
         Tab::Theme => paint_theme(p, pill, scale, ui)?,
         Tab::Clipboard => paint_clipboard(p, pill, scale, ui, clips)?,
         Tab::Controls => paint_controls(p, pill, scale, ui)?,

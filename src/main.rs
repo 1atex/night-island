@@ -9,5 +9,8 @@ mod ui;
 mod view;
 
 fn main() -> windows_core::Result<()> {
+    if services::agents::handle_cli() {
+        return Ok(());
+    }
     island::run()
 }

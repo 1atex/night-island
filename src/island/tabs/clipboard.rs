@@ -35,6 +35,14 @@ impl App {
         let pill = self.pill_rect(true);
         let (frame, inner) = view::clip_search_frame(pill, self.scale);
         let (fx, fy) = (x as f32, y as f32);
+        let clear = view::clip_clear_rect(pill, self.scale);
+        if fx >= clear.0 && fx < clear.2 && fy >= clear.1 && fy < clear.3 {
+            return self.press_clear_clips();
+        }
+        if self.ui.clip.clear_armed {
+            self.ui.clip.clear_armed = false;
+            self.repaint_expanded();
+        }
         if fx >= frame.0 && fx < frame.2 && fy >= frame.1 && fy < frame.3 {
             self.begin_edit();
             if let Some(layout) = self.active_layout() {
@@ -53,7 +61,9 @@ impl App {
         let at = |i: usize| self.clipboard.clips.get(self.ui.clip.scroll + i);
         match hit {
             view::ClipHit::Row(i) => {
-                if let Some(text) = at(i).map(|c| c.text.clone()) {
+                let text =
+                    at(i).and_then(|c| self.store.as_ref().and_then(|s| s.text(c.id)).or_else(|| Some(c.text.clone())));
+                if let Some(text) = text {
                     self.clipboard.own_clip_seq = clips::sys::write_and_paste(self.hwnd, &text);
                 }
             }
@@ -72,6 +82,22 @@ impl App {
                 self.repaint_expanded();
             }
         }
+    }
+
+    fn press_clear_clips(&mut self) {
+        if self.ui.clip.clear_armed {
+            self.ui.clip.clear_armed = false;
+            self.kill_timer(Timer::Disarm);
+            if let Some(store) = &self.store {
+                store.clear_unpinned();
+            }
+            self.ui.clip.scroll = 0;
+            self.reload_clips();
+        } else {
+            self.ui.clip.clear_armed = true;
+            self.set_timer(Timer::Disarm, 3000);
+        }
+        self.repaint_expanded();
     }
 
     pub(in crate::island) fn reload_clips(&mut self) {

@@ -91,7 +91,7 @@ impl App {
             } else {
                 base
             };
-            if let Ok(shape) = p.fill_spikes(w as f32, BUMP_SEAM * s, &levels, depth, base, tip) {
+            if let Ok(shape) = p.fill_spikes(w as f32, self.seam_px(), &levels, depth, base, tip) {
                 self.clip_bump_blur(&shape);
             }
         });
@@ -155,7 +155,7 @@ impl App {
     pub(in crate::island) fn update_eq(&mut self) {
         let visible = self.state == State::Collapsed
             && !self.gaming
-            && !self.pill_hidden
+            && (!self.pill_hidden || self.ghosted)
             && self.ui.media.playing
             && self.ui.volume.is_none()
             && self.ui.downloading.is_none()
@@ -191,6 +191,10 @@ impl App {
         let _ = self.liquid.bump.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
     }
 
+    pub(in crate::island) fn seam_px(&self) -> f32 {
+        BUMP_SEAM * self.scale + if self.settings.pill_opacity < 0.98 { 1.0 } else { 0.0 }
+    }
+
     pub(in crate::island) fn bump_half(&self, amp: f32) -> f32 {
         let s = self.scale;
         let max = (self.settings.liquid_strength * s).max(1.0);
@@ -198,24 +202,34 @@ impl App {
     }
 
     pub(in crate::island) fn paint_bump_with(&self, amp: f32, cx: f32) {
-        let s = self.scale;
         let (w, _) = self.liquid.bump.size();
         let half = self.bump_half(amp);
         let _ = self.liquid.bump.paint(&self.gpu, |p| {
             let (r, g, b) = crate::ui::theme::panel();
-            if let Ok(shape) =
-                p.fill_bump(w as f32, BUMP_SEAM * s, w as f32 / 2.0 + cx, half, amp, crate::ui::gfx::rgba(r, g, b, 1.0))
-            {
+            if let Ok(shape) = p.fill_bump(
+                w as f32,
+                self.seam_px(),
+                w as f32 / 2.0 + cx,
+                half,
+                amp,
+                crate::ui::gfx::rgba(r, g, b, 1.0),
+            ) {
                 self.clip_bump_blur(&shape);
             }
         });
     }
 
     pub(in crate::island) fn clip_bump_blur(&self, shape: &windows::Win32::Graphics::Direct2D::ID2D1PathGeometry) {
-        if self.settings.pill_blur
-            && let Ok(path) = crate::ui::gfx::composition_path(shape)
-        {
-            let _ = self.liquid.bump_shape.SetPath(&path);
+        if !self.settings.pill_blur {
+            return;
+        }
+        match crate::ui::gfx::composition_path(shape) {
+            Ok(path) => {
+                if let Err(e) = self.liquid.bump_shape.SetPath(&path) {
+                    crate::log_warn!("bump blur: SetPath failed: {e}");
+                }
+            }
+            Err(e) => crate::log_warn!("bump blur: no path: {e}"),
         }
     }
 

@@ -10,13 +10,14 @@ impl App {
     pub(in crate::island) fn click_dev_menu(&mut self, x: i32, y: i32) {
         let pill = self.pill_rect(true);
         let Some((items, scroll)) = self.ui.home.dev_menu.take() else { return };
-        if let Some(Some(row)) = view::hit_menu(pill, self.scale, x as f32, y as f32, items.len()) {
+        let wide = view::home_wide(&self.ui);
+        if let Some(Some(row)) = view::hit_menu(pill, self.scale, x as f32, y as f32, items.len(), wide) {
             if let Some(d) = items.get(scroll + row) {
                 volume::set_default(&d.id);
                 self.refresh_home();
                 self.ui.mic_muted = volume::mic_muted();
             }
-        } else if view::hit_menu(pill, self.scale, x as f32, y as f32, items.len()).is_some() {
+        } else if view::hit_menu(pill, self.scale, x as f32, y as f32, items.len(), wide).is_some() {
             self.ui.home.dev_menu = Some((items, scroll));
             return;
         }
@@ -28,23 +29,20 @@ impl App {
             return self.click_dev_menu(x, y);
         }
         let pill = self.pill_rect(true);
-        let has = !self.ui.media.title.is_empty();
-        match view::hit_home(
-            pill,
-            self.scale,
-            x as f32,
-            y as f32,
-            has,
-            view::spotify_active(&self.ui),
-            view::discord_strip(&self.ui),
-            self.ui.home.dock.len(),
-        ) {
+        match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
             Some(view::HomeHit::Media(i)) => media::control(match i {
                 0 => media::Control::Previous,
                 1 => media::Control::PlayPause,
                 _ => media::Control::Next,
             }),
+            Some(view::HomeHit::Player) => media::next_player(),
+            Some(view::HomeHit::Action(i)) if self.ui.home.edit => self.toggle_home_action(i),
             Some(view::HomeHit::Action(i)) => self.home_action(i),
+            Some(view::HomeHit::Edit) => {
+                self.ui.home.edit = !self.ui.home.edit;
+                self.ui.home.hover_act = None;
+                self.repaint_expanded();
+            }
             Some(view::HomeHit::Dock(i)) => self.open_dock_item(i),
             Some(view::HomeHit::DockAdd) => self.want_dock_dialog = true,
             Some(view::HomeHit::DiscordOverlay) => self.toggle_overlay(),
@@ -80,11 +78,24 @@ impl App {
         }
     }
 
+    fn toggle_home_action(&mut self, id: usize) {
+        let id = id as u8;
+        match self.settings.home_actions.iter().position(|&a| a == id) {
+            Some(at) => {
+                self.settings.home_actions.remove(at);
+            }
+            None => self.settings.home_actions.push(id),
+        }
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        self.repaint_expanded();
+    }
+
     pub(in crate::island) fn drag_volume(&mut self, x: i32) {
         if !self.pointer.vol_drag {
             return;
         }
-        let (tl, tr, _) = view::volume_track(self.pill_rect(true), self.scale);
+        let (tl, tr, _) = view::volume_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
         let level = ((x as f32 - tl) / (tr - tl).max(1.0)).clamp(0.0, 1.0);
         let current = if self.ui.home.vol_track { self.ui.home.app_vol } else { self.ui.home.vol };
         if (level - current).abs() > 0.004 {
@@ -103,7 +114,7 @@ impl App {
         if !self.pointer.seek_drag {
             return;
         }
-        let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale);
+        let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
         self.ui.home.seek = Some(((x as f32 - l) / (r - l).max(1.0)).clamp(0.0, 1.0));
         self.repaint_expanded();
     }
@@ -201,16 +212,7 @@ impl App {
             return None;
         }
         let pill = self.pill_rect(true);
-        match view::hit_home(
-            pill,
-            self.scale,
-            x as f32,
-            y as f32,
-            false,
-            false,
-            view::discord_strip(&self.ui),
-            self.ui.home.dock.len(),
-        ) {
+        match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
             Some(view::HomeHit::Dock(i)) => view::dock_path(&self.ui, i).map(|p| (i, p.to_string())),
             _ => None,
         }

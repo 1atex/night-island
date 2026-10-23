@@ -323,6 +323,18 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Screenshot of the screen" => "Снимок экрана",
         "Hide the pill for a few seconds" => "Спрятать пилюлю на пару секунд",
         "Hide the pill for" => "Прятать пилюлю на",
+        "Cover art on the pill" => "Обложка на пилюле",
+        "Chat" => "Чат",
+        "New chat" => "Новый чат",
+        "Ask anything" => "Спросите о чём угодно",
+        "Message…" => "Сообщение…",
+        "Set up an AI service in the settings to chat" => "Чтобы общаться, настройте нейросеть в настройках",
+        "Open AI settings" => "Открыть настройки ИИ",
+        "Another request is running, try again in a moment" => "Другой запрос ещё идёт, повторите чуть позже",
+        "Hotkey makes the pill a ghost" => "Хоткей делает пилюлю призраком",
+        "Ghost visibility" => "Видимость призрака",
+        "Ghost ignores the mouse" => "Призрак не реагирует на мышь",
+        "Ghost only while held" => "Призрак, пока клавиши зажаты",
         "Press the new keys…" => "Нажмите новые клавиши…",
         "Click a key, then press the new combination with Ctrl, Alt, Shift or Win." => {
             "Нажмите на клавишу, затем новое сочетание с Ctrl, Alt, Shift или Win."
@@ -422,6 +434,90 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Open settings file" => "Открыть файл настроек",
         "Waiting for the browser…" => "Жду браузер…",
         "Coming soon" => "Скоро",
+        "Privacy" => "Приватность",
+        "Activity" => "Активность",
+        "System" => "Система",
+        "Agents" => "Агенты",
+        "Steam games (started, ended)" => "Игры Steam (запуск, завершение)",
+        "Played" => "Играл:",
+        "Playing" => "Играешь:",
+        "Coding agents" => "Кодовые агенты",
+        "Coding agents (waiting, finished)" => "Кодовые агенты (ждут, закончили)",
+        "The island shows when an agent works, waits for you or finishes." => {
+            "Остров показывает, когда агент работает, ждёт вас или закончил."
+        }
+        "Nothing is changed in their settings until you connect." => "Пока вы не подключите, их настройки не меняются.",
+        "Claude Code: hooks in ~/.claude/settings.json. Codex CLI: its notify command, finished only." => {
+            "Claude Code: хуки в ~/.claude/settings.json. Codex CLI: его команда notify, только «закончил»."
+        }
+        "Sessions" => "Сессии",
+        "No sessions heard from yet." => "Пока от сессий ничего не приходило.",
+        "working" => "работает",
+        "waiting for you" => "ждёт вас",
+        "finished" => "закончил",
+        "The Claude Code settings file is not valid JSON" => "Файл настроек Claude Code повреждён (не JSON)",
+        "The hooks in the Claude Code settings are not an object" => "Раздел hooks в настройках Claude Code не объект",
+        "A hook list in the Claude Code settings is not a list" => "Список хуков в настройках Claude Code не список",
+        "Could not write the Claude Code settings file" => "Не удалось записать настройки Claude Code",
+        "Codex already has a notify command of its own" => "У Codex уже есть своя команда notify",
+        "Could not write the Codex configuration" => "Не удалось записать настройки Codex",
+        "The user folder was not found" => "Папка пользователя не найдена",
+        "The program path is unknown" => "Путь к программе неизвестен",
+        "Figures" => "Показатели",
+        "Read every" => "Опрашивать каждые",
+        "Processor" => "Процессор",
+        "Memory" => "Память",
+        "Graphics card" => "Видеокарта",
+        "System disk" => "Системный диск",
+        "Download speed" => "Скорость загрузки",
+        "Upload speed" => "Скорость отдачи",
+        "Uptime" => "Время работы",
+        "On the tab" => "На вкладке",
+        "On the pill" => "На пилюле",
+        "Tab and pill" => "Вкладка и пилюля",
+        "Click a figure to move it: hidden, the System tab, the pill, or both." => {
+            "Нажмите на показатель, чтобы переставить: скрыт, вкладка «Система», пилюля или оба."
+        }
+        "Nothing is read while no figure is on screen." => {
+            "Пока ни один показатель не на экране, ничего не опрашивается."
+        }
+        "No figures chosen: pick some in Settings → System" => {
+            "Показатели не выбраны: выберите их в Настройки → Система"
+        }
+        "Reading…" => "Считываю…",
+        "Microphone, camera and screen" => "Микрофон, камера и экран",
+        "Who used them, and when" => "Кто и когда ими пользовался",
+        "Nothing yet: no program has used them since the log began" => {
+            "Пока пусто: с начала журнала ими никто не пользовался"
+        }
+        "Yesterday" => "Вчера",
+        "now" => "сейчас",
+        "is capturing the screen" => "снимает экран",
+        "Screen capture by other programs" => "Запись экрана другими программами",
+        "Track activity (time in programs)" => "Следить за активностью (время в программах)",
+        "Time in the program in front" => "Время в активной программе",
+        "Activity tracking is off. It only notes which program is in front and for how long, on this computer." => {
+            "Слежение выключено. Оно лишь отмечает, какая программа активна и сколько, и хранит это на этом компьютере."
+        }
+        "Turn tracking on" => "Включить слежение",
+        "7 days" => "7 дней",
+        "Total" => "Всего",
+        "Nothing recorded yet" => "Пока ничего не записано",
+        "Dictate by voice" => "Диктовка голосом",
+        "Paste dictated text" => "Вставлять надиктованное",
+        "Listening… press the keys again" => "Слушаю… нажмите клавиши ещё раз",
+        "Recognizing…" => "Распознаю…",
+        "Dictation needs Gemini or an OpenAI-compatible service" => {
+            "Для диктовки нужен Gemini или OpenAI-совместимый сервис"
+        }
+        "Save a key for the AI service first" => "Сначала сохраните ключ нейросети",
+        "The microphone could not be opened" => "Не удалось открыть микрофон",
+        "Too short, nothing was recorded" => "Слишком коротко, ничего не записано",
+        "Nothing was heard (is the microphone muted?)" => "Ничего не слышно (микрофон выключен?)",
+        "No speech was recognized" => "Речь не распознана",
+        "This service cannot turn speech into text; choose Gemini or an OpenAI-compatible one" => {
+            "Этот сервис не распознаёт речь: выберите Gemini или OpenAI-совместимый"
+        }
         "Needs a Client ID" => "Нужен Client ID",
         "Create an app at developer.spotify.com," => "Создай приложение на developer.spotify.com,",
         "add the Redirect URI http://127.0.0.1:8898/callback" => "добавь Redirect URI http://127.0.0.1:8898/callback",
@@ -429,6 +525,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Who is in your voice channel and who writes to you." => "Кто в твоём голосовом канале и кто тебе пишет.",
         "Search the clipboard" => "Поиск по буферу",
         "Nothing found" => "Ничего не найдено",
+        "Sure?" => "Точно?",
+        "Searching…" => "Ищу…",
         "MP4: hardware H.264 + AAC sound." => "MP4: H.264 на видеокарте + звук AAC.",
         "The GPU captures and encodes: a still" => "Видеокарта сама снимает и кодирует:",
         "screen costs almost nothing." => "статичный экран почти ничего не стоит.",

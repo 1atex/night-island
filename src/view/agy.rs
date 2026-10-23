@@ -148,22 +148,24 @@ pub(in crate::view) fn agy_layout(
     p.md_layout(&m.doc, (width - trim * scale).max(40.0), size * scale, m.kind == crate::services::agy::Kind::Thinking)
 }
 
-pub(in crate::view) fn paint_agy_history(
-    p: &Painter,
-    pill: Rect,
-    scale: f32,
-    ui: &UiState,
-    running: bool,
-) -> Result<()> {
+pub(in crate::view) struct History<'a> {
+    pub msgs: &'a [crate::services::agy::Msg],
+    pub cache: &'a std::cell::RefCell<(String, i32, usize, Vec<f32>)>,
+    pub id: String,
+    pub hist: f32,
+    pub max: &'a std::cell::Cell<f32>,
+    pub input_h: f32,
+}
+
+pub(in crate::view) fn paint_history(p: &Painter, pill: Rect, scale: f32, h: &History, running: bool) -> Result<()> {
     use crate::services::agy::Kind;
-    let view = agy_view(pill, scale, ui.agy.input_h.get());
+    let view = agy_view(pill, scale, h.input_h);
     let width = view.2 - view.0 - 10.0 * scale;
     let running_h = if running { 24.0 * scale } else { 0.0 };
-    let key = (ui.agy.sel.clone().unwrap_or_default(), width.round() as i32, ui.agy.msgs.len());
-    let mut cache = ui.agy.cache.borrow_mut();
+    let key = (h.id.clone(), width.round() as i32, h.msgs.len());
+    let mut cache = h.cache.borrow_mut();
     if (cache.0.clone(), cache.1, cache.2) != key {
-        let heights = ui
-            .agy
+        let heights = h
             .msgs
             .iter()
             .map(|m| {
@@ -177,17 +179,17 @@ pub(in crate::view) fn paint_agy_history(
     let total: f32 = cache.3.iter().sum::<f32>() + running_h;
     let view_h = view.3 - view.1;
     let max = (total - view_h).max(0.0);
-    ui.agy.max.set(max);
-    let offset = ui.agy.hist.clamp(0.0, max);
+    h.max.set(max);
+    let offset = h.hist.clamp(0.0, max);
     p.push_clip(view);
     let mut y = view.1 - (max - offset);
     if total < view_h {
         y = view.1 + (view_h - total).min(0.0);
     }
     let code_bg = rgba(1.0, 1.0, 1.0, 0.1);
-    for (m, h) in ui.agy.msgs.iter().zip(cache.3.iter()) {
+    for (m, mh) in h.msgs.iter().zip(cache.3.iter()) {
         let (indent, _, _, pad, _) = agy_block(m.kind);
-        if y + h >= view.1
+        if y + mh >= view.1
             && y <= view.3
             && let Ok(layout) = agy_layout(p, m, width, scale)
         {
@@ -223,7 +225,7 @@ pub(in crate::view) fn paint_agy_history(
                 Kind::Error => p.md_draw(&layout, &m.doc, tx, ty, rgba(1.0, 0.5, 0.45, 1.0), code_bg)?,
             }
         }
-        y += h;
+        y += mh;
     }
     if running {
         p.text(
@@ -356,7 +358,15 @@ pub(in crate::view) fn paint_agy(p: &Painter, pill: Rect, scale: f32, ui: &UiSta
         chip_color,
     )?;
     let running = matches!(ui.agy.jobs.get(&chat.id), Some(crate::services::agy::Job::Running));
-    paint_agy_history(p, pill, scale, ui, running)?;
+    let history = History {
+        msgs: &ui.agy.msgs,
+        cache: &ui.agy.cache,
+        id: ui.agy.sel.clone().unwrap_or_default(),
+        hist: ui.agy.hist,
+        max: &ui.agy.max,
+        input_h: ui.agy.input_h.get(),
+    };
+    paint_history(p, pill, scale, &history, running)?;
     let (frame, text_area) = agy_input(pill, scale, ui.agy.input_h.get());
     paint_editor(
         p,

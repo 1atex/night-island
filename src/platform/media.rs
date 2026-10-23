@@ -41,6 +41,7 @@ pub struct Media {
     pub accent: Option<(u8, u8, u8)>,
     pub cover: Option<Arc<Cover>>,
     pub source: String,
+    pub players: u8,
 }
 
 static TIMELINE: Mutex<Option<(f32, f32, Instant, bool)>> = Mutex::new(None);
@@ -76,8 +77,29 @@ fn clip(s: windows::core::HSTRING) -> String {
     s.to_string().chars().take(MAX_TEXT_CHARS).collect()
 }
 
+type Session = windows::Media::Control::GlobalSystemMediaTransportControlsSession;
+
+static CHOSEN: Mutex<Option<String>> = Mutex::new(None);
+static WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+fn app_id(session: &Session) -> String {
+    session.SourceAppUserModelId().map(|s| s.to_string()).unwrap_or_default()
+}
+
+fn pick(manager: &Manager) -> Option<Session> {
+    let chosen = CHOSEN.lock().ok().and_then(|c| c.clone());
+    if let Some(id) = chosen
+        && let Ok(sessions) = manager.GetSessions()
+        && let Some(found) = sessions.into_iter().find(|s| app_id(s) == id)
+    {
+        return Some(found);
+    }
+    manager.GetCurrentSession().ok()
+}
+
 fn fetch(manager: &Manager) -> Media {
-    let Ok(session) = manager.GetCurrentSession() else { return Media::default() };
+    let Some(session) = pick(manager) else { return Media::default() };
+    let players = manager.GetSessions().map_or(0, |s| s.Size().unwrap_or(0)).min(255) as u8;
     let (mut title, mut artist) = (String::new(), String::new());
     if let Ok(props) = session.TryGetMediaPropertiesAsync().and_then(|op| op.join()) {
         title = props.Title().map(clip).unwrap_or_default();
@@ -117,7 +139,41 @@ fn fetch(manager: &Manager) -> Media {
             *s = start;
         }
     }
-    Media { title, artist, playing, accent, cover, source }
+    Media { title, artist, playing, accent, cover, source, players }
+}
+
+fn refresh(manager: &Manager) -> bool {
+    let now = fetch(manager);
+    let Ok(mut guard) = SNAPSHOT.lock() else { return false };
+    let changed = guard.as_ref() != Some(&now);
+    *guard = Some(now);
+    if changed {
+        let raw = WINDOW.load(std::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_MEDIA, WPARAM(0), LPARAM(0));
+        }
+    }
+    true
+}
+
+pub fn next_player() {
+    std::thread::spawn(|| {
+        unsafe {
+            let _ = RoInitialize(RO_INIT_MULTITHREADED);
+        }
+        let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else { return };
+        let Ok(sessions) = manager.GetSessions() else { return };
+        let ids: Vec<String> = sessions.into_iter().map(|s| app_id(&s)).collect();
+        if ids.len() < 2 {
+            return;
+        }
+        let current = pick(&manager).map(|s| app_id(&s));
+        let at = current.and_then(|c| ids.iter().position(|id| *id == c)).unwrap_or(0);
+        if let Ok(mut chosen) = CHOSEN.lock() {
+            *chosen = Some(ids[(at + 1) % ids.len()].clone());
+        }
+        refresh(&manager);
+    });
 }
 
 fn report_age(stamp: windows::Foundation::DateTime) -> f32 {
@@ -234,7 +290,7 @@ pub fn dominant(bgra: &[u8]) -> (u8, u8, u8) {
 }
 
 pub fn start(hwnd: HWND) {
-    let raw = hwnd.0 as isize;
+    WINDOW.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
     std::thread::spawn(move || {
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
@@ -244,17 +300,8 @@ pub fn start(hwnd: HWND) {
             return;
         };
         loop {
-            let now = fetch(&manager);
-            let changed = {
-                let Ok(mut guard) = SNAPSHOT.lock() else { return };
-                let changed = guard.as_ref() != Some(&now);
-                *guard = Some(now);
-                changed
-            };
-            if changed {
-                unsafe {
-                    let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_MEDIA, WPARAM(0), LPARAM(0));
-                }
+            if !refresh(&manager) {
+                return;
             }
             std::thread::sleep(POLL);
         }
@@ -297,7 +344,7 @@ pub fn seek(secs: f32) {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
         let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else { return };
-        let Ok(session) = manager.GetCurrentSession() else { return };
+        let Some(session) = pick(&manager) else { return };
         let _ = session.TryChangePlaybackPositionAsync(((secs + start) as f64 * 1e7) as i64).and_then(|op| op.join());
     });
 }
@@ -308,7 +355,7 @@ pub fn control(action: Control) {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
         let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else { return };
-        let Ok(session) = manager.GetCurrentSession() else { return };
+        let Some(session) = pick(&manager) else { return };
         let _ = match action {
             Control::Previous => session.TrySkipPreviousAsync().and_then(|op| op.join()),
             Control::PlayPause => session.TryTogglePlayPauseAsync().and_then(|op| op.join()),

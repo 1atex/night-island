@@ -5,6 +5,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{HSTRING, PCWSTR, w};
 
 use crate::platform::apps;
+use crate::platform::steam;
 use crate::tools::calc;
 use crate::view::Ctl;
 
@@ -147,8 +148,17 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+pub fn is_file_search(query: &str) -> bool {
+    query.trim().strip_prefix(FILE_PREFIX).is_some_and(|rest| !rest.trim().is_empty())
+}
+
+pub fn start_file_search(own: windows::Win32::Foundation::HWND, query: &str) {
+    if let Some(rest) = query.trim().strip_prefix(FILE_PREFIX) {
+        crate::services::everything::start(own, rest.trim(), MAX_ITEMS as u32);
+    }
+}
+
 fn files(own: windows::Win32::Foundation::HWND, query: &str) -> Vec<Item> {
-    use crate::services::everything::{self, Error};
     let notice = |glyph, title: &str, hint: &str, action| Item {
         icon: None,
         glyph,
@@ -165,7 +175,22 @@ fn files(own: windows::Win32::Foundation::HWND, query: &str) -> Vec<Item> {
             Action::Copy(String::new()),
         )];
     }
-    match everything::search(own, q, MAX_ITEMS as u32) {
+    start_file_search(own, &format!("{FILE_PREFIX}{q}"));
+    vec![notice('\u{E721}', "Searching…", "Everything", Action::Copy(String::new()))]
+}
+
+pub fn file_items(
+    answer: Result<Vec<crate::services::everything::Hit>, crate::services::everything::Error>,
+) -> Vec<Item> {
+    use crate::services::everything::Error;
+    let notice = |glyph, title: &str, hint: &str, action| Item {
+        icon: None,
+        glyph,
+        title: title.to_string(),
+        hint: hint.to_string(),
+        action,
+    };
+    match answer {
         Err(Error::NotRunning) => vec![notice(
             '\u{E783}',
             "Everything is not running",
@@ -259,6 +284,16 @@ pub fn search(own: windows::Win32::Foundation::HWND, query: &str) -> Vec<Item> {
             title: app.name.clone(),
             hint: "App".into(),
             action: Action::Launch { launch: app.launch.clone(), path: app.path.clone() },
+        });
+    }
+
+    for game in steam::find(q, 3) {
+        items.push(Item {
+            icon: None,
+            glyph: '\u{E7FC}',
+            title: game.name.clone(),
+            hint: "Steam".into(),
+            action: Action::Launch { launch: steam::launch_url(game.id), path: PathBuf::new() },
         });
     }
 

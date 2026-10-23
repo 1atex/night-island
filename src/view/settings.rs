@@ -6,6 +6,7 @@ pub enum Sid {
     Autostart,
     PillOpacity,
     AgyAuto,
+    VoicePaste,
     PanelHue,
     PanelSat,
     PanelVal,
@@ -25,6 +26,7 @@ pub enum Sid {
     PillBattery,
     MusicEq,
     MusicTitle,
+    MusicCover,
     MusicLyrics,
     TabClipboard,
     TabShelf,
@@ -34,6 +36,11 @@ pub enum Sid {
     TabWeather,
     TabRecord,
     TabAgy,
+    TabChat,
+    TabPrivacy,
+    TabActivity,
+    TabSystem,
+    MetricsInterval,
     TabControls,
     TabTheme,
     NotifyMic,
@@ -52,6 +59,10 @@ pub enum Sid {
     AiProvider,
     NotifyAi,
     NotifyUpdate,
+    NotifyPrivacy,
+    NotifyAgents,
+    NotifySteam,
+    ActivityTrack,
     SharedLyrics,
     UpdateCheck,
     UpdateBeta,
@@ -72,6 +83,10 @@ pub enum Sid {
     CaptureSelf,
     GameMode,
     HidePillSecs,
+    GhostMode,
+    GhostOpacity,
+    GhostThrough,
+    GhostHold,
 }
 
 #[derive(Clone, Copy)]
@@ -93,6 +108,10 @@ pub(in crate::view) fn tab_toggle_name(id: Sid) -> Option<&'static str> {
         Sid::TabWeather => "Weather",
         Sid::TabRecord => "Record",
         Sid::TabAgy => "AGY",
+        Sid::TabChat => "Chat",
+        Sid::TabPrivacy => "Privacy",
+        Sid::TabActivity => "Activity",
+        Sid::TabSystem => "System",
         Sid::TabControls => "Controls",
         Sid::TabTheme => "Theme",
         _ => return None,
@@ -161,6 +180,8 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
         Sid::OpenSpeed | Sid::CloseSpeed => (0.4, 2.5, 0.1),
         Sid::RecFps => (10.0, 60.0, 5.0),
         Sid::HidePillSecs => (5.0, 10.0, 1.0),
+        Sid::MetricsInterval => (1.0, 10.0, 1.0),
+        Sid::GhostOpacity => (0.05, 1.0, 0.05),
         _ => (0.0, 1.0, 0.01),
     }
 }
@@ -184,6 +205,8 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
         Sid::CloseSpeed => c.close_speed,
         Sid::RecFps => c.record_fps as f32,
         Sid::HidePillSecs => c.hide_pill_secs as f32,
+        Sid::MetricsInterval => c.metrics_secs as f32,
+        Sid::GhostOpacity => c.ghost_opacity,
         _ => 0.0,
     }
 }
@@ -192,7 +215,7 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
     match id {
         Sid::Size => format!("{v:.0}%"),
         Sid::LiquidReach | Sid::LiquidStrength => format!("{v:.0} px"),
-        Sid::LiquidSoftness | Sid::Tint | Sid::PillOpacity | Sid::PanelSat | Sid::AccentSat => {
+        Sid::LiquidSoftness | Sid::Tint | Sid::PillOpacity | Sid::GhostOpacity | Sid::PanelSat | Sid::AccentSat => {
             format!("{:.0}%", v * 100.0)
         }
         Sid::PanelHue | Sid::AccentHue => format!("{v:.0}°"),
@@ -200,7 +223,7 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
         Sid::OpenDelay | Sid::CloseDelay => format!("{v:.0} ms"),
         Sid::OpenSpeed | Sid::CloseSpeed => format!("{v:.1}×"),
         Sid::RecFps => format!("{v:.0} fps"),
-        Sid::HidePillSecs => format!("{v:.0} s"),
+        Sid::HidePillSecs | Sid::MetricsInterval => format!("{v:.0} s"),
         _ => String::new(),
     }
 }
@@ -227,6 +250,8 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
         Sid::CloseSpeed => c.close_speed = v,
         Sid::RecFps => c.record_fps = v as u32,
         Sid::HidePillSecs => c.hide_pill_secs = v as u32,
+        Sid::MetricsInterval => c.metrics_secs = v as u32,
+        Sid::GhostOpacity => c.ghost_opacity = v,
         _ => {}
     }
     c.sanitize();
@@ -246,14 +271,22 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::Capture => c.capture_hidden,
         Sid::CaptureSelf => c.capture_self_hidden,
         Sid::GameMode => c.game_mode,
+        Sid::GhostMode => c.ghost_mode,
+        Sid::GhostThrough => c.ghost_click_through,
+        Sid::GhostHold => c.ghost_hold,
         Sid::Spikes => c.edge_spikes,
         Sid::PillWeather => c.pill_weather,
         Sid::MusicEq => c.music_eq,
         Sid::MusicTitle => c.music_title,
+        Sid::MusicCover => c.music_cover,
         Sid::MusicLyrics => c.music_lyrics,
         Sid::DevTools => c.dev_tools,
         Sid::NotifyAi => c.notify.ai,
         Sid::NotifyUpdate => c.notify.update,
+        Sid::NotifyPrivacy => c.notify.privacy,
+        Sid::NotifyAgents => c.notify.agents,
+        Sid::NotifySteam => c.notify.steam,
+        Sid::ActivityTrack => c.activity_track,
         Sid::SharedLyrics => c.shared_lyrics,
         Sid::UpdateCheck => c.update_check,
         Sid::UpdateBeta => c.update_beta,
@@ -273,6 +306,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::Autostart => crate::platform::autostart::enabled(),
         Sid::Weather => c.weather,
         Sid::AgyAuto => c.agy_auto,
+        Sid::VoicePaste => c.voice_paste,
         Sid::RecSystem => c.record_system_audio,
         Sid::RecMic => c.record_mic,
         _ => false,
@@ -289,14 +323,22 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::Capture => c.capture_hidden = on,
         Sid::CaptureSelf => c.capture_self_hidden = on,
         Sid::GameMode => c.game_mode = on,
+        Sid::GhostMode => c.ghost_mode = on,
+        Sid::GhostThrough => c.ghost_click_through = on,
+        Sid::GhostHold => c.ghost_hold = on,
         Sid::Spikes => c.edge_spikes = on,
         Sid::PillWeather => c.pill_weather = on,
         Sid::MusicEq => c.music_eq = on,
         Sid::MusicTitle => c.music_title = on,
+        Sid::MusicCover => c.music_cover = on,
         Sid::MusicLyrics => c.music_lyrics = on,
         Sid::DevTools => c.dev_tools = on,
         Sid::NotifyAi => c.notify.ai = on,
         Sid::NotifyUpdate => c.notify.update = on,
+        Sid::NotifyPrivacy => c.notify.privacy = on,
+        Sid::NotifyAgents => c.notify.agents = on,
+        Sid::NotifySteam => c.notify.steam = on,
+        Sid::ActivityTrack => c.activity_track = on,
         Sid::SharedLyrics => c.shared_lyrics = on,
         Sid::UpdateCheck => c.update_check = on,
         Sid::UpdateBeta => c.update_beta = on,
@@ -316,6 +358,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::Autostart => crate::platform::autostart::set(on),
         Sid::Weather => c.weather = on,
         Sid::AgyAuto => c.agy_auto = on,
+        Sid::VoicePaste => c.voice_paste = on,
         Sid::RecSystem => c.record_system_audio = on,
         Sid::RecMic => c.record_mic = on,
         _ => {}

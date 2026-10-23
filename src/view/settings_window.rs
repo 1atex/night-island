@@ -9,7 +9,7 @@ pub struct Group {
     pub(in crate::view) custom: Option<fn(&UiState) -> Vec<Item>>,
 }
 
-const GENERAL: [(Sid, &str, Kind); 8] = [
+const GENERAL: [(Sid, &str, Kind); 9] = [
     (Sid::Language, "Language", Kind::Segment(["Русский", "English"])),
     (Sid::Weather, "Weather", Kind::Toggle),
     (Sid::Autostart, "Start with Windows", Kind::Toggle),
@@ -18,9 +18,14 @@ const GENERAL: [(Sid, &str, Kind); 8] = [
     (Sid::Capture, "Hide in screenshots", Kind::Toggle),
     (Sid::CaptureSelf, "Hide island in my captures", Kind::Toggle),
     (Sid::DevTools, "Developer tools", Kind::Toggle),
+    (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 10] = [
+const ISLAND: [(Sid, &str, Kind); 14] = [
+    (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
+    (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
+    (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
+    (Sid::GhostHold, "Ghost only while held", Kind::Toggle),
     (Sid::HidePillSecs, "Hide the pill for", Kind::Slider),
     (Sid::Placement, "Placement", Kind::Segment(["Floating", "Docked"])),
     (Sid::Edge, "Edge", Kind::Cycle),
@@ -40,18 +45,19 @@ const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
 ];
 
-const PILL: [(Sid, &str, Kind); 8] = [
+const PILL: [(Sid, &str, Kind); 9] = [
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
+    (Sid::MusicCover, "Cover art on the pill", Kind::Toggle),
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 13] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 16] = [
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
     (Sid::NotifyCapture, "Screenshots, text and QR", Kind::Toggle),
@@ -65,9 +71,13 @@ const NOTIFICATIONS: [(Sid, &str, Kind); 13] = [
     (Sid::NotifyBattery, "Charger and low battery", Kind::Toggle),
     (Sid::NotifyAi, "AI answers", Kind::Toggle),
     (Sid::NotifyUpdate, "New version available", Kind::Toggle),
+    (Sid::NotifyPrivacy, "Screen capture by other programs", Kind::Toggle),
+    (Sid::NotifyAgents, "Coding agents (waiting, finished)", Kind::Toggle),
+    (Sid::NotifySteam, "Steam games (started, ended)", Kind::Toggle),
 ];
 
-const AI: [(Sid, &str, Kind); 1] = [(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle)];
+const AI: [(Sid, &str, Kind); 2] =
+    [(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle), (Sid::VoicePaste, "Paste dictated text", Kind::Toggle)];
 
 const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
 
@@ -77,7 +87,7 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 10] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabShelf, "Shelf", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
@@ -86,20 +96,26 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 10] = [
     (Sid::TabWeather, "Weather", Kind::Toggle),
     (Sid::TabRecord, "Record", Kind::Toggle),
     (Sid::TabAgy, "AGY", Kind::Toggle),
+    (Sid::TabChat, "Chat", Kind::Toggle),
+    (Sid::TabPrivacy, "Privacy", Kind::Toggle),
+    (Sid::TabActivity, "Activity", Kind::Toggle),
+    (Sid::TabSystem, "System", Kind::Toggle),
     (Sid::TabControls, "Controls", Kind::Toggle),
     (Sid::TabTheme, "Theme", Kind::Toggle),
 ];
 
-pub const GROUPS: [Group; 10] = [
+pub const GROUPS: [Group; 12] = [
     Group { glyph: '\u{E713}', name: "General", rows: &GENERAL, custom: None },
     Group { glyph: '\u{E80F}', name: "Island", rows: &ISLAND, custom: None },
     Group { glyph: '\u{E790}', name: "Appearance", rows: &APPEARANCE, custom: None },
     Group { glyph: '\u{E8D6}', name: "Pill and music", rows: &PILL, custom: Some(pill_items) },
+    Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items) },
     Group { glyph: '\u{EA8F}', name: "Notifications", rows: &NOTIFICATIONS, custom: None },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items) },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items) },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items) },
+    Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items) },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items) },
 ];
 
@@ -142,6 +158,8 @@ pub enum Act {
     KeysReset,
     LyricsAppAdd,
     LyricsAppRemove(usize),
+    Metric(usize),
+    Agent(usize),
 }
 
 #[derive(Default)]
@@ -256,6 +274,54 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     }
     out.push(Item::Field(Field::SpotifyId, "Own Client ID", "Optional: your Spotify app"));
     out.push(Item::Button(Act::SpotifySaveId, "Save the Client ID".into(), true));
+    out
+}
+
+fn agent_items(ui: &UiState) -> Vec<Item> {
+    use crate::services::agents::{self, Agent, State};
+    let mut out = vec![Item::Heading("Coding agents")];
+    out.push(Item::Note("The island shows when an agent works, waits for you or finishes."));
+    out.push(Item::Note("Nothing is changed in their settings until you connect."));
+    for (i, agent) in Agent::ALL.into_iter().enumerate() {
+        let state = if agents::connected(agent) { "Disconnect" } else { "Connect" };
+        out.push(Item::Pair(Act::Agent(i), agent.name().into(), state.into(), false));
+    }
+    out.push(Item::Note(
+        "Claude Code: hooks in ~/.claude/settings.json. Codex CLI: its notify command, finished only.",
+    ));
+    out.push(Item::Heading("Sessions"));
+    if ui.agents.is_empty() {
+        out.push(Item::Note("No sessions heard from yet."));
+    }
+    let tr = |s: &str| crate::ui::i18n::tr(s).into_owned();
+    for s in ui.agents.iter().take(8) {
+        let word = match s.state {
+            State::Working => tr("working"),
+            State::Waiting => tr("waiting for you"),
+            State::Done => tr("finished"),
+        };
+        out.push(Item::Text(format!("{} · {} — {word}", s.agent.name(), s.project)));
+    }
+    out
+}
+
+fn metrics_items(ui: &UiState) -> Vec<Item> {
+    use crate::platform::metrics::Metric;
+    let mut out = vec![Item::Heading("System"), Item::Row(Sid::MetricsInterval, "Read every", Kind::Slider)];
+    out.push(Item::Heading("Figures"));
+    for (i, m) in Metric::ALL.into_iter().enumerate() {
+        let on_tab = ui.cfg.metrics_tab.iter().any(|k| k == m.key());
+        let on_pill = ui.cfg.metrics_pill.iter().any(|k| k == m.key());
+        let state = match (on_tab, on_pill) {
+            (false, false) => "Hidden",
+            (true, false) => "On the tab",
+            (false, true) => "On the pill",
+            (true, true) => "Tab and pill",
+        };
+        out.push(Item::Pair(Act::Metric(i), m.label().into(), state.into(), false));
+    }
+    out.push(Item::Note("Click a figure to move it: hidden, the System tab, the pill, or both."));
+    out.push(Item::Note("Nothing is read while no figure is on screen."));
     out
 }
 

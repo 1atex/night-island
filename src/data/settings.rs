@@ -123,6 +123,12 @@ pub struct Settings {
     pub pill_battery: BatteryStyle,
     pub music_eq: bool,
     pub music_title: bool,
+    pub music_cover: bool,
+    pub metrics_tab: Vec<String>,
+    pub metrics_pill: Vec<String>,
+    pub metrics_secs: u32,
+    pub activity_track: bool,
+    pub voice_paste: bool,
     pub music_lyrics: bool,
     pub dev_tools: bool,
     pub shared_lyrics: bool,
@@ -155,6 +161,11 @@ pub struct Settings {
     pub close_speed: f32,
     pub keys: BTreeMap<String, Combo>,
     pub hide_pill_secs: u32,
+    pub ghost_mode: bool,
+    pub ghost_opacity: f32,
+    pub ghost_click_through: bool,
+    pub ghost_hold: bool,
+    pub home_actions: Vec<u8>,
     pub lyrics_apps: Vec<String>,
 }
 
@@ -185,13 +196,19 @@ impl Default for Settings {
             pill_battery: BatteryStyle::Percent,
             music_eq: true,
             music_title: false,
+            music_cover: false,
+            voice_paste: true,
+            activity_track: false,
+            metrics_tab: ["cpu", "ram", "gpu", "net_down", "net_up"].map(String::from).to_vec(),
+            metrics_pill: Vec::new(),
+            metrics_secs: 2,
             music_lyrics: false,
             dev_tools: false,
             shared_lyrics: false,
             update_check: true,
             update_beta: false,
             ai: AiSettings::default(),
-            hidden_tabs: vec!["AGY".to_string()],
+            hidden_tabs: vec!["AGY".to_string(), "Activity".to_string()],
             notify: NotifySettings::default(),
             spike_color: true,
             record_format: RecordFormat::Mp4,
@@ -217,10 +234,19 @@ impl Default for Settings {
             close_speed: 1.0,
             keys: BTreeMap::new(),
             hide_pill_secs: 7,
+            ghost_mode: true,
+            ghost_opacity: 0.3,
+            ghost_click_through: true,
+            ghost_hold: false,
+            home_actions: Vec::new(),
             lyrics_apps: Vec::new(),
         }
     }
 }
+
+pub const METRIC_KEYS: [&str; 7] = ["cpu", "ram", "gpu", "disk", "net_down", "net_up", "uptime"];
+
+pub const HOME_ACTION_COUNT: usize = 8;
 
 fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
@@ -336,6 +362,9 @@ pub enum Notice {
     LockKeys,
     Battery,
     Ai,
+    Steam,
+    Agents,
+    Privacy,
     Update,
 }
 
@@ -355,6 +384,9 @@ pub struct NotifySettings {
     pub battery: bool,
     pub ai: bool,
     pub update: bool,
+    pub privacy: bool,
+    pub agents: bool,
+    pub steam: bool,
 }
 
 impl Default for NotifySettings {
@@ -373,6 +405,9 @@ impl Default for NotifySettings {
             battery: false,
             ai: true,
             update: true,
+            privacy: true,
+            agents: true,
+            steam: true,
         }
     }
 }
@@ -392,12 +427,29 @@ impl NotifySettings {
             Notice::Battery => self.battery,
             Notice::Ai => self.ai,
             Notice::Update => self.update,
+            Notice::Privacy => self.privacy,
+            Notice::Agents => self.agents,
+            Notice::Steam => self.steam,
         }
     }
 }
 
-pub const HIDEABLE_TABS: [&str; 10] =
-    ["Clipboard", "Shelf", "Text", "Note", "Reminders", "Weather", "Record", "AGY", "Controls", "Theme"];
+pub const HIDEABLE_TABS: [&str; 14] = [
+    "System",
+    "Clipboard",
+    "Shelf",
+    "Text",
+    "Note",
+    "Reminders",
+    "Weather",
+    "Record",
+    "AGY",
+    "Chat",
+    "Privacy",
+    "Activity",
+    "Controls",
+    "Theme",
+];
 
 impl Settings {
     pub fn tab_hidden(&self, name: &str) -> bool {
@@ -519,6 +571,24 @@ impl Settings {
         self.open_speed = clamp_f(self.open_speed, 0.4, 2.5, d.open_speed);
         self.close_speed = clamp_f(self.close_speed, 0.4, 2.5, d.close_speed);
         self.hide_pill_secs = self.hide_pill_secs.clamp(5, 10);
+        self.ghost_opacity = clamp_f(self.ghost_opacity, 0.05, 1.0, d.ghost_opacity);
+        self.metrics_secs = self.metrics_secs.clamp(1, 10);
+        for list in [&mut self.metrics_tab, &mut self.metrics_pill] {
+            let mut seen: Vec<String> = Vec::new();
+            for key in std::mem::take(list) {
+                if METRIC_KEYS.contains(&key.as_str()) && !seen.contains(&key) {
+                    seen.push(key);
+                }
+            }
+            *list = seen;
+        }
+        let mut seen = Vec::new();
+        for id in std::mem::take(&mut self.home_actions) {
+            if usize::from(id) < HOME_ACTION_COUNT && !seen.contains(&id) {
+                seen.push(id);
+            }
+        }
+        self.home_actions = seen;
         self.sanitize_keys();
         let mut apps: Vec<String> = Vec::new();
         for a in &self.lyrics_apps {
@@ -603,6 +673,14 @@ mod tests {
         assert_eq!(s.combo(Hotkey::Mic), Combo::new(2, 69));
         assert_eq!(s.combo(Hotkey::HidePill), Combo::new(2, 70));
         assert_eq!(s.hide_pill_secs, 10);
+        assert!(s.ghost_mode && s.ghost_click_through && !s.ghost_hold);
+        let mut s: Settings = serde_json::from_str(r#"{"ghost_opacity":-3}"#).unwrap();
+        s.sanitize();
+        assert_eq!(s.ghost_opacity, 0.05);
+        assert!(s.home_actions.is_empty());
+        let mut s: Settings = serde_json::from_str(r#"{"home_actions":[3,3,99,0]}"#).unwrap();
+        s.sanitize();
+        assert_eq!(s.home_actions, [3, 0]);
 
         let json = r#"{"keys":{"mic":{"mods":2,"vk":69}}}"#;
         let mut s: Settings = serde_json::from_str(json).unwrap();
