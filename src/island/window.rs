@@ -76,6 +76,13 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 let picked = pick_file(hwnd);
                 with_app(|a| a.finish_dock_dialog(picked));
             }
+            let mut chat_dialog = false;
+            with_app(|a| chat_dialog = std::mem::take(&mut a.want_chat_dialog));
+            if chat_dialog {
+                with_app(|a| a.popup_open = true);
+                let picked = pick_file(hwnd);
+                with_app(|a| a.finish_chat_dialog(picked));
+            }
             LRESULT(0)
         }
         WM_RBUTTONUP => {

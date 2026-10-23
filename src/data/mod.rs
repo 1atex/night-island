@@ -1,3 +1,4 @@
+pub mod chats;
 pub mod clips;
 pub mod keys;
 pub mod log;

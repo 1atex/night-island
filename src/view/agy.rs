@@ -155,11 +155,13 @@ pub(in crate::view) struct History<'a> {
     pub hist: f32,
     pub max: &'a std::cell::Cell<f32>,
     pub input_h: f32,
+    pub reserve: f32,
 }
 
 pub(in crate::view) fn paint_history(p: &Painter, pill: Rect, scale: f32, h: &History, running: bool) -> Result<()> {
     use crate::services::agy::Kind;
-    let view = agy_view(pill, scale, h.input_h);
+    let mut view = agy_view(pill, scale, h.input_h);
+    view.3 -= h.reserve;
     let width = view.2 - view.0 - 10.0 * scale;
     let running_h = if running { 24.0 * scale } else { 0.0 };
     let key = (h.id.clone(), width.round() as i32, h.msgs.len());
@@ -365,6 +367,7 @@ pub(in crate::view) fn paint_agy(p: &Painter, pill: Rect, scale: f32, ui: &UiSta
         hist: ui.agy.hist,
         max: &ui.agy.max,
         input_h: ui.agy.input_h.get(),
+        reserve: 0.0,
     };
     paint_history(p, pill, scale, &history, running)?;
     let (frame, text_area) = agy_input(pill, scale, ui.agy.input_h.get());

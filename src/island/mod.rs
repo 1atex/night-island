@@ -134,6 +134,7 @@ struct App {
     popup_open: bool,
     overlay: Option<overlay::Overlay>,
     want_dock_dialog: bool,
+    want_chat_dialog: bool,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
     notice_link: Option<std::path::PathBuf>,

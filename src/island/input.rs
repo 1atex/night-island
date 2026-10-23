@@ -223,6 +223,11 @@ impl App {
             match view::hit_chat(pill, self.scale, fx, fy, &self.ui) {
                 Some(view::ChatHit::Send) => Some(1200),
                 Some(view::ChatHit::New) => Some(1201),
+                Some(view::ChatHit::Chats) => Some(1202),
+                Some(view::ChatHit::Attach) => Some(1203),
+                Some(view::ChatHit::Row(i)) => Some(1220 + i),
+                Some(view::ChatHit::RowDelete(i)) => Some(1240 + i),
+                Some(view::ChatHit::ChipRemove(i)) => Some(1260 + i),
                 Some(view::ChatHit::Setup) => Some(1210),
                 _ => None,
             }
@@ -353,6 +358,12 @@ impl App {
         if self.ui.tab == view::Tab::Agy && self.ui.agy.open {
             let step = 54.0 * self.scale * if delta > 0 { 1.0 } else { -1.0 };
             self.ui.agy.hist = (self.ui.agy.hist + step).clamp(0.0, self.ui.agy.max.get());
+            return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Chat && self.ui.chat.list_open {
+            let most = self.ui.chat.list.len().saturating_sub(view::chat_rows());
+            let scroll = &mut self.ui.chat.list_scroll;
+            *scroll = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(most) };
             return self.repaint_expanded();
         }
         if self.ui.tab == view::Tab::Chat {

@@ -85,6 +85,7 @@ impl Store {
         .ok()?;
         super::notes::init(&conn).ok()?;
         super::usage::init(&conn).ok()?;
+        super::chats::init(&conn).ok()?;
         Some(Self { conn })
     }
 

@@ -226,6 +226,7 @@ impl App {
             popup_open: false,
             overlay: None,
             want_dock_dialog: false,
+            want_chat_dialog: false,
             reminders: Vec::new(),
             recording: None,
             notice_link: None,

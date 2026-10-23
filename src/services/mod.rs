@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod agy;
 pub mod ai;
+pub mod attach;
 pub mod discord;
 pub mod everything;
 pub mod http;
