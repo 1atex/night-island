@@ -1,6 +1,6 @@
 use crate::island::*;
 
-pub(in crate::island) const TINT_OPEN_NO_BLUR: f32 = 0.9;
+pub(in crate::island) const TINT_OPEN_NO_BLUR: f32 = 0.97;
 
 pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
     #[repr(C)]

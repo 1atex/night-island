@@ -13,6 +13,21 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let (bh, gap, icon_w) = (36.0 * scale, 1.0 * scale, 32.0 * scale);
     let y0 = y + 12.0 * scale;
     let mut left = x + 12.0 * scale;
+    let pin_left = x + w - 78.0 * scale;
+    let chip = if ui.privacy.cam || ui.privacy.mic { 42.0 * scale } else { 0.0 };
+    let room = pin_left - 6.0 * scale - chip - left;
+    let shown = TABS.iter().filter(|(t, _, n)| *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n)).count() as f32;
+    let label = |name: &str| (crate::ui::i18n::tr(name).chars().count() as f32 * 8.6 + 8.0) * scale;
+    let active_extra = TABS
+        .iter()
+        .find(|(t, _, n)| *t == active && *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n))
+        .map_or(0.0, |(_, _, n)| label(n));
+    let gaps = (shown - 1.0).max(0.0) * gap;
+    let bare_w = if shown * icon_w + gaps + active_extra > room {
+        icon_w * ((room - active_extra - gaps) / (shown * icon_w)).clamp(0.6, 1.0)
+    } else {
+        icon_w
+    };
     std::array::from_fn(|i| {
         let (tab, _, name) = TABS[i];
         if !tab_in_bar(&ui.cfg, tab, name) {
@@ -22,11 +37,7 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
             let r = x + w - 12.0 * scale;
             return (r - icon_w, y0, r, y0 + bh);
         }
-        let width = if tab == active {
-            icon_w + (crate::ui::i18n::tr(name).chars().count() as f32 * 8.6 + 8.0) * scale
-        } else {
-            icon_w
-        };
+        let width = if tab == active { icon_w + label(name) } else { bare_w };
         let rect = (left, y0, left + width, y0 + bh);
         left += width + gap;
         rect
