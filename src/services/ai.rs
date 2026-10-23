@@ -72,6 +72,28 @@ pub fn remove_key(provider: AiProvider) {
     integrations::delete_secret(&secret_name(provider));
 }
 
+const VOICE_SECRET: &str = "ai_voice";
+
+pub fn has_voice_key() -> bool {
+    integrations::dir().is_some_and(|d| d.join(format!("{VOICE_SECRET}.bin")).exists())
+}
+
+pub fn save_voice_key(key: &str) -> bool {
+    if !valid_key(key) {
+        return false;
+    }
+    integrations::save_secret(VOICE_SECRET, key.trim());
+    has_voice_key()
+}
+
+pub fn remove_voice_key() {
+    integrations::delete_secret(VOICE_SECRET);
+}
+
+pub fn voice_ready(settings: &AiSettings) -> bool {
+    if settings.voice_separate { has_voice_key() } else { has_key(settings.provider) }
+}
+
 pub fn valid_model(model: &str, provider: AiProvider) -> bool {
     let ok = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
     !model.is_empty()
@@ -239,8 +261,12 @@ pub const WM_TRANSCRIBED: u32 = WM_APP + 26;
 static VOICE_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 const MULTIPART_BOUNDARY: &str = "----NightIslandVoice7f3a91c2";
 
-pub fn can_transcribe(provider: AiProvider) -> bool {
-    provider != AiProvider::Claude
+pub fn can_transcribe(settings: &AiSettings) -> bool {
+    settings.voice_separate || settings.provider != AiProvider::Claude
+}
+
+fn voice_provider(settings: &AiSettings) -> AiProvider {
+    if settings.voice_separate { AiProvider::OpenAi } else { settings.provider }
 }
 
 #[derive(Debug, PartialEq)]
@@ -255,33 +281,58 @@ fn whisper_model(base: &str) -> &'static str {
     if base.contains("groq.com") { "whisper-large-v3-turbo" } else { "whisper-1" }
 }
 
+fn openai_voice_call(base: &str, model: &str, key: &str, wav: &[u8]) -> VoiceCall {
+    let mut body: Vec<u8> = Vec::with_capacity(wav.len() + 512);
+    let field = |name: &str, value: &str| {
+        format!(
+            "--{MULTIPART_BOUNDARY}
+Content-Disposition: form-data; name=\"{name}\"
+
+{value}
+"
+        )
+    };
+    body.extend_from_slice(field("model", model).as_bytes());
+    body.extend_from_slice(field("response_format", "json").as_bytes());
+    body.extend_from_slice(
+        format!(
+            "--{MULTIPART_BOUNDARY}
+Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"
+Content-Type: audio/wav
+
+"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(wav);
+    body.extend_from_slice(
+        format!(
+            "
+--{MULTIPART_BOUNDARY}--
+"
+        )
+        .as_bytes(),
+    );
+    VoiceCall {
+        url: format!("{base}/audio/transcriptions"),
+        headers: vec![("Authorization", format!("Bearer {key}"))],
+        content_type: format!("multipart/form-data; boundary={MULTIPART_BOUNDARY}"),
+        body,
+    }
+}
+
 pub fn build_voice_call(settings: &AiSettings, key: &str, wav: &[u8]) -> Option<VoiceCall> {
+    if settings.voice_separate {
+        let base = clean_base(&settings.voice_base)?;
+        return valid_model(&settings.voice_model, AiProvider::OpenAi)
+            .then(|| openai_voice_call(&base, &settings.voice_model, key, wav));
+    }
     let provider = settings.provider;
     match provider {
         AiProvider::Claude => None,
         AiProvider::OpenAi => {
             let base = clean_base(&settings.openai_base)?;
-            let model = whisper_model(&base);
-            let mut body: Vec<u8> = Vec::with_capacity(wav.len() + 512);
-            let field = |name: &str, value: &str| {
-                format!("--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
-            };
-            body.extend_from_slice(field("model", model).as_bytes());
-            body.extend_from_slice(field("response_format", "json").as_bytes());
-            body.extend_from_slice(
-                format!(
-                    "--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
-                )
-                .as_bytes(),
-            );
-            body.extend_from_slice(wav);
-            body.extend_from_slice(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n").as_bytes());
-            Some(VoiceCall {
-                url: format!("{base}/audio/transcriptions"),
-                headers: vec![("Authorization", format!("Bearer {key}"))],
-                content_type: format!("multipart/form-data; boundary={MULTIPART_BOUNDARY}"),
-                body,
-            })
+            Some(openai_voice_call(&base, whisper_model(&base), key, wav))
         }
         AiProvider::Gemini => {
             use base64::Engine as _;
@@ -342,11 +393,12 @@ pub fn transcribe(hwnd: HWND, wav: Vec<u8>) -> bool {
 }
 
 fn transcribe_now(settings: &AiSettings, wav: &[u8]) -> Answer {
-    let provider = settings.provider;
-    if !can_transcribe(provider) {
+    let provider = voice_provider(settings);
+    if !can_transcribe(settings) {
         return Err("This service cannot turn speech into text; choose Gemini or an OpenAI-compatible one".into());
     }
-    let Some(key) = integrations::load_secret(&secret_name(provider)) else {
+    let secret = if settings.voice_separate { VOICE_SECRET.to_string() } else { secret_name(provider) };
+    let Some(key) = integrations::load_secret(&secret) else {
         return Err("No key is saved for this service".into());
     };
     let Some(call) = build_voice_call(settings, &key, wav) else {

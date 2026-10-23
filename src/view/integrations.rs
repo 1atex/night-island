@@ -9,6 +9,10 @@ pub struct IntegrationsUi {
     pub ai_model: TextEdit,
     pub ai_base: TextEdit,
     pub ai_key_saved: bool,
+    pub voice_key: TextEdit,
+    pub voice_model: TextEdit,
+    pub voice_base: TextEdit,
+    pub voice_key_saved: bool,
 }
 
 pub fn discord_fields_ok(ui: &UiState) -> bool {

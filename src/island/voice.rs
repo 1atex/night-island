@@ -15,17 +15,16 @@ impl App {
             self.show_notice_for('\u{E9D9}', "Recognizing…", 60_000);
             return;
         }
-        let provider = self.settings.ai.provider;
-        if !ai::can_transcribe(provider) {
+        if !ai::can_transcribe(&self.settings.ai) {
             return self.notify_for(
                 Notice::Error,
                 '\u{E783}',
-                "Dictation needs Gemini or an OpenAI-compatible service",
+                "Dictation needs Gemini, an OpenAI-compatible service or a separate speech service",
                 4000,
             );
         }
-        if !ai::has_key(provider) {
-            return self.notify_for(Notice::Error, '\u{E783}', "Save a key for the AI service first", 3500);
+        if !ai::voice_ready(&self.settings.ai) {
+            return self.notify_for(Notice::Error, '\u{E783}', "Save a key for the speech service first", 3500);
         }
         if dictation::start(self.hwnd) {
             self.show_notice_for(

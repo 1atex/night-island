@@ -7,6 +7,7 @@ pub enum Sid {
     PillOpacity,
     AgyAuto,
     VoicePaste,
+    VoiceSeparate,
     PanelHue,
     PanelSat,
     PanelVal,
@@ -307,6 +308,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::Weather => c.weather,
         Sid::AgyAuto => c.agy_auto,
         Sid::VoicePaste => c.voice_paste,
+        Sid::VoiceSeparate => c.ai.voice_separate,
         Sid::RecSystem => c.record_system_audio,
         Sid::RecMic => c.record_mic,
         _ => false,
@@ -359,6 +361,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::Weather => c.weather = on,
         Sid::AgyAuto => c.agy_auto = on,
         Sid::VoicePaste => c.voice_paste = on,
+        Sid::VoiceSeparate => c.ai.voice_separate = on,
         Sid::RecSystem => c.record_system_audio = on,
         Sid::RecMic => c.record_mic = on,
         _ => {}

@@ -326,6 +326,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Cover art on the pill" => "Обложка на пилюле",
         "Chat" => "Чат",
         "New chat" => "Новый чат",
+        "Attach" => "Файл",
         "Ask anything" => "Спросите о чём угодно",
         "Message…" => "Сообщение…",
         "Set up an AI service in the settings to chat" => "Чтобы общаться, настройте нейросеть в настройках",
@@ -510,7 +511,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Dictation needs Gemini or an OpenAI-compatible service" => {
             "Для диктовки нужен Gemini или OpenAI-совместимый сервис"
         }
-        "Save a key for the AI service first" => "Сначала сохраните ключ нейросети",
         "The microphone could not be opened" => "Не удалось открыть микрофон",
         "Too short, nothing was recorded" => "Слишком коротко, ничего не записано",
         "Nothing was heard (is the microphone muted?)" => "Ничего не слышно (микрофон выключен?)",

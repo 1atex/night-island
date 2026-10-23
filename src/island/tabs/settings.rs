@@ -106,7 +106,7 @@ impl App {
                 UpdateCheck | UpdateBeta => {
                     update::configure(self.settings.update_check, self.settings.update_beta);
                 }
-                AiProvider => {
+                AiProvider | VoiceSeparate => {
                     ai::configure(&self.settings.ai);
                     self.sync_ai_fields();
                 }

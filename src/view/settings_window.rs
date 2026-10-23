@@ -76,8 +76,11 @@ const NOTIFICATIONS: [(Sid, &str, Kind); 16] = [
     (Sid::NotifySteam, "Steam games (started, ended)", Kind::Toggle),
 ];
 
-const AI: [(Sid, &str, Kind); 2] =
-    [(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle), (Sid::VoicePaste, "Paste dictated text", Kind::Toggle)];
+const AI: [(Sid, &str, Kind); 3] = [
+    (Sid::AgyAuto, "AGY auto-approve", Kind::Toggle),
+    (Sid::VoicePaste, "Paste dictated text", Kind::Toggle),
+    (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
+];
 
 const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
 
@@ -139,6 +142,9 @@ pub enum Field {
     AiKey,
     AiModel,
     AiBase,
+    VoiceKey,
+    VoiceModel,
+    VoiceBase,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -151,6 +157,8 @@ pub enum Act {
     SpotifySaveId,
     AiSave,
     AiRemoveKey,
+    VoiceSave,
+    VoiceRemoveKey,
     UpdateCheck,
     UpdateDownload,
     UpdateInstall,
@@ -429,6 +437,21 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
     for &(id, label, kind) in &AI {
         out.push(Item::Row(id, label, kind));
     }
+    if ui.cfg.ai.voice_separate {
+        let saved = ui.int.voice_key_saved;
+        out.push(Item::Field(
+            Field::VoiceKey,
+            "Speech API key",
+            if saved { "Saved: type a new one to replace it" } else { "Paste the key here" },
+        ));
+        out.push(Item::Field(Field::VoiceModel, "Speech model", "whisper-1"));
+        out.push(Item::Field(Field::VoiceBase, "Speech server address", "https://api.openai.com/v1"));
+        out.push(Item::Button(Act::VoiceSave, "Save speech service".into(), true));
+        if saved {
+            out.push(Item::Button(Act::VoiceRemoveKey, "Remove the speech key".into(), true));
+        }
+        out.push(Item::Note("Any OpenAI-compatible /audio/transcriptions server: OpenAI, Groq, your own Whisper."));
+    }
     out
 }
 
@@ -581,6 +604,9 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::AiKey => &ui.int.ai_key,
         Field::AiModel => &ui.int.ai_model,
         Field::AiBase => &ui.int.ai_base,
+        Field::VoiceKey => &ui.int.voice_key,
+        Field::VoiceModel => &ui.int.voice_model,
+        Field::VoiceBase => &ui.int.voice_base,
     }
 }
 
@@ -732,7 +758,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         ctl,
                         inner,
                         field_edit(ui, field),
-                        matches!(field, Field::DiscordSecret | Field::AiKey),
+                        matches!(field, Field::DiscordSecret | Field::AiKey | Field::VoiceKey),
                         hint,
                         ui.sw.field == Some(field),
                         ui.sw.caret_on,

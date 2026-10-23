@@ -305,6 +305,9 @@ pub struct AiSettings {
     pub openai_model: String,
     pub openai_base: String,
     pub gemini_model: String,
+    pub voice_separate: bool,
+    pub voice_base: String,
+    pub voice_model: String,
 }
 
 impl Default for AiSettings {
@@ -315,6 +318,9 @@ impl Default for AiSettings {
             openai_model: AiProvider::OpenAi.default_model().into(),
             openai_base: "https://api.openai.com/v1".into(),
             gemini_model: AiProvider::Gemini.default_model().into(),
+            voice_separate: false,
+            voice_base: "https://api.openai.com/v1".into(),
+            voice_model: "whisper-1".into(),
         }
     }
 }
@@ -346,6 +352,10 @@ impl AiSettings {
             }
         }
         self.openai_base = clean_base(&self.openai_base).unwrap_or(d.openai_base);
+        self.voice_base = clean_base(&self.voice_base).unwrap_or(d.voice_base);
+        if !valid_model(&self.voice_model, AiProvider::OpenAi) {
+            self.voice_model = d.voice_model;
+        }
     }
 }
 
