@@ -126,7 +126,7 @@ impl App {
         }
         self.ui.cfg = self.settings.clone();
         self.repaint_expanded();
-        self.settle_layers();
+        self.set_timer(Timer::Settle, 700);
         if self.pointer.slider.is_none() {
             self.settings.save();
         }

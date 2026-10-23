@@ -18,6 +18,11 @@ impl App {
 
     pub(in crate::island) fn animate_to(&self, expanded: bool, hidden: bool) -> Result<()> {
         let ms = if expanded { self.open_ms() } else { self.close_ms() };
+        let _ = self.collapsed.sprite.SetIsVisible(true);
+        let _ = self.expanded.sprite.SetIsVisible(true);
+        if self.settings.character != Character::None {
+            let _ = self.pet.char_layer.sprite.SetIsVisible(true);
+        }
         let (offset, size, radius) = self.pill(self.win, expanded, hidden);
         self.geometry.StartAnimation(h!("Offset"), &self.spring(offset, ms)?)?;
         self.geometry.StartAnimation(h!("Size"), &self.spring(size, ms)?)?;
@@ -115,6 +120,17 @@ impl App {
             State::Collapsed => false,
             _ => return,
         };
+        let _ = self.collapsed.sprite.SetIsVisible(!expanded);
+        let _ = self.expanded.sprite.SetIsVisible(expanded);
+        if expanded {
+            let _ = self.pet.char_layer.sprite.SetIsVisible(false);
+            self.set_bump_visible(false);
+            for bar in &self.music.spectrum {
+                let _ = bar.SetIsVisible(false);
+            }
+        } else {
+            let _ = self.pet.char_layer.sprite.SetIsVisible(self.settings.character != Character::None);
+        }
         let open_tint = if self.settings.acrylic { self.settings.tint_open } else { TINT_OPEN_NO_BLUR };
         let tint_want = if expanded { open_tint } else { self.settings.pill_opacity };
         let layers = [
