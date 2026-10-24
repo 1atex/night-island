@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Night Island</title>
+  <defs>
+    <mask id="crescent" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <rect width="256" height="256" fill="#fff"/>
+      <circle cx="81" cy="122" r="22" fill="#000"/>
+    </mask>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="58" fill="#101533"/>
+  <circle cx="52" cy="52" r="4" fill="#f2e9c9" opacity="0.8"/>
+  <circle cx="112" cy="38" r="2.5" fill="#f2e9c9" opacity="0.8"/>
+  <circle cx="196" cy="58" r="3.5" fill="#f2e9c9" opacity="0.8"/>
+  <circle cx="214" cy="206" r="3" fill="#f2e9c9" opacity="0.8"/>
+  <circle cx="80" cy="208" r="2.5" fill="#f2e9c9" opacity="0.8"/>
+  <circle cx="150" cy="214" r="4" fill="#f2e9c9" opacity="0.8"/>
+  <rect x="25.25" y="89.25" width="205.5" height="77.5" rx="38.75" fill="#05060f" stroke="#2b3566" stroke-width="2.5"/>
+  <circle cx="70" cy="128" r="26" fill="#f2e9c9" mask="url(#crescent)"/>
+  <circle cx="140" cy="128" r="11" fill="#5eead4"/>
+  <circle cx="182" cy="128" r="11" fill="#8b93c9"/>
+</svg>
