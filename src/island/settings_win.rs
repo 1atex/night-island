@@ -80,7 +80,7 @@ impl App {
             self.settings_win = Some(hwnd);
             self.ui.sw = view::SwUi::default();
             self.ui.int.spotify_id.set_text(&spotify::own_client_id());
-            self.sync_ai_fields();
+            self.sync_voice_fields();
             self.reload_groups();
             spotify::reload_status();
             let _ = ShowWindow(hwnd, SW_SHOW);
@@ -182,6 +182,9 @@ impl App {
         if self.ui.sw.field == field {
             return;
         }
+        if self.ui.sw.field == Some(view::Field::WakeWord) {
+            self.commit_wake();
+        }
         self.ui.sw.field = field;
         self.ui.sw.caret_on = true;
         if field.is_some() {
@@ -242,11 +245,29 @@ impl App {
         self.ui.int.ai_base.set_text(&self.settings.ai.openai_base);
         self.ui.int.ai_key.set_text("");
         self.ui.int.ai_key_saved = ai::has_key(provider);
+        self.ui.int.voice_key_shared =
+            ai::voice_shares_chat_key(&self.settings.ai) && ai::has_key(crate::data::settings::AiProvider::OpenAi);
+    }
+
+    pub(in crate::island) fn sync_voice_fields(&mut self) {
         self.ui.int.voice_model.set_text(&self.settings.ai.voice_model);
         self.ui.int.voice_base.set_text(&self.settings.ai.voice_base);
         self.ui.int.voice_key.set_text("");
         self.ui.int.voice_key_saved = ai::has_voice_key();
         self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
+        self.sync_ai_fields();
+    }
+
+    fn commit_wake(&mut self) {
+        let typed = self.ui.int.wake.text();
+        if let Some(wake) = crate::tools::voicecmd::clean_wake_setting(&typed)
+            && wake != self.settings.ai.voice_wake
+        {
+            self.settings.ai.voice_wake = wake;
+            self.settings.save();
+            self.ui.cfg = self.settings.clone();
+            ai::configure(&self.settings.ai);
+        }
     }
 
     fn save_wake(&mut self) {
@@ -257,7 +278,7 @@ impl App {
         self.settings.save();
         self.ui.cfg = self.settings.clone();
         ai::configure(&self.settings.ai);
-        self.sync_ai_fields();
+        self.sync_voice_fields();
         self.notify(Notice::Integrations, '\u{E73E}', "Command name saved");
     }
 
@@ -279,7 +300,7 @@ impl App {
         self.settings.save();
         self.ui.cfg = self.settings.clone();
         ai::configure(&self.settings.ai);
-        self.sync_ai_fields();
+        self.sync_voice_fields();
         self.notify(Notice::Integrations, '\u{E73E}', "Speech service saved");
     }
 
@@ -498,7 +519,7 @@ impl App {
             }
             view::Act::VoiceRemoveKey => {
                 ai::remove_voice_key();
-                self.sync_ai_fields();
+                self.sync_voice_fields();
             }
             view::Act::AiRemoveKey => {
                 ai::remove_key(self.settings.ai.provider);
@@ -734,6 +755,7 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_destroyed(&mut self) {
+        self.commit_wake();
         self.end_rebind();
         self.kill_timer(Timer::SwCaret);
         self.settings_win = None;

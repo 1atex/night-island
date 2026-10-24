@@ -40,7 +40,9 @@ impl App {
             Some(view::HomeHit::Action(i)) => self.home_action(i),
             Some(view::HomeHit::Edit) => {
                 self.ui.home.edit = !self.ui.home.edit;
+                self.ui.home.edit_scroll = 0;
                 self.ui.home.hover_act = None;
+                self.sync_metrics();
                 self.repaint_expanded();
             }
             Some(view::HomeHit::Dock(i)) => self.open_dock_item(i),
@@ -84,11 +86,33 @@ impl App {
             Some(at) => {
                 self.settings.home_actions.remove(at);
             }
+            None if self.settings.home_actions.len() >= view::MAX_HOME_TILES => {
+                return self.notify(Notice::Error, '\u{E783}', "Up to 8 tiles fit: take one off first");
+            }
             None => self.settings.home_actions.push(id),
         }
         self.settings.save();
         self.ui.cfg = self.settings.clone();
+        self.sync_metrics();
         self.repaint_expanded();
+    }
+
+    fn home_info_click(&mut self, id: usize) {
+        let Some(view::Tile::Info(_, _, info)) = view::tile_kind(id) else { return };
+        let tab = match info {
+            view::Info::Metric(_) => Some(view::Tab::System),
+            view::Info::ScreenTime => Some(view::Tab::Activity),
+            view::Info::Weather => Some(view::Tab::Weather),
+            view::Info::Reminder => Some(view::Tab::Remind),
+            view::Info::Steam => Some(view::Tab::Steam),
+            view::Info::Vpn => return self.toggle_vpn(),
+            view::Info::Battery | view::Info::Agents | view::Info::Clock => None,
+        };
+        if let Some(tab) = tab
+            .filter(|t| view::tab_in_bar(&self.settings, *t, view::TABS.iter().find(|x| x.0 == *t).map_or("", |x| x.2)))
+        {
+            self.select_tab(tab);
+        }
     }
 
     pub(in crate::island) fn drag_volume(&mut self, x: i32) {
@@ -151,7 +175,8 @@ impl App {
                 self.collapse();
                 self.plain_paste();
             }
-            _ => self.toggle_command(),
+            7 => self.toggle_command(),
+            _ => self.home_info_click(i),
         }
     }
 
@@ -160,6 +185,7 @@ impl App {
             self.ui.home.vol = v;
         }
         self.ui.home.device = volume::device_name().unwrap_or_default();
+        self.refresh_screen_time();
         if self.ui.home.vol_track {
             match volume::app_volume(&self.ui.media.source) {
                 Some(v) => self.ui.home.app_vol = v,

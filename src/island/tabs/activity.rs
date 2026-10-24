@@ -77,6 +77,19 @@ impl App {
             }
         }
         self.sort_unknown();
+        if self.state == State::Expanded && self.ui.tab == view::Tab::Home {
+            self.refresh_screen_time();
+            self.repaint_expanded();
+        }
+    }
+
+    pub(in crate::island) fn refresh_screen_time(&mut self) {
+        self.ui.home.screen_secs = if self.settings.activity_track {
+            let today = activity::today();
+            self.store.as_ref().map(|s| s.activity_since(today, 1000).iter().map(|(_, secs)| *secs).sum())
+        } else {
+            None
+        };
     }
 
     pub(in crate::island) fn reload_groups(&mut self) {

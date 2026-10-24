@@ -36,6 +36,7 @@ mod remind;
 mod settings;
 mod settings_window;
 mod shelf;
+mod steam;
 mod text;
 mod weather;
 mod widgets;
@@ -44,7 +45,7 @@ use self::shelf::*;
 pub use self::{
     activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
     integrations::*, metrics::*, note::*, pill::*, privacy::*, record::*, remind::*, settings::*, settings_window::*,
-    text::*, weather::*, widgets::*,
+    steam::*, text::*, weather::*, widgets::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);
@@ -63,13 +64,14 @@ pub enum Tab {
     Chat,
     Privacy,
     Activity,
+    Steam,
     System,
     Controls,
     Theme,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 16] = [
+pub const TABS: [(Tab, char, &str); 17] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Shelf, '\u{E838}', "Shelf"),
@@ -82,6 +84,7 @@ pub const TABS: [(Tab, char, &str); 16] = [
     (Tab::Chat, '\u{E8F2}', "Chat"),
     (Tab::Privacy, '\u{EA18}', "Privacy"),
     (Tab::Activity, '\u{E823}', "Activity"),
+    (Tab::Steam, '\u{E7FC}', "Steam"),
     (Tab::System, '\u{E9D9}', "System"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
     (Tab::Theme, '\u{E790}', "Theme"),
@@ -113,6 +116,8 @@ pub struct UiState {
     pub sw: SwUi,
     pub privacy: Privacy,
     pub mic_muted: Option<bool>,
+    pub vpn: Option<bool>,
+    pub vpn_busy: bool,
     pub notice: Option<(char, String)>,
     pub volume: Option<f32>,
     pub recording_secs: Option<u32>,
@@ -135,6 +140,7 @@ pub struct UiState {
     pub chat: ChatUi,
     pub privacy_log: PrivacyUi,
     pub activity: ActivityUi,
+    pub steam: SteamUi,
     pub metrics: MetricsUi,
     pub agents: Vec<crate::services::agents::Session>,
 }
@@ -147,6 +153,7 @@ impl UiState {
             chat: ChatUi::default(),
             privacy_log: PrivacyUi::default(),
             activity: ActivityUi::default(),
+            steam: SteamUi::default(),
             metrics: MetricsUi::default(),
             agents: Vec::new(),
             cmd: CommandUi::default(),
@@ -169,6 +176,8 @@ impl UiState {
             sw: SwUi::default(),
             privacy: Privacy::default(),
             mic_muted: None,
+            vpn: None,
+            vpn_busy: false,
             notice: None,
             volume: None,
             recording_secs: None,

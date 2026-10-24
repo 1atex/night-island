@@ -33,10 +33,12 @@ pub(in crate::island) enum Timer {
     Activity = 29,
     Settle = 30,
     UiAnim = 31,
+    VpnWait = 32,
+    SteamPoll = 33,
 }
 
 impl Timer {
-    const ALL: [Timer; 31] = [
+    const ALL: [Timer; 33] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -68,6 +70,8 @@ impl Timer {
         Timer::Activity,
         Timer::Settle,
         Timer::UiAnim,
+        Timer::VpnWait,
+        Timer::SteamPoll,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -113,6 +117,8 @@ impl App {
             Timer::Activity => self.on_activity_timer(),
             Timer::Settle => self.settle_layers(),
             Timer::UiAnim => self.ui_anim_tick(),
+            Timer::VpnWait => self.vpn_wait_over(),
+            Timer::SteamPoll => self.on_steam_poll(),
             Timer::Geo => {
                 if self.ui.tab == view::Tab::Weather && self.ui.editing {
                     weather::search(self.hwnd, &self.ui.city.input.text());
@@ -160,6 +166,7 @@ impl App {
                 self.ui.clip.clear_armed = false;
                 self.ui.privacy_log.clear_armed = false;
                 self.ui.activity.clear_armed = false;
+                self.ui.steam.armed = None;
                 self.repaint_expanded();
             }
             Timer::Clock => {

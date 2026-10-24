@@ -59,6 +59,12 @@ impl App {
             self.apply_clip_filter();
             return self.repaint_expanded();
         }
+        if self.steam_search() {
+            self.ui.caret_on = true;
+            self.set_timer(Timer::Caret, CARET_BLINK_MS);
+            self.apply_steam_filter();
+            return self.repaint_expanded();
+        }
         if self.ui.cmd.open {
             self.ui.caret_on = true;
             self.set_timer(Timer::Caret, CARET_BLINK_MS);

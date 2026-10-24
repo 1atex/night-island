@@ -20,6 +20,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.hover_at(x, y);
                 if left_down {
                     a.drag_select(x, y);
+                    a.drag_read(x, y);
                     a.drag_slider(x);
                     a.drag_volume(x);
                     a.drag_seek(x);
@@ -46,6 +47,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| {
                 a.pointer.drag_from = None;
                 a.pointer.selecting = false;
+                a.pointer.reading = false;
                 a.pointer.vol_drag = false;
                 a.finish_note_drag();
                 a.mouse_up();
@@ -224,6 +226,18 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         ai::WM_COMMAND => {
             with_app(|a| a.on_voice_command());
+            LRESULT(0)
+        }
+        vpn::WM_VPN => {
+            with_app(|a| a.on_vpn());
+            LRESULT(0)
+        }
+        steam_art::WM_STEAM_ART => {
+            with_app(|a| a.on_steam_art());
+            LRESULT(0)
+        }
+        steam::WM_STEAM_SWITCH => {
+            with_app(|a| a.on_steam_switch());
             LRESULT(0)
         }
         ai::WM_SORT => {

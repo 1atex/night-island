@@ -287,6 +287,24 @@ impl Painter<'_> {
         self.draw_layout(x, y, layout, color)
     }
 
+    pub fn highlight(
+        &self,
+        layout: &IDWriteTextLayout,
+        origin: (f32, f32),
+        start: u32,
+        len: u32,
+        color: D2D1_COLOR_F,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::DirectWrite::DWRITE_HIT_TEST_METRICS;
+        let mut boxes = [DWRITE_HIT_TEST_METRICS::default(); 48];
+        let mut count = 0u32;
+        let _ = unsafe { layout.HitTestTextRange(start, len, origin.0, origin.1, Some(&mut boxes), &mut count) };
+        for b in boxes.iter().take((count as usize).min(boxes.len())) {
+            self.fill_round_rect((b.left - 1.0, b.top, b.left + b.width + 1.0, b.top + b.height), 3.0, color)?;
+        }
+        Ok(())
+    }
+
     pub fn svg(&self, data: &[u8], bounds: [f32; 4], rect: (f32, f32, f32, f32)) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_F;
         use windows::Win32::Graphics::Direct2D::ID2D1DeviceContext5;

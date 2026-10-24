@@ -68,6 +68,8 @@ impl App {
         }
         self.ui.editing = false;
         self.pointer.selecting = false;
+        self.pointer.reading = false;
+        self.ui.chat.sel = None;
         self.kill_timer(Timer::Caret);
         self.finish_rename(true);
         self.save_note();
@@ -114,6 +116,9 @@ impl App {
         if !self.ui.editing {
             return;
         }
+        if self.ui.chat.sel.take().is_some() && unit >= 0x20 {
+            self.repaint_expanded();
+        }
         let ch = match unit {
             0x08 => {
                 let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
@@ -124,6 +129,7 @@ impl App {
                 || self.remind_active()
                 || self.rename_active()
                 || self.clip_search()
+                || self.steam_search()
                 || self.extra_field().is_some() =>
             {
                 return;
@@ -193,22 +199,44 @@ impl App {
         }
         let hwnd = self.hwnd;
         let layout = self.active_layout();
+        if self.ui.tab == view::Tab::Chat && self.ui.chat.sel.is_some() {
+            match vk {
+                v if ctrl && v == b'C' as u16 => {
+                    self.copy_chat_selection();
+                    return;
+                }
+                v if ctrl && v == b'A' as u16 => {
+                    self.ui.chat.select_all();
+                    return self.repaint_expanded();
+                }
+                v if v == VK_ESCAPE.0 => {
+                    self.ui.chat.sel = None;
+                    return self.repaint_expanded();
+                }
+                _ => {}
+            }
+        }
         if self.ui.tab == view::Tab::Agy && vk == VK_RETURN.0 && !shift {
             return self.send_agy();
         }
         if self.ui.tab == view::Tab::Chat && vk == VK_RETURN.0 && !shift {
             return self.send_chat();
         }
+        if self.steam_search() && vk == VK_RETURN.0 {
+            return self.launch_first_steam_game();
+        }
         let extra = self.extra_field();
         if extra.is_some() && vk == VK_RETURN.0 {
             return self.save_city();
         }
-        let single = command || self.clip_search() || extra.is_some();
+        let single = command || self.clip_search() || self.steam_search() || extra.is_some();
         let n = if command {
             &mut self.ui.cmd.input
         } else if let Some(k) = extra {
             let _ = k;
             &mut self.ui.city.input
+        } else if self.steam_search() {
+            &mut self.ui.steam.query
         } else if single {
             &mut self.ui.clip.query
         } else {
@@ -277,6 +305,8 @@ impl App {
             &mut self.ui.city.input
         } else if self.clip_search() {
             &mut self.ui.clip.query
+        } else if self.steam_search() {
+            &mut self.ui.steam.query
         } else {
             self.multi_mut()
         }
@@ -299,6 +329,15 @@ impl App {
                 &self.ui.clip.query.text(),
                 100_000.0,
                 view::CLIP_FONT * self.scale,
+            )
+            .ok();
+        }
+        if self.steam_search() {
+            return crate::ui::gfx::make_layout(
+                self.gpu.dwrite(),
+                &self.ui.steam.query.text(),
+                100_000.0,
+                view::STEAM_SEARCH_FONT * self.scale,
             )
             .ok();
         }

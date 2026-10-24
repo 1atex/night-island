@@ -4,6 +4,7 @@ use crate::view::*;
 pub enum Ctl {
     WiFi,
     Bluetooth,
+    Vpn,
     Theme,
     Battery,
     Mic,
@@ -13,9 +14,10 @@ pub enum Ctl {
     PowerOff,
 }
 
-pub const CTLS: [(Ctl, char, &str); 8] = [
+pub const CTLS: [(Ctl, char, &str); 9] = [
     (Ctl::WiFi, '\u{E701}', "Wi-Fi"),
     (Ctl::Bluetooth, '\u{E702}', "Bluetooth"),
+    (Ctl::Vpn, VPN_GLYPH, "VPN"),
     (Ctl::Theme, '\u{E706}', "Dark theme"),
     (Ctl::Battery, '\u{E83F}', "Battery"),
     (Ctl::Lock, '\u{E72E}', "Lock"),
@@ -28,7 +30,9 @@ pub fn needs_confirm(c: Ctl) -> bool {
     matches!(c, Ctl::Sleep | Ctl::Restart | Ctl::PowerOff)
 }
 
-pub(in crate::view) const CTL_COLS: usize = 4;
+pub(in crate::view) const CTL_COLS: usize = 5;
+
+const CTL_SMALL_COLS: usize = 4;
 
 pub(in crate::view) const CTL_BIG_H: f32 = 124.0;
 
@@ -40,9 +44,9 @@ pub(in crate::view) fn ctl_rect(pill: Rect, scale: f32, i: usize) -> Rect {
     let (x, y, w, _) = pill;
     let side = SIDE_PAD * scale;
     let gap = CTL_GAP * scale;
-    let tile_w = (w - 2.0 * side - (CTL_COLS - 1) as f32 * gap) / CTL_COLS as f32;
-    let col = (i % CTL_COLS) as f32;
-    let left = x + side + col * (tile_w + gap);
+    let (cols, col) = if i < CTL_COLS { (CTL_COLS, i) } else { (CTL_SMALL_COLS, i - CTL_COLS) };
+    let tile_w = (w - 2.0 * side - (cols - 1) as f32 * gap) / cols as f32;
+    let left = x + side + col as f32 * (tile_w + gap);
     let (top, h) = if i < CTL_COLS {
         (y + 62.0 * scale, CTL_BIG_H * scale)
     } else {
@@ -63,6 +67,7 @@ pub(in crate::view) fn paint_controls(p: &Painter, pill: Rect, scale: f32, ui: &
             Ctl::WiFi => Some(ui.radios.wifi),
             Ctl::Bluetooth => Some(ui.radios.bluetooth),
             Ctl::Theme => Some(Some(ui.dark)),
+            Ctl::Vpn => Some(ui.vpn),
             _ => None,
         };
         let on = state == Some(Some(true));
@@ -119,6 +124,7 @@ pub(in crate::view) fn paint_controls(p: &Painter, pill: Rect, scale: f32, ui: &
                     Some((_, false)) => "On battery",
                     None => "On AC power",
                 },
+                Ctl::Vpn if ui.vpn_busy => "Switching",
                 _ => match state.flatten() {
                     Some(true) => "On",
                     Some(false) => "Off",

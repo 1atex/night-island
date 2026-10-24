@@ -3,6 +3,7 @@ use crate::view::*;
 pub fn tab_in_bar(cfg: &Settings, tab: Tab, name: &str) -> bool {
     match tab {
         Tab::Home | Tab::Settings => true,
+        Tab::Steam => crate::platform::steam::client_installed() && !cfg.tab_hidden(name),
         _ => !cfg.tab_hidden(name),
     }
 }
@@ -58,6 +59,17 @@ pub fn hit_pin(pill: Rect, scale: f32, px: f32, py: f32) -> bool {
     inside(pin_rect(pill, scale), px, py)
 }
 
+pub fn vpn_btn_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
+    vpn_button(ui).then(|| {
+        let pin = pin_rect(pill, scale);
+        (pin.0 - 34.0 * scale, pin.1, pin.0 - 2.0 * scale, pin.3)
+    })
+}
+
+pub fn hit_vpn_btn(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bool {
+    vpn_btn_rect(pill, scale, ui).is_some_and(|r| inside(r, px, py))
+}
+
 pub(in crate::view) fn privacy_chip(pill: Rect, scale: f32, ui: &UiState) -> Option<(Rect, char, &'static str)> {
     let (glyph, label) = if ui.privacy.cam {
         ('\u{E722}', "Camera")
@@ -67,7 +79,7 @@ pub(in crate::view) fn privacy_chip(pill: Rect, scale: f32, ui: &UiState) -> Opt
         return None;
     };
     let pin = pin_rect(pill, scale);
-    let right = pin.0 - 4.0 * scale;
+    let right = vpn_btn_rect(pill, scale, ui).map_or(pin.0, |r| r.0) - 4.0 * scale;
     let mut width = (46.0 + crate::ui::i18n::tr(label).chars().count() as f32 * 8.6) * scale;
     let tabs_end = tab_rects(pill, scale, ui)
         .iter()
@@ -138,6 +150,9 @@ pub fn paint_expanded(
         16.0 * scale,
         rgba(1.0, 1.0, 1.0, if ui.pinned { 1.0 } else { 0.62 }),
     )?;
+    if let Some(r) = vpn_btn_rect(pill, scale, ui) {
+        p.glyph(VPN_GLYPH, r, 16.0 * scale, vpn_color(ui))?;
+    }
     if let Some((chip, glyph, label)) = privacy_chip(pill, scale, ui) {
         let muted = label == "Microphone" && ui.mic_muted == Some(true);
         let (fill, icon, text) = if muted {
@@ -171,6 +186,7 @@ pub fn paint_expanded(
         Tab::Chat => paint_chat(p, pill, scale, ui)?,
         Tab::Privacy => paint_privacy(p, pill, scale, ui)?,
         Tab::Activity => paint_activity(p, pill, scale, ui)?,
+        Tab::Steam => paint_steam(p, pill, scale, ui)?,
         Tab::System => paint_system(p, pill, scale, ui)?,
         Tab::Theme => paint_theme(p, pill, scale, ui)?,
         Tab::Clipboard => paint_clipboard(p, pill, scale, ui, clips)?,

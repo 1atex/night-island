@@ -227,6 +227,7 @@ impl App {
             overlay: None,
             want_dock_dialog: false,
             want_chat_dialog: false,
+            pending_power: None,
             reminders: Vec::new(),
             recording: None,
             notice_link: None,
@@ -276,6 +277,7 @@ impl App {
                 moving: None,
                 drag_from: None,
                 selecting: false,
+                reading: false,
                 slider: None,
                 vol_drag: false,
                 seek_drag: false,
@@ -288,6 +290,8 @@ impl App {
         app.ui.cfg = app.settings.clone();
         app.ui.char_inset = if app.settings.character == Character::None { 0.0 } else { CHAR_INSET };
         app.ui.mic_muted = volume::mic_muted();
+        vpn::set_enabled(true);
+        vpn::start_watch(app.hwnd);
         app.reload_clips();
         if let Some(store) = &app.store {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());

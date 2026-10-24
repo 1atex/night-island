@@ -45,7 +45,8 @@ const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
 ];
 
-const PILL: [(Sid, &str, Kind); 9] = [
+const PILL: [(Sid, &str, Kind); 10] = [
+    (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
@@ -92,7 +93,7 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 15] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabShelf, "Shelf", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
@@ -104,6 +105,7 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
     (Sid::TabChat, "Chat", Kind::Toggle),
     (Sid::TabPrivacy, "Privacy", Kind::Toggle),
     (Sid::TabActivity, "Activity", Kind::Toggle),
+    (Sid::TabSteam, "Steam", Kind::Toggle),
     (Sid::TabSystem, "System", Kind::Toggle),
     (Sid::TabControls, "Controls", Kind::Toggle),
     (Sid::TabTheme, "Theme", Kind::Toggle),
@@ -302,9 +304,9 @@ fn agent_items(ui: &UiState) -> Vec<Item> {
         let state = if agents::connected(agent) { "Disconnect" } else { "Connect" };
         out.push(Item::Pair(Act::Agent(i), agent.name().into(), state.into(), false));
     }
-    out.push(Item::Note(
-        "Claude Code: hooks in ~/.claude/settings.json. Codex CLI: its notify command, finished only.",
-    ));
+    out.push(Item::Note("Claude Code, Gemini CLI, Cursor, Copilot CLI: hooks in their settings files."));
+    out.push(Item::Note("Codex CLI: its notify command (finished only); a command it already has keeps running."));
+    out.push(Item::Note("Perplexity has no hooks or command line to connect to."));
     out.push(Item::Heading("Sessions"));
     if ui.agents.is_empty() {
         out.push(Item::Note("No sessions heard from yet."));
@@ -479,10 +481,17 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
     ));
     if ui.cfg.ai.voice_separate {
         let saved = ui.int.voice_key_saved;
+        let shared = ui.int.voice_key_shared;
         out.push(Item::Field(
             Field::VoiceKey,
             "Speech API key",
-            if saved { "Saved: type a new one to replace it" } else { "Paste the key here" },
+            if saved {
+                "Saved: type a new one to replace it"
+            } else if shared {
+                "Same server: the key of the chat service is used"
+            } else {
+                "Paste the key here"
+            },
         ));
         out.push(Item::Field(Field::VoiceModel, "Speech model", "whisper-1"));
         out.push(Item::Field(Field::VoiceBase, "Speech server address", "https://api.openai.com/v1"));

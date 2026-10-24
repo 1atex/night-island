@@ -129,6 +129,7 @@ pub struct Settings {
     pub metrics_secs: u32,
     pub activity_track: bool,
     pub activity_ai: bool,
+    pub vpn_pill: bool,
     pub voice_paste: bool,
     pub music_lyrics: bool,
     pub dev_tools: bool,
@@ -201,6 +202,7 @@ impl Default for Settings {
             voice_paste: true,
             activity_track: false,
             activity_ai: false,
+            vpn_pill: true,
             metrics_tab: ["cpu", "ram", "gpu", "net_down", "net_up"].map(String::from).to_vec(),
             metrics_pill: Vec::new(),
             metrics_secs: 2,
@@ -248,7 +250,7 @@ impl Default for Settings {
 
 pub const METRIC_KEYS: [&str; 7] = ["cpu", "ram", "gpu", "disk", "net_down", "net_up", "uptime"];
 
-pub const HOME_ACTION_COUNT: usize = 8;
+pub const HOME_ACTION_COUNT: usize = 23;
 
 fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
@@ -449,7 +451,7 @@ impl NotifySettings {
     }
 }
 
-pub const HIDEABLE_TABS: [&str; 14] = [
+pub const HIDEABLE_TABS: [&str; 15] = [
     "System",
     "Clipboard",
     "Shelf",
@@ -462,6 +464,7 @@ pub const HIDEABLE_TABS: [&str; 14] = [
     "Chat",
     "Privacy",
     "Activity",
+    "Steam",
     "Controls",
     "Theme",
 ];

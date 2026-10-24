@@ -32,7 +32,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Microphone" => "Микрофон",
         "Battery" => "Батарея",
         "On" => "Включён",
-        "Off" => "Выключен",
         "Unavailable" => "Недоступно",
         "Press again" => "Нажми ещё раз",
         "Press Enter again" => "Нажми Enter ещё раз",
@@ -521,6 +520,70 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "AI requests today:" => "Запросов к нейросети сегодня:",
         "Groups" => "Группы",
+        "Time at the computer" => "Время за компьютером",
+        "Next reminder" => "Ближайшее напоминание",
+        "Time and date" => "Время и дата",
+        "Tracking off" => "Учёт выключен",
+        "No battery" => "Нет батареи",
+        "None" => "Нет",
+        "Not playing" => "Не играете",
+        "Idle" => "Спокойно",
+        "Off" => "Выключен",
+        "Up to 8 tiles fit: take one off first" => "Помещается до 8 плиток: сначала уберите одну",
+        "Library" => "Библиотека",
+        "Store" => "Магазин",
+        "Downloads" => "Загрузки",
+        "Friends" => "Друзья",
+        "Steam is running" => "Steam запущен",
+        "Steam is not running" => "Steam не запущен",
+        "Steam is not installed on this computer" => "Steam не установлен на этом компьютере",
+        "Start Steam" => "Запустить Steam",
+        "Click again" => "Нажмите ещё раз",
+        "No installed games found" => "Установленных игр не найдено",
+        "playing now" => "играете сейчас",
+        "Search games" => "Поиск игр",
+        "Update" => "Обновить",
+        "Updating…" => "Обновляется…",
+        "Updating" => "Обновляется",
+        "Updates" => "Обновления",
+        "Online" => "В сети",
+        "Away" => "Отошёл",
+        "Invisible" => "Невидимка",
+        "Offline" => "Не в сети",
+        "min" => "мин",
+        "h" => "ч",
+        "Switching Steam to" => "Steam переключается на",
+        "Steam is signing in as" => "Steam входит как",
+        "Steam is already signed in with this account" => "Steam уже вошёл в этот аккаунт",
+        "Steam does not remember that account: sign in to it once in Steam" => {
+            "Steam не помнит этот аккаунт: войдите в него один раз в самом Steam"
+        }
+        "Steam was not found" => "Steam не найден",
+        "That account is not known to Steam" => "Steam не знает такого аккаунта",
+        "Steam did not close" => "Steam не закрылся",
+        "Could not change Steam's sign-in setting" => "Не удалось изменить настройку входа Steam",
+        "Timer" => "Таймер",
+        "Shut down? Say the name and \"yes\"" => "Выключить компьютер? Скажите имя и «да»",
+        "Restart? Say the name and \"yes\"" => "Перезагрузить? Скажите имя и «да»",
+        "Sleep? Say the name and \"yes\"" => "Спящий режим? Скажите имя и «да»",
+        "There is nothing to confirm" => "Подтверждать нечего",
+        "Cancelled" => "Отменено",
+        "Claude Code, Gemini CLI, Cursor, Copilot CLI: hooks in their settings files." => {
+            "Claude Code, Gemini CLI, Cursor, Copilot CLI: хуки в их файлах настроек."
+        }
+        "Codex CLI: its notify command (finished only); a command it already has keeps running." => {
+            "Codex CLI: его команда notify (только завершение); уже заданная команда продолжит работать."
+        }
+        "Perplexity has no hooks or command line to connect to." => {
+            "У Perplexity нет ни хуков, ни командной строки, к которым можно подключиться."
+        }
+        "Same server: the key of the chat service is used" => "Тот же сервер: используется ключ сервиса чата",
+        "VPN shield and button (Happ)" => "Щит и кнопка VPN (Happ)",
+        "Switching" => "Переключение",
+        "VPN connected" => "VPN подключён",
+        "VPN disconnected" => "VPN отключён",
+        "Happ is not installed" => "Happ не установлен",
+        "Happ could not be started" => "Happ не удалось запустить",
         "choose a group" => "выберите группу",
         "Move to a group" => "Перенести в группу",
         "New group" => "Новая группа",

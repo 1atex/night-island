@@ -72,13 +72,44 @@ impl App {
                     self.ui.chat.input.click(&layout, x as f32 - inner.0, y as f32 - inner.1 + scroll, shift);
                 }
             }
-            Some(view::ChatHit::History) | None => {
+            Some(view::ChatHit::History) => {
+                self.begin_edit();
+                self.ui.chat.sel = view::chat_text_at(&self.ui, x as f32, y as f32).map(|at| (at, at));
+                self.pointer.reading = self.ui.chat.sel.is_some();
+            }
+            None => {
                 if self.ui.editing {
                     self.end_edit(false);
                 }
             }
         }
         self.repaint_expanded();
+    }
+
+    pub(in crate::island) fn drag_read(&mut self, x: i32, y: i32) {
+        if !self.pointer.reading || self.ui.tab != view::Tab::Chat {
+            return;
+        }
+        let pill = self.pill_rect(true);
+        let area = view::chat_view(pill, self.scale, self.ui.chat.input_h.get(), self.ui.chat.files.len());
+        let step = 16.0 * self.scale;
+        if (y as f32) < area.1 {
+            self.ui.chat.hist = (self.ui.chat.hist + step).min(self.ui.chat.max.get());
+        } else if (y as f32) > area.3 {
+            self.ui.chat.hist = (self.ui.chat.hist - step).max(0.0);
+        }
+        if let Some(at) = view::chat_text_at(&self.ui, x as f32, y as f32)
+            && let Some((anchor, _)) = self.ui.chat.sel
+        {
+            self.ui.chat.sel = Some((anchor, at));
+            self.repaint_expanded();
+        }
+    }
+
+    pub(in crate::island) fn copy_chat_selection(&mut self) -> bool {
+        let Some(text) = self.ui.chat.selected_text() else { return false };
+        clips::sys::write_text(self.hwnd, &text);
+        true
     }
 
     fn new_chat(&mut self) {

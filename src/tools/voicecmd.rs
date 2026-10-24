@@ -42,11 +42,17 @@ that object only, no other text. Pick exactly one of:\n\
 {\"action\":\"media\",\"do\":\"play_pause\"|\"next\"|\"previous\"}\n\
 {\"action\":\"control\",\"do\":\"mic\"|\"wifi\"|\"bluetooth\"|\"theme\"|\"lock\"}\n\
 {\"action\":\"remind\",\"phrase\":\"<when and what, e.g. in 10 min call mom | 18:30 standup | tomorrow 9:00 report>\"}\n\
+{\"action\":\"timer\",\"seconds\":<whole seconds, e.g. 300 for five minutes>}\n\
+{\"action\":\"open\",\"name\":\"<a program or a game, as it would be typed in a search box: the original title, \
+usually in Latin letters>\"}\n\
+{\"action\":\"power\",\"do\":\"shutdown\"|\"restart\"|\"sleep\"}\n\
+{\"action\":\"confirm\"}  (the user says yes, confirm, do it)\n\
+{\"action\":\"cancel\"}  (the user says no, cancel, stop)\n\
 {\"action\":\"answer\",\"text\":\"<a short answer in the language of the command, at most two sentences>\"}\n\
 {\"action\":\"unknown\"}\n\
-A timer is a reminder: \"set a timer for 5 minutes\" is {\"action\":\"remind\",\"phrase\":\"in 5 min timer\"}. \
-\"Mic\" toggles the microphone mute. Questions are answered with \"answer\". Anything else, \
-and anything about deleting, shutting down, restarting or changing files, is {\"action\":\"unknown\"}.";
+\"Mic\" toggles the microphone mute. A reminder is for a time of day or a later date, a timer for a length of time. \
+Questions are answered with \"answer\". Anything else, and anything about deleting or changing files, is \
+{\"action\":\"unknown\"}.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Media {
@@ -64,17 +70,33 @@ pub enum Toggle {
     Lock,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Power {
+    Shutdown,
+    Restart,
+    Sleep,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Media(Media),
     Control(Toggle),
     Remind(String),
+    Timer(u32),
+    Open(String),
+    Power(Power),
+    Confirm,
+    Cancel,
     Answer(String),
     Unknown,
 }
 
+const MAX_TIMER_SECS: u32 = 86_400;
+pub const CONFIRM_SECS: u64 = 20;
+
 const MAX_PHRASE_CHARS: usize = 300;
 const MAX_ANSWER_CHARS: usize = 300;
+const MAX_NAME_CHARS: usize = 60;
 
 fn json_object(reply: &str) -> Option<&str> {
     let start = reply.find('{')?;
@@ -108,6 +130,19 @@ pub fn parse(reply: &str) -> Command {
             _ => Command::Unknown,
         },
         "remind" => text("phrase", MAX_PHRASE_CHARS).map_or(Command::Unknown, Command::Remind),
+        "timer" => value["seconds"]
+            .as_f64()
+            .filter(|s| *s >= 1.0)
+            .map_or(Command::Unknown, |s| Command::Timer((s as u32).min(MAX_TIMER_SECS))),
+        "open" => text("name", MAX_NAME_CHARS).map_or(Command::Unknown, Command::Open),
+        "power" => match what {
+            "shutdown" => Command::Power(Power::Shutdown),
+            "restart" => Command::Power(Power::Restart),
+            "sleep" => Command::Power(Power::Sleep),
+            _ => Command::Unknown,
+        },
+        "confirm" => Command::Confirm,
+        "cancel" => Command::Cancel,
         "answer" => text("text", MAX_ANSWER_CHARS).map_or(Command::Unknown, Command::Answer),
         _ => Command::Unknown,
     }
@@ -155,6 +190,22 @@ mod tests {
         assert_eq!(parse("```json\n{\"action\":\"control\",\"do\":\"mic\"}\n```"), Command::Control(Toggle::Mic));
         assert_eq!(parse(r#"{"action":"remind","phrase":"in 5 min timer"}"#), Command::Remind("in 5 min timer".into()));
         assert_eq!(parse(r#"Sure! {"action":"answer","text":"Paris."}"#), Command::Answer("Paris.".into()));
+    }
+
+    #[test]
+    fn timers_programs_and_power_commands_are_read() {
+        assert_eq!(parse(r#"{"action":"timer","seconds":300}"#), Command::Timer(300));
+        assert_eq!(parse(r#"{"action":"timer","seconds":99999999}"#), Command::Timer(MAX_TIMER_SECS));
+        assert_eq!(parse(r#"{"action":"timer","seconds":0}"#), Command::Unknown);
+        assert_eq!(parse(r#"{"action":"timer"}"#), Command::Unknown);
+        assert_eq!(parse(r#"{"action":"open","name":" Hades "}"#), Command::Open("Hades".into()));
+        assert_eq!(parse(r#"{"action":"open","name":""}"#), Command::Unknown);
+        assert_eq!(parse(r#"{"action":"power","do":"shutdown"}"#), Command::Power(Power::Shutdown));
+        assert_eq!(parse(r#"{"action":"power","do":"restart"}"#), Command::Power(Power::Restart));
+        assert_eq!(parse(r#"{"action":"power","do":"sleep"}"#), Command::Power(Power::Sleep));
+        assert_eq!(parse(r#"{"action":"power","do":"hibernate-and-format"}"#), Command::Unknown);
+        assert_eq!(parse(r#"{"action":"confirm"}"#), Command::Confirm);
+        assert_eq!(parse(r#"{"action":"cancel"}"#), Command::Cancel);
     }
 
     #[test]

@@ -101,8 +101,23 @@ pub fn remove_voice_key() {
     integrations::delete_secret(VOICE_SECRET);
 }
 
+fn voice_secret(settings: &AiSettings) -> Option<String> {
+    if !settings.voice_separate {
+        return has_key(settings.provider).then(|| secret_name(settings.provider));
+    }
+    if has_voice_key() {
+        return Some(VOICE_SECRET.to_string());
+    }
+    (voice_shares_chat_key(settings) && has_key(AiProvider::OpenAi)).then(|| secret_name(AiProvider::OpenAi))
+}
+
+pub fn voice_shares_chat_key(settings: &AiSettings) -> bool {
+    settings.voice_separate
+        && matches!((clean_base(&settings.voice_base), clean_base(&settings.openai_base)), (Some(a), Some(b)) if a == b)
+}
+
 pub fn voice_ready(settings: &AiSettings) -> bool {
-    if settings.voice_separate { has_voice_key() } else { has_key(settings.provider) }
+    voice_secret(settings).is_some()
 }
 
 pub fn valid_model(model: &str, provider: AiProvider) -> bool {
@@ -492,8 +507,7 @@ fn transcribe_now(settings: &AiSettings, wav: &[u8]) -> Answer {
     if !can_transcribe(settings) {
         return Err("This service cannot turn speech into text; choose Gemini or an OpenAI-compatible one".into());
     }
-    let secret = if settings.voice_separate { VOICE_SECRET.to_string() } else { secret_name(provider) };
-    let Some(key) = integrations::load_secret(&secret) else {
+    let Some(key) = voice_secret(settings).and_then(|secret| integrations::load_secret(&secret)) else {
         return Err("No key is saved for this service".into());
     };
     let Some(call) = build_voice_call(settings, &key, wav) else {
@@ -781,6 +795,18 @@ mod tests {
         s.voice_model = "bad model?".into();
         assert!(build_voice_call(&s, "k1234567", &wav).is_none());
         assert_eq!(voice_provider(&s), AiProvider::OpenAi);
+    }
+
+    #[test]
+    fn the_speech_service_at_the_chat_address_shares_its_key() {
+        let mut s = settings(AiProvider::OpenAi);
+        s.openai_base = "https://api.groq.com/openai/v1".into();
+        s.voice_base = "https://api.groq.com/openai/v1/".into();
+        assert!(!voice_shares_chat_key(&s), "only a separate speech service shares");
+        s.voice_separate = true;
+        assert!(voice_shares_chat_key(&s));
+        s.voice_base = "https://api.openai.com/v1".into();
+        assert!(!voice_shares_chat_key(&s), "another address needs its own key");
     }
 
     #[test]

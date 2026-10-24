@@ -1,3 +1,5 @@
+use crate::data::settings::HOME_ACTION_COUNT;
+use crate::platform::metrics::Metric;
 use crate::view::*;
 
 pub struct HomeUi {
@@ -10,6 +12,8 @@ pub struct HomeUi {
     pub app_vol: f32,
     pub hover_act: Option<usize>,
     pub edit: bool,
+    pub edit_scroll: usize,
+    pub screen_secs: Option<i64>,
 }
 
 impl Default for HomeUi {
@@ -24,6 +28,8 @@ impl Default for HomeUi {
             app_vol: 1.0,
             hover_act: Default::default(),
             edit: false,
+            edit_scroll: 0,
+            screen_secs: None,
         }
     }
 }
@@ -39,7 +45,108 @@ pub const HOME_ACTIONS: [(char, &str); 8] = [
     ('\u{E721}', "Command"),
 ];
 
-const _: () = assert!(HOME_ACTIONS.len() == crate::data::settings::HOME_ACTION_COUNT);
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Info {
+    Metric(Metric),
+    ScreenTime,
+    Weather,
+    Battery,
+    Reminder,
+    Steam,
+    Agents,
+    Vpn,
+    Clock,
+}
+
+pub const HOME_INFO: [(char, &str, Info); 15] = [
+    ('\u{E9D9}', "Processor", Info::Metric(Metric::Cpu)),
+    ('\u{E950}', "Memory", Info::Metric(Metric::Ram)),
+    ('\u{E7F4}', "Graphics card", Info::Metric(Metric::Gpu)),
+    ('\u{EDA2}', "System disk", Info::Metric(Metric::Disk)),
+    ('\u{E896}', "Download speed", Info::Metric(Metric::NetDown)),
+    ('\u{E898}', "Upload speed", Info::Metric(Metric::NetUp)),
+    ('\u{E916}', "Uptime", Info::Metric(Metric::Uptime)),
+    ('\u{E823}', "Time at the computer", Info::ScreenTime),
+    ('\u{E706}', "Weather", Info::Weather),
+    ('\u{E83F}', "Battery", Info::Battery),
+    ('\u{EA8F}', "Next reminder", Info::Reminder),
+    ('\u{E7FC}', "Steam", Info::Steam),
+    ('\u{E756}', "Coding agents", Info::Agents),
+    ('\u{E72E}', "VPN", Info::Vpn),
+    ('\u{E787}', "Time and date", Info::Clock),
+];
+
+const _: () = assert!(HOME_ACTIONS.len() + HOME_INFO.len() == crate::data::settings::HOME_ACTION_COUNT);
+
+pub const MAX_HOME_TILES: usize = 8;
+
+pub enum Tile {
+    Action(char, &'static str),
+    Info(char, &'static str, Info),
+}
+
+pub fn tile_kind(id: usize) -> Option<Tile> {
+    if let Some(&(glyph, label)) = HOME_ACTIONS.get(id) {
+        return Some(Tile::Action(glyph, label));
+    }
+    HOME_INFO.get(id.checked_sub(HOME_ACTIONS.len())?).map(|&(glyph, label, info)| Tile::Info(glyph, label, info))
+}
+
+pub fn tile_needs_metrics(id: usize) -> bool {
+    matches!(tile_kind(id), Some(Tile::Info(_, _, Info::Metric(_))))
+}
+
+fn fit(text: String, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text;
+    }
+    let head: String = text.chars().take(max.saturating_sub(1)).collect();
+    format!("{head}\u{2026}")
+}
+
+pub fn info_value(ui: &UiState, info: Info) -> String {
+    let tr = |s: &str| crate::ui::i18n::tr(s).into_owned();
+    match info {
+        Info::Metric(m) => ui.metrics.sample.as_ref().map_or_else(|| "\u{2026}".to_string(), |s| m.text(s)),
+        Info::ScreenTime => match ui.home.screen_secs {
+            _ if !ui.cfg.activity_track => tr("Tracking off"),
+            Some(secs) => duration_text(secs),
+            None => "\u{2026}".to_string(),
+        },
+        Info::Weather => ui.weather.as_ref().map_or_else(
+            || "\u{2014}".to_string(),
+            |w| format!("{}\u{B0} {}", w.temp.round() as i32, tr(w.sky.name())),
+        ),
+        Info::Battery => match battery() {
+            Some((percent, true)) => format!("{percent}% \u{26A1}"),
+            Some((percent, false)) => format!("{percent}%"),
+            None => tr("No battery"),
+        },
+        Info::Reminder => {
+            ui.remind.list.first().map_or_else(|| tr("None"), |(_, text, when)| format!("{when} \u{B7} {text}"))
+        }
+        Info::Steam => ui.steam.running.as_ref().map_or_else(|| tr("Not playing"), |(_, name, _)| name.clone()),
+        Info::Agents => {
+            use crate::services::agents::State;
+            let waiting = ui.agents.iter().filter(|s| s.state == State::Waiting).count();
+            let working = ui.agents.iter().filter(|s| s.state == State::Working).count();
+            match (waiting, working) {
+                (0, 0) => tr("Idle"),
+                (0, n) => format!("{n} {}", tr("working")),
+                (n, _) => format!("{n} {}", tr("waiting for you")),
+            }
+        }
+        Info::Vpn => match ui.vpn {
+            Some(true) => tr("Connected"),
+            Some(false) => tr("Off"),
+            None => "\u{2014}".to_string(),
+        },
+        Info::Clock => {
+            let c = clock();
+            format!("{} \u{B7} {}", c.hh_mm, c.date)
+        }
+    }
+}
 
 pub(in crate::view) const HOME_TOP: f32 = 58.0;
 
@@ -55,14 +162,23 @@ pub fn home_wide(ui: &UiState) -> bool {
 
 pub(in crate::view) fn slot_action(ui: &UiState, slot: usize) -> Option<usize> {
     if ui.home.edit {
-        (slot < HOME_ACTIONS.len()).then_some(slot)
+        let id = ui.home.edit_scroll * 2 + slot;
+        (id < HOME_ACTION_COUNT).then_some(id)
     } else {
         ui.cfg.home_actions.get(slot).map(|&id| usize::from(id))
     }
 }
 
 fn slot_count(ui: &UiState) -> usize {
-    if ui.home.edit { HOME_ACTIONS.len() } else { ui.cfg.home_actions.len().min(HOME_ACTIONS.len()) }
+    if ui.home.edit {
+        HOME_ACTION_COUNT.saturating_sub(ui.home.edit_scroll * 2).min(MAX_HOME_TILES)
+    } else {
+        ui.cfg.home_actions.len().min(MAX_HOME_TILES)
+    }
+}
+
+pub fn home_edit_rows() -> usize {
+    HOME_ACTION_COUNT.div_ceil(2).saturating_sub(MAX_HOME_TILES / 2)
 }
 
 pub(in crate::view) fn grid_left(pill: Rect, scale: f32, wide: bool) -> f32 {
@@ -638,7 +754,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
 
     for slot in 0..slot_count(ui) {
         let Some(id) = slot_action(ui, slot) else { continue };
-        let (glyph, label) = HOME_ACTIONS[id];
+        let Some(kind) = tile_kind(id) else { continue };
         let r = action_tile(pill, scale, slot);
         let chosen = ui.cfg.home_actions.contains(&(id as u8));
         let recording = id == 6 && ui.recording_secs.is_some() && !ui.home.edit;
@@ -657,19 +773,56 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
             p.stroke_round_rect(r, 16.0 * scale, 1.2 * scale, acc(0.8))?;
         }
         let dim = if ui.home.edit && !chosen { 0.5 } else { 1.0 };
-        p.glyph(
-            glyph,
-            (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
-            17.0 * scale,
-            rgba(1.0, 1.0, 1.0, 0.9 * dim),
-        )?;
-        p.text_wrapped(
-            if recording { "Stop recording" } else { label },
-            (r.0 + 40.0 * scale, r.1 + 2.0 * scale, r.2 - 6.0 * scale, r.3 - 2.0 * scale),
-            12.5 * scale,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            rgba(1.0, 1.0, 1.0, dim),
-        )?;
+        match kind {
+            Tile::Action(glyph, label) => {
+                p.glyph(
+                    glyph,
+                    (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
+                    17.0 * scale,
+                    rgba(1.0, 1.0, 1.0, 0.9 * dim),
+                )?;
+                p.text_wrapped(
+                    if recording { "Stop recording" } else { label },
+                    (r.0 + 40.0 * scale, r.1 + 2.0 * scale, r.2 - 6.0 * scale, r.3 - 2.0 * scale),
+                    12.5 * scale,
+                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                    rgba(1.0, 1.0, 1.0, dim),
+                )?;
+            }
+            Tile::Info(glyph, label, info) => {
+                p.glyph(
+                    glyph,
+                    (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
+                    17.0 * scale,
+                    rgba(1.0, 1.0, 1.0, 0.9 * dim),
+                )?;
+                p.text(
+                    label,
+                    (r.0 + 40.0 * scale, r.1 + 4.0 * scale, r.2 - 6.0 * scale, r.1 + 21.0 * scale),
+                    10.5 * scale,
+                    DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_TEXT_ALIGNMENT_LEADING,
+                    rgba(1.0, 1.0, 1.0, 0.55 * dim),
+                )?;
+                p.text(
+                    &fit(info_value(ui, info), 14),
+                    (r.0 + 40.0 * scale, r.1 + 19.0 * scale, r.2 - 6.0 * scale, r.3 - 3.0 * scale),
+                    13.5 * scale,
+                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                    DWRITE_TEXT_ALIGNMENT_LEADING,
+                    rgba(1.0, 1.0, 1.0, dim),
+                )?;
+            }
+        }
+    }
+    if ui.home.edit && home_edit_rows() > 0 {
+        let first = action_tile(pill, scale, 1);
+        let last = action_tile(pill, scale, MAX_HOME_TILES - 1);
+        let track = (first.2 + 3.0 * scale, first.1, first.2 + 6.0 * scale, last.3);
+        let share = ui.home.edit_scroll as f32 / home_edit_rows() as f32;
+        let thumb_h = (track.3 - track.1) * 0.35;
+        let top = track.1 + (track.3 - track.1 - thumb_h) * share;
+        p.fill_round_rect((track.0, top, track.2, top + thumb_h), 1.5 * scale, rgba(1.0, 1.0, 1.0, 0.35))?;
     }
 
     paint_dock(p, pill, scale, ui)?;
@@ -677,4 +830,61 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         paint_discord_strip(p, pill, scale, ui)?;
     }
     paint_menu(p, pill, scale, ui)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_tile_of_the_catalogue_has_a_kind() {
+        for id in 0..HOME_ACTION_COUNT {
+            assert!(tile_kind(id).is_some(), "{id}");
+        }
+        assert!(tile_kind(HOME_ACTION_COUNT).is_none());
+        assert!(matches!(tile_kind(0), Some(Tile::Action(..))));
+        assert!(matches!(tile_kind(HOME_ACTIONS.len()), Some(Tile::Info(_, _, Info::Metric(Metric::Cpu)))));
+        assert!(
+            tile_needs_metrics(HOME_ACTIONS.len())
+                && !tile_needs_metrics(0)
+                && !tile_needs_metrics(HOME_ACTION_COUNT - 1)
+        );
+    }
+
+    #[test]
+    fn editing_lays_out_the_whole_catalogue_two_to_a_row() {
+        let mut ui = UiState::new();
+        ui.home.edit = true;
+        assert_eq!((slot_action(&ui, 0), slot_action(&ui, 7)), (Some(0), Some(7)));
+        ui.home.edit_scroll = home_edit_rows();
+        let last_row = slot_count(&ui);
+        assert!((1..=MAX_HOME_TILES).contains(&last_row));
+        assert_eq!(slot_action(&ui, last_row - 1), Some(HOME_ACTION_COUNT - 1));
+        assert_eq!(slot_action(&ui, last_row), None);
+    }
+
+    #[test]
+    fn chosen_tiles_follow_each_other_up_to_the_grid_size() {
+        let mut ui = UiState::new();
+        ui.cfg.home_actions = vec![9, 2, 20];
+        assert_eq!(
+            (slot_action(&ui, 0), slot_action(&ui, 1), slot_action(&ui, 2), slot_action(&ui, 3)),
+            (Some(9), Some(2), Some(20), None)
+        );
+        assert!(!home_wide(&ui));
+        ui.cfg.home_actions.clear();
+        assert!(home_wide(&ui));
+    }
+
+    #[test]
+    fn readouts_say_something_before_any_data_arrives() {
+        crate::ui::i18n::set_ru(false);
+        let ui = UiState::new();
+        assert_eq!(info_value(&ui, Info::Metric(Metric::Cpu)), "\u{2026}");
+        assert_eq!(info_value(&ui, Info::Reminder), "None");
+        assert_eq!(info_value(&ui, Info::Steam), "Not playing");
+        assert_eq!(info_value(&ui, Info::Agents), "Idle");
+        assert_eq!(info_value(&ui, Info::Vpn), "\u{2014}");
+        assert_eq!(info_value(&ui, Info::ScreenTime), "Tracking off");
+    }
 }

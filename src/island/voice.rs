@@ -69,6 +69,24 @@ impl App {
         }
     }
 
+    fn open_by_voice(&mut self, name: &str) {
+        let game = steam::find(name, 1).into_iter().next();
+        let app = apps::find(name, 1).into_iter().next();
+        let said = name.trim().to_lowercase();
+        let game_exact = game.as_ref().is_some_and(|g| g.name.to_lowercase() == said);
+        if let Some(g) = game.filter(|_| game_exact || app.is_none()) {
+            cmd::shell_open(&steam::launch_url(g.id), None);
+            return self.show_notice_for('\u{E7FC}', &g.name, 2500);
+        }
+        match app {
+            Some(app) => {
+                cmd::shell_open(&app.launch, None);
+                self.show_notice_for('\u{E71D}', &app.name, 2500);
+            }
+            None => self.notify_for(Notice::Error, '\u{E783}', &format!("Nothing called {name} found"), 3500),
+        }
+    }
+
     pub(in crate::island) fn on_voice_command(&mut self) {
         let Some(answer) = ai::take_command_result() else { return };
         self.clear_notice();
@@ -110,6 +128,36 @@ impl App {
                 }
                 None => self.notify_for(Notice::Error, '\u{E783}', "No time in that command", 3500),
             },
+            voicecmd::Command::Timer(secs) => {
+                let due = chrono::Local::now() + chrono::Duration::seconds(i64::from(secs));
+                self.store_reminder(due, &crate::ui::i18n::tr("Timer"));
+                let length = view::duration_text(i64::from(secs));
+                self.show_notice_for('\u{E916}', &format!("{} · {length}", crate::ui::i18n::tr("Timer")), 3500);
+            }
+            voicecmd::Command::Open(name) => self.open_by_voice(&name),
+            voicecmd::Command::Power(what) => {
+                self.pending_power = Some((what, std::time::Instant::now()));
+                let (glyph, text) = match what {
+                    voicecmd::Power::Shutdown => ('\u{E7E8}', "Shut down? Say the name and \"yes\""),
+                    voicecmd::Power::Restart => ('\u{E777}', "Restart? Say the name and \"yes\""),
+                    voicecmd::Power::Sleep => ('\u{E708}', "Sleep? Say the name and \"yes\""),
+                };
+                self.notify_for(Notice::Integrations, glyph, text, (voicecmd::CONFIRM_SECS * 1000) as u32);
+            }
+            voicecmd::Command::Confirm => {
+                let fresh =
+                    self.pending_power.take().filter(|(_, at)| at.elapsed().as_secs() <= voicecmd::CONFIRM_SECS);
+                match fresh {
+                    Some((voicecmd::Power::Shutdown, _)) => self.run_ctl(view::Ctl::PowerOff),
+                    Some((voicecmd::Power::Restart, _)) => self.run_ctl(view::Ctl::Restart),
+                    Some((voicecmd::Power::Sleep, _)) => self.run_ctl(view::Ctl::Sleep),
+                    None => self.notify_for(Notice::Error, '\u{E783}', "There is nothing to confirm", 3000),
+                }
+            }
+            voicecmd::Command::Cancel => {
+                self.pending_power = None;
+                self.show_notice_for('\u{E711}', "Cancelled", 1500);
+            }
             voicecmd::Command::Answer(text) => {
                 let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
                 self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);

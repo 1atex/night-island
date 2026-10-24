@@ -7,6 +7,7 @@ pub(in crate::island) struct Pointer {
     pub(in crate::island) moving: Option<((i32, i32), (i32, i32))>,
     pub(in crate::island) drag_from: Option<(usize, i32, i32)>,
     pub(in crate::island) selecting: bool,
+    pub(in crate::island) reading: bool,
     pub(in crate::island) slider: Option<view::Sid>,
     pub(in crate::island) vol_drag: bool,
     pub(in crate::island) seek_drag: bool,
@@ -32,6 +33,7 @@ impl App {
             if in_header
                 && view::hit_tab(pill, self.scale, fx, fy, &self.ui).is_none()
                 && !view::hit_pin(pill, self.scale, fx, fy)
+                && !view::hit_vpn_btn(pill, self.scale, &self.ui, fx, fy)
             {
                 let mut pt = windows::Win32::Foundation::POINT::default();
                 unsafe {
@@ -213,6 +215,17 @@ impl App {
         } else if self.ui.tab == view::Tab::Privacy {
             let button = view::usage_clear_button(pill, self.scale);
             (fx >= button.0 && fx < button.2 && fy >= button.1 && fy < button.3).then_some(1300)
+        } else if self.ui.tab == view::Tab::Steam {
+            match view::hit_steam(pill, self.scale, fx, fy, &self.ui.steam) {
+                Some(view::SteamHit::Link(i)) => Some(1400 + i),
+                Some(view::SteamHit::Start) => Some(1405),
+                Some(view::SteamHit::Account(i)) => Some(1410 + i),
+                Some(view::SteamHit::Status(k)) => Some(1420 + k),
+                Some(view::SteamHit::Game(i)) => Some(1430 + i),
+                Some(view::SteamHit::Update(i)) => Some(1450 + i),
+                Some(view::SteamHit::Search) => None,
+                None => None,
+            }
         } else if self.ui.tab == view::Tab::Activity {
             match view::hit_activity(pill, self.scale, fx, fy, self.settings.activity_track, &self.ui.activity) {
                 Some(view::ActivityHit::Clear) => Some(1301),
@@ -318,6 +331,9 @@ impl App {
         if view::hit_mic_chip(pill, self.scale, &self.ui, x as f32, y as f32) {
             return self.toggle_mic();
         }
+        if view::hit_vpn_btn(pill, self.scale, &self.ui, x as f32, y as f32) {
+            return self.toggle_vpn();
+        }
         if let Some(i) = view::hit_tab(pill, self.scale, x as f32, y as f32, &self.ui) {
             if view::TABS[i].0 == view::Tab::Settings {
                 return self.open_settings_window();
@@ -344,6 +360,7 @@ impl App {
             view::Tab::Chat => self.click_chat(x, y),
             view::Tab::Privacy => self.click_privacy(x, y),
             view::Tab::Activity => self.click_activity(x, y),
+            view::Tab::Steam => self.click_steam(x, y),
             view::Tab::System => {}
             view::Tab::Theme => self.click_theme(x, y),
             view::Tab::Settings => {}
@@ -365,6 +382,17 @@ impl App {
         if self.ui.tab == view::Tab::Agy && self.ui.agy.open {
             let step = 54.0 * self.scale * if delta > 0 { 1.0 } else { -1.0 };
             self.ui.agy.hist = (self.ui.agy.hist + step).clamp(0.0, self.ui.agy.max.get());
+            return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Home && self.ui.home.edit {
+            let scroll = &mut self.ui.home.edit_scroll;
+            *scroll = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(view::home_edit_rows()) };
+            return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Steam {
+            let most = self.ui.steam.games.len().saturating_sub(view::steam_rows(self.pill_rect(true), self.scale));
+            let scroll = &mut self.ui.steam.scroll;
+            *scroll = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(most) };
             return self.repaint_expanded();
         }
         if self.ui.tab == view::Tab::Activity && self.ui.activity.open.is_some() {

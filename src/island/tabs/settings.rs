@@ -78,6 +78,11 @@ impl App {
                 }
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
+                VpnPill => {
+                    self.ui.vpn = vpn::state();
+                    self.update_eq();
+                    self.repaint_collapsed();
+                }
                 MetricsInterval => self.sync_metrics(),
                 AutoHide => {
                     if self.settings.auto_hide {

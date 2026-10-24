@@ -97,6 +97,52 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn toggle_vpn(&mut self) {
+        if self.ui.vpn_busy || !vpn::toggle(self.hwnd) {
+            return;
+        }
+        self.ui.vpn_busy = true;
+        self.repaint_collapsed();
+        self.repaint_expanded();
+    }
+
+    pub(in crate::island) fn on_vpn(&mut self) {
+        let state = vpn::state();
+        let was = self.ui.vpn;
+        let result = vpn::take_result();
+        match result {
+            Some(Ok(())) => self.set_timer(Timer::VpnWait, 15_000),
+            Some(Err(why)) => {
+                self.kill_timer(Timer::VpnWait);
+                self.ui.vpn_busy = false;
+                self.notify(Notice::Error, '\u{E783}', why);
+            }
+            None => {}
+        }
+        if was.is_some() && state.is_some() && state != was {
+            self.kill_timer(Timer::VpnWait);
+            self.ui.vpn_busy = false;
+            let (glyph, text) = if state == Some(true) {
+                (view::VPN_GLYPH, "VPN connected")
+            } else {
+                (view::VPN_GLYPH, "VPN disconnected")
+            };
+            self.notify(Notice::Integrations, glyph, text);
+        }
+        self.ui.vpn = state;
+        self.ui.vpn_busy = self.ui.vpn_busy && (vpn::switching() || result.is_none_or(|r| r.is_ok()));
+        self.update_eq();
+        self.repaint_collapsed();
+        self.repaint_expanded();
+    }
+
+    pub(in crate::island) fn vpn_wait_over(&mut self) {
+        self.ui.vpn_busy = false;
+        self.repaint_collapsed();
+        self.repaint_expanded();
+        self.repaint_expanded();
+    }
+
     pub(in crate::island) fn on_downloads(&mut self) {
         for event in downloads::take_events() {
             match event {

@@ -36,6 +36,7 @@ impl App {
                     system::radios_async(self.hwnd, Some((RadioSwitch::Bluetooth, !on)));
                 }
             }
+            view::Ctl::Vpn => self.toggle_vpn(),
             view::Ctl::Theme => {
                 self.ui.dark = !self.ui.dark;
                 system::set_dark_theme(self.ui.dark);

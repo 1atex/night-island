@@ -26,6 +26,8 @@ pub struct ChatUi {
     pub files: Vec<Attachment>,
     pub drop_hot: bool,
     pub loaded: bool,
+    pub sel: Option<((usize, u32), (usize, u32))>,
+    pub geom: std::cell::RefCell<Vec<MsgGeom>>,
 }
 
 impl ChatUi {
@@ -44,7 +46,60 @@ impl ChatUi {
             self.msgs.push(Msg { kind: Kind::Error, doc: crate::ui::md::parse(&text) });
         }
         self.hist = 0.0;
+        self.sel = None;
     }
+
+    pub fn selection(&self) -> Option<TextRange> {
+        let (a, b) = self.sel?;
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        (lo != hi).then_some((lo, hi))
+    }
+
+    pub fn select_all(&mut self) {
+        let Some(last) = self.msgs.len().checked_sub(1) else { return };
+        self.sel = Some(((0, 0), (last, self.msgs[last].doc.text.encode_utf16().count() as u32)));
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        let (lo, hi) = self.selection()?;
+        let mut parts = Vec::new();
+        for index in lo.0..=hi.0 {
+            let units: Vec<u16> = self.msgs.get(index)?.doc.text.encode_utf16().collect();
+            let start = if index == lo.0 { lo.1 as usize } else { 0 };
+            let end = if index == hi.0 { (hi.1 as usize).min(units.len()) } else { units.len() };
+            if end > start {
+                parts.push(String::from_utf16_lossy(&units[start..end]));
+            }
+        }
+        let text = parts.join("\n\n");
+        (!text.trim().is_empty()).then_some(text)
+    }
+}
+
+pub fn chat_text_at(ui: &UiState, px: f32, py: f32) -> Option<(usize, u32)> {
+    use windows::Win32::Graphics::DirectWrite::{DWRITE_HIT_TEST_METRICS, DWRITE_TEXT_METRICS};
+    let geom = ui.chat.geom.borrow();
+    let end_of = |index: usize| ui.chat.msgs.get(index).map_or(0, |m| m.doc.text.encode_utf16().count() as u32);
+    let first = geom.first()?;
+    let mut previous: Option<usize> = None;
+    for g in geom.iter() {
+        if py < g.y {
+            return Some(previous.map_or((first.index, 0), |i| (i, end_of(i))));
+        }
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        unsafe {
+            let _ = g.layout.GetMetrics(&mut metrics);
+        }
+        if py <= g.y + metrics.height {
+            let (mut trailing, mut inside) = (windows::core::BOOL(0), windows::core::BOOL(0));
+            let mut hit = DWRITE_HIT_TEST_METRICS::default();
+            unsafe { g.layout.HitTestPoint(px - g.x, py - g.y, &mut trailing, &mut inside, &mut hit) }.ok()?;
+            let at = hit.textPosition + if trailing.as_bool() { hit.length } else { 0 };
+            return Some((g.index, at.min(end_of(g.index))));
+        }
+        previous = Some(g.index);
+    }
+    previous.map(|i| (i, end_of(i)))
 }
 
 fn shown_text(turn: &ChatTurn) -> String {
@@ -83,7 +138,7 @@ pub(in crate::view) fn chat_reserve(files: usize, scale: f32) -> f32 {
     if files == 0 { 0.0 } else { 32.0 * scale }
 }
 
-pub(in crate::view) fn chat_view(pill: Rect, scale: f32, input_h: f32, files: usize) -> Rect {
+pub fn chat_view(pill: Rect, scale: f32, input_h: f32, files: usize) -> Rect {
     let mut view = agy_view(pill, scale, input_h);
     view.3 -= chat_reserve(files, scale);
     view
@@ -321,6 +376,8 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
             max: &ui.chat.max,
             input_h: ui.chat.input_h.get(),
             reserve: chat_reserve(n, scale),
+            geom: Some(&ui.chat.geom),
+            sel: ui.chat.selection(),
         };
         paint_history(p, pill, scale, &history, ui.chat.pending)?;
     }
@@ -331,7 +388,7 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         frame,
         text_area,
         &ui.chat.input,
-        ui.editing && ui.tab == Tab::Chat,
+        ui.editing && ui.tab == Tab::Chat && ui.chat.sel.is_none(),
         ui.caret_on,
         "Message…",
         AGY_FONT,
@@ -377,4 +434,56 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chat(texts: &[&str]) -> ChatUi {
+        let mut ui = ChatUi::default();
+        for (i, t) in texts.iter().enumerate() {
+            ui.turns.push(ChatTurn::text(i % 2 == 1, *t));
+        }
+        ui.rebuild();
+        ui
+    }
+
+    #[test]
+    fn selected_text_comes_from_one_or_several_messages() {
+        let mut ui = chat(&["Hello there", "General Kenobi"]);
+        ui.sel = Some(((0, 6), (0, 11)));
+        assert_eq!(ui.selected_text().as_deref(), Some("there"));
+        ui.sel = Some(((0, 6), (1, 7)));
+        assert_eq!(ui.selected_text().as_deref(), Some("there\n\nGeneral"));
+        ui.sel = Some(((1, 7), (0, 6)));
+        assert_eq!(ui.selection(), Some(((0, 6), (1, 7))), "dragging backwards selects the same text");
+        assert_eq!(ui.selected_text().as_deref(), Some("there\n\nGeneral"));
+    }
+
+    #[test]
+    fn a_click_without_a_drag_selects_nothing() {
+        let mut ui = chat(&["Hello"]);
+        ui.sel = Some(((0, 3), (0, 3)));
+        assert_eq!(ui.selection(), None);
+        assert_eq!(ui.selected_text(), None);
+    }
+
+    #[test]
+    fn select_all_takes_every_message_and_new_messages_clear_it() {
+        let mut ui = chat(&["one", "two", "three"]);
+        ui.select_all();
+        assert_eq!(ui.selected_text().as_deref(), Some("one\n\ntwo\n\nthree"));
+        ui.rebuild();
+        assert_eq!(ui.sel, None);
+        assert_eq!(chat(&[]).selected_text(), None);
+    }
+
+    #[test]
+    fn text_with_a_two_unit_character_and_markup_is_cut_by_utf16_units() {
+        let mut ui = chat(&["\u{1F600} **bold** end"]);
+        let all = ui.msgs[0].doc.text.encode_utf16().count() as u32;
+        ui.sel = Some(((0, 3), (0, all)));
+        assert_eq!(ui.selected_text().as_deref(), Some("bold end"));
+    }
 }
