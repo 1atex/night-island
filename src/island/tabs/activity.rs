@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use crate::data::groups::{self, Source};
+use crate::tools::appgroups;
 
 use crate::island::*;
 
@@ -8,6 +11,9 @@ const SAMPLE_MS: u32 = 5000;
 const AWAY_SECS: u64 = 120;
 const MAX_STEP_SECS: i64 = 15;
 const FLUSH_SECS: i64 = 60;
+const SORT_MIN_SECS: i64 = 120;
+const SORT_BATCH: usize = 20;
+const SORT_PAUSE: Duration = Duration::from_secs(3600);
 
 #[derive(Default)]
 struct Pending {
@@ -19,6 +25,7 @@ struct Pending {
 
 thread_local! {
     static PENDING: RefCell<Pending> = RefCell::new(Pending::default());
+    static SORTING: RefCell<(Vec<String>, Option<Instant>)> = const { RefCell::new((Vec::new(), None)) };
 }
 
 impl App {
@@ -69,17 +76,130 @@ impl App {
                 store.activity_add(day, &app, s);
             }
         }
+        self.sort_unknown();
+    }
+
+    pub(in crate::island) fn reload_groups(&mut self) {
+        let Some(store) = &self.store else { return };
+        self.ui.activity.groups = store.act_groups();
+        self.ui.activity.ai_used = store.ai_sort_used(activity::today());
+        self.ui.cfg = self.settings.clone();
+        self.render_settings_win();
+    }
+
+    fn sort_unknown(&mut self) {
+        if !self.settings.activity_ai || !self.settings.activity_track {
+            return;
+        }
+        let Some(store) = &self.store else { return };
+        if !ai::has_key(self.settings.ai.provider) || SORTING.with(|s| !s.borrow().0.is_empty()) {
+            return;
+        }
+        if SORTING.with(|s| s.borrow().1.is_some_and(|t| Instant::now() < t)) {
+            return;
+        }
+        let today = activity::today();
+        if store.ai_sort_used(today) >= ai::SORT_REQUESTS_PER_DAY {
+            return;
+        }
+        let groups = store.act_groups();
+        let assigned = store.act_assignments();
+        let mut names: Vec<String> = Vec::new();
+        for (app, secs) in store.activity_since(today - 6, 300) {
+            if secs < SORT_MIN_SECS || appgroups::builtin_group(&app).is_some() {
+                continue;
+            }
+            if let Some(name) = appgroups::clean_app(&app)
+                && !assigned.contains_key(&name)
+                && !names.contains(&name)
+            {
+                names.push(name);
+            }
+            if names.len() >= SORT_BATCH {
+                break;
+            }
+        }
+        if names.is_empty() {
+            return;
+        }
+        let group_names: Vec<String> = groups.iter().map(|g| g.name.clone()).collect();
+        if ai::ask_sort(self.hwnd, &names, &group_names) {
+            store.ai_sort_count(today);
+            SORTING.with(|s| s.borrow_mut().0 = names);
+            self.reload_groups();
+        }
+    }
+
+    pub(in crate::island) fn on_sort(&mut self) {
+        let Some(answer) = ai::take_sort_result() else { return };
+        let asked = SORTING.with(|s| std::mem::take(&mut s.borrow_mut().0));
+        let (Some(store), Ok(reply)) = (&self.store, &answer) else {
+            SORTING.with(|s| s.borrow_mut().1 = Some(Instant::now() + SORT_PAUSE));
+            if let Err(why) = answer {
+                let short: String = why.chars().take(70).collect();
+                self.notify_for(Notice::Error, '\u{E783}', &format!("Sorting programs: {short}"), 4500);
+            }
+            return;
+        };
+        let groups = store.act_groups();
+        let names: Vec<String> = groups.iter().map(|g| g.name.clone()).collect();
+        let found = appgroups::parse_assignments(reply, &asked, &names);
+        if found.is_empty() {
+            SORTING.with(|s| s.borrow_mut().1 = Some(Instant::now() + SORT_PAUSE));
+            return;
+        }
+        for (app, group) in &found {
+            if let Some(g) = groups.iter().find(|g| g.name == *group) {
+                store.act_app_set(app, g.id, Source::Ai);
+            }
+        }
+        for app in asked.iter().filter(|a| !found.iter().any(|(f, _)| f == *a)) {
+            store.act_app_set(app, appgroups::OTHER_ID, Source::Ai);
+        }
+        self.notify_for(Notice::Ai, '\u{E99A}', &format!("AI sorted {} programs into groups", found.len()), 4000);
+        self.reload_activity();
+        self.repaint_expanded();
     }
 
     pub(in crate::island) fn reload_activity(&mut self) {
         self.flush_activity();
-        let first = activity::today() - if self.ui.activity.week { 6 } else { 0 };
-        self.ui.activity.rows = self.store.as_ref().map(|s| s.activity_since(first, 12)).unwrap_or_default();
+        let today = activity::today();
+        let first = today - if self.ui.activity.week { 6 } else { 0 };
+        let Some(store) = &self.store else { return };
+        let groups = store.act_groups();
+        let assigned = store.act_assignments();
+        let rows = store.activity_since(first, 400);
+        self.ui.activity.totals = groups::totals(&rows, &assigned, &groups);
+        self.ui.activity.days = if self.ui.activity.week {
+            groups::stack_days(&store.activity_days(today - 6), today, &assigned, &groups)
+        } else {
+            Vec::new()
+        };
+        self.ui.activity.ai_used = store.ai_sort_used(today);
+        self.ui.activity.groups = groups;
+        if self.ui.activity.open_total().is_none() {
+            self.ui.activity.open = None;
+        }
+        let most = self.ui.activity.open_total().map_or(0, |t| t.apps.len());
+        self.ui.activity.scroll = self.ui.activity.scroll.min(most.saturating_sub(1));
+    }
+
+    fn move_app(&mut self, shown: usize) {
+        let Some(group) = self.ui.activity.open_total() else { return };
+        let Some((app, _)) = group.apps.get(self.ui.activity.scroll + shown).cloned() else { return };
+        let Some(next) = view::next_group(&self.ui.activity.groups, group.id).cloned() else { return };
+        if let Some(store) = &self.store {
+            store.act_app_set(&app, next.id, Source::User);
+        }
+        self.reload_activity();
+        let name = crate::ui::i18n::tr(&next.name).into_owned();
+        self.notify_for(Notice::Integrations, '\u{E73E}', &format!("{app} \u{2192} {name}"), 2500);
     }
 
     pub(in crate::island) fn click_activity(&mut self, x: i32, y: i32) {
         let pill = self.pill_rect(true);
-        match view::hit_activity(pill, self.scale, x as f32, y as f32, self.settings.activity_track) {
+        match view::hit_activity(pill, self.scale, x as f32, y as f32, self.settings.activity_track, &self.ui.activity)
+        {
             Some(view::ActivityHit::TurnOn) => {
                 self.settings.activity_track = true;
                 self.settings.save();
@@ -94,6 +214,15 @@ impl App {
                 self.ui.activity.week = true;
                 self.reload_activity();
             }
+            Some(view::ActivityHit::Group(i)) => {
+                self.ui.activity.open = self.ui.activity.totals.get(i).map(|t| t.id);
+                self.ui.activity.scroll = 0;
+            }
+            Some(view::ActivityHit::Back) => {
+                self.ui.activity.open = None;
+                self.ui.activity.scroll = 0;
+            }
+            Some(view::ActivityHit::App(i)) => self.move_app(i),
             Some(view::ActivityHit::Clear) => {
                 if self.ui.activity.clear_armed {
                     self.ui.activity.clear_armed = false;

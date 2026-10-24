@@ -81,6 +81,7 @@ impl App {
             self.ui.sw = view::SwUi::default();
             self.ui.int.spotify_id.set_text(&spotify::own_client_id());
             self.sync_ai_fields();
+            self.reload_groups();
             spotify::reload_status();
             let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = SetForegroundWindow(hwnd);
@@ -211,6 +212,7 @@ impl App {
             view::Field::VoiceModel => &mut self.ui.int.voice_model,
             view::Field::VoiceBase => &mut self.ui.int.voice_base,
             view::Field::WakeWord => &mut self.ui.int.wake,
+            view::Field::GroupName => &mut self.ui.int.group_name,
         })
     }
 
@@ -477,6 +479,23 @@ impl App {
             view::Act::AiSave => self.save_ai(),
             view::Act::VoiceSave => self.save_voice(),
             view::Act::WakeSave => self.save_wake(),
+            view::Act::GroupAdd => {
+                let name = self.ui.int.group_name.text();
+                let added = self.store.as_ref().and_then(|s| s.act_group_add(&name)).is_some();
+                if added {
+                    self.ui.int.group_name.set_text("");
+                    self.reload_groups();
+                } else {
+                    self.notify(Notice::Error, '\u{E783}', "That group name is taken, empty or one group too many");
+                }
+            }
+            view::Act::GroupDelete(id) => {
+                if let Some(store) = &self.store {
+                    store.act_group_delete(id);
+                }
+                self.reload_groups();
+                self.reload_activity();
+            }
             view::Act::VoiceRemoveKey => {
                 ai::remove_voice_key();
                 self.sync_ai_fields();
@@ -628,6 +647,7 @@ impl App {
                     view::Field::AiKey | view::Field::AiModel | view::Field::AiBase => view::Act::AiSave,
                     view::Field::VoiceKey | view::Field::VoiceModel | view::Field::VoiceBase => view::Act::VoiceSave,
                     view::Field::WakeWord => view::Act::WakeSave,
+                    view::Field::GroupName => view::Act::GroupAdd,
                     _ => view::Act::DiscordMain,
                 };
                 self.sw_act(act);

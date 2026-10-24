@@ -214,9 +214,12 @@ impl App {
             let button = view::usage_clear_button(pill, self.scale);
             (fx >= button.0 && fx < button.2 && fy >= button.1 && fy < button.3).then_some(1300)
         } else if self.ui.tab == view::Tab::Activity {
-            match view::hit_activity(pill, self.scale, fx, fy, self.settings.activity_track) {
+            match view::hit_activity(pill, self.scale, fx, fy, self.settings.activity_track, &self.ui.activity) {
                 Some(view::ActivityHit::Clear) => Some(1301),
                 Some(view::ActivityHit::TurnOn) => Some(1310),
+                Some(view::ActivityHit::Back) => Some(1319),
+                Some(view::ActivityHit::Group(i)) => Some(1320 + i),
+                Some(view::ActivityHit::App(i)) => Some(1340 + i),
                 _ => None,
             }
         } else if self.ui.tab == view::Tab::Chat {
@@ -358,6 +361,12 @@ impl App {
         if self.ui.tab == view::Tab::Agy && self.ui.agy.open {
             let step = 54.0 * self.scale * if delta > 0 { 1.0 } else { -1.0 };
             self.ui.agy.hist = (self.ui.agy.hist + step).clamp(0.0, self.ui.agy.max.get());
+            return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Activity && self.ui.activity.open.is_some() {
+            let most = self.ui.activity.open_total().map_or(0, |t| t.apps.len().saturating_sub(1));
+            let scroll = &mut self.ui.activity.scroll;
+            *scroll = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(most) };
             return self.repaint_expanded();
         }
         if self.ui.tab == view::Tab::Chat && self.ui.chat.list_open {

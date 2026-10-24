@@ -82,6 +82,8 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
+const ACTIVITY: [(Sid, &str, Kind); 1] = [(Sid::ActivityAi, "Sort unknown programs with AI", Kind::Toggle)];
+
 const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
 
 const ABOUT: [(Sid, &str, Kind); 3] = [
@@ -107,7 +109,7 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
     (Sid::TabTheme, "Theme", Kind::Toggle),
 ];
 
-pub const GROUPS: [Group; 12] = [
+pub const GROUPS: [Group; 13] = [
     Group { glyph: '\u{E713}', name: "General", rows: &GENERAL, custom: None },
     Group { glyph: '\u{E80F}', name: "Island", rows: &ISLAND, custom: None },
     Group { glyph: '\u{E790}', name: "Appearance", rows: &APPEARANCE, custom: None },
@@ -117,6 +119,7 @@ pub const GROUPS: [Group; 12] = [
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items) },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items) },
+    Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items) },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items) },
     Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items) },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items) },
@@ -132,7 +135,7 @@ const ROW_H: f32 = 46.0;
 const SERVICE_H: f32 = 56.0;
 const NOTE_H: f32 = 19.0;
 const CTL_W: f32 = 300.0;
-const GROUP_H: f32 = 42.0;
+const GROUP_H: f32 = 38.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Field {
@@ -146,6 +149,7 @@ pub enum Field {
     VoiceModel,
     VoiceBase,
     WakeWord,
+    GroupName,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -161,6 +165,8 @@ pub enum Act {
     VoiceSave,
     VoiceRemoveKey,
     WakeSave,
+    GroupAdd,
+    GroupDelete(i64),
     UpdateCheck,
     UpdateDownload,
     UpdateInstall,
@@ -408,6 +414,33 @@ fn about_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
+fn activity_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![Item::Heading("Activity")];
+    for &(id, label, kind) in &ACTIVITY {
+        out.push(Item::Row(id, label, kind));
+    }
+    out.push(Item::Note("Off by default. Programs are grouped by a built-in table first, and by your choices."));
+    out.push(Item::Note("On: the file names of programs nothing else knows (nothing more) go to your AI service."));
+    out.push(Item::Text(format!(
+        "{} {} / {}",
+        crate::ui::i18n::tr("AI requests today:"),
+        ui.activity.ai_used,
+        crate::services::ai::SORT_REQUESTS_PER_DAY
+    )));
+    out.push(Item::Heading("Groups"));
+    for group in &ui.activity.groups {
+        if group.builtin {
+            out.push(Item::Text(group.name.clone()));
+        } else {
+            out.push(Item::Pair(Act::GroupDelete(group.id), group.name.clone(), "Delete".into(), false));
+        }
+    }
+    out.push(Item::Field(Field::GroupName, "New group", "Name"));
+    out.push(Item::Button(Act::GroupAdd, "Add group".into(), ui.activity.groups.len() < 12));
+    out.push(Item::Note("Open a group in the Activity tab and click a program to move it to the next group."));
+    out
+}
+
 fn ai_items(ui: &UiState) -> Vec<Item> {
     use crate::data::settings::AiProvider;
     let provider = ui.cfg.ai.provider;
@@ -615,6 +648,7 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::VoiceModel => &ui.int.voice_model,
         Field::VoiceBase => &ui.int.voice_base,
         Field::WakeWord => &ui.int.wake,
+        Field::GroupName => &ui.int.group_name,
     }
 }
 

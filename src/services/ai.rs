@@ -30,12 +30,17 @@ pub const WM_CHAT: u32 = WM_APP + 24;
 pub const WM_COMMAND: u32 = WM_APP + 30;
 const COMMAND_OUTPUT_TOKENS: u32 = 200;
 
+pub const WM_SORT: u32 = WM_APP + 31;
+pub const SORT_REQUESTS_PER_DAY: u32 = 5;
+const SORT_OUTPUT_TOKENS: u32 = 500;
+
 pub type Answer = Result<String, String>;
 
 static CONFIG: OnceLock<Mutex<AiSettings>> = OnceLock::new();
 static RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static CHAT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static COMMAND_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
+static SORT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static BUSY: AtomicBool = AtomicBool::new(false);
 
 pub fn configure(settings: &AiSettings) {
@@ -505,6 +510,30 @@ fn transcribe_now(settings: &AiSettings, wav: &[u8]) -> Answer {
             Err("No connection to the service".into())
         }
     }
+}
+
+pub fn take_sort_result() -> Option<Answer> {
+    SORT_RESULT.lock().ok()?.take()
+}
+
+pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let (raw, settings) = (hwnd.0 as isize, config());
+    let system = crate::tools::appgroups::system_prompt(groups);
+    let turn = ChatTurn::text(false, names.join("\n"));
+    std::thread::spawn(move || {
+        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS));
+        if let Ok(mut r) = SORT_RESULT.lock() {
+            *r = Some(answer);
+        }
+        BUSY.store(false, Ordering::SeqCst);
+        unsafe {
+            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_SORT, WPARAM(0), LPARAM(0));
+        }
+    });
+    true
 }
 
 pub fn take_command_result() -> Option<Answer> {

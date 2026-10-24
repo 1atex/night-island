@@ -1,3 +1,4 @@
+pub mod appgroups;
 pub mod calc;
 pub mod cmd;
 pub mod edit;

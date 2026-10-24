@@ -512,6 +512,32 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Turn tracking on" => "Включить слежение",
         "7 days" => "7 дней",
         "Total" => "Всего",
+        "Sort unknown programs with AI" => "Определять неизвестные программы нейросетью",
+        "Off by default. Programs are grouped by a built-in table first, and by your choices." => {
+            "По умолчанию выключено. Сначала работает встроенная таблица и ваши выборы."
+        }
+        "On: the file names of programs nothing else knows (nothing more) go to your AI service." => {
+            "Включено: имена файлов программ, которых никто не знает (и ничего больше), уходят в вашу нейросеть."
+        }
+        "AI requests today:" => "Запросов к нейросети сегодня:",
+        "Groups" => "Группы",
+        "New group" => "Новая группа",
+        "Name" => "Название",
+        "Add group" => "Добавить группу",
+        "Delete" => "Удалить",
+        "Open a group in the Activity tab and click a program to move it to the next group." => {
+            "Откройте группу на вкладке «Активность» и нажмите на программу, чтобы перенести её в следующую группу."
+        }
+        "That group name is taken, empty or one group too many" => {
+            "Такое название занято, пустое или групп уже слишком много"
+        }
+        "Development" => "Разработка",
+        "Communication" => "Общение",
+        "Browsing" => "Браузеры",
+        "Games" => "Игры",
+        "Media" => "Медиа",
+        "Work" => "Работа",
+        "Other" => "Прочее",
         "Nothing recorded yet" => "Пока ничего не записано",
         "Dictate by voice" => "Диктовка голосом",
         "Paste dictated text" => "Вставлять надиктованное",

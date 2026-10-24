@@ -77,6 +77,7 @@ impl App {
                     }
                 }
                 ActivityTrack => self.start_activity(),
+                ActivityAi => self.reload_groups(),
                 MetricsInterval => self.sync_metrics(),
                 AutoHide => {
                     if self.settings.auto_hide {

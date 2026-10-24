@@ -226,6 +226,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_voice_command());
             LRESULT(0)
         }
+        ai::WM_SORT => {
+            with_app(|a| a.on_sort());
+            LRESULT(0)
+        }
         ai::WM_AI => {
             with_app(|a| a.on_ai());
             LRESULT(0)
