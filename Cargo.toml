@@ -98,5 +98,8 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+[build-dependencies]
+embed-resource = "3"
+
 [features]
 demo = []

@@ -151,47 +151,9 @@ impl App {
     pub(in crate::island) fn apply_menu_choice(&mut self, id: usize) {
         match id {
             tray::ID_TOGGLE => self.toggle(),
-            tray::ID_SETTINGS => return self.open_settings_window(),
-            tray::ID_AUTOSTART => autostart::set(!autostart::enabled()),
-            tray::ID_RESET_POS => {
-                self.settings.float_pos = None;
-                self.settings.dock_offset = 0.5;
-                self.settings.save();
-                self.apply_layout();
-            }
-            tray::ID_CAPTURE => {
-                self.settings.capture_hidden = !self.settings.capture_hidden;
-                self.apply_capture();
-            }
-            tray::ID_LIQUID => {
-                self.settings.style = if self.settings.style == Style::Liquid { Style::Flat } else { Style::Liquid };
-                self.apply_style();
-            }
-            tray::ID_ACRYLIC => {
-                self.settings.acrylic = !self.settings.acrylic;
-                self.set_blur(self.state == State::Expanded);
-                if self.state == State::Expanded {
-                    let _ = self.animate_to(true, false);
-                }
-            }
-            tray::ID_AUTOHIDE => {
-                self.settings.auto_hide = !self.settings.auto_hide;
-                if self.settings.auto_hide {
-                    self.schedule_autohide();
-                } else {
-                    self.kill_timer(Timer::Autohide);
-                    self.reveal();
-                }
-            }
-            _ if id > tray::ID_SIZE_BASE => {
-                let pct = (id - tray::ID_SIZE_BASE) as u32;
-                if tray::SIZES.contains(&pct) {
-                    self.settings.scale_percent = pct;
-                    self.apply_layout();
-                }
-            }
-            _ => return,
+            tray::ID_SETTINGS => self.open_settings_window(),
+            tray::ID_RESET_POS => self.reset_position(),
+            _ => {}
         }
-        self.settings.save();
     }
 }

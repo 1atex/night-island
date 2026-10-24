@@ -12,7 +12,7 @@ impl App {
     pub(in crate::island) fn toggle_dictation(&mut self) {
         if dictation::active() {
             dictation::stop();
-            self.show_notice_for('\u{E9D9}', "Recognizing…", 60_000);
+            self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
             return;
         }
         if !ai::can_transcribe(&self.settings.ai) {
@@ -39,7 +39,7 @@ impl App {
         match dictation::take() {
             Some(Ok(wav)) => {
                 if ai::transcribe(self.hwnd, wav) {
-                    self.show_notice_for('\u{E9D9}', "Recognizing…", 60_000);
+                    self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
                 } else {
                     self.clear_notice();
                     self.notify_for(

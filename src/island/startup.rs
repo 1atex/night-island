@@ -1,8 +1,16 @@
 use crate::island::*;
 
+fn mutex_name() -> windows::core::HSTRING {
+    let base = "Local\\NightIsland.SingleInstance";
+    match std::env::var("NI_INSTANCE") {
+        Ok(tag) if cfg!(feature = "demo") => format!("{base}.{tag}").into(),
+        _ => base.into(),
+    }
+}
+
 pub fn run() -> Result<()> {
     unsafe {
-        let mut _mutex = CreateMutexW(None, false, w!("Local\\NightIsland.SingleInstance"))?;
+        let mut _mutex = CreateMutexW(None, false, &mutex_name())?;
         let updated = std::env::args().any(|a| a == "--updated");
         let mut waited = 0;
         while updated
@@ -11,7 +19,7 @@ pub fn run() -> Result<()> {
         {
             let _ = windows::Win32::Foundation::CloseHandle(_mutex);
             std::thread::sleep(std::time::Duration::from_millis(200));
-            _mutex = CreateMutexW(None, false, w!("Local\\NightIsland.SingleInstance"))?;
+            _mutex = CreateMutexW(None, false, &mutex_name())?;
             waited += 1;
         }
         if windows::Win32::Foundation::GetLastError() == windows::Win32::Foundation::ERROR_ALREADY_EXISTS {

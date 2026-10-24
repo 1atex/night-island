@@ -358,7 +358,17 @@ pub(in crate::view) fn paint_alert(p: &Painter, pill: Rect, scale: f32, ui: &UiS
     for (i, label) in ALERT_BUTTONS.iter().enumerate() {
         let r = alert_button(pill, scale, i);
         let strong = i == 0;
-        p.fill_round_rect(r, 12.0 * scale, acc(if strong { 0.55 } else { 0.18 }))?;
+        let hover = ui.home.hover_act == Some(1500 + i);
+        p.fill_round_rect(
+            r,
+            12.0 * scale,
+            acc(match (strong, hover) {
+                (true, false) => 0.55,
+                (true, true) => 0.75,
+                (false, false) => 0.18,
+                (false, true) => 0.32,
+            }),
+        )?;
         p.text(label, r, 13.5 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
     }
     Ok(())

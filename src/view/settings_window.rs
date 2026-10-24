@@ -9,12 +9,13 @@ pub struct Group {
     pub(in crate::view) custom: Option<fn(&UiState) -> Vec<Item>>,
 }
 
-const GENERAL: [(Sid, &str, Kind); 9] = [
+const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::Language, "Language", Kind::Segment(["Русский", "English"])),
     (Sid::Weather, "Weather", Kind::Toggle),
     (Sid::Autostart, "Start with Windows", Kind::Toggle),
     (Sid::GameMode, "Game mode", Kind::Toggle),
     (Sid::AutoHide, "Auto-hide", Kind::Toggle),
+    (Sid::LockDrag, "Lock dragging", Kind::Toggle),
     (Sid::Capture, "Hide in screenshots", Kind::Toggle),
     (Sid::CaptureSelf, "Hide island in my captures", Kind::Toggle),
     (Sid::DevTools, "Developer tools", Kind::Toggle),

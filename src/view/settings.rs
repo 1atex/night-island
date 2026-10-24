@@ -82,6 +82,7 @@ pub enum Sid {
     OpenSpeed,
     CloseSpeed,
     AutoHide,
+    LockDrag,
     Acrylic,
     Capture,
     CaptureSelf,
@@ -272,6 +273,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
     }
     match id {
         Sid::AutoHide => c.auto_hide,
+        Sid::LockDrag => c.lock_drag,
         Sid::Acrylic => c.acrylic,
         Sid::Capture => c.capture_hidden,
         Sid::CaptureSelf => c.capture_self_hidden,
@@ -327,6 +329,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
     }
     match id {
         Sid::AutoHide => c.auto_hide = on,
+        Sid::LockDrag => c.lock_drag = on,
         Sid::Acrylic => c.acrylic = on,
         Sid::Capture => c.capture_hidden = on,
         Sid::CaptureSelf => c.capture_self_hidden = on,

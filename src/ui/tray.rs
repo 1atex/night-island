@@ -5,24 +5,18 @@ use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{HSTRING, w};
+use windows::core::{HSTRING, PCWSTR};
 
-use crate::data::settings::{Settings, Style};
+use crate::ui::i18n::tr;
 
 pub const WM_TRAY: u32 = WM_APP + 1;
 pub const ID_TOGGLE: usize = 1;
-pub const ID_CAPTURE: usize = 2;
-pub const ID_EXIT: usize = 3;
-pub const ID_AUTOHIDE: usize = 4;
-pub const ID_ACRYLIC: usize = 5;
-pub const ID_LIQUID: usize = 6;
-pub const ID_SETTINGS: usize = 7;
-pub const ID_RESET_POS: usize = 8;
-pub const ID_AUTOSTART: usize = 9;
-pub const ID_SIZE_BASE: usize = 1000;
-pub const SIZES: [u32; 6] = [80, 100, 125, 150, 175, 200];
+pub const ID_SETTINGS: usize = 2;
+pub const ID_RESET_POS: usize = 3;
+pub const ID_EXIT: usize = 4;
 
 const ICON_ID: u32 = 1;
+const APP_ICON: usize = 1;
 const TIP: &str = "Night Island";
 
 fn data(hwnd: HWND) -> NOTIFYICONDATAW {
@@ -34,12 +28,29 @@ fn data(hwnd: HWND) -> NOTIFYICONDATAW {
     nid
 }
 
+fn app_icon() -> HICON {
+    unsafe {
+        let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
+        LoadImageW(
+            Some(module.into()),
+            PCWSTR(APP_ICON as *const u16),
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+            LR_DEFAULTCOLOR,
+        )
+        .map(|h| HICON(h.0))
+        .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+        .unwrap_or_default()
+    }
+}
+
 pub fn add(hwnd: HWND) {
     unsafe {
         let mut nid = data(hwnd);
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         nid.uCallbackMessage = WM_TRAY;
-        nid.hIcon = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+        nid.hIcon = app_icon();
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
     }
 }
@@ -64,38 +75,17 @@ pub fn click(lparam: LPARAM) -> Click {
     }
 }
 
-pub fn menu(hwnd: HWND, settings: &Settings) -> Option<usize> {
+pub fn menu(hwnd: HWND) -> Option<usize> {
     unsafe {
         let menu = CreatePopupMenu().ok()?;
-        let check = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
-
-        let sizes = CreatePopupMenu().ok()?;
-        for pct in SIZES {
-            let label = HSTRING::from(format!("{pct}%"));
-            let _ = AppendMenuW(
-                sizes,
-                MF_STRING | check(settings.scale_percent == pct),
-                ID_SIZE_BASE + pct as usize,
-                &label,
-            );
-        }
-
-        let _ = AppendMenuW(menu, MF_STRING, ID_TOGGLE, w!("Open / close island"));
-        let _ = AppendMenuW(menu, MF_STRING, ID_SETTINGS, w!("Settings…"));
-        let _ = AppendMenuW(menu, MF_STRING | check(settings.auto_hide), ID_AUTOHIDE, w!("Auto-hide"));
-        let _ = AppendMenuW(menu, MF_STRING, ID_RESET_POS, w!("Reset position"));
-        let _ = AppendMenuW(
-            menu,
-            MF_STRING | check(crate::platform::autostart::enabled()),
-            ID_AUTOSTART,
-            w!("Start with Windows"),
-        );
-        let _ = AppendMenuW(menu, MF_STRING | check(settings.acrylic), ID_ACRYLIC, w!("Acrylic blur"));
-        let _ = AppendMenuW(menu, MF_STRING | check(settings.style == Style::Liquid), ID_LIQUID, w!("Liquid edge"));
-        let _ = AppendMenuW(menu, MF_POPUP, sizes.0 as usize, w!("Size"));
-        let _ = AppendMenuW(menu, MF_STRING | check(settings.capture_hidden), ID_CAPTURE, w!("Hide from screenshots"));
+        let item = |id: usize, text: &str| {
+            let _ = AppendMenuW(menu, MF_STRING, id, &HSTRING::from(tr(text).as_ref()));
+        };
+        item(ID_TOGGLE, "Open / close island");
+        item(ID_SETTINGS, "Settings");
+        item(ID_RESET_POS, "Reset position");
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-        let _ = AppendMenuW(menu, MF_STRING, ID_EXIT, w!("Exit"));
+        item(ID_EXIT, "Exit");
 
         let mut pt = POINT::default();
         let _ = GetCursorPos(&mut pt);

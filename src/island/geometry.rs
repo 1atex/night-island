@@ -239,6 +239,22 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn reset_position(&mut self) {
+        let fresh = Settings::default();
+        self.settings.placement = fresh.placement;
+        self.settings.dock_edge = fresh.dock_edge;
+        self.settings.dock_offset = fresh.dock_offset;
+        self.settings.float_pos = fresh.float_pos;
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        if matches!(self.state, State::Hiding | State::Hidden) {
+            self.reveal();
+        }
+        self.apply_layout();
+        self.render_settings_win();
+        self.set_timer(Timer::Settle, 700);
+    }
+
     pub(in crate::island) fn apply_layout(&mut self) {
         self.scale = self.dpi_scale * self.settings.scale_percent as f32 / 100.0;
         self.stop_idle();

@@ -114,6 +114,14 @@ pub(in crate::view) fn paint_indicators(p: &Painter, pill: Rect, scale: f32, ui:
     let (mic, cam) = indicators(pill, scale, ui);
     if let Some(r) = mic {
         let color = if ui.mic_muted == Some(true) { rgba(1.0, 0.3, 0.3, 1.0) } else { rgba(1.0, 0.62, 0.2, 1.0) };
+        if ui.hover_head == Some(HeadHit::Mic) {
+            let grow = 2.5 * scale;
+            p.fill_round_rect(
+                (r.0 - grow, r.1 - grow, r.2 + grow, r.3 + grow),
+                3.5 * scale + grow,
+                rgba(1.0, 1.0, 1.0, 0.18),
+            )?;
+        }
         p.fill_round_rect(r, 3.5 * scale, color)?;
     }
     if let Some(r) = cam {

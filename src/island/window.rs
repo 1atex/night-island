@@ -295,10 +295,14 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             LRESULT(0)
         }
         WM_SETCURSOR => {
-            let mut ibeam = false;
-            with_app(|a| ibeam = a.cursor_over_note());
-            if ibeam && (lparam.0 & 0xFFFF) as u32 == HTCLIENT {
-                unsafe { SetCursor(LoadCursorW(None, IDC_IBEAM).ok()) };
+            let (mut ibeam, mut hand) = (false, false);
+            with_app(|a| {
+                ibeam = a.cursor_over_note();
+                hand = a.ui.hand;
+            });
+            if (ibeam || hand) && (lparam.0 & 0xFFFF) as u32 == HTCLIENT {
+                let shape = if ibeam { IDC_IBEAM } else { IDC_HAND };
+                unsafe { SetCursor(LoadCursorW(None, shape).ok()) };
                 return LRESULT(1);
             }
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
@@ -310,17 +314,13 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         tray::WM_TRAY => {
             match tray::click(lparam) {
                 tray::Click::Primary => with_app(|a| a.toggle()),
-                tray::Click::Secondary => {
-                    let mut settings = Settings::default();
-                    with_app(|a| settings = a.settings.clone());
-                    match tray::menu(hwnd, &settings) {
-                        Some(tray::ID_EXIT) => unsafe {
-                            let _ = DestroyWindow(hwnd);
-                        },
-                        Some(id) => with_app(|a| a.apply_menu_choice(id)),
-                        None => {}
-                    }
-                }
+                tray::Click::Secondary => match tray::menu(hwnd) {
+                    Some(tray::ID_EXIT) => unsafe {
+                        let _ = DestroyWindow(hwnd);
+                    },
+                    Some(id) => with_app(|a| a.apply_menu_choice(id)),
+                    None => {}
+                },
                 tray::Click::None => {}
             }
             LRESULT(0)

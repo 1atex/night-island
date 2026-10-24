@@ -327,7 +327,31 @@ impl Painter<'_> {
         Ok(())
     }
 
+    fn icon(
+        &self,
+        view_box: &str,
+        path: &str,
+        rect: (f32, f32, f32, f32),
+        size: f32,
+        color: D2D1_COLOR_F,
+    ) -> Result<()> {
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{view_box}\" width=\"64\" height=\"64\">             <path fill=\"#{:02x}{:02x}{:02x}\" fill-opacity=\"{:.3}\" d=\"{path}\"/></svg>",
+            byte(color.r),
+            byte(color.g),
+            byte(color.b),
+            color.a.clamp(0.0, 1.0)
+        );
+        let (cx, cy) = ((rect.0 + rect.2) / 2.0, (rect.1 + rect.3) / 2.0);
+        let half = size * 1.25 / 2.0;
+        self.svg(svg.as_bytes(), [0.0, 0.0, 64.0, 64.0], (cx - half, cy - half, cx + half, cy + half))
+    }
+
     pub fn glyph(&self, ch: char, rect: (f32, f32, f32, f32), size: f32, color: D2D1_COLOR_F) -> Result<()> {
+        if let Some((view_box, path)) = crate::ui::icons::lookup(ch) {
+            return self.icon(view_box, path, rect, size, color);
+        }
         let mut buf = [0u8; 4];
         self.text_in(
             self.icons,

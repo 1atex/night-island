@@ -34,7 +34,6 @@ use crate::data::usage::UseKind;
 use crate::platform::activity;
 use crate::platform::apps;
 use crate::platform::audio;
-use crate::platform::autostart;
 use crate::platform::capture;
 use crate::platform::dictation;
 use crate::platform::dnd;
