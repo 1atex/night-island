@@ -77,6 +77,12 @@ impl App {
                     }
                 }
                 ActivityTrack => self.start_activity(),
+                ActivityAi => self.reload_groups(),
+                VpnPill => {
+                    self.ui.vpn = vpn::state();
+                    self.update_eq();
+                    self.repaint_collapsed();
+                }
                 MetricsInterval => self.sync_metrics(),
                 AutoHide => {
                     if self.settings.auto_hide {
@@ -106,7 +112,7 @@ impl App {
                 UpdateCheck | UpdateBeta => {
                     update::configure(self.settings.update_check, self.settings.update_beta);
                 }
-                AiProvider => {
+                AiProvider | VoiceSeparate => {
                     ai::configure(&self.settings.ai);
                     self.sync_ai_fields();
                 }

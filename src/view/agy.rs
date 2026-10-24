@@ -148,6 +148,15 @@ pub(in crate::view) fn agy_layout(
     p.md_layout(&m.doc, (width - trim * scale).max(40.0), size * scale, m.kind == crate::services::agy::Kind::Thinking)
 }
 
+pub struct MsgGeom {
+    pub index: usize,
+    pub x: f32,
+    pub y: f32,
+    pub layout: windows::Win32::Graphics::DirectWrite::IDWriteTextLayout,
+}
+
+pub type TextRange = ((usize, u32), (usize, u32));
+
 pub(in crate::view) struct History<'a> {
     pub msgs: &'a [crate::services::agy::Msg],
     pub cache: &'a std::cell::RefCell<(String, i32, usize, Vec<f32>)>,
@@ -155,12 +164,29 @@ pub(in crate::view) struct History<'a> {
     pub hist: f32,
     pub max: &'a std::cell::Cell<f32>,
     pub input_h: f32,
+    pub reserve: f32,
+    pub geom: Option<&'a std::cell::RefCell<Vec<MsgGeom>>>,
+    pub sel: Option<TextRange>,
+}
+
+fn selected_part(sel: Option<TextRange>, index: usize, len: u32) -> Option<(u32, u32)> {
+    let (lo, hi) = sel?;
+    if index < lo.0 || index > hi.0 {
+        return None;
+    }
+    let start = if index == lo.0 { lo.1 } else { 0 };
+    let end = if index == hi.0 { hi.1.min(len) } else { len };
+    (end > start).then_some((start, end - start))
 }
 
 pub(in crate::view) fn paint_history(p: &Painter, pill: Rect, scale: f32, h: &History, running: bool) -> Result<()> {
     use crate::services::agy::Kind;
-    let view = agy_view(pill, scale, h.input_h);
+    let mut view = agy_view(pill, scale, h.input_h);
+    view.3 -= h.reserve;
     let width = view.2 - view.0 - 10.0 * scale;
+    if let Some(geom) = h.geom {
+        geom.borrow_mut().clear();
+    }
     let running_h = if running { 24.0 * scale } else { 0.0 };
     let key = (h.id.clone(), width.round() as i32, h.msgs.len());
     let mut cache = h.cache.borrow_mut();
@@ -187,7 +213,7 @@ pub(in crate::view) fn paint_history(p: &Painter, pill: Rect, scale: f32, h: &Hi
         y = view.1 + (view_h - total).min(0.0);
     }
     let code_bg = rgba(1.0, 1.0, 1.0, 0.1);
-    for (m, mh) in h.msgs.iter().zip(cache.3.iter()) {
+    for (index, (m, mh)) in h.msgs.iter().zip(cache.3.iter()).enumerate() {
         let (indent, _, _, pad, _) = agy_block(m.kind);
         if y + mh >= view.1
             && y <= view.3
@@ -195,6 +221,11 @@ pub(in crate::view) fn paint_history(p: &Painter, pill: Rect, scale: f32, h: &Hi
         {
             let (tx, ty) = (view.0 + indent * scale, y + pad * scale);
             let text_h = p.layout_height(&layout);
+            let origin = (tx + if m.kind == Kind::User { 10.0 * scale } else { 0.0 }, ty);
+            if let Some(geom) = h.geom {
+                geom.borrow_mut().push(MsgGeom { index, x: origin.0, y: origin.1, layout: layout.clone() });
+            }
+            let part = h.sel.and_then(|_| selected_part(h.sel, index, m.doc.text.encode_utf16().count() as u32));
             match m.kind {
                 Kind::User => {
                     p.fill_round_rect(
@@ -202,9 +233,17 @@ pub(in crate::view) fn paint_history(p: &Painter, pill: Rect, scale: f32, h: &Hi
                         12.0 * scale,
                         acc(0.18),
                     )?;
+                    if let Some((start, len)) = part {
+                        p.highlight(&layout, origin, start, len, acc(0.6))?;
+                    }
                     p.md_draw(&layout, &m.doc, tx + 10.0 * scale, ty, WHITE, code_bg)?;
                 }
-                Kind::Assistant => p.md_draw(&layout, &m.doc, tx, ty, WHITE, code_bg)?,
+                Kind::Assistant => {
+                    if let Some((start, len)) = part {
+                        p.highlight(&layout, origin, start, len, acc(0.6))?;
+                    }
+                    p.md_draw(&layout, &m.doc, tx, ty, WHITE, code_bg)?
+                }
                 Kind::Thinking => {
                     p.fill_round_rect(
                         (view.0 + 3.0 * scale, y, view.0 + 5.0 * scale, y + text_h),
@@ -365,6 +404,9 @@ pub(in crate::view) fn paint_agy(p: &Painter, pill: Rect, scale: f32, ui: &UiSta
         hist: ui.agy.hist,
         max: &ui.agy.max,
         input_h: ui.agy.input_h.get(),
+        reserve: 0.0,
+        geom: None,
+        sel: None,
     };
     paint_history(p, pill, scale, &history, running)?;
     let (frame, text_area) = agy_input(pill, scale, ui.agy.input_h.get());

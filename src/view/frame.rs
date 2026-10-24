@@ -3,6 +3,7 @@ use crate::view::*;
 pub fn tab_in_bar(cfg: &Settings, tab: Tab, name: &str) -> bool {
     match tab {
         Tab::Home | Tab::Settings => true,
+        Tab::Steam => crate::platform::steam::client_installed() && !cfg.tab_hidden(name),
         _ => !cfg.tab_hidden(name),
     }
 }
@@ -13,7 +14,8 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let (bh, gap, icon_w) = (36.0 * scale, 1.0 * scale, 32.0 * scale);
     let y0 = y + 12.0 * scale;
     let mut left = x + 12.0 * scale;
-    let pin_left = x + w - 78.0 * scale - LOCK_STEP * scale;
+    let vpn = if vpn_button(ui) { LOCK_STEP } else { 0.0 };
+    let pin_left = x + w - 78.0 * scale - (LOCK_STEP + vpn) * scale;
     let dots = [mic_on(ui), ui.privacy.cam].iter().filter(|on| **on).count() as f32 * DOT_STEP * scale;
     let room = pin_left - 6.0 * scale - dots - left;
     let shown = TABS.iter().filter(|(t, _, n)| *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n)).count() as f32;
@@ -62,6 +64,17 @@ pub fn lock_rect(pill: Rect, scale: f32) -> Rect {
     (pin.0 - 34.0 * scale, pin.1, pin.0 - 2.0 * scale, pin.3)
 }
 
+pub fn vpn_btn_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
+    vpn_button(ui).then(|| {
+        let lock = lock_rect(pill, scale);
+        (lock.0 - 34.0 * scale, lock.1, lock.0 - 2.0 * scale, lock.3)
+    })
+}
+
+pub fn hit_vpn_btn(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bool {
+    vpn_btn_rect(pill, scale, ui).is_some_and(|r| inside(r, px, py))
+}
+
 pub fn mic_on(ui: &UiState) -> bool {
     ui.privacy.mic || ui.mic_muted == Some(true)
 }
@@ -78,7 +91,7 @@ pub fn privacy_dots(pill: Rect, scale: f32, ui: &UiState) -> (Option<Rect>, Opti
     let lock = lock_rect(pill, scale);
     let size = 11.0 * scale;
     let mid = (lock.1 + lock.3) / 2.0;
-    let mut right = lock.0 - 6.0 * scale;
+    let mut right = vpn_btn_rect(pill, scale, ui).map_or(lock.0, |r| r.0) - 6.0 * scale;
     let mut next = |on: bool| {
         on.then(|| {
             let r = (right - size, mid - size / 2.0, right, mid + size / 2.0);
@@ -170,6 +183,9 @@ pub fn paint_expanded(
         p.fill_round_rect(lock, (lock.3 - lock.1) / 2.0, rgba(1.0, 1.0, 1.0, if locked { 0.16 } else { 0.09 }))?;
     }
     p.glyph(if locked { '' } else { '' }, lock, 16.0 * scale, rgba(1.0, 1.0, 1.0, if locked { 1.0 } else { 0.62 }))?;
+    if let Some(r) = vpn_btn_rect(pill, scale, ui) {
+        p.glyph(VPN_GLYPH, r, 16.0 * scale, vpn_color(ui))?;
+    }
     let (mic, cam) = privacy_dots(pill, scale, ui);
     let dot = |r: Rect, color: windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F, hover: bool| -> Result<()> {
         if hover {
@@ -194,6 +210,7 @@ pub fn paint_expanded(
         Tab::Chat => paint_chat(p, pill, scale, ui)?,
         Tab::Privacy => paint_privacy(p, pill, scale, ui)?,
         Tab::Activity => paint_activity(p, pill, scale, ui)?,
+        Tab::Steam => paint_steam(p, pill, scale, ui)?,
         Tab::System => paint_system(p, pill, scale, ui)?,
         Tab::Theme => paint_theme(p, pill, scale, ui)?,
         Tab::Clipboard => paint_clipboard(p, pill, scale, ui, clips)?,

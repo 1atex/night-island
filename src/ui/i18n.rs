@@ -32,7 +32,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Microphone" => "Микрофон",
         "Battery" => "Батарея",
         "On" => "Включён",
-        "Off" => "Выключен",
         "Unavailable" => "Недоступно",
         "Press again" => "Нажми ещё раз",
         "Press Enter again" => "Нажми Enter ещё раз",
@@ -60,7 +59,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Write something, it saves itself" => "Пиши — сохраняется само",
         "Remind me…  e.g. in 30 min call mom" => "Напомни…  например, через 30 мин позвонить маме",
         "Reminder" => "Напоминание",
-        "Done" => "Готово",
         "Snooze 10 min" => "Отложить на 10 мин",
         "Snooze 1 hour" => "Отложить на час",
         "Record an area" => "Записать область",
@@ -336,6 +334,17 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Cover art on the pill" => "Обложка на пилюле",
         "Chat" => "Чат",
         "New chat" => "Новый чат",
+        "New" => "Новый",
+        "Chats" => "Чаты",
+        "Attach" => "Файл",
+        "No saved chats yet" => "Сохранённых чатов пока нет",
+        "Drop files to attach" => "Бросьте файлы, чтобы прикрепить",
+        "Only files can be attached" => "Прикрепить можно только файлы",
+        "That file cannot be read" => "Этот файл не удалось прочитать",
+        "That image is too large" => "Картинка слишком большая",
+        "That PDF is too large" => "PDF слишком большой",
+        "Only images, PDF and text files can be attached" => "Можно прикрепить картинки, PDF и текстовые файлы",
+        "Up to 4 files go with one message" => "К одному сообщению — не больше 4 файлов",
         "Ask anything" => "Спросите о чём угодно",
         "Message…" => "Сообщение…",
         "Set up an AI service in the settings to chat" => "Чтобы общаться, настройте нейросеть в настройках",
@@ -512,15 +521,128 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Turn tracking on" => "Включить слежение",
         "7 days" => "7 дней",
         "Total" => "Всего",
+        "Sort unknown programs with AI" => "Определять неизвестные программы нейросетью",
+        "Off by default. Programs are grouped by a built-in table first, and by your choices." => {
+            "По умолчанию выключено. Сначала работает встроенная таблица и ваши выборы."
+        }
+        "On: the file names of programs nothing else knows (nothing more) go to your AI service." => {
+            "Включено: имена файлов программ, которых никто не знает (и ничего больше), уходят в вашу нейросеть."
+        }
+        "AI requests today:" => "Запросов к нейросети сегодня:",
+        "Groups" => "Группы",
+        "Time at the computer" => "Время за компьютером",
+        "Next reminder" => "Ближайшее напоминание",
+        "Time and date" => "Время и дата",
+        "Tracking off" => "Учёт выключен",
+        "No battery" => "Нет батареи",
+        "None" => "Нет",
+        "Not playing" => "Не играете",
+        "Idle" => "Спокойно",
+        "Off" => "Выключен",
+        "Up to 8 tiles fit: take one off first" => "Помещается до 8 плиток: сначала уберите одну",
+        "Library" => "Библиотека",
+        "Store" => "Магазин",
+        "Downloads" => "Загрузки",
+        "Friends" => "Друзья",
+        "Steam is running" => "Steam запущен",
+        "Steam is not running" => "Steam не запущен",
+        "Steam is not installed on this computer" => "Steam не установлен на этом компьютере",
+        "Start Steam" => "Запустить Steam",
+        "Click again" => "Нажмите ещё раз",
+        "No installed games found" => "Установленных игр не найдено",
+        "playing now" => "играете сейчас",
+        "Search games" => "Поиск игр",
+        "Update" => "Обновить",
+        "Updating…" => "Обновляется…",
+        "Updating" => "Обновляется",
+        "Updates" => "Обновления",
+        "Online" => "В сети",
+        "Away" => "Отошёл",
+        "Invisible" => "Невидимка",
+        "Offline" => "Не в сети",
+        "min" => "мин",
+        "h" => "ч",
+        "Switching Steam to" => "Steam переключается на",
+        "Steam is signing in as" => "Steam входит как",
+        "Steam is already signed in with this account" => "Steam уже вошёл в этот аккаунт",
+        "Steam does not remember that account: sign in to it once in Steam" => {
+            "Steam не помнит этот аккаунт: войдите в него один раз в самом Steam"
+        }
+        "Steam was not found" => "Steam не найден",
+        "That account is not known to Steam" => "Steam не знает такого аккаунта",
+        "Steam did not close" => "Steam не закрылся",
+        "Could not change Steam's sign-in setting" => "Не удалось изменить настройку входа Steam",
+        "Timer" => "Таймер",
+        "Shut down? Say the name and \"yes\"" => "Выключить компьютер? Скажите имя и «да»",
+        "Restart? Say the name and \"yes\"" => "Перезагрузить? Скажите имя и «да»",
+        "Sleep? Say the name and \"yes\"" => "Спящий режим? Скажите имя и «да»",
+        "There is nothing to confirm" => "Подтверждать нечего",
+        "Cancelled" => "Отменено",
+        "Claude Code, Gemini CLI, Cursor, Copilot CLI: hooks in their settings files." => {
+            "Claude Code, Gemini CLI, Cursor, Copilot CLI: хуки в их файлах настроек."
+        }
+        "Codex CLI: its notify command (finished only); a command it already has keeps running." => {
+            "Codex CLI: его команда notify (только завершение); уже заданная команда продолжит работать."
+        }
+        "Perplexity has no hooks or command line to connect to." => {
+            "У Perplexity нет ни хуков, ни командной строки, к которым можно подключиться."
+        }
+        "Same server: the key of the chat service is used" => "Тот же сервер: используется ключ сервиса чата",
+        "VPN shield and button (Happ)" => "Щит и кнопка VPN (Happ)",
+        "Switching" => "Переключение",
+        "VPN connected" => "VPN подключён",
+        "VPN disconnected" => "VPN отключён",
+        "Happ is not installed" => "Happ не установлен",
+        "Happ could not be started" => "Happ не удалось запустить",
+        "choose a group" => "выберите группу",
+        "Move to a group" => "Перенести в группу",
+        "New group" => "Новая группа",
+        "Name" => "Название",
+        "Add group" => "Добавить группу",
+        "Delete" => "Удалить",
+        "Open a group in the Activity tab and click a program to move it to the next group." => {
+            "Откройте группу на вкладке «Активность» и нажмите на программу, чтобы перенести её в следующую группу."
+        }
+        "That group name is taken, empty or one group too many" => {
+            "Такое название занято, пустое или групп уже слишком много"
+        }
+        "Development" => "Разработка",
+        "Communication" => "Общение",
+        "Browsing" => "Браузеры",
+        "Games" => "Игры",
+        "Media" => "Медиа",
+        "Work" => "Работа",
+        "Other" => "Прочее",
         "Nothing recorded yet" => "Пока ничего не записано",
         "Dictate by voice" => "Диктовка голосом",
         "Paste dictated text" => "Вставлять надиктованное",
         "Listening… press the keys again" => "Слушаю… нажмите клавиши ещё раз",
         "Recognizing…" => "Распознаю…",
-        "Dictation needs Gemini or an OpenAI-compatible service" => {
-            "Для диктовки нужен Gemini или OpenAI-совместимый сервис"
+        "Dictation needs Gemini, an OpenAI-compatible service or a separate speech service" => {
+            "Для диктовки нужен Gemini, OpenAI-совместимый сервис или отдельный сервис речи"
         }
-        "Save a key for the AI service first" => "Сначала сохраните ключ нейросети",
+        "Save a key for the speech service first" => "Сначала сохраните ключ сервиса речи",
+        "Separate speech service" => "Отдельный сервис речи",
+        "Voice command name" => "Имя для голосовых команд",
+        "Save command name" => "Сохранить имя",
+        "Command name saved" => "Имя сохранено",
+        "Dictate the name first: \"Island, next track\", \"Island, remind me in 10 min\". Empty: off." => {
+            "Скажите имя первым: «Айленд, следующий трек», «Айленд, напомни через 10 минут». Пусто: выключено."
+        }
+        "Up to 5 names of up to 24 characters, separated by commas" => "До 5 имён по 24 символа, через запятую",
+        "Say a command after the name" => "Скажите команду после имени",
+        "Done" => "Готово",
+        "No time in that command" => "В команде нет времени",
+        "That command is not something I can do by voice" => "Это я голосом сделать не могу",
+        "Speech API key" => "Ключ API речи",
+        "Speech model" => "Модель речи",
+        "Speech server address" => "Адрес сервера речи",
+        "Save speech service" => "Сохранить сервис речи",
+        "Remove the speech key" => "Удалить ключ сервиса речи",
+        "Speech service saved" => "Сервис речи сохранён",
+        "Any OpenAI-compatible /audio/transcriptions server: OpenAI, Groq, your own Whisper." => {
+            "Любой OpenAI-совместимый сервер /audio/transcriptions: OpenAI, Groq, свой Whisper."
+        }
         "The microphone could not be opened" => "Не удалось открыть микрофон",
         "Too short, nothing was recorded" => "Слишком коротко, ничего не записано",
         "Nothing was heard (is the microphone muted?)" => "Ничего не слышно (микрофон выключен?)",

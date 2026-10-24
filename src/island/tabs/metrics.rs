@@ -7,7 +7,11 @@ impl App {
         let pill = view::pill_metrics_on(&self.settings);
         let tab =
             self.state == State::Expanded && self.ui.tab == view::Tab::System && !self.settings.metrics_tab.is_empty();
-        pill || tab
+        let home = self.state == State::Expanded
+            && self.ui.tab == view::Tab::Home
+            && (self.ui.home.edit
+                || self.settings.home_actions.iter().any(|&id| view::tile_needs_metrics(usize::from(id))));
+        pill || tab || home
     }
 
     pub(in crate::island) fn sync_metrics(&mut self) {
@@ -38,7 +42,7 @@ impl App {
         if view::pill_metrics_on(&self.settings) {
             self.repaint_collapsed();
         }
-        if self.state == State::Expanded && self.ui.tab == view::Tab::System {
+        if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::System | view::Tab::Home) {
             self.repaint_expanded();
         }
     }

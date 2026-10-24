@@ -133,7 +133,7 @@ impl App {
         self.store_reminder(due, &message);
     }
 
-    fn store_reminder(&mut self, due: chrono::DateTime<chrono::Local>, message: &str) {
+    pub(in crate::island) fn store_reminder(&mut self, due: chrono::DateTime<chrono::Local>, message: &str) {
         let ok = self.store.as_ref().is_some_and(|s| s.reminder_add(due.timestamp(), message));
         self.ui.remind.status = if ok {
             self.ui.remind.input.set_text("");

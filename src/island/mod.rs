@@ -45,8 +45,10 @@ use crate::platform::privacy;
 use crate::platform::recognize;
 use crate::platform::recorder;
 use crate::platform::steam;
+use crate::platform::steam_art;
 use crate::platform::system::{self, RadioSwitch};
 use crate::platform::volume;
+use crate::platform::vpn;
 use crate::services::agents;
 use crate::services::agy;
 use crate::services::ai;
@@ -60,6 +62,7 @@ use crate::tools::cmd;
 use crate::tools::edit;
 use crate::tools::remind;
 use crate::tools::texttools;
+use crate::tools::voicecmd;
 use crate::ui::characters::{self, Character, Reaction};
 use crate::ui::gfx::{Gpu, Layer};
 use crate::ui::overlay;
@@ -133,6 +136,8 @@ struct App {
     popup_open: bool,
     overlay: Option<overlay::Overlay>,
     want_dock_dialog: bool,
+    want_chat_dialog: bool,
+    pending_power: Option<(voicecmd::Power, std::time::Instant)>,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
     notice_link: Option<std::path::PathBuf>,

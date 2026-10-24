@@ -61,8 +61,12 @@ impl App {
             self.reload_uses();
         }
         self.sync_metrics();
+        if tab == view::Tab::Steam {
+            self.reload_steam();
+        }
         if tab == view::Tab::Activity {
             self.reload_activity();
+            self.restart_activity_anim();
         }
         self.repaint_expanded();
     }

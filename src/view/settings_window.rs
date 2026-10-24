@@ -46,7 +46,8 @@ const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
 ];
 
-const PILL: [(Sid, &str, Kind); 9] = [
+const PILL: [(Sid, &str, Kind); 10] = [
+    (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
@@ -77,8 +78,13 @@ const NOTIFICATIONS: [(Sid, &str, Kind); 16] = [
     (Sid::NotifySteam, "Steam games (started, ended)", Kind::Toggle),
 ];
 
-const AI: [(Sid, &str, Kind); 2] =
-    [(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle), (Sid::VoicePaste, "Paste dictated text", Kind::Toggle)];
+const AI: [(Sid, &str, Kind); 3] = [
+    (Sid::AgyAuto, "AGY auto-approve", Kind::Toggle),
+    (Sid::VoicePaste, "Paste dictated text", Kind::Toggle),
+    (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
+];
+
+const ACTIVITY: [(Sid, &str, Kind); 1] = [(Sid::ActivityAi, "Sort unknown programs with AI", Kind::Toggle)];
 
 const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
 
@@ -88,7 +94,7 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 15] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabShelf, "Shelf", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
@@ -100,12 +106,13 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
     (Sid::TabChat, "Chat", Kind::Toggle),
     (Sid::TabPrivacy, "Privacy", Kind::Toggle),
     (Sid::TabActivity, "Activity", Kind::Toggle),
+    (Sid::TabSteam, "Steam", Kind::Toggle),
     (Sid::TabSystem, "System", Kind::Toggle),
     (Sid::TabControls, "Controls", Kind::Toggle),
     (Sid::TabTheme, "Theme", Kind::Toggle),
 ];
 
-pub const GROUPS: [Group; 12] = [
+pub const GROUPS: [Group; 13] = [
     Group { glyph: '\u{E713}', name: "General", rows: &GENERAL, custom: None },
     Group { glyph: '\u{E80F}', name: "Island", rows: &ISLAND, custom: None },
     Group { glyph: '\u{E790}', name: "Appearance", rows: &APPEARANCE, custom: None },
@@ -115,6 +122,7 @@ pub const GROUPS: [Group; 12] = [
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items) },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items) },
+    Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items) },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items) },
     Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items) },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items) },
@@ -130,7 +138,7 @@ const ROW_H: f32 = 46.0;
 const SERVICE_H: f32 = 56.0;
 const NOTE_H: f32 = 19.0;
 const CTL_W: f32 = 300.0;
-const GROUP_H: f32 = 42.0;
+const GROUP_H: f32 = 38.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Field {
@@ -140,6 +148,11 @@ pub enum Field {
     AiKey,
     AiModel,
     AiBase,
+    VoiceKey,
+    VoiceModel,
+    VoiceBase,
+    WakeWord,
+    GroupName,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -152,6 +165,11 @@ pub enum Act {
     SpotifySaveId,
     AiSave,
     AiRemoveKey,
+    VoiceSave,
+    VoiceRemoveKey,
+    WakeSave,
+    GroupAdd,
+    GroupDelete(i64),
     UpdateCheck,
     UpdateDownload,
     UpdateInstall,
@@ -287,9 +305,9 @@ fn agent_items(ui: &UiState) -> Vec<Item> {
         let state = if agents::connected(agent) { "Disconnect" } else { "Connect" };
         out.push(Item::Pair(Act::Agent(i), agent.name().into(), state.into(), false));
     }
-    out.push(Item::Note(
-        "Claude Code: hooks in ~/.claude/settings.json. Codex CLI: its notify command, finished only.",
-    ));
+    out.push(Item::Note("Claude Code, Gemini CLI, Cursor, Copilot CLI: hooks in their settings files."));
+    out.push(Item::Note("Codex CLI: its notify command (finished only); a command it already has keeps running."));
+    out.push(Item::Note("Perplexity has no hooks or command line to connect to."));
     out.push(Item::Heading("Sessions"));
     if ui.agents.is_empty() {
         out.push(Item::Note("No sessions heard from yet."));
@@ -399,6 +417,33 @@ fn about_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
+fn activity_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![Item::Heading("Activity")];
+    for &(id, label, kind) in &ACTIVITY {
+        out.push(Item::Row(id, label, kind));
+    }
+    out.push(Item::Note("Off by default. Programs are grouped by a built-in table first, and by your choices."));
+    out.push(Item::Note("On: the file names of programs nothing else knows (nothing more) go to your AI service."));
+    out.push(Item::Text(format!(
+        "{} {} / {}",
+        crate::ui::i18n::tr("AI requests today:"),
+        ui.activity.ai_used,
+        crate::services::ai::SORT_REQUESTS_PER_DAY
+    )));
+    out.push(Item::Heading("Groups"));
+    for group in &ui.activity.groups {
+        if group.builtin {
+            out.push(Item::Text(group.name.clone()));
+        } else {
+            out.push(Item::Pair(Act::GroupDelete(group.id), group.name.clone(), "Delete".into(), false));
+        }
+    }
+    out.push(Item::Field(Field::GroupName, "New group", "Name"));
+    out.push(Item::Button(Act::GroupAdd, "Add group".into(), ui.activity.groups.len() < 12));
+    out.push(Item::Note("Open a group in the Activity tab and click a program to move it to the next group."));
+    out
+}
+
 fn ai_items(ui: &UiState) -> Vec<Item> {
     use crate::data::settings::AiProvider;
     let provider = ui.cfg.ai.provider;
@@ -429,6 +474,33 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
     out.push(Item::Note("OpenAI-compatible: OpenAI, OpenRouter, or a local server such as LM Studio."));
     for &(id, label, kind) in &AI {
         out.push(Item::Row(id, label, kind));
+    }
+    out.push(Item::Field(Field::WakeWord, "Voice command name", "Island, Айленд"));
+    out.push(Item::Button(Act::WakeSave, "Save command name".into(), true));
+    out.push(Item::Note(
+        "Dictate the name first: \"Island, next track\", \"Island, remind me in 10 min\". Empty: off.",
+    ));
+    if ui.cfg.ai.voice_separate {
+        let saved = ui.int.voice_key_saved;
+        let shared = ui.int.voice_key_shared;
+        out.push(Item::Field(
+            Field::VoiceKey,
+            "Speech API key",
+            if saved {
+                "Saved: type a new one to replace it"
+            } else if shared {
+                "Same server: the key of the chat service is used"
+            } else {
+                "Paste the key here"
+            },
+        ));
+        out.push(Item::Field(Field::VoiceModel, "Speech model", "whisper-1"));
+        out.push(Item::Field(Field::VoiceBase, "Speech server address", "https://api.openai.com/v1"));
+        out.push(Item::Button(Act::VoiceSave, "Save speech service".into(), true));
+        if saved {
+            out.push(Item::Button(Act::VoiceRemoveKey, "Remove the speech key".into(), true));
+        }
+        out.push(Item::Note("Any OpenAI-compatible /audio/transcriptions server: OpenAI, Groq, your own Whisper."));
     }
     out
 }
@@ -582,6 +654,11 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::AiKey => &ui.int.ai_key,
         Field::AiModel => &ui.int.ai_model,
         Field::AiBase => &ui.int.ai_base,
+        Field::VoiceKey => &ui.int.voice_key,
+        Field::VoiceModel => &ui.int.voice_model,
+        Field::VoiceBase => &ui.int.voice_base,
+        Field::WakeWord => &ui.int.wake,
+        Field::GroupName => &ui.int.group_name,
     }
 }
 
@@ -733,7 +810,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         ctl,
                         inner,
                         field_edit(ui, field),
-                        matches!(field, Field::DiscordSecret | Field::AiKey),
+                        matches!(field, Field::DiscordSecret | Field::AiKey | Field::VoiceKey),
                         hint,
                         ui.sw.field == Some(field),
                         ui.sw.caret_on,

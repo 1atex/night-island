@@ -20,6 +20,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.hover_at(x, y);
                 if left_down {
                     a.drag_select(x, y);
+                    a.drag_read(x, y);
                     a.drag_slider(x);
                     a.drag_volume(x);
                     a.drag_seek(x);
@@ -46,6 +47,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| {
                 a.pointer.drag_from = None;
                 a.pointer.selecting = false;
+                a.pointer.reading = false;
                 a.pointer.vol_drag = false;
                 a.finish_note_drag();
                 a.mouse_up();
@@ -75,6 +77,13 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 with_app(|a| a.popup_open = true);
                 let picked = pick_file(hwnd);
                 with_app(|a| a.finish_dock_dialog(picked));
+            }
+            let mut chat_dialog = false;
+            with_app(|a| chat_dialog = std::mem::take(&mut a.want_chat_dialog));
+            if chat_dialog {
+                with_app(|a| a.popup_open = true);
+                let picked = pick_file(hwnd);
+                with_app(|a| a.finish_chat_dialog(picked));
             }
             LRESULT(0)
         }
@@ -213,6 +222,26 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         ai::WM_CHAT => {
             with_app(|a| a.on_chat());
+            LRESULT(0)
+        }
+        ai::WM_COMMAND => {
+            with_app(|a| a.on_voice_command());
+            LRESULT(0)
+        }
+        vpn::WM_VPN => {
+            with_app(|a| a.on_vpn());
+            LRESULT(0)
+        }
+        steam_art::WM_STEAM_ART => {
+            with_app(|a| a.on_steam_art());
+            LRESULT(0)
+        }
+        steam::WM_STEAM_SWITCH => {
+            with_app(|a| a.on_steam_switch());
+            LRESULT(0)
+        }
+        ai::WM_SORT => {
+            with_app(|a| a.on_sort());
             LRESULT(0)
         }
         ai::WM_AI => {

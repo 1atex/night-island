@@ -13,5 +13,7 @@ pub mod privacy;
 pub mod recognize;
 pub mod recorder;
 pub mod steam;
+pub mod steam_art;
 pub mod system;
 pub mod volume;
+pub mod vpn;

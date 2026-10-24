@@ -80,7 +80,8 @@ impl App {
             self.settings_win = Some(hwnd);
             self.ui.sw = view::SwUi::default();
             self.ui.int.spotify_id.set_text(&spotify::own_client_id());
-            self.sync_ai_fields();
+            self.sync_voice_fields();
+            self.reload_groups();
             spotify::reload_status();
             let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = SetForegroundWindow(hwnd);
@@ -181,6 +182,9 @@ impl App {
         if self.ui.sw.field == field {
             return;
         }
+        if self.ui.sw.field == Some(view::Field::WakeWord) {
+            self.commit_wake();
+        }
         self.ui.sw.field = field;
         self.ui.sw.caret_on = true;
         if field.is_some() {
@@ -207,6 +211,11 @@ impl App {
             view::Field::AiKey => &mut self.ui.int.ai_key,
             view::Field::AiModel => &mut self.ui.int.ai_model,
             view::Field::AiBase => &mut self.ui.int.ai_base,
+            view::Field::VoiceKey => &mut self.ui.int.voice_key,
+            view::Field::VoiceModel => &mut self.ui.int.voice_model,
+            view::Field::VoiceBase => &mut self.ui.int.voice_base,
+            view::Field::WakeWord => &mut self.ui.int.wake,
+            view::Field::GroupName => &mut self.ui.int.group_name,
         })
     }
 
@@ -214,7 +223,7 @@ impl App {
         let Some((_, inner)) = view::sw_field_rects(self.sw_size(), self.dpi_scale, &self.ui, field) else { return };
         let shown = {
             let text = view::field_edit(&self.ui, field).text();
-            if matches!(field, view::Field::DiscordSecret | view::Field::AiKey) {
+            if matches!(field, view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey) {
                 "\u{2022}".repeat(text.chars().count())
             } else {
                 text
@@ -236,6 +245,63 @@ impl App {
         self.ui.int.ai_base.set_text(&self.settings.ai.openai_base);
         self.ui.int.ai_key.set_text("");
         self.ui.int.ai_key_saved = ai::has_key(provider);
+        self.ui.int.voice_key_shared =
+            ai::voice_shares_chat_key(&self.settings.ai) && ai::has_key(crate::data::settings::AiProvider::OpenAi);
+    }
+
+    pub(in crate::island) fn sync_voice_fields(&mut self) {
+        self.ui.int.voice_model.set_text(&self.settings.ai.voice_model);
+        self.ui.int.voice_base.set_text(&self.settings.ai.voice_base);
+        self.ui.int.voice_key.set_text("");
+        self.ui.int.voice_key_saved = ai::has_voice_key();
+        self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
+        self.sync_ai_fields();
+    }
+
+    fn commit_wake(&mut self) {
+        let typed = self.ui.int.wake.text();
+        if let Some(wake) = crate::tools::voicecmd::clean_wake_setting(&typed)
+            && wake != self.settings.ai.voice_wake
+        {
+            self.settings.ai.voice_wake = wake;
+            self.settings.save();
+            self.ui.cfg = self.settings.clone();
+            ai::configure(&self.settings.ai);
+        }
+    }
+
+    fn save_wake(&mut self) {
+        let Some(wake) = crate::tools::voicecmd::clean_wake_setting(&self.ui.int.wake.text()) else {
+            return self.notify(Notice::Error, '\u{E783}', "Up to 5 names of up to 24 characters, separated by commas");
+        };
+        self.settings.ai.voice_wake = wake;
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        ai::configure(&self.settings.ai);
+        self.sync_voice_fields();
+        self.notify(Notice::Integrations, '\u{E73E}', "Command name saved");
+    }
+
+    fn save_voice(&mut self) {
+        let key = self.ui.int.voice_key.text();
+        if !key.trim().is_empty() && !ai::save_voice_key(&key) {
+            return self.notify(Notice::Error, '\u{E783}', "That does not look like an API key");
+        }
+        let model = self.ui.int.voice_model.text().trim().to_string();
+        let model = if model.is_empty() { "whisper-1".to_string() } else { model };
+        if !ai::valid_model(&model, crate::data::settings::AiProvider::OpenAi) {
+            return self.notify(Notice::Error, '\u{E783}', "That model name is not valid");
+        }
+        let Some(base) = ai::clean_base(&self.ui.int.voice_base.text()) else {
+            return self.notify(Notice::Error, '\u{E783}', "The server address must be https:// (or local http://)");
+        };
+        self.settings.ai.voice_model = model;
+        self.settings.ai.voice_base = base;
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        ai::configure(&self.settings.ai);
+        self.sync_voice_fields();
+        self.notify(Notice::Integrations, '\u{E73E}', "Speech service saved");
     }
 
     fn save_ai(&mut self) {
@@ -432,6 +498,29 @@ impl App {
                 }
             }
             view::Act::AiSave => self.save_ai(),
+            view::Act::VoiceSave => self.save_voice(),
+            view::Act::WakeSave => self.save_wake(),
+            view::Act::GroupAdd => {
+                let name = self.ui.int.group_name.text();
+                let added = self.store.as_ref().and_then(|s| s.act_group_add(&name)).is_some();
+                if added {
+                    self.ui.int.group_name.set_text("");
+                    self.reload_groups();
+                } else {
+                    self.notify(Notice::Error, '\u{E783}', "That group name is taken, empty or one group too many");
+                }
+            }
+            view::Act::GroupDelete(id) => {
+                if let Some(store) = &self.store {
+                    store.act_group_delete(id);
+                }
+                self.reload_groups();
+                self.reload_activity();
+            }
+            view::Act::VoiceRemoveKey => {
+                ai::remove_voice_key();
+                self.sync_voice_fields();
+            }
             view::Act::AiRemoveKey => {
                 ai::remove_key(self.settings.ai.provider);
                 self.sync_ai_fields();
@@ -577,6 +666,9 @@ impl App {
                 let act = match field {
                     view::Field::SpotifyId => view::Act::SpotifySaveId,
                     view::Field::AiKey | view::Field::AiModel | view::Field::AiBase => view::Act::AiSave,
+                    view::Field::VoiceKey | view::Field::VoiceModel | view::Field::VoiceBase => view::Act::VoiceSave,
+                    view::Field::WakeWord => view::Act::WakeSave,
+                    view::Field::GroupName => view::Act::GroupAdd,
                     _ => view::Act::DiscordMain,
                 };
                 self.sw_act(act);
@@ -592,7 +684,7 @@ impl App {
                 }
             }
             0x03 | 0x18 => {
-                if !matches!(field, view::Field::DiscordSecret | view::Field::AiKey)
+                if !matches!(field, view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey)
                     && let Some(n) = self.sw_edit_mut()
                     && let Some(text) = n.selected_text()
                 {
@@ -663,6 +755,7 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_destroyed(&mut self) {
+        self.commit_wake();
         self.end_rebind();
         self.kill_timer(Timer::SwCaret);
         self.settings_win = None;

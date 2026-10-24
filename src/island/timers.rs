@@ -32,11 +32,14 @@ pub(in crate::island) enum Timer {
     GhostHold = 28,
     Activity = 29,
     Settle = 30,
-    Tip = 31,
+    UiAnim = 31,
+    VpnWait = 32,
+    SteamPoll = 33,
+    Tip = 34,
 }
 
 impl Timer {
-    const ALL: [Timer; 31] = [
+    const ALL: [Timer; 34] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -67,6 +70,9 @@ impl Timer {
         Timer::GhostHold,
         Timer::Activity,
         Timer::Settle,
+        Timer::UiAnim,
+        Timer::VpnWait,
+        Timer::SteamPoll,
         Timer::Tip,
     ];
 
@@ -112,6 +118,9 @@ impl App {
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),
             Timer::Settle => self.settle_layers(),
+            Timer::UiAnim => self.ui_anim_tick(),
+            Timer::VpnWait => self.vpn_wait_over(),
+            Timer::SteamPoll => self.on_steam_poll(),
             Timer::Tip => self.show_tip(),
             Timer::Geo => {
                 if self.ui.tab == view::Tab::Weather && self.ui.editing {
@@ -160,6 +169,7 @@ impl App {
                 self.ui.clip.clear_armed = false;
                 self.ui.privacy_log.clear_armed = false;
                 self.ui.activity.clear_armed = false;
+                self.ui.steam.armed = None;
                 self.repaint_expanded();
             }
             Timer::Clock => {

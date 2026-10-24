@@ -128,6 +128,8 @@ pub struct Settings {
     pub metrics_pill: Vec<String>,
     pub metrics_secs: u32,
     pub activity_track: bool,
+    pub activity_ai: bool,
+    pub vpn_pill: bool,
     pub voice_paste: bool,
     pub music_lyrics: bool,
     pub dev_tools: bool,
@@ -200,6 +202,8 @@ impl Default for Settings {
             music_cover: false,
             voice_paste: true,
             activity_track: false,
+            activity_ai: false,
+            vpn_pill: true,
             metrics_tab: ["cpu", "ram", "gpu", "net_down", "net_up"].map(String::from).to_vec(),
             metrics_pill: Vec::new(),
             metrics_secs: 2,
@@ -248,7 +252,7 @@ impl Default for Settings {
 
 pub const METRIC_KEYS: [&str; 7] = ["cpu", "ram", "gpu", "disk", "net_down", "net_up", "uptime"];
 
-pub const HOME_ACTION_COUNT: usize = 8;
+pub const HOME_ACTION_COUNT: usize = 23;
 
 fn clamp_f(v: f32, lo: f32, hi: f32, default: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { default }
@@ -307,6 +311,10 @@ pub struct AiSettings {
     pub openai_model: String,
     pub openai_base: String,
     pub gemini_model: String,
+    pub voice_separate: bool,
+    pub voice_base: String,
+    pub voice_model: String,
+    pub voice_wake: String,
 }
 
 impl Default for AiSettings {
@@ -317,6 +325,10 @@ impl Default for AiSettings {
             openai_model: AiProvider::OpenAi.default_model().into(),
             openai_base: "https://api.openai.com/v1".into(),
             gemini_model: AiProvider::Gemini.default_model().into(),
+            voice_separate: false,
+            voice_base: "https://api.openai.com/v1".into(),
+            voice_model: "whisper-1".into(),
+            voice_wake: "Island".into(),
         }
     }
 }
@@ -348,6 +360,11 @@ impl AiSettings {
             }
         }
         self.openai_base = clean_base(&self.openai_base).unwrap_or(d.openai_base);
+        self.voice_base = clean_base(&self.voice_base).unwrap_or(d.voice_base);
+        if !valid_model(&self.voice_model, AiProvider::OpenAi) {
+            self.voice_model = d.voice_model;
+        }
+        self.voice_wake = crate::tools::voicecmd::clean_wake_setting(&self.voice_wake).unwrap_or(d.voice_wake);
     }
 }
 
@@ -436,7 +453,7 @@ impl NotifySettings {
     }
 }
 
-pub const HIDEABLE_TABS: [&str; 14] = [
+pub const HIDEABLE_TABS: [&str; 15] = [
     "System",
     "Clipboard",
     "Shelf",
@@ -449,6 +466,7 @@ pub const HIDEABLE_TABS: [&str; 14] = [
     "Chat",
     "Privacy",
     "Activity",
+    "Steam",
     "Controls",
     "Theme",
 ];

@@ -71,7 +71,36 @@ pub fn indicators(pill: Rect, scale: f32, ui: &UiState) -> (Option<Rect>, Option
 
 pub fn indicators_width(ui: &UiState, scale: f32) -> f32 {
     let any = ui.privacy.mic || ui.mic_muted == Some(true) || ui.privacy.cam;
-    if any { 12.0 * scale } else { 0.0 }
+    (if any { 12.0 } else { 0.0 } + if vpn_visible(ui) { 19.0 } else { 0.0 }) * scale
+}
+
+pub fn vpn_visible(ui: &UiState) -> bool {
+    ui.cfg.vpn_pill && (ui.vpn == Some(true) || ui.vpn_busy)
+}
+
+pub fn vpn_button(ui: &UiState) -> bool {
+    ui.cfg.vpn_pill && ui.vpn.is_some()
+}
+
+pub const VPN_GLYPH: char = '\u{EA18}';
+
+pub fn vpn_color(ui: &UiState) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {
+    match (ui.vpn, ui.vpn_busy) {
+        (_, true) => rgba(1.0, 0.75, 0.3, 1.0),
+        (Some(true), _) => rgba(0.4, 0.9, 0.55, 1.0),
+        _ => rgba(1.0, 1.0, 1.0, 0.45),
+    }
+}
+
+pub fn vpn_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
+    if !vpn_visible(ui) {
+        return None;
+    }
+    let (x, y, _, h) = pill;
+    let any = ui.privacy.mic || ui.mic_muted == Some(true) || ui.privacy.cam;
+    let left = x + (15.0 + ui.char_inset) * scale + if any { 12.0 * scale } else { 0.0 };
+    let size = 14.0 * scale;
+    Some((left, y + h / 2.0 - size / 2.0, left + size, y + h / 2.0 + size / 2.0))
 }
 
 pub fn hit_mic_dot(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bool {
@@ -97,6 +126,9 @@ pub(in crate::view) fn paint_indicators(p: &Painter, pill: Rect, scale: f32, ui:
     }
     if let Some(r) = cam {
         p.fill_round_rect(r, 3.5 * scale, rgba(0.3, 0.85, 0.45, 1.0))?;
+    }
+    if let Some(r) = vpn_rect(pill, scale, ui) {
+        p.glyph(VPN_GLYPH, r, 12.0 * scale, vpn_color(ui))?;
     }
     Ok(())
 }
@@ -169,15 +201,12 @@ pub fn agents_active(ui: &UiState) -> bool {
 }
 
 fn agent_label(ui: &UiState) -> (String, windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F) {
-    use crate::services::agents::{Agent, State};
+    use crate::services::agents::State;
     let active: Vec<_> = ui.agents.iter().filter(|s| matches!(s.state, State::Working | State::Waiting)).collect();
     let waiting = active.iter().any(|s| s.state == State::Waiting);
     let color = if waiting { rgba(1.0, 0.75, 0.3, 1.0) } else { rgba(0.45, 0.8, 1.0, 1.0) };
     let text = match active.as_slice() {
-        [one] => match one.agent {
-            Agent::Claude => "Claude".to_string(),
-            Agent::Codex => "Codex".to_string(),
-        },
+        [one] => one.agent.short().to_string(),
         many => format!("×{}", many.len()),
     };
     (if waiting { format!("{text} !") } else { text }, color)

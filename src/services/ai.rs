@@ -7,6 +7,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 use crate::data::settings::{AiProvider, AiSettings};
+use crate::services::attach::{Attachment, Kind as FileKind};
 use crate::services::{http, integrations};
 
 pub const WM_AI: u32 = WM_APP + 21;
@@ -21,15 +22,25 @@ const CHAT_SYSTEM_PROMPT: &str = "You are a helpful assistant in a small chat pa
     the language of the user's message. Keep answers short and clear; use plain text, short paragraphs and, when it \
     helps, simple lists or code blocks.";
 const CHAT_OUTPUT_TOKENS: u32 = 1200;
+const MAX_MEDIA_BYTES: usize = 12 * 1024 * 1024;
 const CHAT_TURNS: usize = 24;
 
 pub const WM_CHAT: u32 = WM_APP + 24;
+
+pub const WM_COMMAND: u32 = WM_APP + 30;
+const COMMAND_OUTPUT_TOKENS: u32 = 200;
+
+pub const WM_SORT: u32 = WM_APP + 31;
+pub const SORT_REQUESTS_PER_DAY: u32 = 5;
+const SORT_OUTPUT_TOKENS: u32 = 500;
 
 pub type Answer = Result<String, String>;
 
 static CONFIG: OnceLock<Mutex<AiSettings>> = OnceLock::new();
 static RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static CHAT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
+static COMMAND_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
+static SORT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static BUSY: AtomicBool = AtomicBool::new(false);
 
 pub fn configure(settings: &AiSettings) {
@@ -72,6 +83,43 @@ pub fn remove_key(provider: AiProvider) {
     integrations::delete_secret(&secret_name(provider));
 }
 
+const VOICE_SECRET: &str = "ai_voice";
+
+pub fn has_voice_key() -> bool {
+    integrations::dir().is_some_and(|d| d.join(format!("{VOICE_SECRET}.bin")).exists())
+}
+
+pub fn save_voice_key(key: &str) -> bool {
+    if !valid_key(key) {
+        return false;
+    }
+    integrations::save_secret(VOICE_SECRET, key.trim());
+    has_voice_key()
+}
+
+pub fn remove_voice_key() {
+    integrations::delete_secret(VOICE_SECRET);
+}
+
+fn voice_secret(settings: &AiSettings) -> Option<String> {
+    if !settings.voice_separate {
+        return has_key(settings.provider).then(|| secret_name(settings.provider));
+    }
+    if has_voice_key() {
+        return Some(VOICE_SECRET.to_string());
+    }
+    (voice_shares_chat_key(settings) && has_key(AiProvider::OpenAi)).then(|| secret_name(AiProvider::OpenAi))
+}
+
+pub fn voice_shares_chat_key(settings: &AiSettings) -> bool {
+    settings.voice_separate
+        && matches!((clean_base(&settings.voice_base), clean_base(&settings.openai_base)), (Some(a), Some(b)) if a == b)
+}
+
+pub fn voice_ready(settings: &AiSettings) -> bool {
+    voice_secret(settings).is_some()
+}
+
 pub fn valid_model(model: &str, provider: AiProvider) -> bool {
     let ok = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
     !model.is_empty()
@@ -101,11 +149,91 @@ pub struct Call {
 pub struct ChatTurn {
     pub assistant: bool,
     pub text: String,
+    pub attachments: Vec<Attachment>,
+}
+
+impl ChatTurn {
+    pub fn text(assistant: bool, text: impl Into<String>) -> Self {
+        Self { assistant, text: text.into(), attachments: Vec::new() }
+    }
+}
+
+enum Part {
+    Text(String),
+    Media { name: String, mime: &'static str, pdf: bool, b64: String },
+}
+
+fn media_allowed(turns: &[ChatTurn]) -> Vec<bool> {
+    let mut left = MAX_MEDIA_BYTES;
+    let mut allowed = vec![false; turns.len()];
+    for (i, turn) in turns.iter().enumerate().rev() {
+        let size: usize = turn.attachments.iter().filter(|a| a.kind != FileKind::Text).map(|a| a.data.len()).sum();
+        if size <= left {
+            left -= size;
+            allowed[i] = true;
+        }
+    }
+    allowed
+}
+
+fn turn_parts(turn: &ChatTurn, media_ok: bool) -> Vec<Part> {
+    use base64::Engine as _;
+    let mut parts = Vec::new();
+    for a in &turn.attachments {
+        parts.push(match a.kind {
+            FileKind::Text if a.kept() => Part::Text(format!("File \"{}\":\n```\n{}\n```", a.name, a.text())),
+            _ if !a.kept() => Part::Text(format!("[The file \"{}\" is no longer available]", a.name)),
+            _ if !media_ok => Part::Text(format!("[The file \"{}\" was left out to keep the request small]", a.name)),
+            kind => Part::Media {
+                name: a.name.clone(),
+                mime: a.mime,
+                pdf: kind == FileKind::Pdf,
+                b64: base64::engine::general_purpose::STANDARD.encode(a.data.as_slice()),
+            },
+        });
+    }
+    let text: String = turn.text.chars().take(MAX_PROMPT_CHARS).collect();
+    if !text.is_empty() || parts.is_empty() {
+        parts.push(Part::Text(text));
+    }
+    parts
+}
+
+fn content_json(provider: AiProvider, parts: Vec<Part>) -> serde_json::Value {
+    if let [Part::Text(t)] = parts.as_slice() {
+        return json!(t);
+    }
+    parts
+        .into_iter()
+        .map(|part| match (part, provider) {
+            (Part::Text(t), _) => json!({"type": "text", "text": t}),
+            (Part::Media { mime, pdf, b64, .. }, AiProvider::Claude) => json!({
+                "type": if pdf { "document" } else { "image" },
+                "source": {"type": "base64", "media_type": mime, "data": b64},
+            }),
+            (Part::Media { name, mime, pdf: true, b64 }, _) => {
+                json!({"type": "file", "file": {"filename": name, "file_data": format!("data:{mime};base64,{b64}")}})
+            }
+            (Part::Media { mime, b64, .. }, _) => {
+                json!({"type": "image_url", "image_url": {"url": format!("data:{mime};base64,{b64}")}})
+            }
+        })
+        .collect::<Vec<_>>()
+        .into()
+}
+
+fn gemini_parts(parts: Vec<Part>) -> Vec<serde_json::Value> {
+    parts
+        .into_iter()
+        .map(|part| match part {
+            Part::Text(t) => json!({"text": t}),
+            Part::Media { mime, b64, .. } => json!({"inlineData": {"mimeType": mime, "data": b64}}),
+        })
+        .collect()
 }
 
 pub fn build_call(settings: &AiSettings, key: &str, prompt: &str) -> Option<Call> {
-    let turn = ChatTurn { assistant: false, text: prompt.to_string() };
-    build(settings, key, &[turn], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS)
+    build(settings, key, &[ChatTurn::text(false, prompt)], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS)
 }
 
 pub fn build_chat_call(settings: &AiSettings, key: &str, turns: &[ChatTurn]) -> Option<Call> {
@@ -120,8 +248,9 @@ fn build(settings: &AiSettings, key: &str, turns: &[ChatTurn], system: &str, max
     if !valid_model(model, provider) {
         return None;
     }
-    let texts: Vec<(bool, String)> =
-        turns.iter().map(|t| (t.assistant, t.text.chars().take(MAX_PROMPT_CHARS).collect())).collect();
+    let allowed = media_allowed(turns);
+    let messages: Vec<(bool, Vec<Part>)> =
+        turns.iter().zip(allowed).map(|(t, ok)| (t.assistant, turn_parts(t, ok))).collect();
     Some(match provider {
         AiProvider::Claude => Call {
             url: "https://api.anthropic.com/v1/messages".into(),
@@ -130,22 +259,25 @@ fn build(settings: &AiSettings, key: &str, turns: &[ChatTurn], system: &str, max
                 "model": model,
                 "max_tokens": max_tokens,
                 "system": system,
-                "messages": texts
-                    .iter()
-                    .map(|(a, t)| json!({"role": if *a { "assistant" } else { "user" }, "content": t}))
+                "messages": messages
+                    .into_iter()
+                    .map(|(a, parts)| json!({
+                        "role": if a { "assistant" } else { "user" },
+                        "content": content_json(provider, parts),
+                    }))
                     .collect::<Vec<_>>(),
             })
             .to_string(),
         },
         AiProvider::OpenAi => {
-            let mut messages = vec![json!({"role": "system", "content": system})];
-            messages.extend(
-                texts.iter().map(|(a, t)| json!({"role": if *a { "assistant" } else { "user" }, "content": t})),
-            );
+            let mut all = vec![json!({"role": "system", "content": system})];
+            all.extend(messages.into_iter().map(|(a, parts)| {
+                json!({"role": if a { "assistant" } else { "user" }, "content": content_json(provider, parts)})
+            }));
             Call {
                 url: format!("{}/chat/completions", clean_base(&settings.openai_base)?),
                 headers: vec![("Authorization", format!("Bearer {key}"))],
-                body: json!({"model": model, "max_tokens": max_tokens, "messages": messages}).to_string(),
+                body: json!({"model": model, "max_tokens": max_tokens, "messages": all}).to_string(),
             }
         }
         AiProvider::Gemini => Call {
@@ -153,9 +285,9 @@ fn build(settings: &AiSettings, key: &str, turns: &[ChatTurn], system: &str, max
             headers: vec![("x-goog-api-key", key.into())],
             body: json!({
                 "systemInstruction": {"parts": [{"text": system}]},
-                "contents": texts
-                    .iter()
-                    .map(|(a, t)| json!({"role": if *a { "model" } else { "user" }, "parts": [{"text": t}]}))
+                "contents": messages
+                    .into_iter()
+                    .map(|(a, parts)| json!({"role": if a { "model" } else { "user" }, "parts": gemini_parts(parts)}))
                     .collect::<Vec<_>>(),
                 "generationConfig": {"maxOutputTokens": max_tokens},
             })
@@ -239,8 +371,12 @@ pub const WM_TRANSCRIBED: u32 = WM_APP + 26;
 static VOICE_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 const MULTIPART_BOUNDARY: &str = "----NightIslandVoice7f3a91c2";
 
-pub fn can_transcribe(provider: AiProvider) -> bool {
-    provider != AiProvider::Claude
+pub fn can_transcribe(settings: &AiSettings) -> bool {
+    settings.voice_separate || settings.provider != AiProvider::Claude
+}
+
+fn voice_provider(settings: &AiSettings) -> AiProvider {
+    if settings.voice_separate { AiProvider::OpenAi } else { settings.provider }
 }
 
 #[derive(Debug, PartialEq)]
@@ -255,33 +391,58 @@ fn whisper_model(base: &str) -> &'static str {
     if base.contains("groq.com") { "whisper-large-v3-turbo" } else { "whisper-1" }
 }
 
+fn openai_voice_call(base: &str, model: &str, key: &str, wav: &[u8]) -> VoiceCall {
+    let mut body: Vec<u8> = Vec::with_capacity(wav.len() + 512);
+    let field = |name: &str, value: &str| {
+        format!(
+            "--{MULTIPART_BOUNDARY}
+Content-Disposition: form-data; name=\"{name}\"
+
+{value}
+"
+        )
+    };
+    body.extend_from_slice(field("model", model).as_bytes());
+    body.extend_from_slice(field("response_format", "json").as_bytes());
+    body.extend_from_slice(
+        format!(
+            "--{MULTIPART_BOUNDARY}
+Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"
+Content-Type: audio/wav
+
+"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(wav);
+    body.extend_from_slice(
+        format!(
+            "
+--{MULTIPART_BOUNDARY}--
+"
+        )
+        .as_bytes(),
+    );
+    VoiceCall {
+        url: format!("{base}/audio/transcriptions"),
+        headers: vec![("Authorization", format!("Bearer {key}"))],
+        content_type: format!("multipart/form-data; boundary={MULTIPART_BOUNDARY}"),
+        body,
+    }
+}
+
 pub fn build_voice_call(settings: &AiSettings, key: &str, wav: &[u8]) -> Option<VoiceCall> {
+    if settings.voice_separate {
+        let base = clean_base(&settings.voice_base)?;
+        return valid_model(&settings.voice_model, AiProvider::OpenAi)
+            .then(|| openai_voice_call(&base, &settings.voice_model, key, wav));
+    }
     let provider = settings.provider;
     match provider {
         AiProvider::Claude => None,
         AiProvider::OpenAi => {
             let base = clean_base(&settings.openai_base)?;
-            let model = whisper_model(&base);
-            let mut body: Vec<u8> = Vec::with_capacity(wav.len() + 512);
-            let field = |name: &str, value: &str| {
-                format!("--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
-            };
-            body.extend_from_slice(field("model", model).as_bytes());
-            body.extend_from_slice(field("response_format", "json").as_bytes());
-            body.extend_from_slice(
-                format!(
-                    "--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
-                )
-                .as_bytes(),
-            );
-            body.extend_from_slice(wav);
-            body.extend_from_slice(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n").as_bytes());
-            Some(VoiceCall {
-                url: format!("{base}/audio/transcriptions"),
-                headers: vec![("Authorization", format!("Bearer {key}"))],
-                content_type: format!("multipart/form-data; boundary={MULTIPART_BOUNDARY}"),
-                body,
-            })
+            Some(openai_voice_call(&base, whisper_model(&base), key, wav))
         }
         AiProvider::Gemini => {
             use base64::Engine as _;
@@ -342,11 +503,11 @@ pub fn transcribe(hwnd: HWND, wav: Vec<u8>) -> bool {
 }
 
 fn transcribe_now(settings: &AiSettings, wav: &[u8]) -> Answer {
-    let provider = settings.provider;
-    if !can_transcribe(provider) {
+    let provider = voice_provider(settings);
+    if !can_transcribe(settings) {
         return Err("This service cannot turn speech into text; choose Gemini or an OpenAI-compatible one".into());
     }
-    let Some(key) = integrations::load_secret(&secret_name(provider)) else {
+    let Some(key) = voice_secret(settings).and_then(|secret| integrations::load_secret(&secret)) else {
         return Err("No key is saved for this service".into());
     };
     let Some(call) = build_voice_call(settings, &key, wav) else {
@@ -363,6 +524,54 @@ fn transcribe_now(settings: &AiSettings, wav: &[u8]) -> Answer {
             Err("No connection to the service".into())
         }
     }
+}
+
+pub fn take_sort_result() -> Option<Answer> {
+    SORT_RESULT.lock().ok()?.take()
+}
+
+pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let (raw, settings) = (hwnd.0 as isize, config());
+    let system = crate::tools::appgroups::system_prompt(groups);
+    let turn = ChatTurn::text(false, names.join("\n"));
+    std::thread::spawn(move || {
+        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS));
+        if let Ok(mut r) = SORT_RESULT.lock() {
+            *r = Some(answer);
+        }
+        BUSY.store(false, Ordering::SeqCst);
+        unsafe {
+            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_SORT, WPARAM(0), LPARAM(0));
+        }
+    });
+    true
+}
+
+pub fn take_command_result() -> Option<Answer> {
+    COMMAND_RESULT.lock().ok()?.take()
+}
+
+pub fn ask_command(hwnd: HWND, command: &str) -> bool {
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let (raw, settings, turn) = (hwnd.0 as isize, config(), ChatTurn::text(false, command));
+    std::thread::spawn(move || {
+        let answer = run_with(&settings, |key| {
+            build(&settings, key, &[turn], crate::tools::voicecmd::SYSTEM_PROMPT, COMMAND_OUTPUT_TOKENS)
+        });
+        if let Ok(mut r) = COMMAND_RESULT.lock() {
+            *r = Some(answer);
+        }
+        BUSY.store(false, Ordering::SeqCst);
+        unsafe {
+            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_COMMAND, WPARAM(0), LPARAM(0));
+        }
+    });
+    true
 }
 
 pub fn take_chat_result() -> Option<Answer> {
@@ -467,7 +676,7 @@ mod tests {
 
     #[test]
     fn a_chat_call_carries_the_conversation_for_every_provider() {
-        let turn = |assistant: bool, text: &str| ChatTurn { assistant, text: text.into() };
+        let turn = |assistant: bool, text: &str| ChatTurn::text(assistant, text);
         let turns = [turn(true, "stray"), turn(false, "Hi"), turn(true, "Hello"), turn(false, "And now?")];
         let claude = build_chat_call(&settings(AiProvider::Claude), "k1234567", &turns).unwrap();
         let body: serde_json::Value = serde_json::from_str(&claude.body).unwrap();
@@ -508,6 +717,96 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&g.body).unwrap();
         assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["mimeType"], "audio/wav");
         assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["data"], "AQIDBA==");
+    }
+
+    fn file_turn(text: &str, files: Vec<Attachment>) -> ChatTurn {
+        ChatTurn { assistant: false, text: text.into(), attachments: files }
+    }
+
+    fn picture(size: usize) -> Attachment {
+        Attachment {
+            name: "p.png".into(),
+            kind: FileKind::Image,
+            mime: "image/png",
+            data: std::sync::Arc::new(vec![7; size]),
+        }
+    }
+
+    #[test]
+    fn attachments_go_out_in_each_services_own_form() {
+        let note = Attachment::restored("n.txt", FileKind::Text, "secret plan");
+        let pdf = Attachment {
+            name: "d.pdf".into(),
+            kind: FileKind::Pdf,
+            mime: "application/pdf",
+            data: std::sync::Arc::new(vec![1, 2, 3]),
+        };
+        let turns = [file_turn("What is this?", vec![picture(3), pdf, note])];
+        let claude = build_chat_call(&settings(AiProvider::Claude), "k1234567", &turns).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&claude.body).unwrap();
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["type"], "document");
+        assert!(content[2]["text"].as_str().unwrap().contains("secret plan"));
+        assert_eq!(content[3]["text"], "What is this?");
+        let openai = build_chat_call(&settings(AiProvider::OpenAi), "k1234567", &turns).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&openai.body).unwrap();
+        let content = body["messages"][1]["content"].as_array().unwrap();
+        assert!(content[0]["image_url"]["url"].as_str().unwrap().starts_with("data:image/png;base64,"));
+        assert_eq!(content[1]["type"], "file");
+        let gemini = build_chat_call(&settings(AiProvider::Gemini), "k1234567", &turns).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&gemini.body).unwrap();
+        assert_eq!(body["contents"][0]["parts"][0]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(body["contents"][0]["parts"][3]["text"], "What is this?");
+    }
+
+    #[test]
+    fn old_pictures_are_dropped_when_the_request_would_get_too_big() {
+        let big = MAX_MEDIA_BYTES / 2 + 1;
+        let turns = [file_turn("old", vec![picture(big)]), file_turn("new", vec![picture(big)])];
+        assert_eq!(media_allowed(&turns), [false, true], "the newest picture wins");
+        let call = build_chat_call(&settings(AiProvider::Claude), "k1234567", &turns).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
+        assert!(body["messages"][0]["content"][0]["text"].as_str().unwrap().contains("left out"));
+        assert_eq!(body["messages"][1]["content"][0]["type"], "image");
+        let gone = Attachment::restored("x.png", FileKind::Image, "");
+        let call = build_chat_call(&settings(AiProvider::Claude), "k1234567", &[file_turn("hi", vec![gone])]).unwrap();
+        assert!(call.body.contains("no longer available"));
+    }
+
+    #[test]
+    fn a_separate_speech_service_has_its_own_address_and_model() {
+        let wav = vec![9u8, 8, 7];
+        let mut s = settings(AiProvider::Claude);
+        assert!(!can_transcribe(&s), "Claude cannot do speech");
+        s.voice_separate = true;
+        s.voice_base = "https://api.groq.com/openai/v1/".into();
+        s.voice_model = "whisper-large-v3".into();
+        assert!(can_transcribe(&s), "a separate service makes dictation possible with any chat service");
+        let call = build_voice_call(&s, "k1234567", &wav).unwrap();
+        assert_eq!(call.url, "https://api.groq.com/openai/v1/audio/transcriptions");
+        let text = String::from_utf8_lossy(&call.body);
+        assert!(text.contains("whisper-large-v3") && !text.contains("k1234567"));
+        assert!(call.headers.contains(&("Authorization", "Bearer k1234567".to_string())));
+        s.voice_base = "http://example.com/v1".into();
+        assert!(build_voice_call(&s, "k1234567", &wav).is_none(), "plain HTTP only for this computer");
+        s.voice_base = "https://a.b/v1".into();
+        s.voice_model = "bad model?".into();
+        assert!(build_voice_call(&s, "k1234567", &wav).is_none());
+        assert_eq!(voice_provider(&s), AiProvider::OpenAi);
+    }
+
+    #[test]
+    fn the_speech_service_at_the_chat_address_shares_its_key() {
+        let mut s = settings(AiProvider::OpenAi);
+        s.openai_base = "https://api.groq.com/openai/v1".into();
+        s.voice_base = "https://api.groq.com/openai/v1/".into();
+        assert!(!voice_shares_chat_key(&s), "only a separate speech service shares");
+        s.voice_separate = true;
+        assert!(voice_shares_chat_key(&s));
+        s.voice_base = "https://api.openai.com/v1".into();
+        assert!(!voice_shares_chat_key(&s), "another address needs its own key");
     }
 
     #[test]
