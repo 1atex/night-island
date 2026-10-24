@@ -31,7 +31,7 @@ impl App {
                 && fx < pill.0 + pill.2;
             if in_header
                 && view::hit_tab(pill, self.scale, fx, fy, &self.ui).is_none()
-                && !view::hit_pin(pill, self.scale, fx, fy)
+                && view::hit_head(pill, self.scale, &self.ui, fx, fy).is_none()
             {
                 let mut pt = windows::Win32::Foundation::POINT::default();
                 unsafe {
@@ -46,6 +46,9 @@ impl App {
 
     pub(in crate::island) fn drag_island(&mut self) {
         let Some((start_cursor, _)) = self.pointer.press else { return };
+        if self.settings.lock_drag {
+            return;
+        }
         let mut pt = windows::Win32::Foundation::POINT::default();
         unsafe {
             let _ = GetCursorPos(&mut pt);
@@ -154,11 +157,28 @@ impl App {
         }
         let pill = self.pill_rect(true);
         let (fx, fy) = (x as f32, y as f32);
+        if self.ui.remind.alert.is_some() {
+            let hover = view::hit_alert(pill, self.scale, fx, fy).map(|i| 1500 + i);
+            self.ui.hand = hover.is_some();
+            if hover != self.ui.home.hover_act {
+                self.ui.home.hover_act = hover;
+                self.repaint_expanded();
+            }
+            return;
+        }
         if self.ui.cmd.open {
-            if let Some(i) = view::hit_cmd(pill, self.scale, fx, fy, self.ui.cmd.items.len())
+            let row = view::hit_cmd(pill, self.scale, fx, fy, self.ui.cmd.items.len());
+            let button = view::hit_cmd_button(pill, self.scale, fx, fy, &self.ui).map(|i| 200 + i);
+            self.ui.hand = row.is_some() || button.is_some();
+            let mut changed = button != self.ui.home.hover_act;
+            self.ui.home.hover_act = button;
+            if let Some(i) = row
                 && i != self.ui.cmd.sel
             {
                 self.ui.cmd.sel = i;
+                changed = true;
+            }
+            if changed {
                 self.repaint_expanded();
             }
             return;
@@ -210,6 +230,12 @@ impl App {
                 Some(view::AgyHit::Back) => Some(1101),
                 _ => None,
             }
+        } else if self.ui.tab == view::Tab::Record {
+            match view::hit_record(pill, self.scale, fx, fy) {
+                Some(view::RecHit::Start) => Some(1400),
+                Some(view::RecHit::Folder) => Some(1401),
+                None => None,
+            }
         } else if self.ui.tab == view::Tab::Privacy {
             let button = view::usage_clear_button(pill, self.scale);
             (fx >= button.0 && fx < button.2 && fy >= button.1 && fy < button.3).then_some(1300)
@@ -258,12 +284,22 @@ impl App {
         } else {
             None
         };
-        let hover_pin = view::hit_pin(pill, self.scale, fx, fy);
-        if hover_act != self.ui.home.hover_act || hover_pin != self.ui.hover_pin {
+        let hover_head = view::hit_head(pill, self.scale, &self.ui, fx, fy);
+        let tip = self.tip_at(pill, hover_tab, hover_head);
+        self.set_tip(tip);
+        if hover_act != self.ui.home.hover_act || hover_head != self.ui.hover_head {
             self.ui.home.hover_act = hover_act;
-            self.ui.hover_pin = hover_pin;
+            self.ui.hover_head = hover_head;
             self.repaint_expanded();
         }
+        self.ui.hand = hover_act.is_some()
+            || hover_head.is_some()
+            || hover_tab.is_some()
+            || hover_clip.is_some()
+            || hover_ctl.is_some()
+            || hover_note.is_some()
+            || hover_rem.is_some()
+            || hover_text.is_some();
         if hover_tab != self.ui.hover_tab
             || hover_clip != self.ui.clip.hover
             || hover_ctl != self.ui.hover_ctl
@@ -281,7 +317,55 @@ impl App {
         }
     }
 
+    fn tip_at(
+        &self,
+        pill: view::Rect,
+        tab: Option<usize>,
+        head: Option<view::HeadHit>,
+    ) -> Option<(String, (f32, f32))> {
+        let s = self.scale;
+        let below = |r: view::Rect| ((r.0 + r.2) / 2.0, r.3 + 4.0 * s);
+        if let Some(i) = tab.filter(|&i| view::TABS[i].0 != self.ui.tab) {
+            let rect = view::tab_rects(pill, s, &self.ui)[i];
+            return Some((view::TABS[i].2.to_string(), below(rect)));
+        }
+        let (text, rect) = match head? {
+            view::HeadHit::Pin => (if self.ui.pinned { "Let it close" } else { "Keep open" }, view::pin_rect(pill, s)),
+            view::HeadHit::Lock => {
+                (if self.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" }, view::lock_rect(pill, s))
+            }
+            view::HeadHit::Mic => {
+                let muted = self.ui.mic_muted == Some(true);
+                (if muted { "Unmute microphone" } else { "Mute microphone" }, view::privacy_dots(pill, s, &self.ui).0?)
+            }
+            view::HeadHit::Cam => ("Camera in use", view::privacy_dots(pill, s, &self.ui).1?),
+        };
+        Some((text.to_string(), below(rect)))
+    }
+
+    pub(in crate::island) fn set_tip(&mut self, tip: Option<(String, (f32, f32))>) {
+        if tip.as_ref().map(|t| &t.0) == self.ui.tip.as_ref().map(|t| &t.0) {
+            return;
+        }
+        crate::ui::tip::hide(self.hwnd);
+        self.kill_timer(Timer::Tip);
+        if tip.is_some() {
+            self.set_timer(Timer::Tip, 450);
+        }
+        self.ui.tip = tip;
+    }
+
+    pub(in crate::island) fn show_tip(&mut self) {
+        let Some((text, (x, y))) = &self.ui.tip else { return };
+        let mut pt = windows::Win32::Foundation::POINT { x: x.round() as i32, y: y.round() as i32 };
+        unsafe {
+            let _ = windows::Win32::Graphics::Gdi::ClientToScreen(self.hwnd, &mut pt);
+        }
+        crate::ui::tip::show(self.hwnd, &crate::ui::i18n::tr(text), (pt.x, pt.y));
+    }
+
     pub(in crate::island) fn click_at(&mut self, x: i32, y: i32) {
+        self.set_tip(None);
         if self.state == State::Collapsed {
             return self.click_collapsed(x, y);
         }
@@ -295,16 +379,26 @@ impl App {
             return self.click_cmd(x, y);
         }
         let pill = self.pill_rect(true);
-        if view::hit_pin(pill, self.scale, x as f32, y as f32) {
-            self.ui.pinned = !self.ui.pinned;
-            if self.ui.pinned {
-                self.kill_timer(Timer::Collapse);
+        match view::hit_head(pill, self.scale, &self.ui, x as f32, y as f32) {
+            Some(view::HeadHit::Pin) => {
+                self.ui.pinned = !self.ui.pinned;
+                if self.ui.pinned {
+                    self.kill_timer(Timer::Collapse);
+                }
+                self.repaint_expanded();
+                return;
             }
-            self.repaint_expanded();
-            return;
-        }
-        if view::hit_mic_chip(pill, self.scale, &self.ui, x as f32, y as f32) {
-            return self.toggle_mic();
+            Some(view::HeadHit::Lock) => {
+                self.settings.lock_drag = !self.settings.lock_drag;
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.render_settings_win();
+                self.repaint_expanded();
+                return;
+            }
+            Some(view::HeadHit::Mic) => return self.toggle_mic(),
+            Some(view::HeadHit::Cam) => return,
+            None => {}
         }
         if let Some(i) = view::hit_tab(pill, self.scale, x as f32, y as f32, &self.ui) {
             if view::TABS[i].0 == view::Tab::Settings {
@@ -444,6 +538,20 @@ impl App {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed
                 && view::hit_mic_dot(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32);
+            self.ui.hand = self.state == State::Collapsed
+                && self.on_pill(x, y)
+                && (over_mic || self.recording.is_some() || self.notice_link.is_some());
+            let hover = over_mic.then_some(view::HeadHit::Mic);
+            if self.state == State::Collapsed && hover != self.ui.hover_head {
+                self.ui.hover_head = hover;
+                self.repaint_collapsed();
+            }
+            let tip = hover.and_then(|_| {
+                let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
+                let text = if self.ui.mic_muted == Some(true) { "Unmute microphone" } else { "Mute microphone" };
+                Some((text.to_string(), ((dot.0 + dot.2) / 2.0, dot.3 + 10.0 * self.scale)))
+            });
+            self.set_tip(tip);
             if !over_mic && (hidden || self.on_pill(x, y)) {
                 self.set_timer(Timer::Expand, self.settings.open_delay_ms.max(1));
             } else {
@@ -461,7 +569,12 @@ impl App {
             | self.ui.remind.hover.take().is_some()
             | self.ui.notes.hover.take().is_some()
             | self.ui.home.hover_act.take().is_some()
-            | std::mem::take(&mut self.ui.hover_pin);
+            | self.ui.hover_head.take().is_some();
+        self.ui.hand = false;
+        self.set_tip(None);
+        if had_hover && self.state == State::Collapsed {
+            self.repaint_collapsed();
+        }
         if had_hover {
             self.repaint_expanded();
         }

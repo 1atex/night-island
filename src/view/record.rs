@@ -45,6 +45,8 @@ pub(in crate::view) fn paint_record(p: &Painter, pill: Rect, scale: f32, ui: &Ui
     } else {
         (rgba(1.0, 0.3, 0.3, 0.2), "Record an area".to_string(), "Ctrl+Alt+R".to_string())
     };
+    let hover_start = ui.home.hover_act == Some(1400);
+    let fill = if hover_start { rgba(1.0, 0.3, 0.3, fill.a + 0.12) } else { fill };
     p.fill_round_rect(start, 16.0 * scale, fill)?;
     let dot = (
         start.0 + 22.0 * scale,
@@ -71,7 +73,11 @@ pub(in crate::view) fn paint_record(p: &Painter, pill: Rect, scale: f32, ui: &Ui
     )?;
 
     let folder = rec_folder_button(pill, scale);
-    p.fill_round_rect(folder, 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+    p.fill_round_rect(
+        folder,
+        12.0 * scale,
+        rgba(1.0, 1.0, 1.0, if ui.home.hover_act == Some(1401) { 0.14 } else { 0.07 }),
+    )?;
     p.glyph('\u{E838}', (folder.0 + 8.0 * scale, folder.1, folder.0 + 40.0 * scale, folder.3), 15.0 * scale, acc(1.0))?;
     p.text(
         "Open the recordings folder",

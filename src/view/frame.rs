@@ -13,9 +13,9 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let (bh, gap, icon_w) = (36.0 * scale, 1.0 * scale, 32.0 * scale);
     let y0 = y + 12.0 * scale;
     let mut left = x + 12.0 * scale;
-    let pin_left = x + w - 78.0 * scale;
-    let chip = if ui.privacy.cam || ui.privacy.mic { 42.0 * scale } else { 0.0 };
-    let room = pin_left - 6.0 * scale - chip - left;
+    let pin_left = x + w - 78.0 * scale - LOCK_STEP * scale;
+    let dots = [mic_on(ui), ui.privacy.cam].iter().filter(|on| **on).count() as f32 * DOT_STEP * scale;
+    let room = pin_left - 6.0 * scale - dots - left;
     let shown = TABS.iter().filter(|(t, _, n)| *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n)).count() as f32;
     let label = |name: &str| (crate::ui::i18n::tr(name).chars().count() as f32 * 8.6 + 8.0) * scale;
     let active_extra = TABS
@@ -54,35 +54,61 @@ pub fn pin_rect(pill: Rect, scale: f32) -> Rect {
     (r - 32.0 * scale, y + 12.0 * scale, r, y + 48.0 * scale)
 }
 
-pub fn hit_pin(pill: Rect, scale: f32, px: f32, py: f32) -> bool {
-    inside(pin_rect(pill, scale), px, py)
-}
+const LOCK_STEP: f32 = 34.0;
+const DOT_STEP: f32 = 20.0;
 
-pub(in crate::view) fn privacy_chip(pill: Rect, scale: f32, ui: &UiState) -> Option<(Rect, char, &'static str)> {
-    let (glyph, label) = if ui.privacy.cam {
-        ('\u{E722}', "Camera")
-    } else if ui.privacy.mic {
-        ('\u{E720}', "Microphone")
-    } else {
-        return None;
-    };
+pub fn lock_rect(pill: Rect, scale: f32) -> Rect {
     let pin = pin_rect(pill, scale);
-    let right = pin.0 - 4.0 * scale;
-    let mut width = (46.0 + crate::ui::i18n::tr(label).chars().count() as f32 * 8.6) * scale;
-    let tabs_end = tab_rects(pill, scale, ui)
-        .iter()
-        .zip(TABS)
-        .filter(|(_, t)| t.0 != Tab::Settings)
-        .map(|(r, _)| r.2)
-        .fold(0.0, f32::max);
-    if tabs_end + 8.0 * scale > right - width {
-        width = 38.0 * scale;
-    }
-    Some(((right - width, pin.1 + 2.0 * scale, right, pin.3 - 2.0 * scale), glyph, label))
+    (pin.0 - 34.0 * scale, pin.1, pin.0 - 2.0 * scale, pin.3)
 }
 
-pub fn hit_mic_chip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bool {
-    privacy_chip(pill, scale, ui).is_some_and(|(rect, _, label)| label == "Microphone" && inside(rect, px, py))
+pub fn mic_on(ui: &UiState) -> bool {
+    ui.privacy.mic || ui.mic_muted == Some(true)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HeadHit {
+    Pin,
+    Lock,
+    Mic,
+    Cam,
+}
+
+pub fn privacy_dots(pill: Rect, scale: f32, ui: &UiState) -> (Option<Rect>, Option<Rect>) {
+    let lock = lock_rect(pill, scale);
+    let size = 11.0 * scale;
+    let mid = (lock.1 + lock.3) / 2.0;
+    let mut right = lock.0 - 6.0 * scale;
+    let mut next = |on: bool| {
+        on.then(|| {
+            let r = (right - size, mid - size / 2.0, right, mid + size / 2.0);
+            right -= DOT_STEP * scale;
+            r
+        })
+    };
+    let mic = next(mic_on(ui));
+    let cam = next(ui.privacy.cam);
+    (mic, cam)
+}
+
+pub fn hit_head(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<HeadHit> {
+    if inside(pin_rect(pill, scale), px, py) {
+        return Some(HeadHit::Pin);
+    }
+    if inside(lock_rect(pill, scale), px, py) {
+        return Some(HeadHit::Lock);
+    }
+    let pad = 5.0 * scale;
+    let near =
+        |r: Rect| px >= r.0 - pad && px < r.2 + pad && py >= pin_rect(pill, scale).1 && py < pin_rect(pill, scale).3;
+    let (mic, cam) = privacy_dots(pill, scale, ui);
+    if mic.is_some_and(near) {
+        Some(HeadHit::Mic)
+    } else if cam.is_some_and(near) {
+        Some(HeadHit::Cam)
+    } else {
+        None
+    }
 }
 
 pub fn paint_expanded(
@@ -129,39 +155,36 @@ pub fn paint_expanded(
         }
     }
     let pin = pin_rect(pill, scale);
-    if ui.pinned || ui.hover_pin {
+    if ui.pinned || ui.hover_head == Some(HeadHit::Pin) {
         p.fill_round_rect(pin, (pin.3 - pin.1) / 2.0, rgba(1.0, 1.0, 1.0, if ui.pinned { 0.16 } else { 0.09 }))?;
     }
     p.glyph(
-        if ui.pinned { '\u{E840}' } else { '\u{E718}' },
+        if ui.pinned { '' } else { '' },
         pin,
         16.0 * scale,
         rgba(1.0, 1.0, 1.0, if ui.pinned { 1.0 } else { 0.62 }),
     )?;
-    if let Some((chip, glyph, label)) = privacy_chip(pill, scale, ui) {
-        let muted = label == "Microphone" && ui.mic_muted == Some(true);
-        let (fill, icon, text) = if muted {
-            (rgba(1.0, 0.3, 0.3, 0.2), rgba(1.0, 0.45, 0.45, 1.0), rgba(1.0, 0.5, 0.5, 1.0))
-        } else {
-            (rgba(1.0, 0.62, 0.2, 0.2), rgba(1.0, 0.7, 0.3, 1.0), rgba(1.0, 0.72, 0.35, 1.0))
-        };
-        p.fill_round_rect(chip, (chip.3 - chip.1) / 2.0, fill)?;
-        p.glyph(
-            if muted { '\u{F781}' } else { glyph },
-            (chip.0 + 4.0 * scale, chip.1, chip.0 + 32.0 * scale, chip.3),
-            14.0 * scale,
-            icon,
-        )?;
-        if chip.2 - chip.0 > 60.0 * scale {
-            p.text(
-                label,
-                (chip.0 + 32.0 * scale, chip.1, chip.2 - 6.0 * scale, chip.3),
-                13.0 * scale,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                text,
-            )?;
+    let lock = lock_rect(pill, scale);
+    let locked = ui.cfg.lock_drag;
+    if locked || ui.hover_head == Some(HeadHit::Lock) {
+        p.fill_round_rect(lock, (lock.3 - lock.1) / 2.0, rgba(1.0, 1.0, 1.0, if locked { 0.16 } else { 0.09 }))?;
+    }
+    p.glyph(if locked { '' } else { '' }, lock, 16.0 * scale, rgba(1.0, 1.0, 1.0, if locked { 1.0 } else { 0.62 }))?;
+    let (mic, cam) = privacy_dots(pill, scale, ui);
+    let dot = |r: Rect, color: windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F, hover: bool| -> Result<()> {
+        if hover {
+            let grow = 3.0 * scale;
+            let halo = (r.0 - grow, r.1 - grow, r.2 + grow, r.3 + grow);
+            p.fill_round_rect(halo, (halo.2 - halo.0) / 2.0, rgba(color.r, color.g, color.b, 0.25))?;
         }
+        p.fill_round_rect(r, (r.2 - r.0) / 2.0, color)
+    };
+    if let Some(r) = mic {
+        let color = if ui.mic_muted == Some(true) { rgba(1.0, 0.3, 0.3, 1.0) } else { rgba(1.0, 0.62, 0.2, 1.0) };
+        dot(r, color, ui.hover_head == Some(HeadHit::Mic))?;
+    }
+    if let Some(r) = cam {
+        dot(r, rgba(0.3, 0.85, 0.45, 1.0), ui.hover_head == Some(HeadHit::Cam))?;
     }
 
     match ui.tab {
