@@ -220,6 +220,7 @@ impl App {
                 Some(view::ActivityHit::Back) => Some(1319),
                 Some(view::ActivityHit::Group(i)) => Some(1320 + i),
                 Some(view::ActivityHit::App(i)) => Some(1340 + i),
+                Some(view::ActivityHit::Pick(i)) => Some(1360 + i),
                 _ => None,
             }
         } else if self.ui.tab == view::Tab::Chat {
@@ -270,6 +271,9 @@ impl App {
         if hover_act != self.ui.home.hover_act || hover_pin != self.ui.hover_pin {
             self.ui.home.hover_act = hover_act;
             self.ui.hover_pin = hover_pin;
+            if self.ui.tab == view::Tab::Activity {
+                self.set_timer(Timer::UiAnim, 16);
+            }
             self.repaint_expanded();
         }
         if hover_tab != self.ui.hover_tab

@@ -179,20 +179,48 @@ impl App {
         self.ui.activity.groups = groups;
         if self.ui.activity.open_total().is_none() {
             self.ui.activity.open = None;
+            self.ui.activity.picking = None;
         }
         let most = self.ui.activity.open_total().map_or(0, |t| t.apps.len());
         self.ui.activity.scroll = self.ui.activity.scroll.min(most.saturating_sub(1));
     }
 
-    fn move_app(&mut self, shown: usize) {
+    pub(in crate::island) fn restart_activity_anim(&mut self) {
+        self.ui.activity.restart_draw();
+        self.set_timer(Timer::UiAnim, 16);
+    }
+
+    pub(in crate::island) fn ui_anim_tick(&mut self) {
+        if self.state != State::Expanded || self.ui.tab != view::Tab::Activity {
+            return;
+        }
+        let moving = self.ui.activity.step_glow(self.ui.home.hover_act);
+        self.repaint_expanded();
+        if moving || self.ui.activity.animating() {
+            self.set_timer(Timer::UiAnim, 16);
+        }
+    }
+
+    fn pick_app(&mut self, shown: usize) {
         let Some(group) = self.ui.activity.open_total() else { return };
         let Some((app, _)) = group.apps.get(self.ui.activity.scroll + shown).cloned() else { return };
-        let Some(next) = view::next_group(&self.ui.activity.groups, group.id).cloned() else { return };
+        self.ui.activity.picking = Some(app);
+        self.ui.activity.picked_at = Some(std::time::Instant::now());
+        self.ui.activity.glow.clear();
+        self.set_timer(Timer::UiAnim, 16);
+    }
+
+    fn move_app(&mut self, choice: usize) {
+        let Some(app) = self.ui.activity.picking.take() else { return };
+        let Some(group) = self.ui.activity.groups.get(choice).cloned() else { return };
         if let Some(store) = &self.store {
-            store.act_app_set(&app, next.id, Source::User);
+            store.act_app_set(&app, group.id, Source::User);
         }
         self.reload_activity();
-        let name = crate::ui::i18n::tr(&next.name).into_owned();
+        self.ui.activity.glow.clear();
+        self.ui.activity.opened_at = Some(std::time::Instant::now());
+        self.set_timer(Timer::UiAnim, 16);
+        let name = crate::ui::i18n::tr(&group.name).into_owned();
         self.notify_for(Notice::Integrations, '\u{E73E}', &format!("{app} \u{2192} {name}"), 2500);
     }
 
@@ -208,21 +236,35 @@ impl App {
             }
             Some(view::ActivityHit::Today) => {
                 self.ui.activity.week = false;
+                self.ui.activity.picking = None;
                 self.reload_activity();
+                self.restart_activity_anim();
             }
             Some(view::ActivityHit::Week) => {
                 self.ui.activity.week = true;
+                self.ui.activity.picking = None;
                 self.reload_activity();
+                self.restart_activity_anim();
             }
             Some(view::ActivityHit::Group(i)) => {
                 self.ui.activity.open = self.ui.activity.totals.get(i).map(|t| t.id);
                 self.ui.activity.scroll = 0;
+                self.ui.activity.glow.clear();
+                self.ui.activity.opened_at = Some(std::time::Instant::now());
+                self.set_timer(Timer::UiAnim, 16);
             }
             Some(view::ActivityHit::Back) => {
-                self.ui.activity.open = None;
-                self.ui.activity.scroll = 0;
+                if self.ui.activity.picking.take().is_none() {
+                    self.ui.activity.open = None;
+                    self.ui.activity.scroll = 0;
+                    self.ui.activity.opened_at = Some(std::time::Instant::now());
+                    self.ui.activity.drawn_at = Some(std::time::Instant::now());
+                }
+                self.ui.activity.glow.clear();
+                self.set_timer(Timer::UiAnim, 16);
             }
-            Some(view::ActivityHit::App(i)) => self.move_app(i),
+            Some(view::ActivityHit::App(i)) => self.pick_app(i),
+            Some(view::ActivityHit::Pick(i)) => self.move_app(i),
             Some(view::ActivityHit::Clear) => {
                 if self.ui.activity.clear_armed {
                     self.ui.activity.clear_armed = false;
@@ -241,6 +283,7 @@ impl App {
                 if self.ui.activity.clear_armed {
                     self.ui.activity.clear_armed = false;
                 }
+                self.ui.activity.picking = None;
             }
         }
         self.repaint_expanded();

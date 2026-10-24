@@ -521,6 +521,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "AI requests today:" => "Запросов к нейросети сегодня:",
         "Groups" => "Группы",
+        "choose a group" => "выберите группу",
+        "Move to a group" => "Перенести в группу",
         "New group" => "Новая группа",
         "Name" => "Название",
         "Add group" => "Добавить группу",

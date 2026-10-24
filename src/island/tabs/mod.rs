@@ -63,6 +63,7 @@ impl App {
         self.sync_metrics();
         if tab == view::Tab::Activity {
             self.reload_activity();
+            self.restart_activity_anim();
         }
         self.repaint_expanded();
     }
