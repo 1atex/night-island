@@ -14,7 +14,7 @@ const TOOL_ID: usize = 1;
 
 fn tool(owner: HWND, text: &mut [u16]) -> TTTOOLINFOW {
     TTTOOLINFOW {
-        cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+        cbSize: std::mem::offset_of!(TTTOOLINFOW, lParam) as u32,
         uFlags: TTF_TRACK | TTF_ABSOLUTE,
         hwnd: owner,
         uId: TOOL_ID,
