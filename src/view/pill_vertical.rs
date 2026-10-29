@@ -58,6 +58,9 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
         let length = (top + weather.unwrap_or(0.0) + V_CLOCK + battery.unwrap_or(0.0) + 2.0 * V_GAP + V_PAD).max(V_MIN);
         let total = if pill_len > 0.0 { pill_len / scale } else { length };
         let at = |y: f32, h: f32| (y * scale, h * scale);
+        let free_top = top + weather.map_or(0.0, |h| h + V_GAP);
+        let free_bottom = total - V_PAD - battery.map_or(0.0, |h| h + V_GAP);
+        let clock_y = ((total - V_CLOCK) / 2.0).clamp(free_top, (free_bottom - V_CLOCK).max(free_top));
         return VSlots {
             cover: None,
             weather: weather.map(|h| at(top, h)),
@@ -66,7 +69,7 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
             rec: None,
             agent: None,
             metrics: None,
-            clock: at((total - V_CLOCK) / 2.0, V_CLOCK),
+            clock: at(clock_y, V_CLOCK),
             battery: battery.map(|h| at(total - V_PAD - h, h)),
             length,
         };

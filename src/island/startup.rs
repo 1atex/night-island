@@ -163,7 +163,7 @@ impl App {
         let ring =
             gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, &window_room(&settings)))?;
         ring.sprite.SetIsVisible(false)?;
-        let bump = gpu.layer(&compositor, bump_size(scale, COLLAPSED.0))?;
+        let bump = gpu.layer(&compositor, bump_size(scale, (COLLAPSED.0, COLLAPSED.1)))?;
         bump.sprite.SetIsVisible(false)?;
         bump.sprite.SetCenterPoint(Vector3 { X: bump.size().0 as f32 / 2.0, Y: 0.0, Z: 0.0 })?;
         let bump_fill = compositor.CreateSpriteVisual()?;
@@ -305,7 +305,7 @@ impl App {
         app.ui.cfg = app.settings.clone();
         app.ui.char_inset = if app.settings.character == Character::None { 0.0 } else { CHAR_INSET };
         app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
-        if app.settings.vertical() {
+        if app.settings.hang() != Hang::Down {
             app.apply_layout();
         }
         app.ui.mic_muted = volume::mic_muted();

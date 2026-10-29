@@ -29,7 +29,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Interface, Result, h, w};
 
 use crate::data::clips::{self, Clip, Reminder, Store};
-use crate::data::settings::{Edge, Notice, Placement, Settings, Style};
+use crate::data::settings::{Edge, Hang, Notice, Placement, Settings, Style};
 use crate::data::usage::UseKind;
 use crate::platform::activity;
 use crate::platform::apps;

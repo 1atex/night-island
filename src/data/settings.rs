@@ -28,6 +28,14 @@ pub enum Language {
     En,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Hang {
+    Down,
+    Up,
+    Right,
+    Left,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Edge {
@@ -747,6 +755,18 @@ pub const HIDEABLE_TABS: [&str; 10] =
     ["Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
 
 impl Settings {
+    pub fn hang(&self) -> Hang {
+        if self.placement != Placement::Docked {
+            return Hang::Down;
+        }
+        match self.dock_edge {
+            Edge::Top => Hang::Down,
+            Edge::Bottom => Hang::Up,
+            Edge::Left => Hang::Right,
+            Edge::Right => Hang::Left,
+        }
+    }
+
     pub fn vertical(&self) -> bool {
         self.placement == Placement::Docked && matches!(self.dock_edge, Edge::Left | Edge::Right)
     }

@@ -16,13 +16,12 @@ pub(in crate::island) const SPEC_GAP: f32 = 3.0;
 pub(in crate::island) const SPEC_H: f32 = 24.0;
 
 pub(in crate::island) fn bump_room_for(settings: &Settings) -> f32 {
-    let docked_elsewhere = settings.placement == Placement::Docked && settings.dock_edge != Edge::Top;
-    let liquid = if settings.style == Style::Liquid && !docked_elsewhere { BUMP_ROOM } else { 0.0 };
+    let liquid = if settings.style == Style::Liquid { BUMP_ROOM } else { 0.0 };
     if settings.ring_wanted() { liquid.max(RING_ROOM) } else { liquid }
 }
 
-pub(in crate::island) fn bump_size(scale: f32, width: f32) -> (i32, i32) {
-    let straight = (width - COLLAPSED.1) * scale;
+pub(in crate::island) fn bump_size(scale: f32, (w, h): (f32, f32)) -> (i32, i32) {
+    let straight = (w.max(h) - w.min(h)) * scale;
     (straight.round() as i32, ((BUMP_DEPTH_MAX + BUMP_SEAM + 4.0) * scale).round() as i32)
 }
 
@@ -50,7 +49,7 @@ pub(in crate::island) struct MusicBars {
 
 impl App {
     pub(in crate::island) fn liquid_on(&self) -> bool {
-        self.settings.style == Style::Liquid && !(self.docked() && self.edge() != Edge::Top)
+        self.settings.style == Style::Liquid
     }
 
     pub(in crate::island) fn place_spectrum(&self) {
@@ -442,7 +441,7 @@ impl App {
     }
 
     pub(in crate::island) fn fit_bump(&mut self) {
-        let size = bump_size(self.scale, self.cw);
+        let size = bump_size(self.scale, self.collapsed());
         if size == self.liquid.bump.size() {
             return;
         }
@@ -461,10 +460,31 @@ impl App {
     }
 
     pub(in crate::island) fn place_bump(&self) {
+        let width = bump_size(self.scale, self.collapsed()).0 as f32;
+        let (px, py) = self.bump_pivot();
+        let angle = match self.settings.hang() {
+            Hang::Down => 0.0,
+            Hang::Up => 180.0,
+            Hang::Right => -90.0,
+            Hang::Left => 90.0,
+        };
+        let _ = self.liquid.bump.sprite.SetRotationAngleInDegrees(angle);
+        let _ = self.liquid.bump.sprite.SetOffset(Vector3 { X: px - width / 2.0, Y: py, Z: 0.0 });
+    }
+
+    pub(in crate::island) fn bump_pivot(&self) -> (f32, f32) {
+        let s = self.scale;
         let (win_w, _) = self.window_size(self.win);
-        let x = (win_w - bump_size(self.scale, self.cw).0) as f32 / 2.0;
-        let y = (self.win_pad().1 + COLLAPSED.1) * self.scale - BUMP_SEAM * self.scale;
-        let _ = self.liquid.bump.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
+        let (_, top) = self.win_pad();
+        let (pw, ph) = self.collapsed();
+        let seam = BUMP_SEAM * s;
+        let cx = win_w as f32 / 2.0;
+        match self.settings.hang() {
+            Hang::Down => (cx, (top + ph) * s - seam),
+            Hang::Up => (cx, top * s + seam),
+            Hang::Right => (cx + pw * s / 2.0 - seam, (top + ph / 2.0) * s),
+            Hang::Left => (cx - pw * s / 2.0 + seam, (top + ph / 2.0) * s),
+        }
     }
 
     pub(in crate::island) fn seam_px(&self) -> f32 {
@@ -544,10 +564,16 @@ impl App {
         }
         let reach = self.settings.liquid_reach * s;
         let strength = self.settings.liquid_strength * s;
-        let (win_w, _) = self.window_size(self.win);
-        let dx = (pt.x - rc.left) as f32 - win_w as f32 / 2.0;
-        let dy = (pt.y - rc.top) as f32 - (self.win_pad().1 + COLLAPSED.1) * s;
-        let straight = (self.cw - COLLAPSED.1) / 2.0 * s;
+        let (px, py) = self.bump_pivot();
+        let (cx, cy) = ((pt.x - rc.left) as f32, (pt.y - rc.top) as f32);
+        let (dy, dx) = match self.settings.hang() {
+            Hang::Down => (cy - py, cx - px),
+            Hang::Up => (py - cy, px - cx),
+            Hang::Right => (cx - px, py - cy),
+            Hang::Left => (px - cx, cy - py),
+        };
+        let (pw, ph) = self.collapsed();
+        let straight = (pw.max(ph) - pw.min(ph)) / 2.0 * s;
         let slack = 120.0 * s;
         if dy > reach || dx.abs() > straight + slack {
             return (0.0, 0.0);
@@ -602,12 +628,18 @@ impl App {
             if look.is_some_and(|(palette, _)| palette.tone == crate::ui::gfx::Tone::Horizontal) {
                 return Ok(());
             }
-            let (win_w, _) = self.window_size(self.win);
-            let base_x = (win_w - self.liquid.bump.size().0) as f32 / 2.0;
-            let base_y = (self.win_pad().1 + COLLAPSED.1) * s - BUMP_SEAM * s;
+            let (pivot_x, base_y) = self.bump_pivot();
+            let base_x = pivot_x - self.liquid.bump.size().0 as f32 / 2.0;
+            let sideways = matches!(self.settings.hang(), Hang::Left | Hang::Right);
             let drift = ((self.liquid.bump.size().0 as f32 / 2.0) - self.bump_half(IDLE_AMP * s)) * 0.8;
             let drift_anim = self.compositor.CreateVector3KeyFrameAnimation()?;
-            let at = |dx: f32| Vector3 { X: base_x + dx, Y: base_y, Z: 0.0 };
+            let at = |dx: f32| {
+                if sideways {
+                    Vector3 { X: base_x, Y: base_y + dx, Z: 0.0 }
+                } else {
+                    Vector3 { X: base_x + dx, Y: base_y, Z: 0.0 }
+                }
+            };
             drift_anim.InsertKeyFrameWithEasingFunction(0.0, at(-drift), &ease)?;
             drift_anim.InsertKeyFrameWithEasingFunction(0.5, at(drift), &ease)?;
             drift_anim.InsertKeyFrameWithEasingFunction(1.0, at(-drift), &ease)?;

@@ -26,6 +26,18 @@ pub(in crate::island) struct Room {
     pub ring: bool,
     pub open: OpenEq,
     pub vertical: bool,
+    pub hang: Hang,
+}
+
+pub(in crate::island) fn small_pads(room: &Room, docked: bool) -> (f32, f32, f32) {
+    let base_top = if docked { 0.0 } else { TOP_MARGIN };
+    let ring = if room.ring { RING_ROOM } else { 0.0 };
+    let inward = room.bottom;
+    match room.hang {
+        Hang::Down => (PAD.max(ring), base_top.max(ring), inward),
+        Hang::Up => (PAD.max(ring), base_top.max(inward).max(ring), ring),
+        Hang::Left | Hang::Right => (PAD.max(inward).max(ring), base_top.max(ring), ring),
+    }
 }
 
 pub(in crate::island) fn collapsed_dims(vertical: bool, cw: f32) -> (f32, f32) {
@@ -38,7 +50,13 @@ pub(in crate::island) fn window_room(settings: &Settings) -> Room {
         (true, false) => OpenEq::Under,
         (true, true) => OpenEq::Around,
     };
-    Room { bottom: bump_room_for(settings), ring: settings.ring_wanted(), open, vertical: settings.vertical() }
+    Room {
+        bottom: bump_room_for(settings),
+        ring: settings.ring_wanted(),
+        open,
+        vertical: settings.vertical(),
+        hang: settings.hang(),
+    }
 }
 
 pub(in crate::island) fn big_pad(open: OpenEq, docked: bool) -> (f32, f32, f32) {
@@ -52,20 +70,20 @@ pub(in crate::island) fn big_pad(open: OpenEq, docked: bool) -> (f32, f32, f32) 
 
 pub(in crate::island) fn window_size(scale: f32, win: Win, docked: bool, cw: f32, room: &Room) -> (i32, i32) {
     let (w, h) = if win == Win::Big { EXPANDED } else { collapsed_dims(room.vertical, cw) };
-    let base_top = if docked { 0.0 } else { TOP_MARGIN };
-    let (pad, top) = match win {
-        Win::Small if room.ring => (PAD.max(RING_ROOM), base_top.max(RING_ROOM)),
-        Win::Big => {
-            let (x, t, _) = big_pad(room.open, docked);
-            (x, t)
-        }
-        _ => (PAD, base_top),
+    let small = small_pads(room, docked);
+    let pad = match win {
+        Win::Small => small.0,
+        Win::Big => big_pad(room.open, docked).0,
+        Win::Strip => PAD,
     };
     let width = ((w + 2.0 * pad) * scale).round() as i32;
     match win {
         Win::Strip => (width, STRIP_H),
-        Win::Small => (width, ((h + top + room.bottom) * scale).round() as i32),
-        Win::Big => (width, ((h + top + big_pad(room.open, docked).2) * scale).round() as i32),
+        Win::Small => (width, ((h + small.1 + small.2) * scale).round() as i32),
+        Win::Big => {
+            let (_, top, bottom) = big_pad(room.open, docked);
+            (width, ((h + top + bottom) * scale).round() as i32)
+        }
     }
 }
 
@@ -167,16 +185,9 @@ impl App {
         self.settings.placement == Placement::Docked
     }
 
-    pub(in crate::island) fn top_margin(&self) -> f32 {
-        if self.docked() { 0.0 } else { TOP_MARGIN }
-    }
-
     pub(in crate::island) fn small_pad(&self) -> (f32, f32) {
-        if self.settings.ring_wanted() {
-            (PAD.max(RING_ROOM), self.top_margin().max(RING_ROOM))
-        } else {
-            (PAD, self.top_margin())
-        }
+        let (x, t, _) = small_pads(&window_room(&self.settings), self.docked());
+        (x, t)
     }
 
     pub(in crate::island) fn win_pad(&self) -> (f32, f32) {
@@ -393,7 +404,7 @@ impl App {
         let _ = self.collapsed.resize(small);
         self.resize_ring();
         let _ = self.expanded.resize(window_size(self.scale, Win::Big, docked, self.cw, &window_room(&self.settings)));
-        let _ = self.liquid.bump.resize(bump_size(self.scale, self.cw));
+        let _ = self.liquid.bump.resize(bump_size(self.scale, self.collapsed()));
         let _ = self
             .pet
             .char_layer
