@@ -28,20 +28,13 @@ fn data(hwnd: HWND) -> NOTIFYICONDATAW {
     nid
 }
 
-fn app_icon() -> HICON {
+pub fn app_icon(cx: i32, cy: i32) -> HICON {
     unsafe {
         let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
-        LoadImageW(
-            Some(module.into()),
-            PCWSTR(APP_ICON as *const u16),
-            IMAGE_ICON,
-            GetSystemMetrics(SM_CXSMICON),
-            GetSystemMetrics(SM_CYSMICON),
-            LR_DEFAULTCOLOR,
-        )
-        .map(|h| HICON(h.0))
-        .or_else(|_| LoadIconW(None, IDI_APPLICATION))
-        .unwrap_or_default()
+        LoadImageW(Some(module.into()), PCWSTR(APP_ICON as *const u16), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR)
+            .map(|h| HICON(h.0))
+            .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+            .unwrap_or_default()
     }
 }
 
@@ -50,7 +43,7 @@ pub fn add(hwnd: HWND) {
         let mut nid = data(hwnd);
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         nid.uCallbackMessage = WM_TRAY;
-        nid.hIcon = app_icon();
+        nid.hIcon = app_icon(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
     }
 }

@@ -70,6 +70,13 @@ impl App {
                 crate::log_error!("could not create the settings window");
                 return;
             };
+            for (kind, cx, cy) in [
+                (ICON_SMALL, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)),
+                (ICON_BIG, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)),
+            ] {
+                let icon = crate::ui::tray::app_icon(cx, cy);
+                SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
+            }
             let round: i32 = 2;
             let rounded = DwmSetWindowAttribute(
                 hwnd,
