@@ -17,7 +17,7 @@ pub const WM_UPDATE: u32 = WM_APP + 22;
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 pub const OS: &str = "windows-x64";
 pub const APP: &str = "night-island";
-const HOST: &str = sync::HOST;
+const HOST: &str = "backend.night-watchers.com";
 const DOMAIN: &[u8] = b"night-island/release/v1\0";
 const RELEASE_KEY_HEX: &str = include_str!("../../proto/release_public_key.txt");
 const USER_AGENT: &str = "NightIsland/0.1";
@@ -277,7 +277,7 @@ mod tests {
         Release {
             version: "0.2.0".into(),
             beta: false,
-            url: format!("https://{HOST}/api/v1/installers/resource/application/Island.exe"),
+            url: "https://backend.night-watchers.com/api/v1/installers/resource/application/Island.exe".into(),
             sha256: vec![1; 32],
             size: 3_000_000,
             notes: "Faster start.\nFewer bugs.".into(),
@@ -345,14 +345,14 @@ mod tests {
         assert_eq!(ok(Release { app: "night-shell".into(), ..release() }), Err("Release is for another program"));
         assert_eq!(ok(Release { app: String::new(), ..release() }), Err("Release is for another program"));
         for bad_url in [
-            format!("http://{HOST}/x.exe"),
-            "https://evil.example/x.exe".to_string(),
-            format!("https://{HOST}@evil.example/x.exe"),
-            format!("https://{HOST}.evil.example/x.exe"),
-            format!("https://{HOST}:8443/x.exe"),
-            format!("https://{HOST}/a b.exe"),
+            "http://backend.night-watchers.com/x.exe",
+            "https://evil.example/x.exe",
+            "https://backend.night-watchers.com@evil.example/x.exe",
+            "https://backend.night-watchers.com.evil.example/x.exe",
+            "https://backend.night-watchers.com:8443/x.exe",
+            "https://backend.night-watchers.com/a b.exe",
         ] {
-            assert!(ok(Release { url: bad_url.clone(), ..release() }).is_err(), "{bad_url} must be refused");
+            assert!(ok(Release { url: bad_url.into(), ..release() }).is_err(), "{bad_url} must be refused");
         }
         assert!(ok(Release { sha256: vec![1; 31], ..release() }).is_err());
         assert!(ok(Release { version: "latest".into(), ..release() }).is_err());

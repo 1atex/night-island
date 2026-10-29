@@ -23,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 13] = [
+const ISLAND: [(Sid, &str, Kind); 12] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -33,7 +33,6 @@ const ISLAND: [(Sid, &str, Kind); 13] = [
     (Sid::Edge, "Edge", Kind::Cycle),
     (Sid::Style, "Shape", Kind::Segment(["Flat", "Liquid"])),
     (Sid::Character, "Character", Kind::Cycle),
-    (Sid::CharacterDetached, "Let the character roam the desktop", Kind::Toggle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
     (Sid::CloseDelay, "Close delay", Kind::Slider),
@@ -48,17 +47,17 @@ const ANIMATIONS: [(Sid, &str, Kind); 6] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 4] = [
+const APPEARANCE: [(Sid, &str, Kind); 5] = [
+    (Sid::Acrylic, "Acrylic blur", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 19] = [
+const PILL: [(Sid, &str, Kind); 18] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
-    (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
@@ -142,7 +141,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (11, "Open and close")],
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (10, "Open and close")],
     },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None, sections: &[] },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items), sections: &[] },
@@ -166,7 +165,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (4, "Music"), (12, "Edges")],
+        sections: &[(0, "Pill"), (3, "Music"), (11, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',
@@ -466,13 +465,12 @@ fn theme_items(_ui: &UiState) -> Vec<Item> {
         row(1),
         row(2),
         row(3),
-        row(4),
         Item::Section("Pill"),
+        row(4),
         row(5),
-        row(6),
         Item::Section("Accent"),
+        row(6),
         row(7),
-        row(8),
     ]
 }
 
@@ -523,10 +521,7 @@ fn paint_theme_block(p: &Painter, row: Rect, scale: f32, ui: &UiState, hovered: 
     let (l, t, r) = col;
     let (panel, accent) = crate::ui::theme::colors(&ui.cfg);
     let preview = (l, t, r, t + 58.0 * scale);
-    let alpha = ui.cfg.tint_open;
-    p.fill_round_rect(preview, 29.0 * scale, rgba(0.85, 0.85, 0.85, 1.0))?;
-    p.fill_round_rect((l, t, (l + r) / 2.0, t + 58.0 * scale), 29.0 * scale, rgba(0.35, 0.35, 0.35, 1.0))?;
-    p.fill_round_rect(preview, 29.0 * scale, rgba(panel.0, panel.1, panel.2, alpha))?;
+    p.fill_round_rect(preview, 29.0 * scale, rgba(panel.0, panel.1, panel.2, 1.0))?;
     p.stroke_round_rect(preview, 29.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.12))?;
     p.fill_ellipse(
         l + 28.0 * scale,
@@ -645,11 +640,7 @@ fn key_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![Item::Heading("Keys")];
     for h in Hotkey::ALL {
         let capturing = ui.sw.capturing == Some(h);
-        let text = if capturing {
-            "Press the new keys (Esc clears)…".to_string()
-        } else {
-            crate::ui::i18n::tr(&ui.cfg.combo(h).text()).into_owned()
-        };
+        let text = if capturing { "Press the new keys…".to_string() } else { ui.cfg.combo(h).text() };
         out.push(Item::Pair(Act::Rebind(h), h.label().into(), text, capturing));
     }
     out.push(Item::Note("Click a key, then press the new combination with Ctrl, Alt, Shift or Win."));
@@ -690,9 +681,6 @@ fn about_items(ui: &UiState) -> Vec<Item> {
     }
     for &(id, label, kind) in &ABOUT {
         out.push(Item::Row(id, label, kind));
-        if id == Sid::CharacterDetached {
-            out.push(Item::Note("Click for mini AI chat, right-click to hide/show the island. Drag to move."));
-        }
     }
     out
 }
@@ -1392,20 +1380,6 @@ mod tests {
                 seen.push(*id);
             }
         }
-    }
-
-    #[test]
-    fn desktop_character_preserves_the_selected_pet_and_is_searchable() {
-        let mut ui = UiState::new();
-        ui.cfg.character = crate::ui::characters::Character::Cat;
-        toggle_set(Sid::CharacterDetached, &mut ui.cfg, true);
-        assert!(ui.cfg.character_detached);
-        assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
-        ui.sw.search = "roam".into();
-        assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::CharacterDetached, ..))));
-        toggle_set(Sid::CharacterDetached, &mut ui.cfg, false);
-        assert!(!ui.cfg.character_detached);
-        assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
     }
 
     #[test]

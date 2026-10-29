@@ -4,7 +4,6 @@ use crate::island::*;
 pub(in crate::island) struct Pointer {
     pub(in crate::island) tracking: bool,
     pub(in crate::island) press: Option<((i32, i32), (i32, i32))>,
-    pub(in crate::island) character_press: Option<(i32, i32)>,
     pub(in crate::island) moving: Option<((i32, i32), (i32, i32))>,
     pub(in crate::island) drag_from: Option<(usize, i32, i32)>,
     pub(in crate::island) selecting: bool,
@@ -16,20 +15,6 @@ pub(in crate::island) struct Pointer {
 
 impl App {
     pub(in crate::island) fn mouse_down(&mut self, x: i32, y: i32) {
-        if self.can_release_character(x, y) {
-            let mut point = windows::Win32::Foundation::POINT::default();
-            unsafe {
-                if GetCursorPos(&mut point).is_ok() {
-                    self.pointer.character_press = Some((point.x, point.y));
-                    windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
-                }
-            }
-            self.kill_timer(Timer::Expand);
-            self.kill_timer(Timer::Autohide);
-            self.reset_liquid_pull();
-            self.set_tip(None);
-            return;
-        }
         if self.state == State::Collapsed && self.ui.notice.is_none() && self.on_pill(x, y) {
             let mut pt = windows::Win32::Foundation::POINT::default();
             unsafe {
@@ -100,13 +85,6 @@ impl App {
     }
 
     pub(in crate::island) fn mouse_up(&mut self) {
-        if self.pointer.character_press.take().is_some() {
-            unsafe {
-                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
-            }
-            self.set_character_detached(true);
-            return;
-        }
         let press = self.pointer.press.take();
         if self.pointer.moving.take().is_none() {
             if let Some((_, (x, y))) = press {
@@ -374,7 +352,14 @@ impl App {
             view::HeadHit::Pin => {
                 (if self.ui.pinned { "Let it close" } else { "Keep open" }, view::pin_rect(self.pill_full(), s))
             }
-            view::HeadHit::More => ("More tabs and actions", view::more_rect(self.pill_full(), s)),
+            view::HeadHit::Lock => (
+                if self.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" },
+                view::lock_rect(self.pill_full(), s),
+            ),
+            view::HeadHit::TabDrag => (
+                if self.settings.tab_drag { "Stop moving tabs" } else { "Move tabs by dragging" },
+                view::tab_drag_rect(self.pill_full(), s),
+            ),
             view::HeadHit::Mic => {
                 let muted = self.ui.mic_muted == Some(true);
                 (
@@ -383,6 +368,7 @@ impl App {
                 )
             }
             view::HeadHit::Cam => ("Camera in use", view::privacy_dots(self.pill_full(), s, &self.ui).1?),
+            view::HeadHit::TabSettings => ("Settings of this tab", view::tab_settings_rect(self.pill_full(), s)),
         };
         Some((text.to_string(), below(rect)))
     }
@@ -431,12 +417,29 @@ impl App {
                 self.repaint_expanded();
                 return;
             }
-            Some(view::HeadHit::More) => {
-                self.want_header_menu = true;
+            Some(view::HeadHit::Lock) => {
+                self.settings.lock_drag = !self.settings.lock_drag;
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.render_settings_win();
+                self.repaint_expanded();
+                return;
+            }
+            Some(view::HeadHit::TabDrag) => {
+                self.settings.tab_drag = !self.settings.tab_drag;
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.repaint_expanded();
                 return;
             }
             Some(view::HeadHit::Mic) => return self.toggle_mic(),
             Some(view::HeadHit::Cam) => return,
+            Some(view::HeadHit::TabSettings) => {
+                if let Some(group) = view::tab_settings_group(self.ui.tab) {
+                    self.open_settings_at(group);
+                }
+                return;
+            }
             None => {}
         }
         if view::hit_vpn_btn(self.pill_full(), self.scale, &self.ui, x as f32, y as f32) {
@@ -589,15 +592,10 @@ impl App {
         let (left, top) = ((win_w as f32 - w) / 2.0, self.win_pad().1 * s);
         let tol = 3.0 * s;
         let (fx, fy) = (x as f32, y as f32);
-        let above = if self.liquid_on() { tol } else { tol + 40.0 };
-        fx >= left - tol && fx < left + w + tol && fy >= top - above && fy < top + h + tol
+        fx >= left - tol && fx < left + w + tol && fy >= top - tol - 40.0 && fy < top + h + tol
     }
 
     pub(in crate::island) fn on_mouse_move(&mut self, x: i32, y: i32) {
-        if self.character_interacting() {
-            self.kill_timer(Timer::Expand);
-            return;
-        }
         unsafe {
             if !self.pointer.tracking {
                 self.pointer.tracking = true;
@@ -616,27 +614,21 @@ impl App {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed
                 && view::hit_mic_dot(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32);
-            let over_spark = self.can_release_character(x, y);
             self.ui.hand = self.state == State::Collapsed
                 && self.on_pill(x, y)
-                && (over_mic || over_spark || self.recording.is_some() || self.notice_link.is_some());
+                && (over_mic || self.recording.is_some() || self.notice_link.is_some());
             let hover = over_mic.then_some(view::HeadHit::Mic);
             if self.state == State::Collapsed && hover != self.ui.hover_head {
                 self.ui.hover_head = hover;
                 self.repaint_collapsed();
             }
-            let tip = if over_spark {
-                let (w, h) = self.char_size();
-                Some(("Click or drag to release the character".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
-            } else {
-                hover.and_then(|_| {
-                    let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
-                    let text = if self.ui.mic_muted == Some(true) { "Unmute microphone" } else { "Mute microphone" };
-                    Some((text.to_string(), ((dot.0 + dot.2) / 2.0, dot.3 + 10.0 * self.scale)))
-                })
-            };
+            let tip = hover.and_then(|_| {
+                let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
+                let text = if self.ui.mic_muted == Some(true) { "Unmute microphone" } else { "Mute microphone" };
+                Some((text.to_string(), ((dot.0 + dot.2) / 2.0, dot.3 + 10.0 * self.scale)))
+            });
             self.set_tip(tip);
-            if !over_mic && !over_spark && (hidden || self.on_pill(x, y)) {
+            if !over_mic && (hidden || self.on_pill(x, y)) {
                 self.set_timer(Timer::Expand, self.settings.open_delay_ms.max(1));
             } else {
                 self.kill_timer(Timer::Expand);
@@ -662,10 +654,6 @@ impl App {
             self.repaint_expanded();
         }
         self.kill_timer(Timer::Expand);
-        if self.pointer.character_press.is_some() || self.pet.desktop.as_ref().is_some_and(|desktop| desktop.dragging())
-        {
-            return;
-        }
         match self.state {
             State::Expanded
                 if self.ui.remind.alert.is_some()

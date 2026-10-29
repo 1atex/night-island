@@ -1,29 +1,14 @@
 use std::borrow::Cow;
-#[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(not(test))]
 static RU: AtomicBool = AtomicBool::new(true);
 
-#[cfg(test)]
-thread_local! {
-    static RU: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
-}
-
 pub fn set_ru(on: bool) {
-    #[cfg(not(test))]
     RU.store(on, Ordering::Relaxed);
-    #[cfg(test)]
-    RU.set(on);
 }
 
 pub fn is_ru() -> bool {
-    #[cfg(not(test))]
-    {
-        RU.load(Ordering::Relaxed)
-    }
-    #[cfg(test)]
-    RU.get()
+    RU.load(Ordering::Relaxed)
 }
 
 fn phrase(s: &str) -> Option<&'static str> {
@@ -113,9 +98,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Open / close island" => "Открыть / закрыть остров",
         "Reset position" => "Сбросить положение",
         "Exit" => "Выход",
-        "Not set" => "Не задано",
-        "Rebuild and restart" => "Пересобрать и перезапустить",
-        "Panel blur" => "Размытие панели",
+        "Acrylic blur" => "Размытие фона",
         "Hide in screenshots" => "Скрыть на снимках",
         "Hide island in my captures" => "Прятать при записи и снимке",
         "Game mode" => "Игровой режим",
@@ -124,30 +107,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Frame rate" => "Частота кадров",
         "System sound" => "Звук системы",
         "No character" => "Без персонажа",
-        "More" => "Ещё",
-        "Weather position" => "Положение погоды",
-        "Left of the clock" => "Слева от времени",
-        "Right of the clock" => "Справа от времени",
-        "Customize header…" => "Настроить шапку…",
-        "On the header" => "В шапке",
-        "In More" => "В «Ещё»",
-        "Replace:" => "Вместо:",
-        "Restore default header" => "Восстановить шапку",
-        "Your companion is here" => "Ваш персонаж рядом",
-        "More tabs and actions" => "Другие вкладки и действия",
-        "AI settings" => "Настройки ИИ",
-        "You" => "Вы",
-        "Ask me anything. This chat stays beside your character." => {
-            "Задайте мне вопрос. Этот чат открывается рядом с вашим персонажем."
-        }
-        "Enter to send · Shift+Enter for a new line" => "Enter — отправить · Shift+Enter — новая строка",
-        "Connect your AI provider in AI settings." => "Подключите нейросеть в настройках ИИ.",
-        "Let the character roam the desktop" => "Выпустить персонажа на рабочий стол",
-        "Release character" => "Выпустить персонажа",
-        "Click or drag to release the character" => "Нажмите или потяните, чтобы выпустить персонажа",
-        "Click for mini AI chat, right-click to hide/show the island. Drag to move." => {
-            "ЛКМ — мини-чат с ИИ, ПКМ — скрыть/показать остров. Наведение — музыка. Перенесите на остров для возврата."
-        }
         "Capture failed" => "Не удалось сделать снимок",
         "Copied" => "Скопировано",
         "Looking for a QR code…" => "Ищу QR-код…",
@@ -184,19 +143,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Snow" => "Снег",
         "Sleet" => "Дождь со снегом",
         "Thunderstorm" => "Гроза",
-        "Mostly clear" => "Малооблачно",
-        "Overcast" => "Пасмурно",
-        "Light rain" => "Небольшой дождь",
-        "Heavy rain" => "Сильный дождь",
-        "Rain showers" => "Кратковременный дождь",
-        "Heavy rain showers" => "Сильный кратковременный дождь",
-        "Sleet showers" => "Кратковременный дождь со снегом",
-        "Heavy snow" => "Сильный снег",
-        "Snow showers" => "Снег с прояснениями",
-        "Heavy snow showers" => "Сильный снег с прояснениями",
-        "Thunderstorm with rain" => "Гроза с дождём",
-        "Thunderstorm with sleet" => "Гроза с дождём и снегом",
-        "Thunderstorm with snow" => "Гроза со снегом",
         "Feels like" => "Ощущается как",
         "Wind" => "Ветер",
         "Humidity" => "Влажность",
@@ -420,7 +366,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Strip along the bottom" => "Полоска снизу",
         "Outline from the left side" => "Контур от левой стороны",
         "Outline, the bottom fills" => "Контур, заполняется низ",
-        "Fill the island" => "Заливка острова",
         "30 FPS" => "30 кадров/с",
         "60 FPS" => "60 кадров/с",
         "Monitor refresh rate" => "Частота монитора",
@@ -564,7 +509,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Ghost visibility" => "Видимость призрака",
         "Ghost ignores the mouse" => "Призрак не реагирует на мышь",
         "Ghost only while held" => "Призрак, пока клавиши зажаты",
-        "Press the new keys (Esc clears)…" => "Нажмите новые клавиши (Esc — убрать)…",
+        "Press the new keys…" => "Нажмите новые клавиши…",
         "Click a key, then press the new combination with Ctrl, Alt, Shift or Win." => {
             "Нажмите на клавишу, затем новое сочетание с Ctrl, Alt, Shift или Win."
         }

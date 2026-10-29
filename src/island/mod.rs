@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use windows::UI::Color;
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{
-    AnimationIterationBehavior, CompositionAnimation, CompositionColorBrush, CompositionGeometricClip,
-    CompositionPathGeometry, CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual,
+    AnimationIterationBehavior, CompositionAnimation, CompositionColorBrush, CompositionPathGeometry,
+    CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual,
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
@@ -73,7 +73,6 @@ use windows_numerics::{Vector2, Vector3};
 
 mod appearance;
 mod character;
-mod companion_chat;
 mod demo;
 mod editing;
 mod geometry;
@@ -91,8 +90,8 @@ mod voice;
 mod window;
 
 use self::{
-    character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*, tabs::ClipboardState,
-    timers::Timer, window::*,
+    appearance::*, character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*,
+    tabs::ClipboardState, timers::Timer, window::*,
 };
 pub use startup::run;
 
@@ -138,7 +137,6 @@ struct App {
     overlay: Option<overlay::Overlay>,
     want_dock_dialog: bool,
     want_chat_dialog: bool,
-    want_header_menu: bool,
     pending_power: Option<(voicecmd::Power, std::time::Instant)>,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
@@ -150,7 +148,6 @@ struct App {
     music: MusicBars,
     gaming: bool,
     pill_hidden: bool,
-    ghost_stage: u8,
     metrics_on: Option<u32>,
     steam_game: Option<(u32, std::time::Instant)>,
     ghosted: bool,

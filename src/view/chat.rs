@@ -77,13 +77,9 @@ impl ChatUi {
 }
 
 pub fn chat_text_at(ui: &UiState, px: f32, py: f32) -> Option<(usize, u32)> {
-    chat_model_text_at(&ui.chat, px, py)
-}
-
-pub fn chat_model_text_at(chat: &ChatUi, px: f32, py: f32) -> Option<(usize, u32)> {
     use windows::Win32::Graphics::DirectWrite::{DWRITE_HIT_TEST_METRICS, DWRITE_TEXT_METRICS};
-    let geom = chat.geom.borrow();
-    let end_of = |index: usize| chat.msgs.get(index).map_or(0, |m| m.doc.text.encode_utf16().count() as u32);
+    let geom = ui.chat.geom.borrow();
+    let end_of = |index: usize| ui.chat.msgs.get(index).map_or(0, |m| m.doc.text.encode_utf16().count() as u32);
     let first = geom.first()?;
     let mut previous: Option<usize> = None;
     for g in geom.iter() {
