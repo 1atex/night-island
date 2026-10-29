@@ -227,7 +227,8 @@ impl App {
         let (win_w, _) = self.window_size(self.win);
         let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings)).0;
         let big = window_size(self.scale, Win::Big, self.docked(), self.cw, &window_room(&self.settings)).0;
-        for (layer, own_w) in [(&self.collapsed, small), (&self.expanded, big), (&self.liquid.ring, small)] {
+        let ring_w = if self.win == Win::Big { big } else { small };
+        for (layer, own_w) in [(&self.collapsed, small), (&self.expanded, big), (&self.liquid.ring, ring_w)] {
             let x = (win_w - own_w) as f32 / 2.0;
             let _ = layer.sprite.SetOffset(Vector3 { X: x, Y: 0.0, Z: 0.0 });
         }
