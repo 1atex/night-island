@@ -223,6 +223,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_agent());
             LRESULT(0)
         }
+        winevent::WM_FOREGROUND => {
+            winevent::acknowledge();
+            with_app(|a| a.on_foreground_changed());
+            LRESULT(0)
+        }
         metrics::WM_METRICS => {
             with_app(|a| a.on_metrics());
             LRESULT(0)

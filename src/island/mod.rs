@@ -49,6 +49,7 @@ use crate::platform::steam_art;
 use crate::platform::system::{self, RadioSwitch};
 use crate::platform::volume;
 use crate::platform::vpn;
+use crate::platform::winevent;
 use crate::services::agents;
 use crate::services::agy;
 use crate::services::ai;

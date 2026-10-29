@@ -17,3 +17,4 @@ pub mod steam_art;
 pub mod system;
 pub mod volume;
 pub mod vpn;
+pub mod winevent;

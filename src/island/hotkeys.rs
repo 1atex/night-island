@@ -2,7 +2,10 @@ use crate::island::*;
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
 
-pub(in crate::island) const GAME_POLL_MS: u32 = 2000;
+pub(in crate::island) const GAME_POLL_MS: u32 = 3000;
+
+static SETTLE_LOOKS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+const SETTLE_MS: u32 = 250;
 
 const GHOST_POLL_MS: u32 = 60;
 
@@ -73,11 +76,21 @@ pub(in crate::island) fn fullscreen_app_in_front(own: HWND) -> bool {
 impl App {
     pub(in crate::island) fn start_game_watch(&mut self) {
         if self.settings.game_mode {
+            winevent::start(self.hwnd);
             self.set_timer(Timer::Game, GAME_POLL_MS);
         } else {
+            winevent::stop();
             self.kill_timer(Timer::Game);
             self.set_gaming(false);
         }
+    }
+
+    pub(in crate::island) fn on_foreground_changed(&mut self) {
+        if !self.settings.game_mode {
+            return;
+        }
+        SETTLE_LOOKS.store(4, std::sync::atomic::Ordering::Relaxed);
+        self.on_game_timer();
     }
 
     pub(in crate::island) fn on_game_timer(&mut self) {
@@ -86,7 +99,13 @@ impl App {
         }
         let gaming = self.state != State::Expanded && fullscreen_app_in_front(self.hwnd);
         self.set_gaming(gaming);
-        self.set_timer(Timer::Game, GAME_POLL_MS);
+        let looks = SETTLE_LOOKS.load(std::sync::atomic::Ordering::Relaxed);
+        if looks > 0 {
+            SETTLE_LOOKS.store(looks - 1, std::sync::atomic::Ordering::Relaxed);
+            self.set_timer(Timer::Game, SETTLE_MS);
+        } else {
+            self.set_timer(Timer::Game, GAME_POLL_MS);
+        }
     }
 
     pub(in crate::island) fn set_gaming(&mut self, on: bool) {
