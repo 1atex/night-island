@@ -110,9 +110,9 @@ impl App {
     }
 
     pub(in crate::island) fn repaint_expanded(&self) {
-        let e = self.pill_rect(true);
+        let e = self.pill_full();
         let _ = self.expanded.paint(&self.gpu, |p| {
-            let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips, &self.shelf);
+            let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
     }
 

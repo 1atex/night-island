@@ -23,6 +23,9 @@ pub struct Cover {
     id: u64,
     pub size: u32,
     pub bgra: Vec<u8>,
+    pub full_w: u32,
+    pub full_h: u32,
+    pub full: Vec<u8>,
 }
 
 impl PartialEq for Cover {
@@ -185,13 +188,21 @@ fn report_age(stamp: windows::Foundation::DateTime) -> f32 {
 
 fn cover_info(session: &windows::Media::Control::GlobalSystemMediaTransportControlsSession) -> CoverInfo {
     const SIZE: u32 = 96;
+    const LONG_MAX: u32 = 384;
     let pixels = (|| {
         let props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
         let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.join().ok()?;
         let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;
         let transform = BitmapTransform::new().ok()?;
-        transform.SetScaledWidth(SIZE).ok()?;
-        transform.SetScaledHeight(SIZE).ok()?;
+        let (sw, sh) = (decoder.PixelWidth().ok()?.max(1), decoder.PixelHeight().ok()?.max(1));
+        let k = (SIZE as f32 / sw.min(sh) as f32).min(LONG_MAX as f32 / sw.max(sh) as f32).min(1.0).max(0.0);
+        let (tw, th) = if sw.min(sh) <= SIZE {
+            (sw, sh)
+        } else {
+            (((sw as f32 * k).round() as u32).max(1), ((sh as f32 * k).round() as u32).max(1))
+        };
+        transform.SetScaledWidth(tw).ok()?;
+        transform.SetScaledHeight(th).ok()?;
         let bitmap = decoder
             .GetSoftwareBitmapTransformedAsync(
                 BitmapPixelFormat::Bgra8,
@@ -220,7 +231,7 @@ fn cover_info(session: &windows::Media::Control::GlobalSystemMediaTransportContr
         square.extend_from_slice(&pixels[start..start + (side * 4) as usize]);
     }
     let id = COVER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    (accent, Some(Arc::new(Cover { id, size: side, bgra: square })))
+    (accent, Some(Arc::new(Cover { id, size: side, bgra: square, full_w: w, full_h: h, full: pixels })))
 }
 
 fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
@@ -329,7 +340,7 @@ pub fn debug_cover(side: u32, rgba: &[u8]) -> Option<Arc<Cover>> {
         px[2] = (r * a / 255) as u8;
     }
     let id = COVER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    Some(Arc::new(Cover { id, size: side, bgra }))
+    Some(Arc::new(Cover { id, size: side, full_w: side, full_h: side, full: bgra.clone(), bgra }))
 }
 
 pub fn seek(secs: f32) {

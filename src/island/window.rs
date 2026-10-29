@@ -25,6 +25,9 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                     a.drag_volume(x);
                     a.drag_seek(x);
                     a.drag_island();
+                    a.drag_tabs(x, y);
+                    a.drag_tiles(x, y);
+                    a.drag_notes(x, y);
                 }
                 drag = a.take_drag(x, y, left_down);
             });
@@ -46,6 +49,9 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         WM_LBUTTONUP => {
             with_app(|a| {
                 a.pointer.drag_from = None;
+                a.finish_dock_press();
+                a.finish_tab_press();
+                a.finish_tile_press();
                 a.pointer.selecting = false;
                 a.pointer.reading = false;
                 a.pointer.vol_drag = false;
@@ -314,7 +320,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         tray::WM_TRAY => {
             match tray::click(lparam) {
                 tray::Click::Primary => with_app(|a| a.toggle()),
-                tray::Click::Secondary => match tray::menu(hwnd) {
+                tray::Click::Secondary => match tray::menu(app_scale(), &|f| with_app(|a| f(&a.gpu))) {
                     Some(tray::ID_EXIT) => unsafe {
                         let _ = DestroyWindow(hwnd);
                     },
@@ -340,34 +346,98 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
     }
 }
 
-pub(in crate::island) fn dock_popup(hwnd: HWND, exists: bool) -> Option<usize> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, DestroyMenu, MF_SEPARATOR, MF_STRING, SetForegroundWindow, TPM_NONOTIFY,
-        TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
-    };
-    unsafe {
-        let Ok(menu) = CreatePopupMenu() else { return None };
-        let item = |id: usize, text: &str| {
-            let label = windows::core::HSTRING::from(crate::ui::i18n::tr(text).as_ref());
-            let _ = AppendMenuW(menu, MF_STRING, id, windows::core::PCWSTR(label.as_ptr()));
-        };
-        if exists {
-            item(1, "Show in folder");
-            item(2, "Run as administrator");
-            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-        }
-        item(3, "Remove from the dock");
-        let mut pt = windows::Win32::Foundation::POINT::default();
-        let _ = GetCursorPos(&mut pt);
-        let _ = SetForegroundWindow(hwnd);
-        let cmd = TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, None, hwnd, None);
-        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(menu);
-        (cmd.0 > 0).then_some(cmd.0 as usize)
+fn app_scale() -> f32 {
+    let mut scale = 1.0;
+    with_app(|a| scale = a.scale);
+    scale
+}
+
+pub(in crate::island) fn dock_popup(_hwnd: HWND, exists: bool) -> Option<usize> {
+    use crate::ui::menu::{Entry, show};
+    let mut entries = Vec::new();
+    if exists {
+        entries.push(Entry::item(1, "Show in folder").glyph('\u{E838}'));
+        entries.push(Entry::item(2, "Run as administrator").glyph('\u{E7EF}'));
+        entries.push(Entry::divider());
     }
+    entries.push(Entry::item(3, "Remove from the dock").glyph('\u{E711}').danger());
+    let mut pt = windows::Win32::Foundation::POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut pt);
+    }
+    show(entries, (pt.x, pt.y), false, app_scale(), &|f| with_app(|a| f(&a.gpu)))
 }
 
 pub(in crate::island) fn pick_file(owner: HWND) -> Option<String> {
+    use windows::Win32::Foundation::{ERROR_CANCELLED, RPC_E_CHANGED_MODE};
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+    };
+    use windows::Win32::UI::Shell::{
+        FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR, FOS_PATHMUSTEXIST, FileOpenDialog, IFileOpenDialog,
+        SIGDN_FILESYSPATH,
+    };
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let uninit = init.is_ok();
+        if init.is_err() && init != RPC_E_CHANGED_MODE {
+            return pick_file_legacy(owner);
+        }
+        let helper = focus_owner();
+        let result = (|| {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            let options = dialog.GetOptions().ok()?;
+            dialog
+                .SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR)
+                .ok()?;
+            match dialog.Show(helper.or(Some(owner))) {
+                Ok(()) => {}
+                Err(e) if e.code() == ERROR_CANCELLED.to_hresult() => return Some(None),
+                Err(_) => return None,
+            }
+            let item = dialog.GetResult().ok()?;
+            let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+            let path = name.to_string().ok();
+            CoTaskMemFree(Some(name.0.cast()));
+            Some(path)
+        })();
+        if let Some(h) = helper {
+            let _ = DestroyWindow(h);
+        }
+        if uninit {
+            CoUninitialize();
+        }
+        match result {
+            Some(path) => path,
+            None => pick_file_legacy(owner),
+        }
+    }
+}
+
+fn focus_owner() -> Option<HWND> {
+    unsafe {
+        let instance = GetModuleHandleW(None).ok()?;
+        let hwnd = CreateWindowExW(
+            WS_EX_TOOLWINDOW,
+            w!("STATIC"),
+            w!(""),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .ok()?;
+        let _ = SetForegroundWindow(hwnd);
+        Some(hwnd)
+    }
+}
+
+fn pick_file_legacy(owner: HWND) -> Option<String> {
     use windows::Win32::UI::Controls::Dialogs::{
         GetOpenFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW,
     };

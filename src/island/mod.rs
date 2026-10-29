@@ -28,7 +28,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Interface, Result, h, w};
 
-use crate::data::clips::{self, Clip, Reminder, ShelfItem, Store};
+use crate::data::clips::{self, Clip, Reminder, Store};
 use crate::data::settings::{Edge, Notice, Placement, Settings, Style};
 use crate::data::usage::UseKind;
 use crate::platform::activity;
@@ -132,7 +132,6 @@ struct App {
     ui: view::UiState,
     store: Option<Store>,
     clipboard: ClipboardState,
-    shelf: Vec<ShelfItem>,
     popup_open: bool,
     overlay: Option<overlay::Overlay>,
     want_dock_dialog: bool,

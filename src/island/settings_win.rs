@@ -6,7 +6,6 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
     DeleteDC, DeleteObject, EndPaint, GetDC, PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject,
 };
-use windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, SetFocus};
 
 use crate::island::*;
@@ -15,6 +14,17 @@ const MAX_SEARCH_CHARS: usize = 40;
 const SCROLL_STEP: f32 = 64.0;
 
 impl App {
+    pub(in crate::island) fn open_settings_at(&mut self, group: usize) {
+        self.open_settings_window();
+        if self.settings_win.is_some() {
+            self.ui.sw.group = group;
+            self.ui.sw.scroll = 0.0;
+            self.ui.sw.dropdown = None;
+            self.set_search("");
+            self.render_settings_win();
+        }
+    }
+
     pub(in crate::island) fn open_settings_window(&mut self) {
         if let Some(hwnd) = self.settings_win {
             unsafe {
@@ -39,9 +49,7 @@ impl App {
                 };
                 RegisterClassW(&class);
             });
-            let mut rc = windows::Win32::Foundation::RECT { left: 0, top: 0, right: cw, bottom: ch };
-            let _ = AdjustWindowRectExForDpi(&mut rc, style, false, WINDOW_EX_STYLE(0), (dpi * 96.0) as u32);
-            let (ow, oh) = (rc.right - rc.left, rc.bottom - rc.top);
+            let (ow, oh) = (cw, ch);
             let (l, t, r, b) = Self::work_area();
             let x = (l + ((r - l) - ow as f32) / 2.0).max(l) as i32;
             let y = (t + ((b - t) - oh as f32) / 2.0).max(t) as i32;
@@ -62,20 +70,21 @@ impl App {
                 crate::log_error!("could not create the settings window");
                 return;
             };
-            let dark: i32 = 1;
+            let round: i32 = 2;
             let _ = DwmSetWindowAttribute(
                 hwnd,
-                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(20),
-                (&raw const dark).cast::<c_void>(),
+                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(33),
+                (&raw const round).cast::<c_void>(),
                 4,
             );
-            let (pr, pg, pb) = crate::ui::theme::panel_u8();
-            let caption = u32::from(pr) | (u32::from(pg) << 8) | (u32::from(pb) << 16);
-            let _ = DwmSetWindowAttribute(
+            let _ = SetWindowPos(
                 hwnd,
-                windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(35),
-                (&raw const caption).cast::<c_void>(),
-                4,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
             self.settings_win = Some(hwnd);
             self.ui.sw = view::SwUi::default();
@@ -88,6 +97,18 @@ impl App {
             let _ = SetFocus(Some(hwnd));
         }
         self.render_settings_win();
+    }
+
+    pub(in crate::island) fn sw_title_click(&self, x: i32, y: i32) -> u8 {
+        match view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32) {
+            Some(view::SwHit::Minimize) => 1,
+            Some(view::SwHit::Close) => 2,
+            _ => 0,
+        }
+    }
+
+    pub(in crate::island) fn sw_nc_zone(&self, x: i32, y: i32) -> Option<view::TitleZone> {
+        view::sw_title_zone(self.sw_size(), self.dpi_scale, x as f32, y as f32)
     }
 
     fn sw_client(&self) -> Option<(i32, i32)> {
@@ -142,6 +163,10 @@ impl App {
         if left_down && self.ui.sw.drag.is_some() {
             return self.sw_drag(x);
         }
+        if left_down && self.ui.sw.field == Some(view::Field::Search) && self.ui.sw.search_press {
+            self.sw_click_field(view::Field::Search, x, true);
+            return self.render_settings_win();
+        }
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
         if hit != self.ui.sw.hover {
             self.ui.sw.hover = hit;
@@ -151,6 +176,13 @@ impl App {
 
     pub(in crate::island) fn on_sw_down(&mut self, x: i32, y: i32) {
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
+        if let Some(id) = self.ui.sw.dropdown.take() {
+            if let Some(view::SwHit::Pick(_, k)) = hit {
+                view::cycle_pick(id, &mut self.settings, k);
+                self.setting_changed(id, true);
+            }
+            return self.render_settings_win();
+        }
         self.ui.sw.quiet_sys = false;
         let waiting = self.ui.sw.capturing;
         if waiting.is_some() {
@@ -161,7 +193,14 @@ impl App {
         }
         if let Some(view::SwHit::Field(field)) = hit {
             self.sw_focus(Some(field));
-            self.sw_click_field(field, x);
+            let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
+            self.sw_click_field(field, x, shift);
+            if field == view::Field::Search {
+                self.ui.sw.search_press = true;
+                unsafe {
+                    let _ = SetCapture(self.settings_win.unwrap_or(self.hwnd));
+                }
+            }
             return self.render_settings_win();
         }
         self.sw_focus(None);
@@ -169,11 +208,23 @@ impl App {
             Some(view::SwHit::Group(i)) => {
                 self.ui.sw.group = i;
                 self.ui.sw.scroll = 0.0;
-                self.ui.sw.search.clear();
+                self.set_search("");
             }
             Some(view::SwHit::Row(id, hit)) => self.sw_row(id, hit, x),
             Some(view::SwHit::Act(act)) => self.sw_act(act),
-            Some(view::SwHit::Field(_)) | None => {}
+            Some(view::SwHit::Theme(hit)) => {
+                match hit {
+                    view::ThemeHit::Preset(i) => crate::ui::theme::apply_preset(&mut self.settings, i),
+                    view::ThemeHit::Panel(i) => crate::ui::theme::set_panel_swatch(&mut self.settings, i),
+                    view::ThemeHit::Accent(i) => crate::ui::theme::set_accent_swatch(&mut self.settings, i),
+                }
+                self.apply_theme();
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.repaint_expanded();
+            }
+            Some(view::SwHit::Field(_) | view::SwHit::Minimize | view::SwHit::Close | view::SwHit::Pick(..)) | None => {
+            }
         }
         self.render_settings_win();
     }
@@ -216,10 +267,11 @@ impl App {
             view::Field::VoiceBase => &mut self.ui.int.voice_base,
             view::Field::WakeWord => &mut self.ui.int.wake,
             view::Field::GroupName => &mut self.ui.int.group_name,
+            view::Field::Search => &mut self.ui.int.search,
         })
     }
 
-    fn sw_click_field(&mut self, field: view::Field, x: i32) {
+    fn sw_click_field(&mut self, field: view::Field, x: i32, extend: bool) {
         let Some((_, inner)) = view::sw_field_rects(self.sw_size(), self.dpi_scale, &self.ui, field) else { return };
         let shown = {
             let text = view::field_edit(&self.ui, field).text();
@@ -233,9 +285,9 @@ impl App {
         else {
             return;
         };
-        let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
         if let Some(n) = self.sw_edit_mut() {
-            n.click(&layout, x as f32 - inner.0, 4.0, shift);
+            let fx = if (x as f32) < inner.0 { 1.0e6 } else { x as f32 - inner.0 };
+            n.click(&layout, fx, 4.0, extend);
         }
     }
 
@@ -556,14 +608,25 @@ impl App {
     fn sw_row(&mut self, id: view::Sid, hit: view::SetHit, x: i32) {
         match hit {
             view::SetHit::Option(n) => {
-                if matches!(id, view::Sid::Character | view::Sid::Edge | view::Sid::PillBattery | view::Sid::AiProvider)
-                {
+                if matches!(
+                    id,
+                    view::Sid::Character
+                        | view::Sid::Edge
+                        | view::Sid::PillBattery
+                        | view::Sid::AiProvider
+                        | view::Sid::CoverMode
+                        | view::Sid::TabAnimKind
+                        | view::Sid::AnimCurve
+                        | view::Sid::TextLayout
+                ) {
                     view::cycle_set(id, &mut self.settings, n == 1);
                 } else {
                     view::segment_set(id, &mut self.settings, n);
                 }
                 self.setting_changed(id, true);
             }
+            view::SetHit::Label => {}
+            view::SetHit::Select => self.ui.sw.dropdown = Some(id),
             view::SetHit::Toggle => {
                 let on = !view::toggle_get(id, &self.settings);
                 view::toggle_set(id, &mut self.settings, on);
@@ -595,10 +658,25 @@ impl App {
         self.render_settings_win();
     }
 
+    pub(in crate::island) fn set_search(&mut self, text: &str) {
+        self.ui.int.search.set_text(text);
+        self.sync_search();
+    }
+
+    fn sync_search(&mut self) {
+        let text = self.ui.int.search.text();
+        if text != self.ui.sw.search {
+            self.ui.sw.search = text;
+            self.ui.sw.scroll = 0.0;
+            self.ui.sw.hover = None;
+        }
+    }
+
     pub(in crate::island) fn on_sw_up(&mut self) {
         unsafe {
             let _ = ReleaseCapture();
         }
+        self.ui.sw.search_press = false;
         if self.ui.sw.drag.take().is_some() {
             self.finish_slider();
             self.render_settings_win();
@@ -606,6 +684,7 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_wheel(&mut self, delta: i32) {
+        self.ui.sw.dropdown = None;
         let max = view::max_scroll(self.sw_size(), self.dpi_scale, &self.ui);
         let scroll = (self.ui.sw.scroll - delta as f32 / 120.0 * SCROLL_STEP * self.dpi_scale).clamp(0.0, max);
         if scroll != self.ui.sw.scroll {
@@ -615,45 +694,46 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_char(&mut self, c: u16) -> bool {
-        if self.ui.sw.field.is_some() {
-            self.on_sw_field_char(c);
+        if c == 0x1B && self.ui.sw.dropdown.take().is_some() {
+            self.render_settings_win();
             return false;
         }
-        let search = &mut self.ui.sw.search;
-        match c {
-            0x1B => {
-                if search.is_empty() {
-                    return true;
-                }
-                search.clear();
-            }
-            0x08 => {
-                search.pop();
-            }
-            0x16 => {
-                if let Some(text) = crate::data::clips::sys::read_text(self.settings_win.unwrap_or(self.hwnd)) {
-                    let line: String = text.lines().next().unwrap_or("").chars().filter(|c| !c.is_control()).collect();
-                    search.extend(line.chars().take(MAX_SEARCH_CHARS.saturating_sub(search.chars().count())));
-                }
-            }
-            c if c >= 0x20 && c != 0x7F => {
-                if search.chars().count() < MAX_SEARCH_CHARS
-                    && let Some(ch) = char::from_u32(u32::from(c))
-                {
-                    search.push(ch);
-                }
-            }
-            _ => return false,
+        if self.ui.sw.field.is_none() && ((c >= 0x20 && c != 0x7F) || c == 0x16) {
+            self.sw_focus(Some(view::Field::Search));
         }
-        self.ui.sw.scroll = 0.0;
-        self.ui.sw.hover = None;
-        self.render_settings_win();
+        if self.ui.sw.field == Some(view::Field::Search) {
+            match c {
+                0x1B => {
+                    if self.ui.int.search.is_empty() {
+                        return true;
+                    }
+                    self.set_search("");
+                    self.render_settings_win();
+                    return false;
+                }
+                0x0D | 0x09 => return false,
+                _ => {}
+            }
+        }
+        if self.ui.sw.field.is_some() {
+            self.on_sw_field_char(c);
+            self.sync_search();
+            self.render_settings_win();
+            return false;
+        }
+        if c == 0x1B {
+            if self.ui.sw.search.is_empty() {
+                return true;
+            }
+            self.set_search("");
+            self.render_settings_win();
+        }
         false
     }
 
     fn on_sw_field_char(&mut self, unit: u16) {
-        const MAX_FIELD_CHARS: usize = 400;
         let Some(field) = self.ui.sw.field else { return };
+        let max_chars = if field == view::Field::Search { MAX_SEARCH_CHARS } else { 400 };
         let hwnd = self.settings_win.unwrap_or(self.hwnd);
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
         match unit {
@@ -698,7 +778,7 @@ impl App {
                 if let Some(text) = crate::data::clips::sys::read_text(hwnd)
                     && let Some(n) = self.sw_edit_mut()
                 {
-                    let line: String = text.lines().next().unwrap_or("").trim().chars().take(MAX_FIELD_CHARS).collect();
+                    let line: String = text.lines().next().unwrap_or("").trim().chars().take(max_chars).collect();
                     n.insert(&line);
                 }
             }
@@ -715,7 +795,7 @@ impl App {
                     char::from_u32(u32::from(u))
                 };
                 if let (Some(c), Some(n)) = (c, self.sw_edit_mut())
-                    && n.text().chars().count() < MAX_FIELD_CHARS
+                    && n.text().chars().count() < max_chars
                 {
                     let mut buf = [0u8; 4];
                     n.insert(c.encode_utf8(&mut buf));
@@ -750,6 +830,7 @@ impl App {
             _ => return false,
         }
         self.ui.sw.caret_on = true;
+        self.sync_search();
         self.render_settings_win();
         true
     }
@@ -757,6 +838,7 @@ impl App {
     pub(in crate::island) fn on_sw_destroyed(&mut self) {
         self.commit_wake();
         self.end_rebind();
+        self.ui.int.search.set_text("");
         self.kill_timer(Timer::SwCaret);
         self.settings_win = None;
         self.pointer.slider = None;
@@ -782,9 +864,33 @@ extern "system" fn sw_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             with_app(|a| a.on_sw_move(x, y, left_down));
             LRESULT(0)
         }
+        WM_NCCALCSIZE if wparam.0 != 0 => LRESULT(0),
+        WM_NCHITTEST => {
+            let mut pt =
+                windows::Win32::Foundation::POINT { x: lparam.0 as i16 as i32, y: (lparam.0 >> 16) as i16 as i32 };
+            unsafe {
+                let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
+            }
+            let mut zone = None;
+            with_app(|a| zone = a.sw_nc_zone(pt.x, pt.y));
+            match zone {
+                Some(view::TitleZone::Caption) => LRESULT(HTCAPTION as isize),
+                _ => LRESULT(HTCLIENT as isize),
+            }
+        }
         WM_LBUTTONDOWN => {
             let (x, y) = point_from(lparam);
-            with_app(|a| a.on_sw_down(x, y));
+            let mut title = 0;
+            with_app(|a| title = a.sw_title_click(x, y));
+            match title {
+                1 => unsafe {
+                    let _ = ShowWindow(hwnd, SW_MINIMIZE);
+                },
+                2 => unsafe {
+                    let _ = DestroyWindow(hwnd);
+                },
+                _ => with_app(|a| a.on_sw_down(x, y)),
+            }
             LRESULT(0)
         }
         WM_LBUTTONUP => {

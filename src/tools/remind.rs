@@ -111,45 +111,6 @@ pub fn parse(input: &str, now: DateTime<Local>) -> Option<Parsed> {
     Some(Parsed { due, text: if text.is_empty() { "Reminder".to_string() } else { text } })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Quick {
-    In(i64),
-    TomorrowMorning,
-}
-
-pub const QUICK: [(&str, Quick); 6] = [
-    ("+5 min", Quick::In(5)),
-    ("+15 min", Quick::In(15)),
-    ("+30 min", Quick::In(30)),
-    ("+1 hour", Quick::In(60)),
-    ("+2 hours", Quick::In(120)),
-    ("Tomorrow 9:00", Quick::TomorrowMorning),
-];
-
-pub fn quick_due(quick: Quick, now: DateTime<Local>) -> Option<DateTime<Local>> {
-    match quick {
-        Quick::In(minutes) => Some(now + Duration::minutes(minutes)),
-        Quick::TomorrowMorning => at_time(now.date_naive() + Duration::days(1), 9, 0),
-    }
-}
-
-fn at_time(date: chrono::NaiveDate, hour: u32, minute: u32) -> Option<DateTime<Local>> {
-    let time = NaiveTime::from_hms_opt(hour, minute, 0)?;
-    Local.from_local_datetime(&date.and_time(time)).earliest()
-}
-
-pub fn picker_due(now: DateTime<Local>, hour: u32, minute: u32, tomorrow: bool) -> Option<DateTime<Local>> {
-    let day = now.date_naive() + Duration::days(i64::from(tomorrow));
-    let due = at_time(day, hour, minute)?;
-    if due <= now { at_time(day + Duration::days(1), hour, minute) } else { Some(due) }
-}
-
-pub fn default_picker(now: DateTime<Local>) -> (u32, u32, bool) {
-    let later = now + Duration::minutes(60);
-    let rounded = later + Duration::minutes(i64::from((5 - later.minute() % 5) % 5));
-    (rounded.hour(), rounded.minute(), rounded.date_naive() != now.date_naive())
-}
-
 pub fn describe(due: DateTime<Local>, now: DateTime<Local>) -> String {
     let secs = (due - now).num_seconds();
     if secs <= 0 {
@@ -214,35 +175,6 @@ mod tests {
     #[test]
     fn words_in_the_message_are_kept() {
         assert_eq!(parsed("in 5 min at the door").text, "at the door");
-    }
-
-    #[test]
-    fn quick_choices() {
-        assert_eq!(quick_due(Quick::In(15), now()), Some(now() + Duration::minutes(15)));
-        let t = quick_due(Quick::TomorrowMorning, now()).unwrap();
-        assert_eq!((t.day(), t.hour(), t.minute()), (10, 9, 0));
-        assert_eq!(QUICK.len(), 6);
-    }
-
-    #[test]
-    fn picked_time_rolls_over_when_it_has_passed() {
-        let today = picker_due(now(), 18, 30, false).unwrap();
-        assert_eq!((today.day(), today.hour(), today.minute()), (9, 18, 30));
-        let passed = picker_due(now(), 9, 0, false).unwrap();
-        assert_eq!((passed.day(), passed.hour()), (10, 9));
-        let tomorrow = picker_due(now(), 9, 0, true).unwrap();
-        assert_eq!(tomorrow.day(), 10);
-        assert!(picker_due(now(), 24, 0, false).is_none());
-        assert!(picker_due(now(), 12, 60, false).is_none());
-    }
-
-    #[test]
-    fn the_picker_starts_an_hour_ahead() {
-        assert_eq!(default_picker(now()), (16, 0, false));
-        let odd = now() + Duration::minutes(2);
-        assert_eq!(default_picker(odd), (16, 5, false));
-        let late = Local.with_ymd_and_hms(2026, 10, 9, 23, 30, 0).single().unwrap();
-        assert_eq!(default_picker(late), (0, 30, true));
     }
 
     #[test]

@@ -29,22 +29,19 @@ pub enum Sid {
     MusicTitle,
     MusicCover,
     MusicLyrics,
+    CoverMode,
     TabClipboard,
-    TabShelf,
     TabText,
     TabNote,
-    TabReminders,
     TabWeather,
     TabRecord,
-    TabAgy,
-    TabChat,
+    TabAi,
     TabPrivacy,
     TabActivity,
     TabSteam,
     TabSystem,
     MetricsInterval,
     TabControls,
-    TabTheme,
     NotifyMic,
     NotifyDownloads,
     NotifyCapture,
@@ -80,6 +77,10 @@ pub enum Sid {
     OpenDelay,
     CloseDelay,
     OpenSpeed,
+    TabAnimKind,
+    TextLayout,
+    TabAnimSpeed,
+    AnimCurve,
     CloseSpeed,
     AutoHide,
     LockDrag,
@@ -106,20 +107,16 @@ pub(in crate::view) enum Kind {
 pub(in crate::view) fn tab_toggle_name(id: Sid) -> Option<&'static str> {
     Some(match id {
         Sid::TabClipboard => "Clipboard",
-        Sid::TabShelf => "Shelf",
         Sid::TabText => "Text",
         Sid::TabNote => "Note",
-        Sid::TabReminders => "Reminders",
         Sid::TabWeather => "Weather",
         Sid::TabRecord => "Record",
-        Sid::TabAgy => "AGY",
-        Sid::TabChat => "Chat",
+        Sid::TabAi => "AI",
         Sid::TabPrivacy => "Privacy",
         Sid::TabActivity => "Activity",
         Sid::TabSteam => "Steam",
         Sid::TabSystem => "System",
         Sid::TabControls => "Controls",
-        Sid::TabTheme => "Theme",
         _ => return None,
     })
 }
@@ -145,7 +142,6 @@ pub(in crate::view) const THEME_ROWS: [(Sid, &str, Kind); 8] = [
 pub(in crate::view) fn rows_for(tab: Tab) -> &'static [(Sid, &'static str, Kind)] {
     match tab {
         Tab::Record => &RECORD_ROWS,
-        Tab::Theme => &THEME_ROWS,
         _ => &[],
     }
 }
@@ -183,7 +179,7 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
         Sid::PanelVal => (0.0, 0.3, 0.005),
         Sid::OpenDelay => (0.0, 1000.0, 10.0),
         Sid::CloseDelay => (0.0, 3000.0, 50.0),
-        Sid::OpenSpeed | Sid::CloseSpeed => (0.4, 2.5, 0.1),
+        Sid::OpenSpeed | Sid::CloseSpeed | Sid::TabAnimSpeed => (0.4, 2.5, 0.1),
         Sid::RecFps => (10.0, 60.0, 5.0),
         Sid::HidePillSecs => (5.0, 10.0, 1.0),
         Sid::MetricsInterval => (1.0, 10.0, 1.0),
@@ -208,6 +204,7 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
         Sid::OpenDelay => c.open_delay_ms as f32,
         Sid::CloseDelay => c.close_delay_ms as f32,
         Sid::OpenSpeed => c.open_speed,
+        Sid::TabAnimSpeed => c.tab_anim_speed,
         Sid::CloseSpeed => c.close_speed,
         Sid::RecFps => c.record_fps as f32,
         Sid::HidePillSecs => c.hide_pill_secs as f32,
@@ -227,7 +224,7 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
         Sid::PanelHue | Sid::AccentHue => format!("{v:.0}°"),
         Sid::PanelVal => format!("{:.0}%", v / 0.3 * 100.0),
         Sid::OpenDelay | Sid::CloseDelay => format!("{v:.0} ms"),
-        Sid::OpenSpeed | Sid::CloseSpeed => format!("{v:.1}×"),
+        Sid::OpenSpeed | Sid::CloseSpeed | Sid::TabAnimSpeed => format!("{v:.1}×"),
         Sid::RecFps => format!("{v:.0} fps"),
         Sid::HidePillSecs | Sid::MetricsInterval => format!("{v:.0} s"),
         _ => String::new(),
@@ -253,6 +250,7 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
         Sid::OpenDelay => c.open_delay_ms = v as u32,
         Sid::CloseDelay => c.close_delay_ms = v as u32,
         Sid::OpenSpeed => c.open_speed = v,
+        Sid::TabAnimSpeed => c.tab_anim_speed = v,
         Sid::CloseSpeed => c.close_speed = v,
         Sid::RecFps => c.record_fps = v as u32,
         Sid::HidePillSecs => c.hide_pill_secs = v as u32,
@@ -394,6 +392,10 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
         Sid::Character => c.character = c.character.step(forward),
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
+        Sid::CoverMode => c.cover_mode = c.cover_mode.step(forward),
+        Sid::TabAnimKind => c.tab_anim = c.tab_anim.step(forward),
+        Sid::TextLayout => c.text_layout = c.text_layout.step(forward),
+        Sid::AnimCurve => c.anim_curve = c.anim_curve.step(forward),
         Sid::Edge => {
             c.dock_edge = c.dock_edge.step(forward);
             c.dock_offset = 0.5;
@@ -408,7 +410,47 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
         Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
+        Sid::CoverMode => c.cover_mode.name(),
+        Sid::TabAnimKind => c.tab_anim.name(),
+        Sid::TextLayout => c.text_layout.name(),
+        Sid::AnimCurve => c.anim_curve.name(),
         _ => "",
+    }
+}
+
+pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
+    use crate::data::settings::*;
+    fn all<T: Copy + PartialEq>(items: &[T], now: T, name: fn(T) -> &'static str) -> (Vec<&'static str>, usize) {
+        (items.iter().map(|i| name(*i)).collect(), items.iter().position(|i| *i == now).unwrap_or(0))
+    }
+    match id {
+        Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
+        Sid::AiProvider => all(&AiProvider::ALL, c.ai.provider, |v| v.name()),
+        Sid::PillBattery => all(&BatteryStyle::ALL, c.pill_battery, |v| v.name()),
+        Sid::Edge => all(&Edge::ALL, c.dock_edge, |v| v.name()),
+        Sid::CoverMode => all(&CoverMode::ALL, c.cover_mode, |v| v.name()),
+        Sid::TabAnimKind => all(&TabAnim::ALL, c.tab_anim, |v| v.name()),
+        Sid::AnimCurve => all(&AnimCurve::ALL, c.anim_curve, |v| v.name()),
+        Sid::TextLayout => all(&TextLayout::ALL, c.text_layout, |v| v.name()),
+        _ => (Vec::new(), 0),
+    }
+}
+
+pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
+    use crate::data::settings::*;
+    match id {
+        Sid::Character => c.character = crate::ui::characters::Character::ALL[k.min(6)],
+        Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
+        Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],
+        Sid::Edge => {
+            c.dock_edge = Edge::ALL[k.min(3)];
+            c.dock_offset = 0.5;
+        }
+        Sid::CoverMode => c.cover_mode = CoverMode::ALL[k.min(2)],
+        Sid::TabAnimKind => c.tab_anim = TabAnim::ALL[k.min(4)],
+        Sid::AnimCurve => c.anim_curve = AnimCurve::ALL[k.min(3)],
+        Sid::TextLayout => c.text_layout = TextLayout::ALL[k.min(2)],
+        _ => {}
     }
 }
 
@@ -424,6 +466,8 @@ pub fn segment_set(id: Sid, c: &mut Settings, option: usize) {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SetHit {
+    Select,
+    Label,
     Option(usize),
     Slider,
     Toggle,
@@ -459,155 +503,11 @@ pub fn hit_setting(pill: Rect, scale: f32, px: f32, py: f32, tab: Tab) -> Option
     None
 }
 
-pub(in crate::view) fn theme_column(pill: Rect, scale: f32) -> (f32, f32, f32) {
-    let (row, _) = setting_row(pill, scale, SET_PER_COL);
-    (row.0, row.1, row.2)
-}
-
-pub(in crate::view) const PRESET_COLS: usize = 4;
-
-pub(in crate::view) fn preset_tile(pill: Rect, scale: f32, i: usize) -> Rect {
-    let (l, t, r) = theme_column(pill, scale);
-    let gap = 6.0 * scale;
-    let w = (r - l - (PRESET_COLS - 1) as f32 * gap) / PRESET_COLS as f32;
-    let (col, row) = ((i % PRESET_COLS) as f32, (i / PRESET_COLS) as f32);
-    let left = l + col * (w + gap);
-    let top = t + 76.0 * scale + row * (30.0 * scale + gap);
-    (left, top, left + w, top + 30.0 * scale)
-}
-
-pub(in crate::view) fn swatch(pill: Rect, scale: f32, row: usize, i: usize) -> Rect {
-    let (l, t, r) = theme_column(pill, scale);
-    let n = crate::ui::theme::PANEL_SWATCHES.len() as f32;
-    let gap = 5.0 * scale;
-    let d = ((r - l) - (n - 1.0) * gap) / n;
-    let left = l + i as f32 * (d + gap);
-    let top = t + (166.0 + row as f32 * 52.0) * scale;
-    (left, top, left + d, top + d)
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ThemeHit {
     Preset(usize),
     Panel(usize),
     Accent(usize),
-}
-
-pub fn hit_theme(pill: Rect, scale: f32, px: f32, py: f32) -> Option<ThemeHit> {
-    if let Some(i) = (0..crate::ui::theme::PRESETS.len()).find(|&i| inside(preset_tile(pill, scale, i), px, py)) {
-        return Some(ThemeHit::Preset(i));
-    }
-    let n = crate::ui::theme::PANEL_SWATCHES.len();
-    for i in 0..n {
-        if inside(swatch(pill, scale, 0, i), px, py) {
-            return Some(ThemeHit::Panel(i));
-        }
-        if inside(swatch(pill, scale, 1, i), px, py) {
-            return Some(ThemeHit::Accent(i));
-        }
-    }
-    None
-}
-
-pub(in crate::view) fn paint_theme(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
-    paint_rows(p, pill, scale, ui, &THEME_ROWS)?;
-    let (l, t, r) = theme_column(pill, scale);
-    let (panel, accent) = crate::ui::theme::colors(&ui.cfg);
-    let preview = (l, t, r, t + 58.0 * scale);
-    p.fill_round_rect(preview, 29.0 * scale, rgba(panel.0, panel.1, panel.2, 1.0))?;
-    p.stroke_round_rect(preview, 29.0 * scale, 1.0 * scale, rgba(1.0, 1.0, 1.0, 0.12))?;
-    p.fill_ellipse(
-        l + 28.0 * scale,
-        t + 29.0 * scale,
-        7.0 * scale,
-        7.0 * scale,
-        rgba(accent.0, accent.1, accent.2, 1.0),
-    )?;
-    p.text(
-        "12:34",
-        (l, t, r, t + 58.0 * scale),
-        17.0 * scale,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_TEXT_ALIGNMENT_CENTER,
-        WHITE,
-    )?;
-    for k in 0..4 {
-        let h = (8.0 + k as f32 * 4.0) * scale;
-        let x = r - 56.0 * scale + k as f32 * 9.0 * scale;
-        p.fill_round_rect(
-            (x, t + 29.0 * scale - h / 2.0, x + 4.0 * scale, t + 29.0 * scale + h / 2.0),
-            2.0 * scale,
-            rgba(accent.0, accent.1, accent.2, 1.0),
-        )?;
-    }
-    p.text(
-        "Presets",
-        (l, t + 58.0 * scale, r, t + 74.0 * scale),
-        11.5 * scale,
-        DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_TEXT_ALIGNMENT_LEADING,
-        rgba(1.0, 1.0, 1.0, 0.55),
-    )?;
-    for (i, (name, _)) in crate::ui::theme::PRESETS.iter().enumerate() {
-        let tile = preset_tile(pill, scale, i);
-        let (pc, ac) = crate::ui::theme::preset_colors(i);
-        let hover = ui.home.hover_act == Some(800 + i);
-        p.fill_round_rect(tile, 10.0 * scale, rgba(pc.0, pc.1, pc.2, 1.0))?;
-        p.stroke_round_rect(
-            tile,
-            10.0 * scale,
-            if hover { 1.6 } else { 1.0 } * scale,
-            rgba(1.0, 1.0, 1.0, if hover { 0.5 } else { 0.16 }),
-        )?;
-        p.fill_ellipse(
-            tile.0 + 11.0 * scale,
-            (tile.1 + tile.3) / 2.0,
-            4.5 * scale,
-            4.5 * scale,
-            rgba(ac.0, ac.1, ac.2, 1.0),
-        )?;
-        p.text(
-            name,
-            (tile.0 + 20.0 * scale, tile.1, tile.2 - 2.0 * scale, tile.3),
-            10.5 * scale,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
-            WHITE,
-        )?;
-    }
-    let near = |a: f32, b: f32, eps: f32| (a - b).abs() <= eps;
-    for (row, label, swatches) in
-        [(0usize, "Panel", &crate::ui::theme::PANEL_SWATCHES), (1, "Accent", &crate::ui::theme::ACCENT_SWATCHES)]
-    {
-        let first = swatch(pill, scale, row, 0);
-        p.text(
-            label,
-            (l, first.1 - 20.0 * scale, r, first.1 - 4.0 * scale),
-            11.5 * scale,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
-            rgba(1.0, 1.0, 1.0, 0.55),
-        )?;
-        for (i, v) in swatches.iter().enumerate() {
-            let rect = swatch(pill, scale, row, i);
-            let (cr, cg, cb) = crate::ui::theme::hsv(v[0], v[1], v[2]);
-            let hover = ui.home.hover_act == Some(820 + row * 20 + i);
-            p.fill_round_rect(rect, (rect.2 - rect.0) / 2.0, rgba(cr, cg, cb, 1.0))?;
-            let current = if row == 0 {
-                near(ui.cfg.panel_hue, v[0], 1.0)
-                    && near(ui.cfg.panel_sat, v[1], 0.03)
-                    && near(ui.cfg.panel_val, v[2], 0.01)
-            } else {
-                near(ui.cfg.accent_hue, v[0], 1.0)
-                    && near(ui.cfg.accent_sat, v[1], 0.03)
-                    && near(ui.cfg.accent_val, v[2], 0.03)
-            };
-            let ring =
-                if current { rgba(1.0, 1.0, 1.0, 0.95) } else { rgba(1.0, 1.0, 1.0, if hover { 0.6 } else { 0.22 }) };
-            p.stroke_round_rect(rect, (rect.2 - rect.0) / 2.0, if current { 2.0 } else { 1.0 } * scale, ring)?;
-        }
-    }
-    Ok(())
 }
 
 pub(in crate::view) fn track_color(id: Sid, t: f32, c: &Settings) -> Option<(f32, f32, f32)> {
@@ -681,16 +581,22 @@ pub(in crate::view) fn paint_control(
         }
         Kind::Cycle => {
             p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
-            let arrow = 26.0 * scale;
-            p.glyph('\u{E76B}', (ctl.0, ctl.1, ctl.0 + arrow, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
-            p.glyph('\u{E76C}', (ctl.2 - arrow, ctl.1, ctl.2, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
+            p.stroke_round_rect(ctl, 9.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.1))?;
             p.text(
                 cycle_name(id, cfg),
-                (ctl.0 + arrow, ctl.1, ctl.2 - arrow, ctl.3),
-                12.0 * scale,
+                (ctl.0 + 12.0 * scale, ctl.1, ctl.2 - 30.0 * scale, ctl.3),
+                12.5 * scale,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_CENTER,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
                 WHITE,
+            )?;
+            p.text(
+                "\u{25BE}",
+                (ctl.2 - 28.0 * scale, ctl.1, ctl.2 - 6.0 * scale, ctl.3),
+                13.0 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+                rgba(1.0, 1.0, 1.0, 0.7),
             )?;
         }
         Kind::Slider => {

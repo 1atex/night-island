@@ -17,6 +17,7 @@ mod remind;
 mod settings;
 mod shelf;
 mod steam;
+mod tabbar;
 mod text;
 mod weather;
 
@@ -24,15 +25,14 @@ pub(in crate::island) use self::clipboard::ClipboardState;
 
 impl App {
     pub(in crate::island) fn select_tab(&mut self, tab: view::Tab) {
-        if tab != self.ui.tab || !matches!(tab, view::Tab::Note | view::Tab::Text | view::Tab::Remind) {
+        if tab != self.ui.tab || !matches!(tab, view::Tab::Note | view::Tab::Text) {
             self.end_edit(true);
         }
         self.ui.notes.armed_delete = false;
-        if tab == view::Tab::Remind && tab != self.ui.tab {
-            self.reset_picker();
-            self.ui.remind.status.clear();
-        }
+        let from = self.ui.tab;
         self.ui.tab = tab;
+        self.remember_tab(tab);
+        self.start_tab_change(from, tab);
         self.ui.home.dev_menu = None;
         self.ui.home.edit = false;
         self.ui.text.qr = None;

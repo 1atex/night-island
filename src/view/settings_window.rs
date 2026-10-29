@@ -7,6 +7,7 @@ pub struct Group {
     pub name: &'static str,
     pub(in crate::view) rows: &'static [(Sid, &'static str, Kind)],
     pub(in crate::view) custom: Option<fn(&UiState) -> Vec<Item>>,
+    pub(in crate::view) sections: &'static [(usize, &'static str)],
 }
 
 const GENERAL: [(Sid, &str, Kind); 10] = [
@@ -22,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 14] = [
+const ISLAND: [(Sid, &str, Kind); 12] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -35,24 +36,32 @@ const ISLAND: [(Sid, &str, Kind); 14] = [
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
     (Sid::CloseDelay, "Close delay", Kind::Slider),
+];
+
+const ANIMATIONS: [(Sid, &str, Kind); 5] = [
+    (Sid::AnimCurve, "Animation curve", Kind::Cycle),
+    (Sid::TabAnimKind, "Tab change", Kind::Cycle),
+    (Sid::TabAnimSpeed, "Tab change speed", Kind::Slider),
     (Sid::OpenSpeed, "Open speed", Kind::Slider),
     (Sid::CloseSpeed, "Close speed", Kind::Slider),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 4] = [
+const APPEARANCE: [(Sid, &str, Kind); 5] = [
     (Sid::Acrylic, "Acrylic blur", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
+    (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 10] = [
+const PILL: [(Sid, &str, Kind); 11] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
     (Sid::MusicCover, "Cover art on the pill", Kind::Toggle),
+    (Sid::CoverMode, "Cover shape", Kind::Cycle),
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
@@ -94,51 +103,111 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 15] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 11] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
-    (Sid::TabShelf, "Shelf", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
     (Sid::TabNote, "Note", Kind::Toggle),
-    (Sid::TabReminders, "Reminders", Kind::Toggle),
     (Sid::TabWeather, "Weather", Kind::Toggle),
     (Sid::TabRecord, "Record", Kind::Toggle),
-    (Sid::TabAgy, "AGY", Kind::Toggle),
-    (Sid::TabChat, "Chat", Kind::Toggle),
+    (Sid::TabAi, "AI", Kind::Toggle),
     (Sid::TabPrivacy, "Privacy", Kind::Toggle),
     (Sid::TabActivity, "Activity", Kind::Toggle),
     (Sid::TabSteam, "Steam", Kind::Toggle),
     (Sid::TabSystem, "System", Kind::Toggle),
     (Sid::TabControls, "Controls", Kind::Toggle),
-    (Sid::TabTheme, "Theme", Kind::Toggle),
 ];
 
-pub const GROUPS: [Group; 13] = [
-    Group { glyph: '\u{E713}', name: "General", rows: &GENERAL, custom: None },
-    Group { glyph: '\u{E80F}', name: "Island", rows: &ISLAND, custom: None },
-    Group { glyph: '\u{E790}', name: "Appearance", rows: &APPEARANCE, custom: None },
-    Group { glyph: '\u{E8D6}', name: "Pill and music", rows: &PILL, custom: Some(pill_items) },
-    Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items) },
-    Group { glyph: '\u{EA8F}', name: "Notifications", rows: &NOTIFICATIONS, custom: None },
-    Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None },
-    Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items) },
-    Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items) },
-    Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items) },
-    Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items) },
-    Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items) },
-    Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items) },
+pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
+    [(0, "Application"), (4, "Look and feel"), (8, "Monitoring"), (11, "Services"), (14, "Program")];
+
+pub const GROUPS: [Group; 15] = [
+    Group {
+        glyph: '\u{E713}',
+        name: "General",
+        rows: &GENERAL,
+        custom: None,
+        sections: &[(0, "Application"), (3, "Behaviour"), (6, "Privacy"), (8, "Advanced")],
+    },
+    Group {
+        glyph: '\u{E80F}',
+        name: "Island",
+        rows: &ISLAND,
+        custom: None,
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (10, "Open and close")],
+    },
+    Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None, sections: &[] },
+    Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items), sections: &[] },
+    Group {
+        glyph: '\u{E790}',
+        name: "Appearance",
+        rows: &APPEARANCE,
+        custom: None,
+        sections: &[(0, "Window"), (1, "Liquid shape"), (4, "Text tab")],
+    },
+    Group { glyph: '\u{EB52}', name: "Theme", rows: &THEME_ROWS, custom: Some(theme_items), sections: &[] },
+    Group {
+        glyph: '\u{E9D9}',
+        name: "Animations",
+        rows: &ANIMATIONS,
+        custom: None,
+        sections: &[(0, "Curve"), (1, "Tabs"), (3, "Island")],
+    },
+    Group {
+        glyph: '\u{E8D6}',
+        name: "Pill and music",
+        rows: &PILL,
+        custom: Some(pill_items),
+        sections: &[(0, "Pill"), (3, "Music"), (9, "Edges")],
+    },
+    Group {
+        glyph: '\u{EA8F}',
+        name: "Notifications",
+        rows: &NOTIFICATIONS,
+        custom: None,
+        sections: &[(0, "System"), (7, "Clipboard and keys"), (11, "Apps and services")],
+    },
+    Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
+    Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
+    Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items), sections: &[] },
+    Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items), sections: &[] },
+    Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items), sections: &[] },
+    Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items), sections: &[] },
 ];
 
-pub const SW_SIZE: (f32, f32) = (940.0, 620.0);
+pub fn tab_settings_group(tab: crate::view::Tab) -> Option<usize> {
+    use crate::view::Tab;
+    let name = match tab {
+        Tab::Home => "Pill and music",
+        Tab::Clipboard => "Notifications",
+        Tab::Text => "Appearance",
+        Tab::Weather => "General",
+        Tab::Activity => "Activity",
+        Tab::System => "System",
+        Tab::Chat | Tab::Ai => "AI",
+        Tab::Agy => "Agents",
+        Tab::Steam => "Integrations",
+        _ => return None,
+    };
+    GROUPS.iter().position(|g| g.name == name)
+}
+
+pub const SW_SIZE: (f32, f32) = (940.0, 680.0);
 
 const SIDEBAR_W: f32 = 220.0;
 const PAD: f32 = 28.0;
 const SEARCH_H: f32 = 38.0;
 const HEADING_H: f32 = 44.0;
+const SECTION_H: f32 = 46.0;
+const THEME_W: f32 = 420.0;
+const THEME_H: f32 = 268.0;
+const TITLE_H: f32 = 40.0;
+const TITLE_BTN_W: f32 = 46.0;
 const ROW_H: f32 = 46.0;
 const SERVICE_H: f32 = 56.0;
 const NOTE_H: f32 = 19.0;
 const CTL_W: f32 = 300.0;
-const GROUP_H: f32 = 38.0;
+const GROUP_H: f32 = 32.0;
+const SIDE_SECTION_H: f32 = 26.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Field {
@@ -153,6 +222,7 @@ pub enum Field {
     VoiceBase,
     WakeWord,
     GroupName,
+    Search,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -189,13 +259,19 @@ pub struct SwUi {
     pub hover: Option<SwHit>,
     pub drag: Option<Sid>,
     pub field: Option<Field>,
+    pub dropdown: Option<Sid>,
     pub caret_on: bool,
+    pub search_press: bool,
     pub capturing: Option<Hotkey>,
     pub quiet_sys: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SwHit {
+    Pick(Sid, usize),
+    Theme(ThemeHit),
+    Minimize,
+    Close,
     Group(usize),
     Row(Sid, SetHit),
     Field(Field),
@@ -204,6 +280,8 @@ pub enum SwHit {
 
 pub(in crate::view) enum Item {
     Heading(&'static str),
+    Section(&'static str),
+    ThemeBlock,
     Row(Sid, &'static str, Kind),
     Service { name: &'static str, glyph: char, status: String, live: bool },
     Field(Field, &'static str, &'static str),
@@ -217,6 +295,8 @@ impl Item {
     fn height(&self) -> f32 {
         match self {
             Item::Heading(_) => HEADING_H,
+            Item::Section(_) => SECTION_H,
+            Item::ThemeBlock => THEME_H,
             Item::Row(..) | Item::Field(..) | Item::Button(..) | Item::Pair(..) => ROW_H,
             Item::Service { .. } => SERVICE_H,
             Item::Note(_) | Item::Text(_) => NOTE_H,
@@ -308,7 +388,7 @@ fn agent_items(ui: &UiState) -> Vec<Item> {
     out.push(Item::Note("Claude Code, Gemini CLI, Cursor, Copilot CLI: hooks in their settings files."));
     out.push(Item::Note("Codex CLI: its notify command (finished only); a command it already has keeps running."));
     out.push(Item::Note("Perplexity has no hooks or command line to connect to."));
-    out.push(Item::Heading("Sessions"));
+    out.push(Item::Section("Sessions"));
     if ui.agents.is_empty() {
         out.push(Item::Note("No sessions heard from yet."));
     }
@@ -327,7 +407,7 @@ fn agent_items(ui: &UiState) -> Vec<Item> {
 fn metrics_items(ui: &UiState) -> Vec<Item> {
     use crate::platform::metrics::Metric;
     let mut out = vec![Item::Heading("System"), Item::Row(Sid::MetricsInterval, "Read every", Kind::Slider)];
-    out.push(Item::Heading("Figures"));
+    out.push(Item::Section("Figures"));
     for (i, m) in Metric::ALL.into_iter().enumerate() {
         let on_tab = ui.cfg.metrics_tab.iter().any(|k| k == m.key());
         let on_pill = ui.cfg.metrics_pill.iter().any(|k| k == m.key());
@@ -344,10 +424,171 @@ fn metrics_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
+fn theme_items(_ui: &UiState) -> Vec<Item> {
+    let row = |i: usize| {
+        let (id, label, kind) = THEME_ROWS[i];
+        Item::Row(id, label, kind)
+    };
+    vec![
+        Item::Heading("Theme"),
+        Item::Section("Preview and presets"),
+        Item::ThemeBlock,
+        Item::Section("Panel"),
+        row(0),
+        row(1),
+        row(2),
+        row(3),
+        Item::Section("Pill"),
+        row(4),
+        row(5),
+        Item::Section("Accent"),
+        row(6),
+        row(7),
+    ]
+}
+
+fn theme_col(row: Rect, scale: f32) -> (f32, f32, f32) {
+    (row.0, row.1 + 4.0 * scale, row.0 + THEME_W * scale)
+}
+
+const PRESET_COLS: usize = 4;
+
+fn theme_preset_tile(col: (f32, f32, f32), scale: f32, i: usize) -> Rect {
+    let (l, t, r) = col;
+    let gap = 6.0 * scale;
+    let w = (r - l - (PRESET_COLS - 1) as f32 * gap) / PRESET_COLS as f32;
+    let (c, row) = ((i % PRESET_COLS) as f32, (i / PRESET_COLS) as f32);
+    let left = l + c * (w + gap);
+    let top = t + 76.0 * scale + row * (30.0 * scale + gap);
+    (left, top, left + w, top + 30.0 * scale)
+}
+
+fn theme_swatch(col: (f32, f32, f32), scale: f32, row: usize, i: usize) -> Rect {
+    let (l, t, r) = col;
+    let n = crate::ui::theme::PANEL_SWATCHES.len() as f32;
+    let gap = 5.0 * scale;
+    let d = ((r - l) - (n - 1.0) * gap) / n;
+    let left = l + i as f32 * (d + gap);
+    let top = t + (166.0 + row as f32 * 52.0) * scale;
+    (left, top, left + d, top + d)
+}
+
+fn hit_theme_block(row: Rect, scale: f32, px: f32, py: f32) -> Option<ThemeHit> {
+    let col = theme_col(row, scale);
+    if let Some(i) = (0..crate::ui::theme::PRESETS.len()).find(|&i| inside(theme_preset_tile(col, scale, i), px, py)) {
+        return Some(ThemeHit::Preset(i));
+    }
+    for i in 0..crate::ui::theme::PANEL_SWATCHES.len() {
+        if inside(theme_swatch(col, scale, 0, i), px, py) {
+            return Some(ThemeHit::Panel(i));
+        }
+        if inside(theme_swatch(col, scale, 1, i), px, py) {
+            return Some(ThemeHit::Accent(i));
+        }
+    }
+    None
+}
+
+fn paint_theme_block(p: &Painter, row: Rect, scale: f32, ui: &UiState, hovered: Option<ThemeHit>) -> Result<()> {
+    let col = theme_col(row, scale);
+    let (l, t, r) = col;
+    let (panel, accent) = crate::ui::theme::colors(&ui.cfg);
+    let preview = (l, t, r, t + 58.0 * scale);
+    p.fill_round_rect(preview, 29.0 * scale, rgba(panel.0, panel.1, panel.2, 1.0))?;
+    p.stroke_round_rect(preview, 29.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.12))?;
+    p.fill_ellipse(
+        l + 28.0 * scale,
+        t + 29.0 * scale,
+        7.0 * scale,
+        7.0 * scale,
+        rgba(accent.0, accent.1, accent.2, 1.0),
+    )?;
+    p.text("12:34", preview, 17.0 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
+    for k in 0..4 {
+        let h = (8.0 + k as f32 * 4.0) * scale;
+        let x = r - 56.0 * scale + k as f32 * 9.0 * scale;
+        p.fill_round_rect(
+            (x, t + 29.0 * scale - h / 2.0, x + 4.0 * scale, t + 29.0 * scale + h / 2.0),
+            2.0 * scale,
+            rgba(accent.0, accent.1, accent.2, 1.0),
+        )?;
+    }
+    p.text(
+        "Presets",
+        (l, t + 58.0 * scale, r, t + 74.0 * scale),
+        11.5 * scale,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_TEXT_ALIGNMENT_LEADING,
+        rgba(1.0, 1.0, 1.0, 0.55),
+    )?;
+    for (i, (name, _)) in crate::ui::theme::PRESETS.iter().enumerate() {
+        let tile = theme_preset_tile(col, scale, i);
+        let (pc, ac) = crate::ui::theme::preset_colors(i);
+        let hover = hovered == Some(ThemeHit::Preset(i));
+        p.fill_round_rect(tile, 10.0 * scale, rgba(pc.0, pc.1, pc.2, 1.0))?;
+        p.stroke_round_rect(
+            tile,
+            10.0 * scale,
+            if hover { 1.6 } else { 1.0 } * scale,
+            rgba(1.0, 1.0, 1.0, if hover { 0.5 } else { 0.16 }),
+        )?;
+        p.fill_ellipse(
+            tile.0 + 11.0 * scale,
+            (tile.1 + tile.3) / 2.0,
+            4.5 * scale,
+            4.5 * scale,
+            rgba(ac.0, ac.1, ac.2, 1.0),
+        )?;
+        p.text(
+            name,
+            (tile.0 + 20.0 * scale, tile.1, tile.2 - 2.0 * scale, tile.3),
+            10.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
+    }
+    let near = |a: f32, b: f32, eps: f32| (a - b).abs() <= eps;
+    for (line, label, swatches) in
+        [(0usize, "Panel", &crate::ui::theme::PANEL_SWATCHES), (1, "Accent", &crate::ui::theme::ACCENT_SWATCHES)]
+    {
+        let first = theme_swatch(col, scale, line, 0);
+        p.text(
+            label,
+            (l, first.1 - 20.0 * scale, r, first.1 - 4.0 * scale),
+            11.5 * scale,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            rgba(1.0, 1.0, 1.0, 0.55),
+        )?;
+        for (i, v) in swatches.iter().enumerate() {
+            let rect = theme_swatch(col, scale, line, i);
+            let (cr, cg, cb) = crate::ui::theme::hsv(v[0], v[1], v[2]);
+            let hover = hovered == Some(if line == 0 { ThemeHit::Panel(i) } else { ThemeHit::Accent(i) });
+            p.fill_round_rect(rect, (rect.2 - rect.0) / 2.0, rgba(cr, cg, cb, 1.0))?;
+            let current = if line == 0 {
+                near(ui.cfg.panel_hue, v[0], 1.0)
+                    && near(ui.cfg.panel_sat, v[1], 0.03)
+                    && near(ui.cfg.panel_val, v[2], 0.01)
+            } else {
+                near(ui.cfg.accent_hue, v[0], 1.0)
+                    && near(ui.cfg.accent_sat, v[1], 0.03)
+                    && near(ui.cfg.accent_val, v[2], 0.03)
+            };
+            let ring =
+                if current { rgba(1.0, 1.0, 1.0, 0.95) } else { rgba(1.0, 1.0, 1.0, if hover { 0.6 } else { 0.22 }) };
+            p.stroke_round_rect(rect, (rect.2 - rect.0) / 2.0, if current { 2.0 } else { 1.0 } * scale, ring)?;
+        }
+    }
+    Ok(())
+}
+
 fn pill_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![Item::Heading("Pill and music")];
-    out.extend(PILL.iter().map(|&(id, label, kind)| Item::Row(id, label, kind)));
-    out.push(Item::Heading("Players for lyrics"));
+    if let Some(group) = GROUPS.iter().find(|g| g.name == "Pill and music") {
+        out.extend(rows_with_sections(group));
+    }
+    out.push(Item::Section("Players for lyrics"));
     let apps = &ui.cfg.lyrics_apps;
     if apps.is_empty() {
         out.push(Item::Note("Any player. Add one to take lyrics only from the players you trust."));
@@ -510,6 +751,17 @@ fn matches(label: &str, query: &str) -> bool {
     q.is_empty() || label.to_lowercase().contains(&q) || crate::ui::i18n::tr(label).to_lowercase().contains(&q)
 }
 
+fn rows_with_sections(group: &Group) -> Vec<Item> {
+    let mut out = Vec::new();
+    for (i, &(id, label, kind)) in group.rows.iter().enumerate() {
+        if let Some(&(_, title)) = group.sections.iter().find(|(at, _)| *at == i) {
+            out.push(Item::Section(title));
+        }
+        out.push(Item::Row(id, label, kind));
+    }
+    out
+}
+
 pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
     let mut out = Vec::new();
     if ui.sw.search.trim().is_empty() {
@@ -518,7 +770,7 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
             return build(ui);
         }
         out.push(Item::Heading(group.name));
-        out.extend(group.rows.iter().map(|&(id, label, kind)| Item::Row(id, label, kind)));
+        out.extend(rows_with_sections(group));
         return out;
     }
     for group in &GROUPS {
@@ -541,15 +793,17 @@ struct Layout {
 fn layout(size: (f32, f32), scale: f32) -> Layout {
     let (w, h) = size;
     let left = (SIDEBAR_W + PAD) * scale;
+    let top = TITLE_H * scale;
     Layout {
-        sidebar: (0.0, 0.0, SIDEBAR_W * scale, h),
-        search: (left, 24.0 * scale, w - PAD * scale, (24.0 + SEARCH_H) * scale),
-        content: (left, (24.0 + SEARCH_H + 14.0) * scale, w - PAD * scale, h - 12.0 * scale),
+        sidebar: (0.0, top, SIDEBAR_W * scale, h),
+        search: (left, top + 18.0 * scale, w - PAD * scale, top + (18.0 + SEARCH_H) * scale),
+        content: (left, top + (18.0 + SEARCH_H + 10.0) * scale, w - PAD * scale, h - 12.0 * scale),
     }
 }
 
 fn group_rect(l: &Layout, scale: f32, i: usize) -> Rect {
-    let top = (24.0 + 52.0) * scale + i as f32 * GROUP_H * scale;
+    let sections = SIDEBAR_SECTIONS.iter().filter(|s| s.0 <= i).count() as f32;
+    let top = l.sidebar.1 + 6.0 * scale + (i as f32 * GROUP_H + sections * SIDE_SECTION_H) * scale;
     (l.sidebar.0 + 12.0 * scale, top, l.sidebar.2 - 12.0 * scale, top + (GROUP_H - 4.0) * scale)
 }
 
@@ -578,8 +832,73 @@ fn row_rects(l: &Layout, scale: f32, top: f32) -> (Rect, Rect) {
     (row, ctl)
 }
 
+const DROP_ITEM_H: f32 = 30.0;
+
+fn dropdown_rects(size: (f32, f32), scale: f32, ui: &UiState) -> Option<(Rect, Vec<Rect>)> {
+    let id = ui.sw.dropdown?;
+    let (names, _) = cycle_options(id, &ui.cfg);
+    if names.is_empty() {
+        return None;
+    }
+    let l = layout(size, scale);
+    let top = placed(size, scale, ui).into_iter().find_map(|(item, top)| match item {
+        Item::Row(row_id, ..) if row_id == id => Some(top),
+        _ => None,
+    })?;
+    let (_, ctl) = row_rects(&l, scale, top);
+    let h = names.len() as f32 * DROP_ITEM_H * scale + 8.0 * scale;
+    let below = ctl.3 + 4.0 * scale;
+    let y0 = if below + h <= size.1 - 8.0 * scale { below } else { (ctl.1 - 4.0 * scale - h).max(8.0 * scale) };
+    let list = (ctl.0, y0, ctl.2, y0 + h);
+    let items = (0..names.len())
+        .map(|k| {
+            let t = list.1 + 4.0 * scale + k as f32 * DROP_ITEM_H * scale;
+            (list.0 + 4.0 * scale, t, list.2 - 4.0 * scale, t + DROP_ITEM_H * scale)
+        })
+        .collect();
+    Some((list, items))
+}
+
+fn title_buttons(size: (f32, f32), scale: f32) -> (Rect, Rect) {
+    let (bw, bh) = (TITLE_BTN_W * scale, TITLE_H * scale);
+    let close = (size.0 - bw, 0.0, size.0, bh);
+    ((size.0 - 2.0 * bw, 0.0, size.0 - bw, bh), close)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TitleZone {
+    Button,
+    Caption,
+}
+
+pub fn sw_title_zone(size: (f32, f32), scale: f32, px: f32, py: f32) -> Option<TitleZone> {
+    if py < 0.0 || py >= TITLE_H * scale {
+        return None;
+    }
+    let (min, close) = title_buttons(size, scale);
+    Some(if inside(min, px, py) || inside(close, px, py) { TitleZone::Button } else { TitleZone::Caption })
+}
+
 pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> Option<SwHit> {
     let l = layout(size, scale);
+    if let Some((list, items)) = dropdown_rects(size, scale, ui) {
+        if let (Some(id), Some(k)) = (ui.sw.dropdown, items.iter().position(|r| inside(*r, px, py))) {
+            return Some(SwHit::Pick(id, k));
+        }
+        if inside(list, px, py) {
+            return None;
+        }
+    }
+    let (min, close) = title_buttons(size, scale);
+    if inside(min, px, py) {
+        return Some(SwHit::Minimize);
+    }
+    if inside(close, px, py) {
+        return Some(SwHit::Close);
+    }
+    if inside(l.search, px, py) {
+        return Some(SwHit::Field(Field::Search));
+    }
     if let Some(i) = (0..GROUPS.len()).find(|&i| inside(group_rect(&l, scale, i), px, py)) {
         return Some(SwHit::Group(i));
     }
@@ -590,24 +909,31 @@ pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> O
         let (row, ctl) = row_rects(&l, scale, top);
         match item {
             Item::Row(id, _, kind) => {
-                if !inside(row, px, py) || px < ctl.0 - 6.0 * scale {
+                if !inside(row, px, py) {
                     continue;
                 }
+                let on_label = px < ctl.0 - 6.0 * scale;
                 let hit = match kind {
+                    Kind::Segment(_) | Kind::Cycle | Kind::Slider if on_label => SetHit::Label,
+                    Kind::Cycle => SetHit::Select,
                     Kind::Segment(opts) => {
                         let t = ((px - ctl.0) / (ctl.2 - ctl.0)).clamp(0.0, 0.999);
                         SetHit::Option((t * opts.len() as f32) as usize)
                     }
-                    Kind::Cycle => SetHit::Option(usize::from(px > (ctl.0 + ctl.2) / 2.0)),
                     Kind::Slider => SetHit::Slider,
                     Kind::Toggle => SetHit::Toggle,
                     Kind::Button => SetHit::Button,
                 };
                 return Some(SwHit::Row(id, hit));
             }
-            Item::Field(field, ..) if inside(ctl, px, py) => return Some(SwHit::Field(field)),
-            Item::Button(act, _, enabled) if enabled && inside(ctl, px, py) => return Some(SwHit::Act(act)),
-            Item::Pair(act, ..) if inside(ctl, px, py) => return Some(SwHit::Act(act)),
+            Item::ThemeBlock => {
+                if let Some(h) = hit_theme_block(row, scale, px, py) {
+                    return Some(SwHit::Theme(h));
+                }
+            }
+            Item::Field(field, ..) if inside(row, px, py) => return Some(SwHit::Field(field)),
+            Item::Button(act, _, enabled) if enabled && inside(row, px, py) => return Some(SwHit::Act(act)),
+            Item::Pair(act, ..) if inside(row, px, py) => return Some(SwHit::Act(act)),
             _ => {}
         }
     }
@@ -626,6 +952,10 @@ pub fn sw_slider_track(size: (f32, f32), scale: f32, ui: &UiState, id: Sid) -> O
 
 pub fn sw_field_rects(size: (f32, f32), scale: f32, ui: &UiState, field: Field) -> Option<(Rect, Rect)> {
     let l = layout(size, scale);
+    if field == Field::Search {
+        let s = l.search;
+        return Some((s, (s.0 + 40.0 * scale, s.1, s.2 - 12.0 * scale, s.3)));
+    }
     let top = placed(size, scale, ui).into_iter().find_map(|(item, top)| match item {
         Item::Field(f, ..) if f == field => Some(top),
         _ => None,
@@ -659,7 +989,16 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::VoiceBase => &ui.int.voice_base,
         Field::WakeWord => &ui.int.wake,
         Field::GroupName => &ui.int.group_name,
+        Field::Search => &ui.int.search,
     }
+}
+
+fn row_hover(p: &Painter, row: Rect, scale: f32) -> Result<()> {
+    p.fill_round_rect(
+        (row.0 - 8.0 * scale, row.1 + 2.0 * scale, row.2 + 8.0 * scale, row.3 - 2.0 * scale),
+        10.0 * scale,
+        rgba(1.0, 1.0, 1.0, 0.04),
+    )
 }
 
 pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiState) -> Result<()> {
@@ -668,15 +1007,48 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
     p.fill_rect((0.0, 0.0, size.0, size.1), rgba(pr, pg, pb, 1.0))?;
     p.fill_rect(l.sidebar, rgba(1.0, 1.0, 1.0, 0.045))?;
 
+    let bar = (0.0, 0.0, size.0, TITLE_H * scale);
+    p.fill_rect(bar, rgba(0.0, 0.0, 0.0, 0.18))?;
+    p.fill_rect((0.0, bar.3 - 1.0, size.0, bar.3), rgba(1.0, 1.0, 1.0, 0.07))?;
+    p.glyph('\u{E713}', (14.0 * scale, 0.0, 38.0 * scale, bar.3), 15.0 * scale, rgba(1.0, 1.0, 1.0, 0.8))?;
     p.text(
         "Settings",
-        (l.sidebar.0 + 22.0 * scale, 22.0 * scale, l.sidebar.2, 56.0 * scale),
-        17.0 * scale,
+        (42.0 * scale, 0.0, size.0 / 2.0, bar.3),
+        13.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_LEADING,
-        WHITE,
+        rgba(1.0, 1.0, 1.0, 0.9),
     )?;
+    let (min, close) = title_buttons(size, scale);
+    if ui.sw.hover == Some(SwHit::Minimize) {
+        p.fill_rect(min, rgba(1.0, 1.0, 1.0, 0.1))?;
+    }
+    if ui.sw.hover == Some(SwHit::Close) {
+        p.fill_rect(close, rgba(0.9, 0.2, 0.2, 0.9))?;
+    }
+    let (cx, cy) = ((min.0 + min.2) / 2.0, (min.1 + min.3) / 2.0);
+    p.fill_rect((cx - 5.0 * scale, cy, cx + 5.0 * scale, cy + scale.max(1.0)), rgba(1.0, 1.0, 1.0, 0.9))?;
+    p.glyph('\u{E711}', close, 14.0 * scale, WHITE)?;
+
     let searching = !ui.sw.search.trim().is_empty();
+    for (n, &(first, title)) in SIDEBAR_SECTIONS.iter().enumerate() {
+        let r = group_rect(&l, scale, first);
+        let y = r.1 - SIDE_SECTION_H * scale + 2.0 * scale;
+        if n > 0 {
+            p.fill_rect(
+                (l.sidebar.0 + 14.0 * scale, y + 2.0 * scale, l.sidebar.2 - 14.0 * scale, y + 2.0 * scale + 1.0),
+                rgba(1.0, 1.0, 1.0, 0.08),
+            )?;
+        }
+        p.text(
+            title,
+            (l.sidebar.0 + 18.0 * scale, y + 4.0 * scale, l.sidebar.2, y + SIDE_SECTION_H * scale - 2.0 * scale),
+            11.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            rgba(1.0, 1.0, 1.0, 0.45),
+        )?;
+    }
     for (i, group) in GROUPS.iter().enumerate() {
         let r = group_rect(&l, scale, i);
         let selected = i == ui.sw.group && !searching;
@@ -702,21 +1074,23 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
         )?;
     }
 
-    p.fill_round_rect(l.search, 11.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+    let search_inner = (l.search.0 + 40.0 * scale, l.search.1, l.search.2 - 12.0 * scale, l.search.3);
+    paint_line_edit(
+        p,
+        l.search,
+        search_inner,
+        &ui.int.search,
+        false,
+        "Search settings",
+        ui.sw.field == Some(Field::Search),
+        ui.sw.caret_on,
+        scale,
+    )?;
     p.glyph(
         '\u{E721}',
         (l.search.0 + 4.0 * scale, l.search.1, l.search.0 + 38.0 * scale, l.search.3),
         14.0 * scale,
         rgba(1.0, 1.0, 1.0, 0.6),
-    )?;
-    let (text, alpha) = if ui.sw.search.is_empty() { ("Search settings", 0.45) } else { (ui.sw.search.as_str(), 1.0) };
-    p.text(
-        text,
-        (l.search.0 + 40.0 * scale, l.search.1, l.search.2 - 12.0 * scale, l.search.3),
-        13.5 * scale,
-        DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_TEXT_ALIGNMENT_LEADING,
-        rgba(1.0, 1.0, 1.0, alpha),
     )?;
 
     p.push_clip(l.content);
@@ -749,13 +1123,30 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         WHITE,
                     )?;
                 }
+                Item::ThemeBlock => {
+                    let hovered = match ui.sw.hover {
+                        Some(SwHit::Theme(h)) => Some(h),
+                        _ => None,
+                    };
+                    paint_theme_block(p, row, scale, ui, hovered)?;
+                }
+                Item::Section(title) => {
+                    if top > l.content.1 + 4.0 * scale {
+                        let y = top + 10.0 * scale;
+                        p.fill_rect((row.0, y, row.2, y + 1.0), rgba(1.0, 1.0, 1.0, 0.08))?;
+                    }
+                    p.text(
+                        title,
+                        (row.0, top + 14.0 * scale, row.2, top + SECTION_H * scale),
+                        12.5 * scale,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, 0.55),
+                    )?;
+                }
                 Item::Row(id, label, kind) => {
                     if matches!(ui.sw.hover, Some(SwHit::Row(h, _)) if h == id) {
-                        p.fill_round_rect(
-                            (row.0 - 8.0 * scale, row.1 + 2.0 * scale, row.2 + 8.0 * scale, row.3 - 2.0 * scale),
-                            10.0 * scale,
-                            rgba(1.0, 1.0, 1.0, 0.04),
-                        )?;
+                        row_hover(p, row, scale)?;
                     }
                     p.text(
                         label,
@@ -796,6 +1187,9 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                     )?;
                 }
                 Item::Field(field, label, hint) => {
+                    if ui.sw.hover == Some(SwHit::Field(field)) {
+                        row_hover(p, row, scale)?;
+                    }
                     p.text(
                         label,
                         label_area,
@@ -837,6 +1231,9 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                     )?;
                 }
                 Item::Pair(act, label, button, active) => {
+                    if ui.sw.hover == Some(SwHit::Act(act)) {
+                        row_hover(p, row, scale)?;
+                    }
                     p.text(
                         &label,
                         label_area,
@@ -886,6 +1283,38 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
     })();
     p.pop_clip();
     result?;
+
+    if let (Some(id), Some((list, items))) = (ui.sw.dropdown, dropdown_rects(size, scale, ui)) {
+        let (names, now) = cycle_options(id, &ui.cfg);
+        let (pr, pg, pb) = crate::ui::theme::panel();
+        let lift = |c: f32| c + (1.0 - c) * 0.12;
+        p.fill_round_rect(
+            (list.0 - 2.0 * scale, list.1 + 2.0 * scale, list.2 + 2.0 * scale, list.3 + 6.0 * scale),
+            12.0 * scale,
+            rgba(0.0, 0.0, 0.0, 0.25),
+        )?;
+        p.fill_round_rect(list, 10.0 * scale, rgba(lift(pr), lift(pg), lift(pb), 1.0))?;
+        p.stroke_round_rect(list, 10.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.14))?;
+        for (k, (name, r)) in names.iter().zip(items).enumerate() {
+            let hot = ui.sw.hover == Some(SwHit::Pick(id, k));
+            if k == now {
+                p.fill_round_rect(r, 7.0 * scale, acc(0.35))?;
+            } else if hot {
+                p.fill_round_rect(r, 7.0 * scale, rgba(1.0, 1.0, 1.0, 0.1))?;
+            }
+            p.text(
+                name,
+                (r.0 + 10.0 * scale, r.1, r.2 - 28.0 * scale, r.3),
+                12.5 * scale,
+                if k == now { DWRITE_FONT_WEIGHT_SEMI_BOLD } else { DWRITE_FONT_WEIGHT_NORMAL },
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                WHITE,
+            )?;
+            if k == now {
+                p.glyph('\u{E73E}', (r.2 - 26.0 * scale, r.1, r.2 - 4.0 * scale, r.3), 13.0 * scale, WHITE)?;
+            }
+        }
+    }
 
     let max = max_scroll(size, scale, ui);
     if max > 0.0 {

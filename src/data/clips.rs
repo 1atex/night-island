@@ -20,8 +20,7 @@ pub struct ShelfItem {
     pub path: String,
 }
 
-const MAX_SHELF: i64 = 60;
-const MAX_DOCK: i64 = 24;
+const MAX_DOCK: i64 = 60;
 
 pub struct Reminder {
     pub id: i64,
@@ -87,7 +86,9 @@ impl Store {
         super::usage::init(&conn).ok()?;
         super::chats::init(&conn).ok()?;
         super::groups::init(&conn).ok()?;
-        Some(Self { conn })
+        let store = Self { conn };
+        store.move_shelf_to_dock();
+        Some(store)
     }
 
     pub fn recent(&self) -> Vec<Clip> {
@@ -146,6 +147,14 @@ impl Store {
         self.conn.execute("INSERT INTO reminders (due, text) VALUES (?1, ?2)", params![due, text]).is_ok()
     }
 
+    pub fn reminder_add_id(&self, due: i64, text: &str) -> Option<i64> {
+        self.reminder_add(due, text).then(|| self.conn.last_insert_rowid())
+    }
+
+    pub fn reminder_set_text(&self, id: i64, text: &str) {
+        let _ = self.conn.execute("UPDATE reminders SET text = ?2 WHERE id = ?1", params![id, text]);
+    }
+
     pub fn reminder_remove(&self, id: i64) {
         let _ = self.conn.execute("DELETE FROM reminders WHERE id = ?1", params![id]);
     }
@@ -174,29 +183,28 @@ impl Store {
         let _ = self.conn.execute("DELETE FROM dock WHERE id = ?1", params![id]);
     }
 
-    pub fn shelf(&self) -> Vec<ShelfItem> {
-        let Ok(mut stmt) = self.conn.prepare_cached("SELECT id, path FROM shelf ORDER BY ts DESC LIMIT ?1") else {
-            return Vec::new();
-        };
-        stmt.query_map(params![MAX_SHELF], |r| Ok(ShelfItem { id: r.get(0)?, path: r.get(1)? }))
-            .map(|rows| rows.flatten().collect())
-            .unwrap_or_default()
+    pub fn dock_move(&self, id: i64, to: usize) {
+        let ids: Vec<i64> = self.dock().into_iter().map(|d| d.id).collect();
+        let Some(from) = ids.iter().position(|&i| i == id) else { return };
+        let mut ids = ids;
+        let item = ids.remove(from);
+        ids.insert(to.min(ids.len()), item);
+        let Ok(tx) = self.conn.unchecked_transaction() else { return };
+        for (n, id) in ids.iter().enumerate() {
+            let _ = tx.execute("UPDATE dock SET ord = ?2 WHERE id = ?1", params![id, n as i64 + 1]);
+        }
+        let _ = tx.commit();
     }
 
-    pub fn shelf_add(&self, path: &str) {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
-        let _ = self.conn.execute(
-            "INSERT INTO shelf (path, ts) VALUES (?1, ?2) ON CONFLICT(path) DO UPDATE SET ts = excluded.ts",
-            params![path, now],
-        );
-        let _ = self.conn.execute(
-            "DELETE FROM shelf WHERE id NOT IN (SELECT id FROM shelf ORDER BY ts DESC LIMIT ?1)",
-            params![MAX_SHELF],
-        );
-    }
-
-    pub fn shelf_remove(&self, id: i64) {
-        let _ = self.conn.execute("DELETE FROM shelf WHERE id = ?1", params![id]);
+    fn move_shelf_to_dock(&self) {
+        let Ok(mut stmt) = self.conn.prepare("SELECT path FROM shelf ORDER BY ts ASC") else { return };
+        let paths: Vec<String> =
+            stmt.query_map([], |r| r.get(0)).map(|rows| rows.flatten().collect()).unwrap_or_default();
+        drop(stmt);
+        for path in paths {
+            self.dock_add(&path);
+        }
+        let _ = self.conn.execute("DELETE FROM shelf", []);
     }
 
     pub fn toggle_pin(&self, id: i64) {

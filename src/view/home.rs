@@ -7,6 +7,11 @@ pub struct HomeUi {
     pub device: String,
     pub dev_menu: Option<(Vec<crate::platform::volume::Device>, usize)>,
     pub dock: Vec<ShelfItem>,
+    pub dock_open: bool,
+    pub reorder: Option<Reorder>,
+    pub dock_press: Option<(usize, i32, i32)>,
+    pub tile_press: Option<(usize, i32, i32)>,
+    pub tile_reorder: Option<Reorder>,
     pub seek: Option<f32>,
     pub vol_track: bool,
     pub app_vol: f32,
@@ -23,6 +28,11 @@ impl Default for HomeUi {
             device: Default::default(),
             dev_menu: Default::default(),
             dock: Default::default(),
+            dock_open: false,
+            reorder: None,
+            dock_press: None,
+            tile_press: None,
+            tile_reorder: None,
             seek: Default::default(),
             vol_track: Default::default(),
             app_vol: 1.0,
@@ -187,7 +197,7 @@ pub(in crate::view) fn grid_left(pill: Rect, scale: f32, wide: bool) -> f32 {
     if wide { right + 12.0 * scale } else { right - (2.0 * GRID_COL_W + GRID_GAP) * scale }
 }
 
-pub(in crate::view) fn action_tile(pill: Rect, scale: f32, i: usize) -> Rect {
+pub fn action_tile(pill: Rect, scale: f32, i: usize) -> Rect {
     let (_, y, _, _) = pill;
     let (col, row) = ((i % 2) as f32, (i / 2) as f32);
     let left = grid_left(pill, scale, false) + col * (GRID_COL_W + GRID_GAP) * scale;
@@ -316,26 +326,89 @@ pub(in crate::view) fn dock_capacity(pill: Rect, scale: f32, compact: bool) -> u
     ((room / (DOCK_ICON + DOCK_GAP)).floor() as usize).saturating_sub(1).max(1)
 }
 
-pub(in crate::view) fn dock_slot(pill: Rect, scale: f32, compact: bool, i: usize) -> Rect {
-    let zone = dock_zone(pill, scale, compact);
-    let left = zone.0 + (14.0 + i as f32 * (DOCK_ICON + DOCK_GAP)) * scale;
-    let top = zone.1 + if compact { 4.0 } else { 12.0 } * scale;
-    (left, top, left + DOCK_ICON * scale, top + DOCK_ICON * scale)
+pub struct DockLayout {
+    pub slots: Vec<Rect>,
+    pub button: Rect,
+    pub more: bool,
+    pub zone: Rect,
+    pub close: Option<Rect>,
+    pub open: bool,
 }
 
-pub(in crate::view) fn hit_dock(
-    pill: Rect,
-    scale: f32,
-    px: f32,
-    py: f32,
-    compact: bool,
-    count: usize,
-) -> Option<HomeHit> {
-    let shown = count.min(dock_capacity(pill, scale, compact));
-    if let Some(i) = (0..shown).find(|&i| inside(dock_slot(pill, scale, compact, i), px, py)) {
+pub fn dock_layout(pill: Rect, scale: f32, ui: &UiState) -> DockLayout {
+    let compact = discord_strip(ui);
+    let n = ui.home.dock.len();
+    let cap = dock_capacity(pill, scale, compact);
+    let step = (DOCK_ICON + DOCK_GAP) * scale;
+    let icon = DOCK_ICON * scale;
+    let row_zone = dock_zone(pill, scale, compact);
+    if ui.home.dock_open && n > cap {
+        let top = pill.1 + HOME_TOP * scale;
+        let zone = (row_zone.0, top, row_zone.2, row_zone.3);
+        let rows = (((zone.3 - zone.1) / scale - 40.0) / (DOCK_ICON + DOCK_GAP)).floor().max(1.0) as usize;
+        let shown = n.min(rows * cap - 1);
+        let slot = |i: usize| {
+            let (col, row) = ((i % cap) as f32, (i / cap) as f32);
+            let left = zone.0 + 14.0 * scale + col * step;
+            let t = zone.1 + 32.0 * scale + row * step;
+            (left, t, left + icon, t + icon)
+        };
+        let close = (zone.2 - 40.0 * scale, zone.1 + 4.0 * scale, zone.2 - 8.0 * scale, zone.1 + 32.0 * scale);
+        return DockLayout {
+            slots: (0..shown).map(slot).collect(),
+            button: slot(shown),
+            more: false,
+            zone,
+            close: Some(close),
+            open: true,
+        };
+    }
+    let shown = n.min(cap);
+    let slot = |i: usize| {
+        let left = row_zone.0 + 14.0 * scale + i as f32 * step;
+        let t = row_zone.1 + if compact { 4.0 } else { 12.0 } * scale;
+        (left, t, left + icon, t + icon)
+    };
+    DockLayout {
+        slots: (0..shown).map(slot).collect(),
+        button: slot(shown),
+        more: n > cap,
+        zone: row_zone,
+        close: None,
+        open: false,
+    }
+}
+
+pub fn dock_cross(slot: Rect, scale: f32) -> Rect {
+    (slot.2 - 11.0 * scale, slot.1 - 5.0 * scale, slot.2 + 3.0 * scale, slot.1 + 9.0 * scale)
+}
+
+fn hovered_dock(ui: &UiState) -> Option<usize> {
+    match ui.home.hover_act {
+        Some(a @ 600..700) => Some(a - 600),
+        Some(a @ 800..900) => Some(a - 800),
+        _ => None,
+    }
+}
+
+pub(in crate::view) fn hit_dock(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<HomeHit> {
+    let layout = dock_layout(pill, scale, ui);
+    if layout.close.is_some_and(|c| inside(c, px, py)) {
+        return Some(HomeHit::DockMore);
+    }
+    if let Some(i) = hovered_dock(ui).filter(|_| ui.home.reorder.is_none())
+        && let Some(&slot) = layout.slots.get(i)
+        && inside(dock_cross(slot, scale), px, py)
+    {
+        return Some(HomeHit::DockUnpin(i));
+    }
+    if let Some(i) = layout.slots.iter().position(|&s| inside(s, px, py)) {
         return Some(HomeHit::Dock(i));
     }
-    inside(dock_slot(pill, scale, compact, shown), px, py).then_some(HomeHit::DockAdd)
+    if inside(layout.button, px, py) {
+        return Some(if layout.more { HomeHit::DockMore } else { HomeHit::DockAdd });
+    }
+    None
 }
 
 pub(in crate::view) fn dock_name(path: &str) -> String {
@@ -345,14 +418,33 @@ pub(in crate::view) fn dock_name(path: &str) -> String {
 
 pub(in crate::view) fn paint_dock(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let compact = discord_strip(ui);
-    let zone = dock_zone(pill, scale, compact);
-    p.fill_round_rect(zone, 18.0 * scale, rgba(1.0, 1.0, 1.0, 0.05))?;
-    let shown = ui.home.dock.len().min(dock_capacity(pill, scale, compact));
+    let layout = dock_layout(pill, scale, ui);
+    let zone = layout.zone;
+    if layout.open {
+        let (r, g, b) = crate::ui::theme::panel();
+        p.fill_round_rect(zone, 18.0 * scale, rgba(r, g, b, 1.0))?;
+    }
+    p.fill_round_rect(zone, 18.0 * scale, rgba(1.0, 1.0, 1.0, if layout.open { 0.07 } else { 0.05 }))?;
+    let reorder = ui.home.reorder.as_ref();
     let mut hovered: Option<&str> = None;
-    for (i, item) in ui.home.dock.iter().take(shown).enumerate() {
-        let slot = dock_slot(pill, scale, compact, i);
-        let hover = ui.home.hover_act == Some(600 + i);
-        if hover {
+    let paint_icon = |item: &ShelfItem, slot: Rect| -> Result<()> {
+        let inner = 3.0 * scale;
+        let icon_rect = (slot.0 + inner, slot.1 + inner, slot.2 - inner, slot.3 - inner);
+        match crate::platform::apps::icon_for_path(&item.path) {
+            Some(icon) => p.image(icon_rect, 6.0 * scale, icon.side, &icon.bgra),
+            None => p.glyph('\u{E8A5}', slot, 22.0 * scale, rgba(1.0, 1.0, 1.0, 0.7)),
+        }
+    };
+    for (i, item) in ui.home.dock.iter().take(layout.slots.len()).enumerate() {
+        if reorder.is_some_and(|r| r.from == i) {
+            continue;
+        }
+        let mut slot = layout.slots[i];
+        if let Some(r) = reorder.filter(|r| r.pos.len() == layout.slots.len()) {
+            let (w, h) = (slot.2 - slot.0, slot.3 - slot.1);
+            slot = (r.pos[i].0, r.pos[i].1, r.pos[i].0 + w, r.pos[i].1 + h);
+        }
+        if reorder.is_none() && hovered_dock(ui) == Some(i) {
             let g = 5.0 * scale;
             p.fill_round_rect(
                 (slot.0 - g, slot.1 - g, slot.2 + g, slot.3 + g),
@@ -361,17 +453,60 @@ pub(in crate::view) fn paint_dock(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
             )?;
             hovered = Some(&item.path);
         }
-        let inner = 3.0 * scale;
-        let icon_rect = (slot.0 + inner, slot.1 + inner, slot.2 - inner, slot.3 - inner);
-        match crate::platform::apps::icon_for_path(&item.path) {
-            Some(icon) => p.image(icon_rect, 6.0 * scale, icon.side, &icon.bgra)?,
-            None => p.glyph('\u{E8A5}', slot, 22.0 * scale, rgba(1.0, 1.0, 1.0, 0.7))?,
+        paint_icon(item, slot)?;
+        if reorder.is_none() && hovered_dock(ui) == Some(i) {
+            let cross = dock_cross(slot, scale);
+            let on = ui.home.hover_act == Some(800 + i);
+            let (cx, cy) = ((cross.0 + cross.2) / 2.0, (cross.1 + cross.3) / 2.0);
+            let r = 7.0 * scale;
+            p.fill_ellipse(cx, cy, r, r, rgba(0.1, 0.1, 0.12, 0.92))?;
+            p.fill_ellipse(cx, cy, r, r, rgba(1.0, 1.0, 1.0, if on { 0.28 } else { 0.1 }))?;
+            p.glyph('\u{E711}', cross, 8.5 * scale, rgba(1.0, 1.0, 1.0, if on { 1.0 } else { 0.8 }))?;
         }
     }
-    let add = dock_slot(pill, scale, compact, shown);
+    if let Some(r) = reorder
+        && let (Some(item), Some(&base)) = (ui.home.dock.get(r.from), layout.slots.get(r.from))
+    {
+        let size = (base.2 - base.0, base.3 - base.1);
+        let at = r.dragged_rect(size);
+        let g = 6.0 * scale;
+        p.fill_round_rect((at.0 - g, at.1 - g, at.2 + g, at.3 + g), 16.0 * scale, rgba(1.0, 1.0, 1.0, 0.2))?;
+        paint_icon(item, at)?;
+    }
+    let add = layout.button;
     let add_hover = ui.home.hover_act == Some(700);
-    p.stroke_round_rect(add, 12.0 * scale, 1.2 * scale, rgba(1.0, 1.0, 1.0, if add_hover { 0.55 } else { 0.28 }))?;
-    p.glyph('\u{E710}', add, 16.0 * scale, rgba(1.0, 1.0, 1.0, if add_hover { 0.9 } else { 0.55 }))?;
+    let ring = rgba(1.0, 1.0, 1.0, if add_hover { 0.55 } else { 0.28 });
+    p.stroke_round_rect(add, 12.0 * scale, 1.2 * scale, ring)?;
+    let sign_alpha = if add_hover { 0.9 } else { 0.55 };
+    if layout.more {
+        p.glyph(
+            '\u{E710}',
+            (add.0, add.1 - 5.0 * scale, add.2, add.3 - 5.0 * scale),
+            14.0 * scale,
+            rgba(1.0, 1.0, 1.0, sign_alpha),
+        )?;
+        for k in 0..3 {
+            let cx = (add.0 + add.2) / 2.0 + (k as f32 - 1.0) * 6.0 * scale;
+            p.fill_ellipse(cx, add.3 - 9.0 * scale, 1.5 * scale, 1.5 * scale, rgba(1.0, 1.0, 1.0, sign_alpha))?;
+        }
+    } else {
+        p.glyph('\u{E710}', add, 16.0 * scale, rgba(1.0, 1.0, 1.0, sign_alpha))?;
+    }
+    if let Some(close) = layout.close {
+        let hover = ui.home.hover_act == Some(701);
+        if hover {
+            p.fill_round_rect(close, 10.0 * scale, rgba(1.0, 1.0, 1.0, 0.12))?;
+        }
+        p.glyph('\u{E711}', close, 13.0 * scale, rgba(1.0, 1.0, 1.0, if hover { 1.0 } else { 0.6 }))?;
+        p.text(
+            "Pinned",
+            (zone.0 + 14.0 * scale, zone.1 + 4.0 * scale, zone.2 - 48.0 * scale, zone.1 + 32.0 * scale),
+            12.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            rgba(1.0, 1.0, 1.0, 0.6),
+        )?;
+    }
     if ui.home.dock.is_empty() {
         p.text(
             "Drop shortcuts, folders or files here",
@@ -382,21 +517,15 @@ pub(in crate::view) fn paint_dock(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
             rgba(1.0, 1.0, 1.0, 0.5),
         )?;
     }
-    if !compact {
+    if !compact || layout.open {
         let name = hovered.map(dock_name).unwrap_or_default();
+        let line = (zone.0 + 14.0 * scale, zone.3 - 30.0 * scale, zone.2 - 14.0 * scale, zone.3 - 8.0 * scale);
         if !name.is_empty() {
+            p.text(&name, line, 13.0 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING, WHITE)?;
+        } else if !ui.home.dock.is_empty() && reorder.is_none() {
             p.text(
-                &name,
-                (zone.0 + 14.0 * scale, zone.3 - 34.0 * scale, zone.2 - 14.0 * scale, zone.3 - 10.0 * scale),
-                13.0 * scale,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                WHITE,
-            )?;
-        } else if !ui.home.dock.is_empty() {
-            p.text(
-                "Click to open, right-click for more",
-                (zone.0 + 14.0 * scale, zone.3 - 34.0 * scale, zone.2 - 14.0 * scale, zone.3 - 10.0 * scale),
+                "Click to open, drag to reorder, right-click for more",
+                line,
                 12.0 * scale,
                 DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -434,7 +563,9 @@ pub enum HomeHit {
     DiscordDeaf,
     DiscordOverlay,
     Dock(usize),
+    DockUnpin(usize),
     DockAdd,
+    DockMore,
     Seek(f32),
     VolumeIcon,
     Edit,
@@ -444,8 +575,11 @@ pub enum HomeHit {
 pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<HomeHit> {
     let (has_media, spotify, strip) = (!ui.media.title.is_empty(), spotify_active(ui), discord_strip(ui));
     let wide = home_wide(ui);
-    if let Some(hit) = hit_dock(pill, scale, px, py, strip, ui.home.dock.len()) {
+    if let Some(hit) = hit_dock(pill, scale, px, py, ui) {
         return Some(hit);
+    }
+    if dock_layout(pill, scale, ui).open {
+        return None;
     }
     if strip {
         for (i, hit) in [HomeHit::DiscordDeaf, HomeHit::DiscordMute, HomeHit::DiscordOverlay].into_iter().enumerate() {
@@ -566,9 +700,9 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         )?;
     } else {
         let side = 72.0 * scale;
-        let cover = (cl + pad, ct + pad, cl + pad + side, ct + pad + side);
+        let cover = (cl + pad, ct + pad, cl + pad + side * cover_aspect(ui), ct + pad + side);
         match &ui.media.cover {
-            Some(c) => p.image(cover, 12.0 * scale, c.size, &c.bgra)?,
+            Some(c) => p.cover(cover, 12.0 * scale, c, ui.cfg.cover_mode)?,
             None => {
                 p.fill_round_rect(cover, 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.1))?;
                 p.glyph('\u{E8D6}', cover, 28.0 * scale, rgba(1.0, 1.0, 1.0, 0.6))?;
@@ -752,10 +886,22 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         rgba(1.0, 1.0, 1.0, if ui.home.edit { 1.0 } else { 0.6 }),
     )?;
 
-    for slot in 0..slot_count(ui) {
+    let carried = ui.home.tile_reorder.as_ref().filter(|_| !ui.home.edit);
+    let slots = slot_count(ui);
+    let order: Vec<usize> =
+        (0..slots).filter(|s| Some(*s) != carried.map(|r| r.from)).chain(carried.map(|r| r.from)).collect();
+    for slot in order {
         let Some(id) = slot_action(ui, slot) else { continue };
         let Some(kind) = tile_kind(id) else { continue };
-        let r = action_tile(pill, scale, slot);
+        let mut r = action_tile(pill, scale, slot);
+        if let Some(c) = carried.filter(|c| c.pos.len() == slots) {
+            let (w, h) = (r.2 - r.0, r.3 - r.1);
+            r = if slot == c.from {
+                c.dragged_rect((w, h))
+            } else {
+                (c.pos[slot].0, c.pos[slot].1, c.pos[slot].0 + w, c.pos[slot].1 + h)
+            };
+        }
         let chosen = ui.cfg.home_actions.contains(&(id as u8));
         let recording = id == 6 && ui.recording_secs.is_some() && !ui.home.edit;
         let hovered = ui.home.hover_act == Some(id);

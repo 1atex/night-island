@@ -4,10 +4,6 @@ pub(in crate::island) const NOTE_SAVE_MS: u32 = 800;
 const DELETE_ARM_MS: u32 = 3000;
 
 impl App {
-    pub(in crate::island) fn remind_active(&self) -> bool {
-        self.ui.tab == view::Tab::Remind
-    }
-
     pub(in crate::island) fn rename_active(&self) -> bool {
         self.ui.tab == view::Tab::Note && self.ui.notes.renaming.is_some() && self.ui.editing
     }
@@ -18,14 +14,12 @@ impl App {
 
     pub(in crate::island) fn note_layout(&self) -> Option<windows::Win32::Graphics::DirectWrite::IDWriteTextLayout> {
         let inner = self.note_inner();
-        let one_line = self.remind_active() || self.rename_active();
+        let one_line = self.rename_active();
         crate::ui::gfx::make_layout(
             self.gpu.dwrite(),
             &self.multi().text(),
             if one_line { 100_000.0 } else { inner.2 - inner.0 },
-            if self.remind_active() {
-                13.5
-            } else if self.rename_active() {
+            if self.rename_active() {
                 13.0
             } else if self.ui.tab == view::Tab::Agy {
                 view::AGY_FONT
@@ -39,7 +33,15 @@ impl App {
     pub(in crate::island) fn save_note(&self) {
         self.kill_timer(Timer::NoteSave);
         if let (Some(store), Some(id)) = (&self.store, self.ui.notes.current) {
-            store.note_set_text(id, &self.ui.note.text());
+            let text = self.ui.note.text();
+            store.note_set_text(id, &text);
+            if let Some((rid, _)) = self.ui.notes.remind {
+                let line: String =
+                    text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().chars().take(200).collect();
+                if !line.is_empty() {
+                    store.reminder_set_text(rid, &line);
+                }
+            }
         }
     }
 
@@ -127,6 +129,114 @@ impl App {
         self.ui.notes.armed_delete = false;
         self.ui.notes.reveal(id);
         self.ensure_row_visible(id);
+        self.ui.notes.picker = None;
+        self.refresh_note_remind();
+        self.repaint_expanded();
+    }
+
+    pub(in crate::island) fn refresh_note_remind(&mut self) {
+        let remind = match (&self.store, self.ui.notes.current) {
+            (Some(store), Some(id)) => store.note_remind(id),
+            _ => None,
+        };
+        self.ui.notes.remind = remind;
+        if let Some(store) = &self.store {
+            self.ui.notes.items = store.note_items();
+        }
+    }
+
+    pub(in crate::island) fn toggle_note_type(&mut self) {
+        let (Some(id), Some(store)) = (self.ui.notes.current, &self.store) else { return };
+        match self.ui.notes.remind {
+            Some((rid, _)) => {
+                store.reminder_remove(rid);
+                store.note_set_remind(id, 0);
+            }
+            None => {
+                let name = self.ui.notes.item(id).map(|i| i.name.clone()).unwrap_or_default();
+                let text = self.ui.note.text();
+                let line: String =
+                    text.lines().find(|l| !l.trim().is_empty()).unwrap_or(&name).trim().chars().take(200).collect();
+                let due = chrono::Local::now().timestamp() + 3600;
+                if let Some(rid) = store.reminder_add_id(due, if line.is_empty() { "Reminder" } else { &line }) {
+                    store.note_set_remind(id, rid);
+                }
+            }
+        }
+        self.reload_reminders();
+        self.repaint_expanded();
+    }
+
+    fn change_remind(
+        &mut self,
+        f: impl FnOnce(chrono::DateTime<chrono::Local>) -> Option<chrono::DateTime<chrono::Local>>,
+    ) {
+        use chrono::{Duration, Local, TimeZone};
+        let Some((rid, due)) = self.ui.notes.remind else { return };
+        let now = Local::now();
+        let current = Local.timestamp_opt(due, 0).single().unwrap_or(now);
+        let Some(next) = f(current) else { return };
+        let next = next.max(now + Duration::minutes(1));
+        if let Some(store) = &self.store {
+            store.reminder_set_due(rid, next.timestamp());
+        }
+        self.reload_reminders();
+    }
+
+    fn picker_click(&mut self, hit: view::NoteHit) {
+        use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone, Timelike};
+        match hit {
+            view::NoteHit::PickMonth(d) => {
+                let (y, m) = self.ui.notes.picker.unwrap_or((2026, 1));
+                let index = y * 12 + m as i32 - 1 + d;
+                let today = Local::now();
+                if index >= today.year() * 12 + today.month() as i32 - 1 {
+                    self.ui.notes.picker = Some((index.div_euclid(12), index.rem_euclid(12) as u32 + 1));
+                }
+            }
+            view::NoteHit::PickDay(day) => {
+                let (y, m) = self.ui.notes.picker.unwrap_or((2026, 1));
+                if NaiveDate::from_ymd_opt(y, m, day).is_some_and(|d| d >= Local::now().date_naive()) {
+                    self.change_remind(|t| {
+                        let date = NaiveDate::from_ymd_opt(y, m, day)?;
+                        Local.from_local_datetime(&date.and_time(t.time())).single()
+                    });
+                }
+            }
+            view::NoteHit::PickHour(d) => self.change_remind(|t| Some(t + Duration::hours(i64::from(d)))),
+            view::NoteHit::PickMinute(d) => self.change_remind(|t| {
+                let m = t.minute() as i32;
+                let to = if d > 0 { (m / 5 + 1) * 5 } else { (m + 4) / 5 * 5 - 5 };
+                Some(t + Duration::minutes(i64::from(to - m)))
+            }),
+            view::NoteHit::PickDone => self.ui.notes.picker = None,
+            _ => {}
+        }
+    }
+
+    pub(in crate::island) fn adjust_note_remind(&mut self, i: usize) {
+        use chrono::{Duration, Local, TimeZone};
+        let Some((rid, due)) = self.ui.notes.remind else { return };
+        let now = Local::now();
+        let current = Local.timestamp_opt(due, 0).single().unwrap_or(now);
+        let next = match i {
+            0 => current - Duration::days(1),
+            1 => current + Duration::days(1),
+            2 => current - Duration::hours(1),
+            3 => current + Duration::hours(1),
+            4 => current - Duration::minutes(10),
+            5 => current + Duration::minutes(10),
+            6 => now + Duration::hours(1),
+            _ => (now.date_naive() + chrono::Days::new(1))
+                .and_hms_opt(9, 0, 0)
+                .and_then(|t| Local.from_local_datetime(&t).single())
+                .unwrap_or(now + Duration::days(1)),
+        };
+        let next = next.max(now + Duration::minutes(1));
+        if let Some(store) = &self.store {
+            store.reminder_set_due(rid, next.timestamp());
+        }
+        self.reload_reminders();
         self.repaint_expanded();
     }
 
@@ -228,6 +338,7 @@ impl App {
                 let Some(id) = self.ui.notes.rows().get(index).map(|(_, i)| i.id) else { return };
                 self.ui.notes.sel = Some(id);
                 self.ui.notes.drag_from = Some(id);
+                self.ui.notes.drag_xy = self.cursor_client().map_or((0, 0), |(x, y)| (x as i32, y as i32));
                 unsafe {
                     windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
                 }
@@ -240,6 +351,7 @@ impl App {
                 }
             }
             view::NoteHit::Delete => self.delete_selected(),
+            _ => {}
         }
         self.repaint_expanded();
     }
@@ -259,7 +371,27 @@ impl App {
         if let Some(hit) = view::hit_note_tree(pill, self.scale, fx, fy, &self.ui) {
             return self.note_tree_click(hit);
         }
-        if !inside(view::note_frame(pill, self.scale).0) {
+        let panel = view::hit_note_panel(pill, self.scale, fx, fy, &self.ui);
+        if self.ui.notes.picker.is_some() {
+            match panel {
+                Some(hit) => self.picker_click(hit),
+                None => self.ui.notes.picker = None,
+            }
+            return self.repaint_expanded();
+        }
+        match panel {
+            Some(view::NoteHit::TypeToggle) => return self.toggle_note_type(),
+            Some(view::NoteHit::Remind(i)) => return self.adjust_note_remind(i),
+            Some(view::NoteHit::RemindOpen) => {
+                use chrono::{Datelike, TimeZone};
+                let due = self.ui.notes.remind.map_or(0, |r| r.1);
+                let when = chrono::Local.timestamp_opt(due, 0).single().unwrap_or_else(chrono::Local::now);
+                self.ui.notes.picker = Some((when.year(), when.month()));
+                return self.repaint_expanded();
+            }
+            _ => {}
+        }
+        if !inside(view::note_frame_for(pill, self.scale, self.ui.notes.remind.is_some()).0) {
             self.end_edit(true);
             return;
         }
@@ -278,10 +410,116 @@ impl App {
         self.note_changed();
     }
 
+    fn tree_slots(&self) -> Vec<view::Rect> {
+        let pill = self.pill_rect(true);
+        let tree = view::note_tree(pill, self.scale);
+        let shown =
+            view::tree_rows_fit(pill, self.scale).min(self.ui.notes.rows().len().saturating_sub(self.ui.notes.scroll));
+        (0..shown).map(|slot| view::tree_row(tree, self.scale, slot)).collect()
+    }
+
+    pub(in crate::island) fn step_tree_reorder(&mut self) -> bool {
+        let slots = self.tree_slots();
+        let rows: Vec<(bool, i64)> = self
+            .ui
+            .notes
+            .rows()
+            .iter()
+            .skip(self.ui.notes.scroll)
+            .take(slots.len())
+            .map(|(_, i)| (i.folder, i.id))
+            .collect();
+        let Some(r) = self.ui.notes.reorder.as_mut() else { return false };
+        let cursor = r.cursor;
+        let into = slots.iter().enumerate().find_map(|(k, s)| {
+            let band = (s.3 - s.1) * 0.25;
+            let (folder, id) = rows.get(k).copied()?;
+            (folder
+                && k != r.from
+                && cursor.0 >= s.0
+                && cursor.0 < s.2
+                && cursor.1 >= s.1 + band
+                && cursor.1 < s.3 - band)
+                .then_some(id)
+        });
+        let moving = r.step(&slots, cursor);
+        let moving = if into.is_some() {
+            r.to = r.from;
+            r.step(&slots, cursor) || moving
+        } else {
+            moving
+        };
+        self.ui.notes.into = into;
+        moving
+    }
+
+    pub(in crate::island) fn drag_notes(&mut self, x: i32, y: i32) {
+        if self.state != State::Expanded || self.ui.tab != view::Tab::Note {
+            return;
+        }
+        let cursor = (x as f32, y as f32);
+        if self.ui.notes.reorder.is_some() {
+            if let Some(r) = self.ui.notes.reorder.as_mut() {
+                r.cursor = cursor;
+            }
+            self.step_tree_reorder();
+            self.set_timer(Timer::UiAnim, 16);
+            return self.repaint_expanded();
+        }
+        let Some(id) = self.ui.notes.drag_from else { return };
+        let (x0, y0) = self.ui.notes.drag_xy;
+        if (x - x0).abs() < 6 && (y - y0).abs() < 6 {
+            return;
+        }
+        let slots = self.tree_slots();
+        let rows = self.ui.notes.rows();
+        let Some(index) = rows.iter().position(|(_, i)| i.id == id) else { return };
+        let Some(slot) = index.checked_sub(self.ui.notes.scroll).filter(|s| *s < slots.len()) else { return };
+        self.ui.notes.reorder = Some(view::Reorder::new(&slots, slot, cursor));
+        self.set_timer(Timer::UiAnim, 16);
+        self.repaint_expanded();
+    }
+
     pub(in crate::island) fn finish_note_drag(&mut self) {
         let Some(from_id) = self.ui.notes.drag_from.take() else { return };
         unsafe {
             let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+        }
+        let carried = self.ui.notes.reorder.take();
+        let into = self.ui.notes.into.take();
+        if let Some(r) = carried {
+            if self.state != State::Expanded || self.ui.tab != view::Tab::Note {
+                return;
+            }
+            let rows: Vec<(i64, Option<i64>)> = self.ui.notes.rows().iter().map(|(_, i)| (i.id, i.parent)).collect();
+            let scroll = self.ui.notes.scroll;
+            let ok = if let Some(folder) = into {
+                self.store.as_ref().is_some_and(|s| s.note_place(from_id, Some(folder), None))
+            } else if r.to == r.from {
+                false
+            } else {
+                let target = rows.get(scroll + r.to).copied();
+                let sibling_after = rows.get(scroll + r.to + 1).copied();
+                match target {
+                    Some((tid, tparent)) if r.to < r.from => {
+                        self.store.as_ref().is_some_and(|s| s.note_place(from_id, tparent, Some(tid)))
+                    }
+                    Some((_, tparent)) => {
+                        let before = sibling_after.filter(|(_, p)| *p == tparent).map(|(i, _)| i);
+                        self.store.as_ref().is_some_and(|s| s.note_place(from_id, tparent, before))
+                    }
+                    None => false,
+                }
+            };
+            if ok {
+                if let Some(t) = into {
+                    self.ui.notes.expanded.insert(t);
+                }
+                self.reload_notes();
+                self.ui.notes.sel = Some(from_id);
+                self.ensure_row_visible(from_id);
+            }
+            return self.repaint_expanded();
         }
         if self.state != State::Expanded || self.ui.tab != view::Tab::Note {
             return;
@@ -365,15 +603,21 @@ impl App {
     }
 
     pub(in crate::island) fn cursor_over_note(&self) -> bool {
-        if self.state != State::Expanded || !matches!(self.ui.tab, view::Tab::Note | view::Tab::Remind) {
+        if self.ui.tab == view::Tab::Note
+            && let Some((x, y)) = self.cursor_client()
+            && view::hit_note_panel(self.pill_rect(true), self.scale, x, y, &self.ui).is_some()
+        {
+            return false;
+        }
+        if self.state != State::Expanded || !matches!(self.ui.tab, view::Tab::Note | view::Tab::Text) {
             return false;
         }
         let Some((x, y)) = self.cursor_client() else { return false };
         let pill = self.pill_rect(true);
-        let frame = if self.ui.tab == view::Tab::Note {
-            view::note_frame(pill, self.scale).0
-        } else {
-            view::remind_frame(pill, self.scale).0
+        let frame = match self.ui.tab {
+            view::Tab::Note => view::note_frame_for(pill, self.scale, self.ui.notes.remind.is_some()).0,
+            view::Tab::Text => view::text_frame(pill, self.scale).0,
+            _ => return false,
         };
         x >= frame.0 && x < frame.2 && y >= frame.1 && y < frame.3
     }

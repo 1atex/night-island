@@ -25,7 +25,7 @@ pub(in crate::view) fn agy_side(pill: Rect, scale: f32) -> (f32, f32) {
 }
 
 pub fn agy_rows() -> usize {
-    (((372.0 - AGY_LIST_TOP) + 4.0) / (AGY_ROW_H + 4.0)).floor() as usize
+    (((372.0 - SUB_H - AGY_LIST_TOP) + 4.0) / (AGY_ROW_H + 4.0)).floor() as usize
 }
 
 pub(in crate::view) fn agy_row(pill: Rect, scale: f32, i: usize) -> Rect {

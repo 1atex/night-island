@@ -204,14 +204,51 @@ impl App {
     }
 
     pub(in crate::island) fn ui_anim_tick(&mut self) {
-        if self.state != State::Expanded || self.ui.tab != view::Tab::Activity {
+        if self.state != State::Expanded {
+            self.ui.tab_change = None;
             return;
         }
-        let moving = self.ui.activity.step_glow(self.ui.home.hover_act);
+        let mut again = false;
+        if let Some(change) = self.ui.tab_change {
+            if change.start.elapsed().as_millis() as u32 >= change.ms {
+                self.ui.tab_change = None;
+            } else {
+                again = true;
+            }
+        }
+        if self.ui.home.reorder.is_some() {
+            again |= self.step_reorder();
+        }
+        if self.ui.tab_drag.is_some() {
+            again |= self.step_tab_drag();
+        }
+        if self.ui.notes.reorder.is_some() {
+            again |= self.step_tree_reorder();
+        }
+        if self.ui.home.tile_reorder.is_some() {
+            again |= self.step_tile_reorder();
+        }
+        if self.ui.tab == view::Tab::Activity {
+            let moving = self.ui.activity.step_glow(self.ui.home.hover_act);
+            again |= moving || self.ui.activity.animating();
+        }
         self.repaint_expanded();
-        if moving || self.ui.activity.animating() {
+        if again {
             self.set_timer(Timer::UiAnim, 16);
         }
+    }
+
+    pub(in crate::island) fn start_tab_change(&mut self, from: view::Tab, to: view::Tab) {
+        use crate::data::settings::TabAnim;
+        if from == to || self.state != State::Expanded || self.settings.tab_anim == TabAnim::None {
+            self.ui.tab_change = None;
+            return;
+        }
+        let index = |t: view::Tab| view::TABS.iter().position(|e| e.0 == t).unwrap_or(0) as i32;
+        let dir = if index(to) >= index(from) { 1.0 } else { -1.0 };
+        let ms = (240.0 / self.settings.tab_anim_speed.max(0.1)) as u32;
+        self.ui.tab_change = Some(view::TabChange { from, start: std::time::Instant::now(), ms, dir });
+        self.set_timer(Timer::UiAnim, 16);
     }
 
     fn pick_app(&mut self, shown: usize) {

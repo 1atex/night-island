@@ -9,6 +9,8 @@ pub(in crate::island) const EAR: f32 = 14.0;
 pub(in crate::island) const DOCK_RADIUS: f32 = 16.0;
 pub(in crate::island) const STRIP_H: i32 = 3;
 
+pub(in crate::island) static SNAP_FIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub(in crate::island) fn window_size(scale: f32, win: Win, docked: bool, cw: f32, room: f32) -> (i32, i32) {
     let (w, h) = if win == Win::Big { EXPANDED } else { (cw, COLLAPSED.1) };
     let top = if docked { 0.0 } else { TOP_MARGIN };
@@ -123,9 +125,15 @@ impl App {
         window_size(self.scale, win, self.docked(), self.cw, self.bump_room())
     }
 
+    pub(in crate::island) fn pill_full(&self) -> view::Rect {
+        let (w, h) = EXPANDED;
+        (PAD * self.scale, self.top_margin() * self.scale, w * self.scale, h * self.scale)
+    }
+
     pub(in crate::island) fn pill_rect(&self, expanded: bool) -> view::Rect {
         let (w, h) = if expanded { EXPANDED } else { (self.cw, COLLAPSED.1) };
-        (PAD * self.scale, self.top_margin() * self.scale, w * self.scale, h * self.scale)
+        let full = (PAD * self.scale, self.top_margin() * self.scale, w * self.scale, h * self.scale);
+        if expanded { view::body_rect(full, self.scale, self.ui.tab) } else { full }
     }
 
     pub(in crate::island) fn update_offsets(&self) {
@@ -143,6 +151,7 @@ impl App {
         if self.state != State::Collapsed {
             return;
         }
+        let animate = !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed);
         let want = view::collapsed_width(&self.ui, COLLAPSED.0);
         if (want - self.cw).abs() < 0.5 {
             return;
@@ -160,7 +169,14 @@ impl App {
         let _ = self.collapsed.resize(window_size(self.scale, Win::Small, docked, self.cw, self.bump_room()));
         self.fit_bump();
         self.update_offsets();
-        let _ = self.animate_to(false, false);
+        if animate {
+            let _ = self.animate_to(false, false);
+        } else {
+            for name in [windows::core::h!("Offset"), windows::core::h!("Size"), windows::core::h!("CornerRadius")] {
+                let _ = self.geometry.StopAnimation(name);
+            }
+            let _ = self.set_geometry_now(Win::Small, false, false);
+        }
     }
 
     pub(in crate::island) fn pill(&self, win: Win, expanded: bool, hidden: bool) -> (Vector2, Vector2, Vector2) {

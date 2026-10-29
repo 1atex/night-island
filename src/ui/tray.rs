@@ -1,13 +1,14 @@
 use std::mem::size_of;
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::PCWSTR;
 
-use crate::ui::i18n::tr;
+use crate::ui::gfx::Gpu;
+use crate::ui::menu::Entry;
 
 pub const WM_TRAY: u32 = WM_APP + 1;
 pub const ID_TOGGLE: usize = 1;
@@ -75,32 +76,17 @@ pub fn click(lparam: LPARAM) -> Click {
     }
 }
 
-pub fn menu(hwnd: HWND) -> Option<usize> {
+pub fn menu(scale: f32, with_gpu: &dyn Fn(&mut dyn FnMut(&Gpu))) -> Option<usize> {
+    let entries = vec![
+        Entry::item(ID_TOGGLE, "Open / close island").glyph('\u{E8A7}'),
+        Entry::item(ID_SETTINGS, "Settings").glyph('\u{E713}'),
+        Entry::item(ID_RESET_POS, "Reset position").glyph('\u{E72C}'),
+        Entry::divider(),
+        Entry::item(ID_EXIT, "Exit").glyph('\u{E7E8}').danger(),
+    ];
+    let mut pt = POINT::default();
     unsafe {
-        let menu = CreatePopupMenu().ok()?;
-        let item = |id: usize, text: &str| {
-            let _ = AppendMenuW(menu, MF_STRING, id, &HSTRING::from(tr(text).as_ref()));
-        };
-        item(ID_TOGGLE, "Open / close island");
-        item(ID_SETTINGS, "Settings");
-        item(ID_RESET_POS, "Reset position");
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-        item(ID_EXIT, "Exit");
-
-        let mut pt = POINT::default();
         let _ = GetCursorPos(&mut pt);
-        let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
-        let cmd = TrackPopupMenu(
-            menu,
-            TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-            pt.x,
-            pt.y,
-            None,
-            hwnd,
-            None,
-        );
-        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(menu);
-        (cmd.0 > 0).then_some(cmd.0 as usize)
     }
+    crate::ui::menu::show(entries, (pt.x, pt.y), true, scale, with_gpu)
 }
