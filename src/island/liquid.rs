@@ -182,6 +182,16 @@ impl App {
     }
 
     pub(in crate::island) fn paint_open_eq(&self) {
+        if TICKS.get().is_multiple_of(150) {
+            crate::log_info!(
+                "open equalizer: style {:?}, window {:?}, ring {:?}, levels {:.2}/{:.2}",
+                self.settings.eq_style,
+                self.window_size(self.win),
+                self.liquid.ring.size(),
+                audio::level(0),
+                audio::level(audio::BANDS / 2)
+            );
+        }
         if self.settings.eq_style.around() {
             self.paint_ring();
         } else {
@@ -207,7 +217,7 @@ impl App {
         let (tip, palette) = (self.eq_tip(), self.eq_palette());
         let seam = 3.0 * s;
         let _ = self.liquid.ring.paint(&self.gpu, |p| {
-            let clear = crate::ui::gfx::rgba(tip.r, tip.g, tip.b, 0.0);
+            let clear = crate::ui::gfx::rgba(0.0, 0.0, 0.0, 0.0);
             let old = p.push_offset(l + r, t + h - seam);
             let _ = p.fill_spikes(width, seam, &levels, depth, clear, tip, shape, palette);
             p.set_transform(&old);
@@ -349,6 +359,9 @@ impl App {
             }
             if self.state != State::Collapsed {
                 self.set_bump_visible(false);
+            }
+            if show {
+                self.set_timer(Timer::Spectrum, self.frame_ms());
             }
             return;
         }

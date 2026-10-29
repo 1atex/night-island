@@ -434,32 +434,32 @@ fn paint_progress_outline(p: &Painter, pill: Rect, scale: f32, ui: &UiState, fra
         rgba(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0)
     };
     let thick = 2.6 * scale;
-    let steps = ((perimeter / (3.0 * scale)) as usize).clamp(48, 400);
+    let steps = ((perimeter / (2.0 * scale)) as usize).clamp(64, 600);
+    let faint = rgba(1.0, 1.0, 1.0, 0.1);
+    let track = (x + inset, y + inset, x + w - inset, y + h - inset);
+    p.stroke_round_rect(track, r, thick, faint)?;
     let left_middle = half + arc + straight + arc / 2.0;
     let bottom_start = half + 2.0 * arc + straight;
     for i in 0..steps {
         let (s0, s1) = (perimeter * i as f32 / steps as f32, perimeter * (i + 1) as f32 / steps as f32);
-        let (a, b) = match ui.cfg.progress_style {
-            ProgressStyle::OutlineFromLeft => (point(left_middle + s0), point(left_middle + s1)),
-            _ => (point(s0), point(s1)),
-        };
-        let faint = rgba(1.0, 1.0, 1.0, 0.1);
+        let mid = (s0 + s1) / 2.0;
         let colour = match ui.cfg.progress_style {
             ProgressStyle::OutlineFromLeft => {
-                if s0 / perimeter < fraction {
-                    tone(s0 / perimeter)
-                } else {
-                    faint
-                }
+                let away = (mid - left_middle).rem_euclid(perimeter);
+                let t = away.min(perimeter - away) / (perimeter / 2.0);
+                (t <= fraction).then(|| tone(t))
             }
             _ => {
-                let along = (s0 + perimeter - bottom_start).rem_euclid(perimeter);
+                let along = (mid + perimeter - bottom_start).rem_euclid(perimeter);
                 let on_bottom = straight > 1.0 && along < straight;
-                let t = ((a.0 - x) / w.max(1.0)).clamp(0.0, 1.0);
-                if !on_bottom || along / straight < fraction { tone(t) } else { faint }
+                let t = ((point(mid).0 - x) / w.max(1.0)).clamp(0.0, 1.0);
+                (!on_bottom || along / straight < fraction).then(|| tone(t))
             }
         };
+        let Some(colour) = colour else { continue };
+        let (a, b) = (point(s0), point(s1 + 0.5 * scale));
         p.line(a, b, thick, colour)?;
+        p.fill_ellipse(b.0, b.1, thick / 2.0, thick / 2.0, colour)?;
     }
     Ok(())
 }

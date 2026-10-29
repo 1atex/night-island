@@ -109,7 +109,7 @@ impl App {
         self.place(Win::Small);
         let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings));
         let _ = self.collapsed.resize(small);
-        let _ = self.liquid.ring.resize(self.window_size(self.win));
+        self.resize_ring();
         self.fit_bump();
         let _ = self.set_geometry_now(Win::Small, false, false);
         self.schedule_autohide();

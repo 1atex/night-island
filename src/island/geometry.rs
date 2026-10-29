@@ -213,6 +213,16 @@ impl App {
         if expanded { view::body_rect(full, self.scale, self.ui.tab) } else { full }
     }
 
+    pub(in crate::island) fn resize_ring(&mut self) {
+        let size = self.window_size(self.win);
+        if self.liquid.ring.size() == size {
+            return;
+        }
+        let _ = self.liquid.ring.resize(size);
+        let _ = self.liquid.ring.paint(&self.gpu, |_| {});
+        let _ = self.liquid.ring.sprite.SetIsVisible(false);
+    }
+
     pub(in crate::island) fn update_offsets(&self) {
         let (win_w, _) = self.window_size(self.win);
         let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings)).0;
@@ -248,7 +258,7 @@ impl App {
         let docked = self.docked();
         let small = window_size(self.scale, Win::Small, docked, self.cw, &window_room(&self.settings));
         let _ = self.collapsed.resize(small);
-        let _ = self.liquid.ring.resize(self.window_size(self.win));
+        self.resize_ring();
         self.fit_bump();
         self.update_offsets();
         if animate {
@@ -311,7 +321,7 @@ impl App {
             let _ =
                 SetWindowPos(self.hwnd, Some(HWND_TOPMOST), x.round() as i32, y.round() as i32, w, h, SWP_NOACTIVATE);
         }
-        let _ = self.liquid.ring.resize(self.window_size(win));
+        self.resize_ring();
         self.update_offsets();
     }
 
@@ -367,7 +377,7 @@ impl App {
         let _ = self.set_geometry_now(win, expanded, hidden);
         let small = window_size(self.scale, Win::Small, docked, self.cw, &window_room(&self.settings));
         let _ = self.collapsed.resize(small);
-        let _ = self.liquid.ring.resize(self.window_size(self.win));
+        self.resize_ring();
         let _ = self.expanded.resize(window_size(self.scale, Win::Big, docked, self.cw, &window_room(&self.settings)));
         let _ = self.liquid.bump.resize(bump_size(self.scale, self.cw));
         let _ = self
