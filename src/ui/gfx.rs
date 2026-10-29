@@ -45,6 +45,26 @@ pub struct RingPt {
     pub d: f32,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Single,
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub base: (u8, u8, u8),
+    pub tone: Tone,
+}
+
+impl Palette {
+    pub fn at(&self, t: f32, alpha: f32) -> D2D1_COLOR_F {
+        let (r, g, b) = crate::platform::media::gradient(self.base, t.clamp(0.0, 1.0));
+        D2D1_COLOR_F { r: f32::from(r) / 255.0, g: f32::from(g) / 255.0, b: f32::from(b) / 255.0, a: alpha }
+    }
+}
+
 pub const WHITE: D2D1_COLOR_F = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 
 pub fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
@@ -544,6 +564,7 @@ impl Painter<'_> {
         color: D2D1_COLOR_F,
         tip: D2D1_COLOR_F,
         shape: EdgeShape,
+        palette: Palette,
     ) -> Result<ID2D1PathGeometry> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
         use windows::Win32::Graphics::Direct2D::{
@@ -555,13 +576,18 @@ impl Painter<'_> {
             let top = seam - 1.0;
             let slot = width / levels.len().max(1) as f32;
             let half = slot * 0.5;
-            let tinted = (tip.r, tip.g, tip.b) != (color.r, color.g, color.b);
-            let stops = [
-                D2D1_GRADIENT_STOP { position: 0.0, color: D2D1_COLOR_F { a: 0.0, ..tip } },
-                D2D1_GRADIENT_STOP { position: 0.55, color: D2D1_COLOR_F { a: 0.85, ..tip } },
-                D2D1_GRADIENT_STOP { position: 1.0, color: tip },
-            ];
-            let collection = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+            let tinted = palette.tone != Tone::Single || (tip.r, tip.g, tip.b) != (color.r, color.g, color.b);
+            let stops_for = |t0: f32, t1: f32| {
+                let stop = |position: f32, alpha: f32| {
+                    let colour = match palette.tone {
+                        Tone::Single => D2D1_COLOR_F { a: alpha, ..tip },
+                        Tone::Horizontal => palette.at(t0, alpha),
+                        Tone::Vertical => palette.at(t1 * position, alpha),
+                    };
+                    D2D1_GRADIENT_STOP { position, color: colour }
+                };
+                [stop(0.0, 0.0), stop(0.55, 0.85), stop(1.0, 1.0)]
+            };
             let solid = self.dc.CreateSolidColorBrush(&color, None)?;
 
             if shape == EdgeShape::Wave {
@@ -600,12 +626,34 @@ impl Painter<'_> {
                 self.dc.FillGeometry(&geometry, &solid, None);
                 if tinted {
                     let reach = ys.iter().copied().fold(1.0, f32::max);
-                    let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                        startPoint: pt(width / 2.0, seam + reach * 0.1),
-                        endPoint: pt(width / 2.0, seam + reach),
-                    };
-                    let brush = self.dc.CreateLinearGradientBrush(&props, None, &collection)?;
-                    self.dc.FillGeometry(&geometry, &brush, None);
+                    if palette.tone == Tone::Horizontal {
+                        let stops: Vec<D2D1_GRADIENT_STOP> = (0..=6)
+                            .map(|k| D2D1_GRADIENT_STOP {
+                                position: k as f32 / 6.0,
+                                color: palette.at(k as f32 / 6.0, 0.9),
+                            })
+                            .collect();
+                        let along =
+                            self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                            startPoint: pt(0.0, seam),
+                            endPoint: pt(width, seam),
+                        };
+                        let brush = self.dc.CreateLinearGradientBrush(&props, None, &along)?;
+                        self.dc.FillGeometry(&geometry, &brush, None);
+                    } else {
+                        let own = self.dc.CreateGradientStopCollection(
+                            &stops_for(0.0, 1.0),
+                            D2D1_GAMMA_2_2,
+                            D2D1_EXTEND_MODE_CLAMP,
+                        )?;
+                        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                            startPoint: pt(width / 2.0, seam + reach * 0.1),
+                            endPoint: pt(width / 2.0, seam + reach),
+                        };
+                        let brush = self.dc.CreateLinearGradientBrush(&props, None, &own)?;
+                        self.dc.FillGeometry(&geometry, &brush, None);
+                    }
                 }
                 return Ok(geometry);
             }
@@ -673,27 +721,46 @@ impl Painter<'_> {
                     startPoint: pt(cx, seam + d * 0.15),
                     endPoint: pt(cx, seam + d),
                 };
-                let brush = self.dc.CreateLinearGradientBrush(&props, None, &collection)?;
+                let own = self.dc.CreateGradientStopCollection(
+                    &stops_for(cx / width.max(1.0), d / depth.max(1.0)),
+                    D2D1_GAMMA_2_2,
+                    D2D1_EXTEND_MODE_CLAMP,
+                )?;
+                let brush = self.dc.CreateLinearGradientBrush(&props, None, &own)?;
                 self.dc.FillGeometry(&one, &brush, None);
             }
             Ok(geometry)
         }
     }
 
-    pub fn fill_ring(&self, points: &[RingPt], aura: bool, color: D2D1_COLOR_F, ray: f32) -> Result<()> {
+    pub fn fill_ring(
+        &self,
+        points: &[RingPt],
+        aura: bool,
+        color: D2D1_COLOR_F,
+        ray: f32,
+        palette: Palette,
+    ) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_FILL_MODE_ALTERNATE;
         let n = points.len();
         if n < 3 {
             return Ok(());
         }
         let reach = points.iter().map(|p| p.d).fold(1.0, f32::max);
+        let (x_min, x_max) = points.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p.x), hi.max(p.x)));
+        let across = |x: f32| ((x - x_min) / (x_max - x_min).max(1.0)).clamp(0.0, 1.0);
         unsafe {
             let factory: ID2D1Factory = self.dc.GetFactory()?;
             let pt = |x: f32, y: f32| windows_numerics::Vector2 { X: x, Y: y };
             if !aura {
                 for p in points.iter().filter(|p| p.d >= 0.8) {
                     let alpha = (0.4 + 0.6 * (p.d / reach)).clamp(0.0, 1.0);
-                    let brush = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: alpha, ..color }, None)?;
+                    let ray_colour = match palette.tone {
+                        Tone::Single => color,
+                        Tone::Horizontal => palette.at(across(p.x), 1.0),
+                        Tone::Vertical => palette.at(p.d / reach, 1.0),
+                    };
+                    let brush = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: alpha, ..ray_colour }, None)?;
                     let (tx, ty) = (-p.ny, p.nx);
                     let half = ray / 2.0;
                     let (bx, by) = (p.x - p.nx * 2.0, p.y - p.ny * 2.0);
@@ -741,10 +808,48 @@ impl Painter<'_> {
             }
             sink.EndFigure(D2D1_FIGURE_END_CLOSED);
             sink.Close()?;
-            let fill = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: 0.38, ..color }, None)?;
-            self.dc.FillGeometry(&band, &fill, None);
-            let line = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: 0.95, ..color }, None)?;
-            self.dc.DrawGeometry(&edge, &line, (ray * 0.55).max(1.2), None);
+            let width = (ray * 0.55).max(1.2);
+            match palette.tone {
+                Tone::Single => {
+                    let fill = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: 0.38, ..color }, None)?;
+                    self.dc.FillGeometry(&band, &fill, None);
+                    let line = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: 0.95, ..color }, None)?;
+                    self.dc.DrawGeometry(&edge, &line, width, None);
+                }
+                Tone::Horizontal => {
+                    use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+                    use windows::Win32::Graphics::Direct2D::{
+                        D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+                    };
+                    let along = |alpha: f32| -> Result<_> {
+                        let stops: Vec<D2D1_GRADIENT_STOP> = (0..=8)
+                            .map(|k| D2D1_GRADIENT_STOP {
+                                position: k as f32 / 8.0,
+                                color: palette.at(k as f32 / 8.0, alpha),
+                            })
+                            .collect();
+                        let collection =
+                            self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                            startPoint: pt(x_min, 0.0),
+                            endPoint: pt(x_max, 0.0),
+                        };
+                        self.dc.CreateLinearGradientBrush(&props, None, &collection)
+                    };
+                    self.dc.FillGeometry(&band, &along(0.38)?, None);
+                    self.dc.DrawGeometry(&edge, &along(0.95)?, width, None);
+                }
+                Tone::Vertical => {
+                    let fill = self.dc.CreateSolidColorBrush(&palette.at(0.2, 0.38), None)?;
+                    self.dc.FillGeometry(&band, &fill, None);
+                    for i in 0..n {
+                        let (a, b) = (&outer[i], &outer[(i + 1) % n]);
+                        let t = (points[i].d + points[(i + 1) % n].d) / 2.0 / reach;
+                        let brush = self.dc.CreateSolidColorBrush(&palette.at(t, 0.95), None)?;
+                        self.dc.DrawLine(pt(a.0, a.1), pt(b.0, b.1), &brush, width, None);
+                    }
+                }
+            }
         }
         Ok(())
     }

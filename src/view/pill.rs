@@ -375,6 +375,9 @@ pub fn progress_strip_on(ui: &UiState) -> bool {
 
 fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let Some((pos, len)) = crate::platform::media::progress().filter(|_| progress_strip_on(ui)) else { return Ok(()) };
+    if ui.cfg.progress_style != crate::data::settings::ProgressStyle::Strip {
+        return paint_progress_outline(p, pill, scale, ui, (pos / len).clamp(0.0, 1.0));
+    }
     let (x, y, w, h) = pill;
     let thick = 3.0 * scale;
     let r = h / 2.0;
@@ -395,6 +398,68 @@ fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         let (r, g, b) = crate::platform::media::gradient(base, i as f32 / (STEPS - 1) as f32);
         let c = rgba(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0);
         p.fill_rect((a, top, (a + step + 0.5).min(filled), top + thick), c)?;
+    }
+    Ok(())
+}
+
+fn paint_progress_outline(p: &Painter, pill: Rect, scale: f32, ui: &UiState, fraction: f32) -> Result<()> {
+    use crate::data::settings::ProgressStyle;
+    let (x, y, w, h) = pill;
+    let inset = 1.8 * scale;
+    let r = h / 2.0 - inset;
+    let straight = (w - h).max(0.0);
+    let arc = std::f32::consts::PI * r;
+    let perimeter = 2.0 * straight + 2.0 * arc;
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+    let half = straight / 2.0;
+    let point = |at: f32| -> (f32, f32) {
+        let at = at.rem_euclid(perimeter);
+        if at < half {
+            (cx + at, cy + r)
+        } else if at < half + arc {
+            let a = (at - half) / r;
+            (cx + half + r * a.sin(), cy + r * a.cos())
+        } else if at < half + arc + straight {
+            (cx + half - (at - half - arc), cy - r)
+        } else if at < half + 2.0 * arc + straight {
+            let a = std::f32::consts::PI + (at - half - arc - straight) / r;
+            (cx - half + r * a.sin(), cy + r * a.cos())
+        } else {
+            (cx - half + (at - half - 2.0 * arc - straight), cy + r)
+        }
+    };
+    let base = ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
+    let tone = |t: f32| {
+        let (r, g, b) = crate::platform::media::gradient(base, t.clamp(0.0, 1.0));
+        rgba(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0)
+    };
+    let thick = 2.6 * scale;
+    let steps = ((perimeter / (3.0 * scale)) as usize).clamp(48, 400);
+    let left_middle = half + arc + straight + arc / 2.0;
+    let bottom_start = half + 2.0 * arc + straight;
+    for i in 0..steps {
+        let (s0, s1) = (perimeter * i as f32 / steps as f32, perimeter * (i + 1) as f32 / steps as f32);
+        let (a, b) = match ui.cfg.progress_style {
+            ProgressStyle::OutlineFromLeft => (point(left_middle + s0), point(left_middle + s1)),
+            _ => (point(s0), point(s1)),
+        };
+        let faint = rgba(1.0, 1.0, 1.0, 0.1);
+        let colour = match ui.cfg.progress_style {
+            ProgressStyle::OutlineFromLeft => {
+                if s0 / perimeter < fraction {
+                    tone(s0 / perimeter)
+                } else {
+                    faint
+                }
+            }
+            _ => {
+                let along = (s0 + perimeter - bottom_start).rem_euclid(perimeter);
+                let on_bottom = straight > 1.0 && along < straight;
+                let t = ((a.0 - x) / w.max(1.0)).clamp(0.0, 1.0);
+                if !on_bottom || along / straight < fraction { tone(t) } else { faint }
+            }
+        };
+        p.line(a, b, thick, colour)?;
     }
     Ok(())
 }

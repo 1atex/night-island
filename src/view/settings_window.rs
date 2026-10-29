@@ -55,7 +55,7 @@ const APPEARANCE: [(Sid, &str, Kind); 5] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 14] = [
+const PILL: [(Sid, &str, Kind); 16] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
@@ -66,9 +66,11 @@ const PILL: [(Sid, &str, Kind); 14] = [
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
     (Sid::MusicProgress, "Song progress strip", Kind::Toggle),
+    (Sid::ProgressStyle, "Progress style", Kind::Cycle),
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
     (Sid::EqStyle, "Equalizer shape", Kind::Cycle),
     (Sid::EqStrength, "Equalizer strength", Kind::Slider),
+    (Sid::EqGradient, "Equalizer colours", Kind::Cycle),
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
@@ -161,7 +163,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (3, "Music"), (10, "Edges")],
+        sections: &[(0, "Pill"), (3, "Music"), (11, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',

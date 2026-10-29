@@ -270,6 +270,59 @@ impl EqStyle {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EqGradient {
+    #[default]
+    Single,
+    Vertical,
+    Horizontal,
+}
+
+impl EqGradient {
+    pub fn name(self) -> &'static str {
+        match self {
+            EqGradient::Single => "One colour",
+            EqGradient::Vertical => "Gradient outwards",
+            EqGradient::Horizontal => "Gradient left to right",
+        }
+    }
+
+    pub const ALL: [EqGradient; 3] = [EqGradient::Single, EqGradient::Vertical, EqGradient::Horizontal];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ProgressStyle {
+    #[default]
+    Strip,
+    OutlineFromLeft,
+    OutlineBottom,
+}
+
+impl ProgressStyle {
+    pub fn name(self) -> &'static str {
+        match self {
+            ProgressStyle::Strip => "Strip along the bottom",
+            ProgressStyle::OutlineFromLeft => "Outline from the left side",
+            ProgressStyle::OutlineBottom => "Outline, the bottom fills",
+        }
+    }
+
+    pub const ALL: [ProgressStyle; 3] =
+        [ProgressStyle::Strip, ProgressStyle::OutlineFromLeft, ProgressStyle::OutlineBottom];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -311,6 +364,8 @@ pub struct Settings {
     pub frame_rate: FrameRate,
     pub eq_style: EqStyle,
     pub eq_strength: f32,
+    pub eq_gradient: EqGradient,
+    pub progress_style: ProgressStyle,
     pub text_layout: TextLayout,
     pub dev_tools: bool,
     pub shared_lyrics: bool,
@@ -401,6 +456,8 @@ impl Default for Settings {
             frame_rate: FrameRate::Fps30,
             eq_style: EqStyle::Spikes,
             eq_strength: 1.0,
+            eq_gradient: EqGradient::Single,
+            progress_style: ProgressStyle::Strip,
             text_layout: TextLayout::Categories,
             dev_tools: false,
             shared_lyrics: false,

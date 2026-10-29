@@ -85,6 +85,21 @@ impl App {
             && self.state == State::Collapsed
     }
 
+    fn eq_palette(&self) -> crate::ui::gfx::Palette {
+        use crate::data::settings::EqGradient;
+        let base = if self.settings.spike_color {
+            self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8)
+        } else {
+            crate::ui::theme::accent_u8()
+        };
+        let tone = match self.settings.eq_gradient {
+            EqGradient::Single => crate::ui::gfx::Tone::Single,
+            EqGradient::Vertical => crate::ui::gfx::Tone::Vertical,
+            EqGradient::Horizontal => crate::ui::gfx::Tone::Horizontal,
+        };
+        crate::ui::gfx::Palette { base, tone }
+    }
+
     pub(in crate::island) fn refresh_eq_shape(&mut self) {
         let _ = self.liquid.ring.sprite.SetIsVisible(false);
         self.set_bump_visible(false);
@@ -114,6 +129,7 @@ impl App {
             })
             .collect();
         let depth = self.settings.liquid_strength * s * 0.9 * self.settings.eq_strength;
+        let palette = self.eq_palette();
         let shape = match self.settings.eq_style {
             crate::data::settings::EqStyle::Wave => crate::ui::gfx::EdgeShape::Wave,
             crate::data::settings::EqStyle::Bars => crate::ui::gfx::EdgeShape::Bars,
@@ -130,7 +146,7 @@ impl App {
             } else {
                 base
             };
-            if let Ok(shape) = p.fill_spikes(w as f32, self.seam_px(), &levels, depth, base, tip, shape) {
+            if let Ok(shape) = p.fill_spikes(w as f32, self.seam_px(), &levels, depth, base, tip, shape, palette) {
                 self.clip_bump_blur(&shape);
             }
         });
@@ -197,8 +213,9 @@ impl App {
             crate::ui::gfx::rgba((r * k).min(1.0), (g * k).min(1.0), (b * k).min(1.0), 1.0)
         };
         let aura = self.settings.eq_style == crate::data::settings::EqStyle::Aura;
+        let palette = self.eq_palette();
         let _ = self.liquid.ring.paint(&self.gpu, |p| {
-            let _ = p.fill_ring(&points, aura, tip, 3.0 * s);
+            let _ = p.fill_ring(&points, aura, tip, 3.0 * s, palette);
         });
         let _ = self.liquid.ring.sprite.SetIsVisible(points.iter().any(|p| p.d > 0.8));
     }
