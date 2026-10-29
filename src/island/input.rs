@@ -107,7 +107,7 @@ impl App {
         } else {
             (self.cw * s, COLLAPSED.1 * s)
         };
-        let (px, py) = (rc.left as f32 + PAD * s, rc.top as f32 + self.top_margin() * s);
+        let (px, py) = (rc.left as f32 + self.win_pad().0 * s, rc.top as f32 + self.win_pad().1 * s);
         let (mid_x, mid_y) = (px + cw / 2.0, py + ch / 2.0);
         if self.docked() {
             let near = [
@@ -589,7 +589,7 @@ impl App {
         let s = self.scale;
         let (win_w, _) = self.window_size(self.win);
         let (w, h) = (self.cw * s, COLLAPSED.1 * s);
-        let (left, top) = ((win_w as f32 - w) / 2.0, self.top_margin() * s);
+        let (left, top) = ((win_w as f32 - w) / 2.0, self.win_pad().1 * s);
         let tol = 3.0 * s;
         let (fx, fy) = (x as f32, y as f32);
         fx >= left - tol && fx < left + w + tol && fy >= top - tol - 40.0 && fy < top + h + tol

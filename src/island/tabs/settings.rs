@@ -131,9 +131,13 @@ impl App {
                         lockkeys::stop();
                     }
                 }
-                EqStyle | EqStrength => self.refresh_eq_shape(),
+                EqStyle | Spikes => {
+                    self.apply_layout();
+                    self.refresh_eq_shape();
+                }
+                EqStrength => self.refresh_eq_shape(),
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
-                | PillBattery | SpikeColor | Spikes => {
+                | PillBattery | SpikeColor => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }

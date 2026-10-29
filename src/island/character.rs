@@ -21,7 +21,7 @@ impl App {
         let s = self.scale;
         let (win_w, _) = self.window_size(self.win);
         let x = (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s;
-        let y = self.top_margin() * s + (COLLAPSED.1 - characters::BOX_H) * s / 2.0;
+        let y = self.win_pad().1 * s + (COLLAPSED.1 - characters::BOX_H) * s / 2.0;
         let _ = self.pet.char_layer.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
     }
 
@@ -99,7 +99,7 @@ impl App {
                 let s = self.scale;
                 let (win_w, _) = self.window_size(self.win);
                 let cx = rc.left as f32 + (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s + cw / 2.0;
-                let cy = rc.top as f32 + self.top_margin() * s + COLLAPSED.1 * s / 2.0 + ch * 0.0;
+                let cy = rc.top as f32 + self.win_pad().1 * s + COLLAPSED.1 * s / 2.0 + ch * 0.0;
                 (((pt.x as f32 - cx) / 260.0).clamp(-1.0, 1.0), ((pt.y as f32 - cy) / 200.0).clamp(-1.0, 1.0))
             } else {
                 (0.0, 0.0)

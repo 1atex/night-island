@@ -107,7 +107,8 @@ impl App {
         self.set_blur(false);
         self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         self.place(Win::Small);
-        let small = window_size(self.scale, Win::Small, self.docked(), self.cw, self.bump_room());
+        let small =
+            window_size(self.scale, Win::Small, self.docked(), self.cw, self.bump_room(), self.settings.ring_wanted());
         let _ = self.collapsed.resize(small);
         let _ = self.liquid.ring.resize(small);
         self.fit_bump();

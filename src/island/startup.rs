@@ -145,9 +145,11 @@ impl App {
         let scale = dpi_scale * settings.scale_percent as f32 / 100.0;
         let gpu = Gpu::new(&compositor)?;
         let docked = settings.placement == Placement::Docked;
-        let collapsed =
-            gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, bump_room_for(&settings)))?;
-        let expanded = gpu.layer(&compositor, window_size(scale, Win::Big, docked, COLLAPSED.0, 0.0))?;
+        let collapsed = gpu.layer(
+            &compositor,
+            window_size(scale, Win::Small, docked, COLLAPSED.0, bump_room_for(&settings), settings.ring_wanted()),
+        )?;
+        let expanded = gpu.layer(&compositor, window_size(scale, Win::Big, docked, COLLAPSED.0, 0.0, false))?;
         let ear_px = ((EAR * scale).round() as i32, (EAR * scale).round() as i32);
         let ears = [gpu.layer(&compositor, ear_px)?, gpu.layer(&compositor, ear_px)?];
         for ear in &ears {
@@ -159,8 +161,10 @@ impl App {
         let char_layer = gpu.layer(&compositor, char_px)?;
         char_layer.sprite.SetIsVisible(false)?;
 
-        let ring =
-            gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, bump_room_for(&settings)))?;
+        let ring = gpu.layer(
+            &compositor,
+            window_size(scale, Win::Small, docked, COLLAPSED.0, bump_room_for(&settings), settings.ring_wanted()),
+        )?;
         ring.sprite.SetIsVisible(false)?;
         let bump = gpu.layer(&compositor, bump_size(scale, COLLAPSED.0))?;
         bump.sprite.SetIsVisible(false)?;

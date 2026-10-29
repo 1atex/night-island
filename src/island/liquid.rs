@@ -17,7 +17,8 @@ pub(in crate::island) const SPEC_H: f32 = 24.0;
 
 pub(in crate::island) fn bump_room_for(settings: &Settings) -> f32 {
     let docked_elsewhere = settings.placement == Placement::Docked && settings.dock_edge != Edge::Top;
-    if settings.style == Style::Liquid && !docked_elsewhere { BUMP_ROOM } else { 0.0 }
+    let liquid = if settings.style == Style::Liquid && !docked_elsewhere { BUMP_ROOM } else { 0.0 };
+    if settings.ring_wanted() { liquid.max(RING_ROOM) } else { liquid }
 }
 
 pub(in crate::island) fn bump_size(scale: f32, width: f32) -> (i32, i32) {
@@ -61,7 +62,7 @@ impl App {
         let pill_left = (win_w as f32 - self.cw * s) / 2.0;
         let Some(bars) = view::music_slots(&self.ui, s, self.cw * s).bars else { return };
         let x0 = pill_left + bars.0;
-        let y = self.top_margin() * s + (COLLAPSED.1 - SPEC_H) * s / 2.0;
+        let y = self.win_pad().1 * s + (COLLAPSED.1 - SPEC_H) * s / 2.0;
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetSize(Vector2 { X: SPEC_W * s, Y: SPEC_H * s });
             let _ = bar.SetCenterPoint(Vector3 { X: 0.0, Y: SPEC_H * s / 2.0, Z: 0.0 });
@@ -139,14 +140,14 @@ impl App {
     pub(in crate::island) fn paint_ring(&self) {
         use crate::ui::gfx::RingPt;
         let s = self.scale;
-        let (win_w, win_h) = self.window_size(Win::Small);
-        let (l, t) = (PAD * s, self.top_margin() * s);
+        let (px, py) = self.small_pad();
+        let (l, t) = (px * s, py * s);
         let (w, h) = (self.cw * s, COLLAPSED.1 * s);
         let r = h / 2.0;
         let straight = (w - h).max(0.0);
         let perimeter = 2.0 * straight + 2.0 * std::f32::consts::PI * r;
         let n = ((perimeter / (9.0 * s)) as usize).clamp(24, 160) & !1;
-        let room = (l, (win_w as f32 - l - w).max(0.0), t, (win_h as f32 - t - h).max(0.0));
+        let free = RING_ROOM * s - 2.0;
         let depth = self.settings.liquid_strength * s * 0.9 * self.settings.eq_strength;
         let (cx, cy) = (l + w / 2.0, t + h / 2.0);
         let half = straight / 2.0;
@@ -181,10 +182,7 @@ impl App {
         let points: Vec<RingPt> = (0..n)
             .map(|i| {
                 let (x, y, nx, ny) = outline(perimeter * (i as f32 + 0.5) / n as f32);
-                let fit = |room: f32, dir: f32| if dir.abs() > 0.001 { room / dir.abs() } else { f32::MAX };
-                let free = fit(if nx > 0.0 { room.1 } else { room.0 }, nx)
-                    .min(fit(if ny > 0.0 { room.3 } else { room.2 }, ny));
-                let d = (smooth[i].clamp(0.0, 1.0) * depth).min((free - 2.0).max(0.0));
+                let d = (smooth[i].clamp(0.0, 1.0) * depth).min(free.max(0.0));
                 RingPt { x, y, nx, ny, d }
             })
             .collect();
@@ -317,7 +315,7 @@ impl App {
     pub(in crate::island) fn place_bump(&self) {
         let (win_w, _) = self.window_size(self.win);
         let x = (win_w - bump_size(self.scale, self.cw).0) as f32 / 2.0;
-        let y = (self.top_margin() + COLLAPSED.1) * self.scale - BUMP_SEAM * self.scale;
+        let y = (self.win_pad().1 + COLLAPSED.1) * self.scale - BUMP_SEAM * self.scale;
         let _ = self.liquid.bump.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
     }
 
@@ -376,7 +374,7 @@ impl App {
         let strength = self.settings.liquid_strength * s;
         let (win_w, _) = self.window_size(self.win);
         let dx = (pt.x - rc.left) as f32 - win_w as f32 / 2.0;
-        let dy = (pt.y - rc.top) as f32 - (self.top_margin() + COLLAPSED.1) * s;
+        let dy = (pt.y - rc.top) as f32 - (self.win_pad().1 + COLLAPSED.1) * s;
         let straight = (self.cw - COLLAPSED.1) / 2.0 * s;
         let slack = 120.0 * s;
         if dy > reach || dx.abs() > straight + slack {
@@ -429,7 +427,7 @@ impl App {
 
             let (win_w, _) = self.window_size(self.win);
             let base_x = (win_w - self.liquid.bump.size().0) as f32 / 2.0;
-            let base_y = (self.top_margin() + COLLAPSED.1) * s - BUMP_SEAM * s;
+            let base_y = (self.win_pad().1 + COLLAPSED.1) * s - BUMP_SEAM * s;
             let drift = ((self.liquid.bump.size().0 as f32 / 2.0) - self.bump_half(IDLE_AMP * s)) * 0.8;
             let drift_anim = self.compositor.CreateVector3KeyFrameAnimation()?;
             let at = |dx: f32| Vector3 { X: base_x + dx, Y: base_y, Z: 0.0 };

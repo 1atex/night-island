@@ -660,6 +660,10 @@ pub const HIDEABLE_TABS: [&str; 10] =
     ["Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
 
 impl Settings {
+    pub fn ring_wanted(&self) -> bool {
+        self.edge_spikes && self.eq_style.around()
+    }
+
     pub fn tab_hidden(&self, name: &str) -> bool {
         self.hidden_tabs.iter().any(|t| t == name)
     }
