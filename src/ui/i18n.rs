@@ -1,458 +1,18 @@
 use std::borrow::Cow;
-#[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(not(test))]
 static RU: AtomicBool = AtomicBool::new(true);
 
-#[cfg(test)]
-thread_local! {
-    static RU: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
-}
-
 pub fn set_ru(on: bool) {
-    #[cfg(not(test))]
     RU.store(on, Ordering::Relaxed);
-    #[cfg(test)]
-    RU.set(on);
 }
 
 pub fn is_ru() -> bool {
-    #[cfg(not(test))]
-    {
-        RU.load(Ordering::Relaxed)
-    }
-    #[cfg(test)]
-    RU.get()
+    RU.load(Ordering::Relaxed)
 }
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
-        "Close" => "Закрыть",
-        "Mixer" => "Микшер",
-        "Minimize" => "Свернуть",
-        "Maximize" => "Развернуть",
-        "Island is hidden from screen capture" => "Island скрыт от снимков и записи экрана",
-        "Island is visible in screen capture" => "Island снова виден при захвате экрана",
-        "Start the application before changing capture protection" => "Сначала запусти приложение",
-        "This application needs a capture integration. Protection was not enabled." => {
-            "Для этой программы нужен модуль защиты. Скрытие от захвата не включено."
-        }
-        "Toggle capture protection · Alt + right-click" => "Защита от захвата · Alt + ПКМ",
-        "Enable experimental capture protection in desktop dock settings" => {
-            "Включи экспериментальную защиту в настройках нижнего дока"
-        }
-        "Capture protection is not supported for this application" => {
-            "Это приложение пока не поддерживает экспериментальную защиту"
-        }
-        "Capture integration is unavailable while anti-cheat is running" => {
-            "Режим недоступен: обнаружен работающий античит"
-        }
-        "Protected or elevated applications are not supported" => {
-            "Защищённые программы и запуск от администратора не поддерживаются"
-        }
-        "Capture integration requires a 64-bit application" => "Для этого режима нужна 64-битная версия приложения",
-        "The application window has closed or changed" => "Окно приложения закрылось или изменилось",
-        "Could not load the capture integration" => "Не удалось загрузить модуль защиты",
-        "The application did not confirm capture protection" => "Приложение не подтвердило защиту от захвата",
-        "Windows did not apply capture protection" => "Windows не применила защиту от захвата",
-        "Experimental capture protection" => "Защита от захвата (эксперимент)",
-        "Alt + right-click an app in the dock to hide its windows from capture. Repeat to restore." => {
-            "Alt + ПКМ по программе в доке скрывает её окна от захвата. Повторное нажатие снимает защиту."
-        }
-        "Some recording methods can ignore Windows capture protection." => {
-            "Некоторые способы записи могут игнорировать защиту Windows."
-        }
-        "Current windows only. Browsers, messengers, editors and players; 64-bit, without administrator rights." => {
-            "Для текущих окон браузеров, мессенджеров и редакторов: 64-битные, без прав администратора."
-        }
-        "A temporary module runs inside the chosen app. Anti-cheat blocks this mode." => {
-            "В выбранное приложение загружается временный модуль. Известные античиты блокируют режим."
-        }
-        "Checking capture protection…" => "Проверяем защиту от захвата…",
-        "Windows excluded from capture" => "Скрыто от захвата, окон",
-        "Capture protection removed" => "Защита снята, окон",
-        "New windows are configured separately" => "Новые окна нужно защищать отдельно",
-        "Not confirmed" => "Не подтверждено",
-        "Could not open the Windows tray" => "Не удалось открыть системный трей",
-        "1. Open Windows taskbar settings." => "1. Открой параметры панели задач Windows.",
-        "2. Open Other system tray icons." => "2. «Другие значки области уведомлений».",
-        "3. Enable Hidden icon menu." => "3. Проверь «Меню скрытых значков».",
-        "Already enabled? Try again below." => "Уже включено? Нажми «Повторить» ниже.",
-        "You do not need to enable each application icon." => "Значки отдельных приложений менять не нужно.",
-        "Set up the Windows system tray" => "Открыть параметры трея Windows",
-        "Windows taskbar settings: Other system tray icons → Hidden icon menu." => {
-            "В Windows: «Другие значки области уведомлений» → «Меню скрытых значков»."
-        }
-        "Capture protection" => "Защита от захвата",
-        "System tray" => "Системный трей",
-        "Show top panel at the screen edge" => "Показывать при наведении к верхнему краю",
-        "Autohide frees the top edge. Island visibility is configured separately." => {
-            "Автоскрытие освобождает верх экрана. Видимость острова настраивается отдельно."
-        }
-        "Replace Windows taskbar while dock is enabled" => "Заменять панель задач Windows",
-        "The Windows taskbar returns when the dock or Island closes." => {
-            "Панель задач Windows возвращается при выключении дока или выходе из Island."
-        }
-        "Top panel" => "Верхняя панель",
-        "Animate panel interactions" => "Анимации верхней панели",
-        "Animate dock interactions" => "Анимации нижнего дока",
-        "Separate pinned and running applications" => "Разделять закреплённые и запущенные",
-        "Lock dock icon positions" => "Зафиксировать порядок значков",
-        "Switch keyboard layout" => "Переключить раскладку клавиатуры",
-        "Microphone unavailable" => "Микрофон недоступен",
-        "Microphone mute switch" => "Микрофон: состояние и отключение",
-        "Keyboard layout switch" => "Раскладка клавиатуры: переключение",
-        "Keyboard layout" => "Раскладка клавиатуры",
-        "Windows and desktops" => "Окна и рабочие столы",
-        "Edit dock shortcut" => "Изменить ярлык дока",
-        "Application or file" => "Приложение или файл",
-        "Custom icon (PNG, ICO or application)" => "Свой значок (PNG, ICO или приложение)",
-        "Leave the icon empty to use the original" => "Пустое поле значка — оригинальная иконка",
-        "Reset icon" => "Сбросить значок",
-        "Browse…" => "Выбрать…",
-        "Keep window buttons accessible" => "Оставлять место для кнопок окна",
-        "Enable top panel" => "Включить верхнюю панель",
-        "Companion blocks beside the island, on the main display. Colours follow the island theme." => {
-            "Блоки рядом с островом на основном экране. Цвета соответствуют теме острова."
-        }
-        "Visible blocks" => "Отображаемые блоки",
-        "Active application and window actions" => "Активная программа и действия с окнами",
-        "System volume" => "Системная громкость",
-        "Battery and power" => "Батарея и питание",
-        "Hide top panel in fullscreen apps" => "Скрывать в полноэкранных приложениях",
-        "Keep maximized windows below the top panel" => "Оставлять место над развёрнутыми окнами",
-        "Music, time and notifications stay in the island. Right-click a block to customize the panel." => {
-            "Музыка, время и уведомления остаются в острове. ПКМ по блоку открывает настройки панели."
-        }
-        "Desktop" => "Рабочий стол",
-        "No active application" => "Нет активной программы",
-        "Radio unavailable" => "Адаптер недоступен",
-        "Enabled" => "Включено",
-        "Disabled" => "Выключено",
-        "Open Windows settings" => "Параметры Windows",
-        "Power connected" => "Питание от сети",
-        "Minimize window" => "Свернуть окно",
-        "Maximize window" => "Развернуть окно",
-        "Restore window" => "Восстановить окно",
-        "Window actions" => "Действия с окном",
-        "Open app mixer" => "Микшер приложений",
-        "Output device" => "Устройство вывода",
-
-        "Window previews and controls on hover" => "Предпросмотр окон и управление при наведении",
-        "Window preview and controls" => "Предпросмотр и управление",
-        "Show application" => "Показать приложение",
-        "More options…" => "Дополнительно…",
-        "Voice chat" => "Голосовой чат",
-        "Voice channel" => "Голосовой канал",
-        "No voice participants" => "В канале пока никого нет",
-        "Connect to control your call" => "Подключи для управления звонком",
-        "Close preview" => "Закрыть предпросмотр",
-        "Open window" => "Открыть окно",
-        "Previous window" => "Предыдущее окно",
-        "Next window" => "Следующее окно",
-        "Close window" => "Закрыть окно",
-        "Previous player" => "Предыдущий плеер",
-        "Previous track" => "Предыдущий трек",
-        "Next track" => "Следующий трек",
-        "Play" => "Воспроизвести",
-        "Mute application" => "Выключить звук приложения",
-        "Unmute application" => "Включить звук приложения",
-        "Quieter" => "Тише",
-        "Louder" => "Громче",
-        "Application volume" => "Громкость",
-        "Connect Discord in settings" => "Подключить Discord в настройках",
-        "Discord voice controls require connection" => "Для управления голосом подключите Discord",
-        "Discord voice controls unavailable" => "Управление голосом Discord недоступно",
-        "Waiting for Discord voice settings" => "Получение настроек голоса Discord…",
-        "Window minimized" => "Окно свёрнуто",
-        "Preview unavailable" => "Предпросмотр недоступен",
-        "Window is no longer available" => "Окно больше недоступно",
-        "Running" => "Запущено",
-        "Windows" => "Окна",
-        "Minimized" => "Свёрнуто",
-        "Active" => "Активно",
-        "Properties" => "Свойства",
-        "Copy application path" => "Копировать путь приложения",
-        "Restore all windows" => "Восстановить все окна",
-        "Minimize all windows" => "Свернуть все окна",
-        "Close windows normally" => "Закрыть окна",
-        "Stop hiding dock for this app" => "Не скрывать док в этом приложении",
-        "Hide dock while this app is active" => "Скрывать док в этом приложении",
-        "Keep dock visible" => "Оставлять док видимым",
-        "Auto-hide dock" => "Автоматически скрывать док",
-        "Island settings" => "Настройки Island",
-        "Dock behavior…" => "Поведение дока…",
-        "Application actions…" => "Действия с приложением…",
-        "Windows…" => "Окна…",
-        "Night Island · Settings" => "Night Island · Настройки",
-
-        "Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back." => {
-            "Полноэкранные приложения скрывают док на своём мониторе. Alt+Tab вернёт его."
-        }
-        "Games and application rules" => "Игры и правила приложений",
-        "For a windowed game, right-click its dock icon and choose Hide dock in this app." => {
-            "Для игры в окне: ПКМ по значку → «Скрывать док в этом приложении»."
-        }
-        "Remove rule" => "Убрать правило",
-        "Blur behind the dock" => "Размытие фона за доком",
-        "Dock tint" => "Оттенок панели",
-        "Dock tint saturation" => "Насыщенность оттенка",
-        "Dock tint brightness" => "Яркость панели",
-        "Applications" => "Приложения",
-        "Pinned applications" => "Закреплённые приложения",
-        "Add" => "Добавить",
-        "Monitor" => "Монитор",
-        "Desktop dock" => "Нижний док",
-        "Enable desktop dock" => "Включить нижний док",
-        "One process with Island. Enable after closing your other dock." => {
-            "Работает внутри Island. Перед включением закрой другой док."
-        }
-        "Automatically hide the dock" => "Автоматически скрывать док",
-        "Show running applications" => "Показывать запущенные приложения",
-        "Hide over fullscreen applications" => "Скрывать поверх полноэкранных приложений",
-        "Economy animations (30 fps)" => "Экономичные анимации (30 кадров/с)",
-        "Dock icon size" => "Размер иконок",
-        "Magnification on hover" => "Увеличение при наведении",
-        "Dock opacity" => "Непрозрачность дока",
-        "Bottom margin" => "Отступ снизу",
-        "Switch dock monitor" => "Переключить монитор дока",
-        "Primary monitor" => "Основной монитор",
-        "Import applications from MyDockFinder" => "Импорт приложений из MyDockFinder",
-        "Add application or file" => "Добавить приложение или файл",
-        "Drop shortcuts onto the dock. Drag pinned icons to reorder." => {
-            "Перетащи ярлыки на док. Закреплённые значки можно переставлять."
-        }
-        "Right-click for windows, pinning and settings. Scroll for more apps." => {
-            "ПКМ — окна и закрепление. Колесо — прокрутка приложений."
-        }
-        "Windows taskbar settings" => "Параметры панели задач Windows",
-        "To free the bottom edge, enable taskbar auto-hide in Windows." => {
-            "Чтобы освободить низ экрана, включи автоскрытие панели Windows."
-        }
-        "Could not create the desktop dock" => "Не удалось создать док",
-        "Application added to the dock" => "Приложение добавлено в док",
-        "Already pinned or dock is full (32)" => "Уже закреплено или достигнут лимит (32)",
-        "Could not read ico.ini" => "Не удалось прочитать ico.ini",
-        "Imported applications" => "Добавлено приложений",
-        "Open new window" => "Открыть новое окно",
-        "Unpin from desktop dock" => "Открепить от дока",
-        "Pin to desktop dock" => "Закрепить в доке",
-        "Move left" => "Передвинуть влево",
-        "Move right" => "Передвинуть вправо",
-        "Desktop dock settings" => "Настройки нижнего дока",
-        "Dock configuration is too large" => "Файл настроек дока слишком большой",
-        "Unsupported dock configuration encoding" => "Неподдерживаемая кодировка настроек дока",
-        "No applications found in ico.ini" => "В ico.ini не найдены приложения",
-        "Import" => "Импортировать",
-        "Switch" => "Переключить",
-
-        "Create a pet from this photo" => "Создай питомца по этой фотографии",
-        "Preview ready. Apply your pet or describe another change below." => {
-            "Питомец готов. Нажми «Применить» или опиши, что ещё изменить."
-        }
-        "Building a preview. Your current pet stays with you." => {
-            "Готовлю предпросмотр. Текущий питомец пока остаётся с тобой."
-        }
-        "Shaping your pet…" => "Готовим новый образ…",
-        "Describe another change below." => "Опиши новые изменения ниже.",
-        "Apply your pet or describe a change." => "Примени или опиши изменения.",
-        "Describe your pet below." => "Опиши питомца ниже.",
-        "Describe your pet or add a photo." => "Опиши питомца или добавь фото.",
-        "Back to chat" => "К чату",
-        "Needs attention" => "Нужно уточнить",
-        "Creating…" => "Создаём образ",
-        "With you" => "Уже с тобой",
-        "Preview" => "Предпросмотр",
-        "Palette" => "Палитра",
-        "Your pet is taking shape. Your current companion stays with you." => {
-            "Готовим новый образ. Текущий питомец остаётся с тобой."
-        }
-        "Describe a look below or add a photo for a vision model." => {
-            "Опиши внешность ниже или добавь фото для модели с распознаванием изображений."
-        }
-        "Photo attached. Tell us what to keep or change." => "Фото добавлено. Напиши, что сохранить или изменить.",
-        "Pet studio" => "Питомец",
-        "Create or change your pet" => "Создать или изменить питомца",
-        "Create your pet" => "Создай питомца",
-        "Creating your pet…" => "Создаём питомца…",
-        "Apply pet" => "Применить",
-        "Applied" => "Применён",
-        "Pet photo" => "Фото",
-        "Text only" => "Без фото",
-        "Describe your pet…" => "Опиши питомца или изменения…",
-        "Your pet is ready. Describe another change below." => "Питомец готов. Ниже можно описать новые изменения.",
-        "Describe the shape, colors and details. Photos will not be sent." => {
-            "Опиши форму, цвета и детали. Фото не будет отправлено."
-        }
-        "Describe your pet or attach a photo. A model with vision is needed for photos." => {
-            "Опиши питомца или добавь фото. Для фото нужна модель с распознаванием изображений."
-        }
-        "Photo attached. Add your wishes below, then press Send." => {
-            "Фото добавлено. Напиши пожелания ниже и нажми отправить."
-        }
-        "Could not build this pet. Try a simpler description." => {
-            "Не удалось создать питомца. Попробуй описать его проще."
-        }
-        "This model did not accept the photo. Select Text only and describe your pet, or choose a vision model." => {
-            "Модель не приняла фото. Нажми «Без фото» и опиши питомца или выбери модель с распознаванием изображений."
-        }
-        "Choose a PNG, JPEG or WebP photo for your pet" => "Выбери фото питомца в PNG, JPEG или WebP",
-        "Bear" => "Медведь",
-        "Custom pet" => "Свой питомец",
-        "My pet" => "Мой питомец",
-        "Pet animation quality" => "Анимация питомца",
-        "Pet walks, rests and sleeps on its own" => "Самостоятельные прогулки, отдых и сон",
-        "Pet: reduced motion" => "Без движения",
-        "Pet: economical · up to 20 FPS" => "Экономно · до 20 FPS",
-        "Pet: balanced · up to 30 FPS" => "Баланс · до 30 FPS",
-        "Pet: smooth · up to 60 FPS" => "Плавно · до 60 FPS",
-        "My Wave · Settings" => "Моя волна · Настроить",
-        "Open My Wave settings" => "Открыть настройки Моей волны",
-        "Open main player" => "К плееру",
-        "Could not remove the saved sign-in. Try signing out again." => {
-            "Не удалось удалить сохранённый вход. Повтори выход из аккаунта."
-        }
-        "Cancel" => "Отмена",
-        "Yandex Music" => "Яндекс Музыка",
-        "Dismiss" => "Закрыть",
-        "Back" => "Назад",
-        "Expand notification" => "Развернуть уведомление",
-        "Could not open the sender app" => "Не удалось открыть приложение-отправитель",
-        "Open sender app" => "Открыть приложение",
-        "4 tiles" => "4 плитки",
-        "2 tiles" => "2 плитки",
-        "1 tile" => "1 плитка",
-        "Click a notification to open its app" => "Клик по уведомлению открывает приложение",
-        "Notification preview size" => "Размер превью уведомления",
-        "Code" => "Код",
-        "Start My Wave with the island" => "Запускать волну вместе с островом",
-        "Open sign-in page" => "Открыть страницу входа",
-        "Open My Wave" => "Открыть Мою волну",
-        "Wave activity" => "Занятие",
-        "Connected for this session; Windows could not save the sign-in" => {
-            "Вход выполнен, но Windows не сохранила его для следующего запуска"
-        }
-        "Sign out" => "Выйти",
-        "Resume" => "Продолжить",
-        "Pause" => "Пауза",
-        "Connecting…" => "Подключение…",
-        "Loading music…" => "Загружаем…",
-
-        "My Wave" => "Моя волна",
-        "Yandex Music inside your island" => "Яндекс Музыка в острове",
-        "Sign in in your browser. Your password stays with Yandex." => {
-            "Войди через браузер. Пароль остаётся у Яндекса."
-        }
-        "Enter this code at ya.ru/device" => "Введи этот код на ya.ru/device",
-        "Waiting for confirmation in your browser…" => "Ждём подтверждения в браузере…",
-        "Requires Yandex Music access. The connection uses an unofficial API." => {
-            "Нужен доступ к Яндекс Музыке по подписке. Подключение использует неофициальный API."
-        }
-        "Connect Yandex Music" => "Подключить Яндекс Музыку",
-        "Open Yandex" => "Открыть Яндекс",
-        "Copy code" => "Скопировать код",
-        "Made for you" => "Подобрано для тебя",
-        "Music for this moment" => "Музыка под настроение",
-        "Variety" => "Характер",
-        "Mood" => "Настроение",
-        "Any" => "Любое",
-        "Start wave" => "Запустить",
-        "Stop wave" => "Остановить",
-        "Start wave when Island starts" => "Запускать при старте острова",
-        "Could not connect to Yandex Music. Try again." => "Не удалось связаться с Яндекс Музыкой. Попробуй снова.",
-        "Sign in to Yandex Music again" => "Войди в Яндекс Музыку снова",
-        "Yandex Music requires an active subscription and an available region" => {
-            "Нужна действующая подписка и доступность Яндекс Музыки в регионе"
-        }
-        "Yandex Music is busy. Wait a moment and try again." => {
-            "Яндекс Музыка занята. Подожди немного и попробуй снова."
-        }
-        "Yandex Music could not complete the request. Try again." => {
-            "Яндекс Музыка не выполнила запрос. Попробуй снова."
-        }
-        "This track is unavailable with your subscription or in your region" => {
-            "Трек недоступен по подписке или в твоём регионе"
-        }
-        "Could not save My Wave settings" => "Не удалось сохранить настройки волны",
-        "Could not start Yandex sign-in. Try again." => "Не удалось начать вход. Попробуй снова.",
-        "Could not play this track. Check your connection and start the wave again." => {
-            "Трек не воспроизводится. Проверь соединение и запусти волну снова."
-        }
-        "My Wave returned no tracks. Try different settings." => "Волна не вернула треки. Попробуй другие настройки.",
-        "Could not start the Windows audio player" => "Не удалось запустить аудиоплеер Windows",
-        "The sign-in code expired. Connect again." => "Код входа истёк. Нажми «Подключить» снова.",
-        "Yandex sign-in was cancelled or expired. Connect again." => "Вход отменён или код истёк. Подключись снова.",
-        "Wave settings are unavailable. Press Try again to reload." => {
-            "Настройки волны недоступны. Нажми «Повторить», чтобы загрузить снова."
-        }
-
-        "Close the app mixer" => "Закрыть микшер приложений",
-        "Prefer the player that is playing" => "Приоритет играющего плеера",
-        "Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls." => {
-            "При включённом приоритете: поставьте волну на паузу и запустите видео — главная переключится на браузер. Во вкладке «Моя волна» остаётся управление Яндексом."
-        }
-        "Player volume: left-click for system, right-click for mixer" => {
-            "Громкость плеера: ЛКМ — система, ПКМ — микшер"
-        }
-        "System volume: left-click for player, right-click for mixer" => "Громкость системы: ЛКМ — плеер, ПКМ — микшер",
-        "Player volume is unavailable. Right-click for the mixer" => {
-            "Громкость этого плеера недоступна. ПКМ — открыть микшер"
-        }
-        "App mixer: adjust each application's volume" => "Микшер: громкость каждого приложения",
-        "Setup guide" => "Как настроить",
-        "Connected. The island receives Windows system notifications" => {
-            "Подключено. Остров получает системные уведомления Windows"
-        }
-        "1. Connect notification access" => "1. Подключи уведомления",
-        "Press Connect and allow access when Windows asks." => {
-            "Нажми «Подключить» и разреши доступ, если Windows его запросит."
-        }
-        "2. Keep notifications, hide duplicate banners" => "2. Убери дубликаты справа снизу",
-        "Windows settings → your app: banners off, notification center on. Do not disturb alone can have exceptions." => {
-            "Включи «Не беспокоить». В параметрах нужного приложения: баннеры выкл., центр уведомлений вкл."
-        }
-        "3. Telegram needs Windows notifications" => "3. Включи системные уведомления в Telegram",
-        "Telegram → Settings → Notifications and Sounds → Use Windows notifications. Custom Telegram popups cannot reach the island." => {
-            "Telegram → Настройки → Уведомления и звуки: включи «Системное окно Windows» или «Использовать уведомления Windows»."
-        }
-        "Windows notifications" => "Уведомления Windows",
-        "Windows notifications from the island" => "Уведомления Windows из острова",
-        "Windows notification settings" => "Настройки уведомлений Windows",
-        "Show Windows notifications from the island" => "Показывать уведомления Windows из острова",
-        "Allow notification access to connect the island" => "Разреши острову доступ к уведомлениям",
-        "Notification access is disabled in Windows privacy settings" => {
-            "Доступ к уведомлениям отключён в настройках конфиденциальности Windows"
-        }
-        "Turn on Do not disturb in Windows to hide the standard banners" => {
-            "Включи «Не беспокоить» в Windows, чтобы скрыть стандартные баннеры"
-        }
-        "Connected. New notifications will appear from the island" => {
-            "Подключено. Новые уведомления будут появляться из острова"
-        }
-        "Windows notifications are unavailable. Try connecting again" => {
-            "Уведомления Windows недоступны. Попробуй подключиться ещё раз"
-        }
-        "Allow access" => "Дать доступ",
-        "Disable" => "Отключить",
-        "Try again" => "Повторить",
-        "Windows settings" => "Параметры Windows",
-        "Show example" => "Показать пример",
-        "Notification history" => "Центр уведомлений",
-        "New notifications will be listed here" => "Здесь появятся уведомления Windows",
-        "Notifications from the island" => "Уведомления из острова",
-        "Your Windows notifications will appear here. Hover to keep reading." => {
-            "Здесь будут появляться уведомления Windows. Наведи курсор, чтобы спокойно прочитать."
-        }
-        "App mixer" => "Микшер приложений",
-        "New notification" => "Новое уведомление",
-        "Separate volume for each app" => "Отдельная громкость для каждого приложения",
-        "System sounds" => "Системные звуки",
-        "Looking for audio apps…" => "Ищем приложения со звуком…",
-        "Audio mixer is unavailable" => "Не удалось открыть микшер. Проверь устройство вывода звука.",
-        "Play music, a video or a game to see its volume here" => {
-            "Запусти музыку, видео или игру — приложение появится здесь."
-        }
         "Home" => "Главная",
         "Clipboard" => "Буфер",
         "Shelf" => "Полка",
@@ -538,9 +98,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Open / close island" => "Открыть / закрыть остров",
         "Reset position" => "Сбросить положение",
         "Exit" => "Выход",
-        "Not set" => "Не задано",
-        "Rebuild and restart" => "Пересобрать и перезапустить",
-        "Panel blur" => "Размытие панели",
+        "Acrylic blur" => "Размытие фона",
         "Hide in screenshots" => "Скрыть на снимках",
         "Hide island in my captures" => "Прятать при записи и снимке",
         "Game mode" => "Игровой режим",
@@ -549,34 +107,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Frame rate" => "Частота кадров",
         "System sound" => "Звук системы",
         "No character" => "Без персонажа",
-        "More" => "Ещё",
-        "Weather position" => "Положение погоды",
-        "Left of the clock" => "Слева от времени",
-        "Right of the clock" => "Справа от времени",
-        "Customize header…" => "Настроить шапку…",
-        "Add to header" => "Добавить в шапку",
-        "On the header" => "В шапке",
-        "In More" => "В «Ещё»",
-        "Replace:" => "Вместо:",
-        "Restore default header" => "Восстановить шапку",
-        "Your companion is here" => "Ваш персонаж рядом",
-        "More tabs and actions" => "Другие вкладки и действия",
-        "AI settings" => "Настройки ИИ",
-        "You" => "Вы",
-        "Ask me anything. This chat stays beside your character." => {
-            "Задайте мне вопрос. Этот чат открывается рядом с вашим персонажем."
-        }
-        "Enter to send · Shift+Enter for a new line" => "Enter — отправить · Shift+Enter — новая строка",
-        "Connect your AI provider in AI settings." => "Подключите нейросеть в настройках ИИ.",
-        "Release the pet from the island" => "Выпустить питомца на рабочий стол",
-        "Pets pause near the pointer and during chat. Reduced motion stops walking." => {
-            "Рядом с курсором и во время чата питомец останавливается. Режим «Без движения» отключает прогулки."
-        }
-        "Release character" => "Выпустить персонажа",
-        "Click or drag to release the character" => "Нажмите или потяните, чтобы выпустить персонажа",
-        "Click for mini AI chat, right-click to hide/show the island. Drag to move." => {
-            "ЛКМ — мини-чат с ИИ, ПКМ — скрыть/показать остров. Наведение — музыка. Перенесите на остров для возврата."
-        }
         "Capture failed" => "Не удалось сделать снимок",
         "Copied" => "Скопировано",
         "Looking for a QR code…" => "Ищу QR-код…",
@@ -613,19 +143,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Snow" => "Снег",
         "Sleet" => "Дождь со снегом",
         "Thunderstorm" => "Гроза",
-        "Mostly clear" => "Малооблачно",
-        "Overcast" => "Пасмурно",
-        "Light rain" => "Небольшой дождь",
-        "Heavy rain" => "Сильный дождь",
-        "Rain showers" => "Кратковременный дождь",
-        "Heavy rain showers" => "Сильный кратковременный дождь",
-        "Sleet showers" => "Кратковременный дождь со снегом",
-        "Heavy snow" => "Сильный снег",
-        "Snow showers" => "Снег с прояснениями",
-        "Heavy snow showers" => "Сильный снег с прояснениями",
-        "Thunderstorm with rain" => "Гроза с дождём",
-        "Thunderstorm with sleet" => "Гроза с дождём и снегом",
-        "Thunderstorm with snow" => "Гроза со снегом",
         "Feels like" => "Ощущается как",
         "Wind" => "Ветер",
         "Humidity" => "Влажность",
@@ -849,7 +366,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Strip along the bottom" => "Полоска снизу",
         "Outline from the left side" => "Контур от левой стороны",
         "Outline, the bottom fills" => "Контур, заполняется низ",
-        "Fill the island" => "Заливка острова",
         "30 FPS" => "30 кадров/с",
         "60 FPS" => "60 кадров/с",
         "Monitor refresh rate" => "Частота монитора",
@@ -993,7 +509,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Ghost visibility" => "Видимость призрака",
         "Ghost ignores the mouse" => "Призрак не реагирует на мышь",
         "Ghost only while held" => "Призрак, пока клавиши зажаты",
-        "Press the new keys (Esc clears)…" => "Нажмите новые клавиши (Esc — убрать)…",
+        "Press the new keys…" => "Нажмите новые клавиши…",
         "Click a key, then press the new combination with Ctrl, Alt, Shift or Win." => {
             "Нажмите на клавишу, затем новое сочетание с Ctrl, Alt, Shift или Win."
         }
@@ -1212,6 +728,9 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Steam did not close" => "Steam не закрылся",
         "Could not change Steam's sign-in setting" => "Не удалось изменить настройку входа Steam",
         "Timer" => "Таймер",
+        "Shut down? Say the name and \"yes\"" => "Выключить компьютер? Скажите имя и «да»",
+        "Restart? Say the name and \"yes\"" => "Перезагрузить? Скажите имя и «да»",
+        "Sleep? Say the name and \"yes\"" => "Спящий режим? Скажите имя и «да»",
         "There is nothing to confirm" => "Подтверждать нечего",
         "Cancelled" => "Отменено",
         "Claude Code, Gemini CLI, Cursor, Copilot CLI: hooks in their settings files." => {
@@ -1267,143 +786,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "Up to 5 names of up to 24 characters, separated by commas" => "До 5 имён по 24 символа, через запятую",
         "Say a command after the name" => "Скажите команду после имени",
-        "Assistant" => "Ассистент",
-        "Voice" => "Голос",
-        "What it may do" => "Что ассистенту можно",
-        "Voice assistant" => "Голосовой ассистент",
-        "Listen for the call word" => "Слушать слово-вызов",
-        "Download the wake-word model (46 MB)" => "Скачать модель слова-вызова (46 МБ)",
-        "Sound cues" => "Звуковые сигналы",
-        "Speak answers aloud" => "Озвучивать ответы",
-        "Check commands with a second model call when asking first" => {
-            "Проверять команды вторым запросом к модели в режиме «Спрашивать»"
-        }
-        "Ask first after reading web pages" => "Спрашивать подтверждение после чтения сайтов",
-        "Open the page:" => "Открыть страницу:",
-        "Search the web:" => "Искать в сети:",
-        "Read:" => "Прочитать:",
-        "Write:" => "Записать:",
-        "Shut down?" => "Выключить?",
-        "Restart?" => "Перезагрузить?",
-        "Sleep?" => "Уснуть?",
-        "The assistant needed too many steps" => "Ассистенту понадобилось слишком много шагов",
-        "The command is empty or too long" => "Команда пустая или слишком длинная",
-        "The script is empty or too long" => "Скрипт пустой или слишком длинный",
-        "The script could not be prepared" => "Не удалось подготовить скрипт",
-        "Music and media keys" => "Музыка и медиаклавиши",
-        "Volume, mic, Wi-Fi, Bluetooth, theme, lock" => "Громкость, микрофон, Wi-Fi, Bluetooth, тема, блокировка",
-        "The model spent its whole limit thinking and gave no answer" => {
-            "Модель потратила весь лимит на размышления и не ответила"
-        }
-        "Natural voice from the speech service (paid, no load on the PC)" => {
-            "Живой голос от сервиса речи (платно, ПК не нагружает)"
-        }
-        "Keep listening after an answer" => "Слушать дальше после ответа",
-        "Did not catch that" => "Не расслышал",
-        "Cloud voice service" => "Облачный сервис голоса",
-        "Voice ID" => "ID голоса",
-        "Fish Audio: the key is in fish.audio, Developers, API keys." => {
-            "Fish Audio: ключ на fish.audio, Developers, API keys."
-        }
-        "The voice ID is the ID of a voice model from fish.audio/discovery; \"default\" uses the stock voice." => {
-            "ID голоса это ID модели голоса с fish.audio/discovery; «default» берёт стандартный голос."
-        }
-        "Models: s2.1-pro (default), s2-pro, s1; s2.1-pro-free is the free developer tier." => {
-            "Модели: s2.1-pro (по умолчанию), s2-pro, s1; s2.1-pro-free это бесплатный уровень для разработчиков."
-        }
-        "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota)." => {
-            "ElevenLabs: ключ на elevenlabs.io, профиль, API keys (после бесплатной квоты платно)."
-        }
-        "The voice ID is under Voices, the ID of a voice you added; the default is a stock voice." => {
-            "ID голоса смотрите в разделе Voices; по умолчанию стоит стандартный голос."
-        }
-        "Models: eleven_multilingual_v2 (speaks Russian), eleven_flash_v2_5 (faster)." => {
-            "Модели: eleven_multilingual_v2 (говорит по-русски), eleven_flash_v2_5 (быстрее)."
-        }
-        "Voice API key" => "Ключ API голоса",
-        "Voice server address" => "Адрес сервера голоса",
-        "Voice model" => "Модель голоса",
-        "Voice name" => "Имя голоса",
-        "Save the voice service" => "Сохранить сервис голоса",
-        "Remove the voice key" => "Удалить ключ голоса",
-        "Voice service saved" => "Сервис голоса сохранён",
-        "Same server: the speech service key is used" => "Тот же сервер: берётся ключ сервиса речи",
-        "Any OpenAI-compatible server with /audio/speech. The address is where requests go:" => {
-            "Любой OpenAI-совместимый сервер с /audio/speech. Адрес — куда уходят запросы:"
-        }
-        "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own" => {
-            "OpenAI https://api.openai.com/v1 (ключ: platform.openai.com/api-keys, платно) или свой"
-        }
-        "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key." => {
-            "сервер (Kokoro-FastAPI, openedai-speech), например http://localhost:8880/v1 с любым ключом."
-        }
-        "OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer." => {
-            "Голоса OpenAI: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."
-        }
-        "Edit the assistant's own instructions" => "Свои инструкции ассистенту",
-        "Steps per request" => "Шагов на запрос",
-        "How it works" => "Как работает",
-        "Local voice Piper (free, works offline, a little CPU while speaking)" => {
-            "Локальный голос Piper (бесплатно, без сети, чуть грузит процессор, пока говорит)"
-        }
-        "Download the local voice (up to 44 MB)" => "Скачать локальный голос (до 44 МБ)",
-        "Downloading the local voice…" => "Скачиваю локальный голос…",
-        "The local voice is already being downloaded" => "Локальный голос уже скачивается",
-        "The local voice is installed: turn it on in the settings" => {
-            "Локальный голос установлен: включите его в настройках"
-        }
-        "Could not download the voice" => "Не удалось скачать голос",
-        "The archive is not safe" => "Архив небезопасен",
-        "The archive has too many files" => "В архиве слишком много файлов",
-        "The archive is too large" => "Архив слишком большой",
-        "No profile folder" => "Нет папки профиля",
-        "Look at the screen (preview, needs a model that sees images)" => {
-            "Смотреть на экран (превью, нужна модель с картинками)"
-        }
-        "The screen could not be captured" => "Не удалось снять экран",
-        "Island data: weather, music, Spotify, Discord, Steam, notes" => {
-            "Данные Острова: погода, музыка, Spotify, Discord, Steam, заметки"
-        }
-        "Volume" => "Громкость",
-        "Muted" => "Звук выключен",
-        "Opened" => "Открыто",
-        "The assistant did not understand the model's reply" => "Ассистент не понял ответ модели",
-        "That address cannot be opened" => "Этот адрес открыть нельзя",
-        "WSL could not be started" => "Не удалось запустить WSL",
-        "Open programs and games" => "Запуск программ и игр",
-        "Reminders and timers" => "Напоминания и таймеры",
-        "Remember things about you" => "Запоминать факты о вас",
-        "Search the internet" => "Поиск в интернете",
-        "Read and search files" => "Чтение и поиск файлов",
-        "Create and change files" => "Создание и изменение файлов",
-        "Command line" => "Командная строка",
-        "Browser (open sites, read pages)" => "Браузер (сайты, чтение страниц)",
-        "Shut down, restart, sleep" => "Выключение, перезагрузка, сон",
-        "Ask first" => "Спрашивать",
-        "Allowed" => "Разрешено",
-        "Listening…" => "Слушаю…",
-        "Checking the command…" => "Проверяю команду…",
-        "Running…" => "Выполняю…",
-        "Remembered" => "Запомнил",
-        "Already known" => "Уже знаю",
-        "Nothing like that in memory" => "В памяти такого нет",
-        "Wake-word model installed" => "Модель слова-вызова установлена",
-        "Downloading the wake-word model…" => "Скачиваю модель слова-вызова…",
-        "The wake-word model is already being downloaded" => "Модель слова-вызова уже скачивается",
-        "Already like that" => "Уже так и есть",
-        "off in the Assistant settings" => "выключено в настройках ассистента",
-        "Run:" => "Выполнить:",
-        "Forgot" => "Забыл",
-        "Say the name and \"yes\"" => "Скажите имя и «да»",
-        "Could not download the voice runtime" => "Не удалось скачать голосовой модуль",
-        "The download server refused the request" => "Сервер скачивания отказал",
-        "The download does not match the expected checksum" => "Скачанное не совпало с контрольной суммой",
-        "The archive is damaged" => "Архив повреждён",
-        "The archive is missing files" => "В архиве не хватает файлов",
-        "The installation is incomplete" => "Установка неполная",
-        "Could not write to the profile folder" => "Не удалось записать в папку профиля",
-        "The command line could not be started" => "Не удалось запустить командную строку",
-        "The review could not be done" => "Проверку выполнить не удалось",
         "Done" => "Готово",
         "No time in that command" => "В команде нет времени",
         "That command is not something I can do by voice" => "Это я голосом сделать не могу",
@@ -1442,8 +824,7 @@ fn phrase(s: &str) -> Option<&'static str> {
     })
 }
 
-const PREFIXES: [(&str, &str); 10] = [
-    ("Blocked by the check: ", "Заблокировано проверкой: "),
+const PREFIXES: [(&str, &str); 9] = [
     ("Add the player ", "Добавить плеер "),
     ("Already used by: ", "Уже занято: "),
     ("Downloaded ", "Скачано "),

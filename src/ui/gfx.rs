@@ -2,7 +2,7 @@ use windows::Foundation::Size;
 use windows::Graphics::DirectX::{DirectXAlphaMode, DirectXPixelFormat};
 use windows::Graphics::SizeInt32;
 use windows::UI::Composition::{CompositionDrawingSurface, CompositionGraphicsDevice, Compositor, SpriteVisual};
-use windows::Win32::Foundation::{HMODULE, POINT, RECT};
+use windows::Win32::Foundation::{HMODULE, POINT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_BEGIN_HOLLOW,
     D2D1_FIGURE_END_CLOSED, D2D1_FILL_MODE_WINDING,
@@ -28,11 +28,6 @@ use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::System::WinRT::Composition::{ICompositionDrawingSurfaceInterop, ICompositorInterop};
 use windows::core::{BOOL, Interface, PCWSTR, Result, w};
 use windows_numerics::Matrix3x2;
-
-mod liquid;
-#[cfg(test)]
-mod tests;
-pub use liquid::{ElasticBody, ElasticPull, LiquidBody, cursor_pull};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EdgeShape {
@@ -72,6 +67,12 @@ impl Palette {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum BumpFill {
+    Solid(D2D1_COLOR_F),
+    Tone { palette: Palette, tip: D2D1_COLOR_F, span: (f32, f32) },
+}
+
 pub type D2D1Colour = D2D1_COLOR_F;
 
 pub const WHITE: D2D1_COLOR_F = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
@@ -85,24 +86,9 @@ pub struct Gpu {
     factory: ID2D1Factory,
     dwrite: IDWriteFactory,
     icons: PCWSTR,
-    weather: std::cell::RefCell<crate::ui::weather_icons::WeatherIcons>,
 }
 
 impl Gpu {
-    pub fn compositor(&self) -> Result<Compositor> {
-        self.gfx.Compositor()
-    }
-
-    pub fn popup(&self) -> Self {
-        Self {
-            gfx: self.gfx.clone(),
-            factory: self.factory.clone(),
-            dwrite: self.dwrite.clone(),
-            icons: self.icons,
-            weather: std::cell::RefCell::default(),
-        }
-    }
-
     pub fn new(compositor: &Compositor) -> Result<Self> {
         unsafe {
             let mut d3d: Option<ID3D11Device> = None;
@@ -123,7 +109,7 @@ impl Gpu {
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let icons = pick_icon_font(&dwrite);
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            Ok(Self { gfx, factory, dwrite, icons, weather: std::cell::RefCell::default() })
+            Ok(Self { gfx, factory, dwrite, icons })
         }
     }
 
@@ -182,7 +168,7 @@ impl Gpu {
             dc_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             dc_target.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             let target: ID2D1RenderTarget = dc_target.cast()?;
-            f(&Painter { dc: &target, dwrite: self.dwrite(), icons: self.icons(), weather: &self.weather });
+            f(&Painter { dc: &target, dwrite: self.dwrite(), icons: self.icons() });
             dc_target.EndDraw(None, None)
         }
     }
@@ -216,71 +202,9 @@ impl Layer {
             dc.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             dc.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             let target: ID2D1RenderTarget = dc.cast()?;
-            f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons(), weather: &gpu.weather });
+            f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons() });
             interop.EndDraw()
         }
-    }
-
-    pub fn paint_region(
-        &self,
-        gpu: &Gpu,
-        rect: (f32, f32, f32, f32),
-        f: impl FnOnce(&Painter) -> Result<()>,
-    ) -> Result<()> {
-        let rect = RECT {
-            left: (rect.0.floor() as i32).max(0),
-            top: (rect.1.floor() as i32).max(0),
-            right: (rect.2.ceil() as i32).min(self.size.0),
-            bottom: (rect.3.ceil() as i32).min(self.size.1),
-        };
-        if rect.right <= rect.left || rect.bottom <= rect.top {
-            return Ok(());
-        }
-        unsafe {
-            let interop: ICompositionDrawingSurfaceInterop = self.surface.cast()?;
-            let mut offset = POINT::default();
-            let dc: ID2D1DeviceContext = interop.BeginDraw(Some(&rect), &mut offset)?;
-            dc.SetTransform(&Matrix3x2::translation((offset.x - rect.left) as f32, (offset.y - rect.top) as f32));
-            let clip = D2D_RECT_F {
-                left: rect.left as f32,
-                top: rect.top as f32,
-                right: rect.right as f32,
-                bottom: rect.bottom as f32,
-            };
-            dc.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED);
-            dc.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
-            let target = dc.cast::<ID2D1RenderTarget>();
-            let painted = target.and_then(|target| {
-                f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons(), weather: &gpu.weather })
-            });
-            dc.PopAxisAlignedClip();
-            let ended = interop.EndDraw();
-            painted.and(ended)
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct IconBitmapCache {
-    domain: Option<windows::core::IUnknown>,
-    bitmaps: std::collections::HashMap<
-        usize,
-        (std::sync::Arc<crate::platform::apps::Icon>, windows::Win32::Graphics::Direct2D::ID2D1Bitmap),
-    >,
-}
-
-impl IconBitmapCache {
-    #[cfg(test)]
-    pub fn identities(&self) -> Vec<(usize, usize)> {
-        let mut entries: Vec<_> =
-            self.bitmaps.iter().map(|(key, (_, bitmap))| (*key, bitmap.as_raw() as usize)).collect();
-        entries.sort_unstable();
-        entries
-    }
-
-    pub fn retain(&mut self, icons: impl Iterator<Item = usize>) {
-        let live: std::collections::HashSet<_> = icons.collect();
-        self.bitmaps.retain(|key, _| live.contains(key));
     }
 }
 
@@ -288,14 +212,9 @@ pub struct Painter<'a> {
     dc: &'a ID2D1RenderTarget,
     dwrite: &'a IDWriteFactory,
     icons: PCWSTR,
-    weather: &'a std::cell::RefCell<crate::ui::weather_icons::WeatherIcons>,
 }
 
 impl Painter<'_> {
-    pub fn weather_svg(&self, name: &'static str, rect: (f32, f32, f32, f32), animated: bool) -> Result<()> {
-        self.weather.borrow_mut().draw(self.dc, name, rect, animated)
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn text(
         &self,
@@ -337,77 +256,6 @@ impl Painter<'_> {
             layout.GetMetrics(&mut m)?;
             let y = rect.1 + ((rect.3 - rect.1) - m.height).max(0.0) / 2.0;
             self.draw_layout(rect.0, y, &layout, color)
-        }
-    }
-
-    pub fn text_wrapped_trimmed(
-        &self,
-        text: &str,
-        rect: (f32, f32, f32, f32),
-        size: f32,
-        weight: DWRITE_FONT_WEIGHT,
-        color: D2D1_COLOR_F,
-    ) -> Result<()> {
-        unsafe {
-            let format = self.dwrite.CreateTextFormat(
-                w!("Segoe UI"),
-                None,
-                weight,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!("en-us"),
-            )?;
-            format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
-            let sign = self.dwrite.CreateEllipsisTrimmingSign(&format)?;
-            format.SetTrimming(
-                &DWRITE_TRIMMING {
-                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
-                    delimiter: 0,
-                    delimiterCount: 0,
-                },
-                &sign,
-            )?;
-            let wide: Vec<u16> = text.encode_utf16().collect();
-            let layout =
-                self.dwrite.CreateTextLayout(&wide, &format, (rect.2 - rect.0).max(1.0), (rect.3 - rect.1).max(1.0))?;
-            self.push_clip(rect);
-            let result = self.draw_layout(rect.0, rect.1, &layout, color);
-            self.pop_clip();
-            result
-        }
-    }
-
-    pub fn text_scrolled(
-        &self,
-        text: &str,
-        rect: (f32, f32, f32, f32),
-        size: f32,
-        scroll: f32,
-        color: D2D1_COLOR_F,
-    ) -> Result<f32> {
-        use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
-        unsafe {
-            let format = self.dwrite.CreateTextFormat(
-                w!("Segoe UI"),
-                None,
-                DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!("en-us"),
-            )?;
-            format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
-            let wide: Vec<u16> = text.encode_utf16().collect();
-            let layout = self.dwrite.CreateTextLayout(&wide, &format, (rect.2 - rect.0).max(1.0), 100_000.0)?;
-            let mut metrics = DWRITE_TEXT_METRICS::default();
-            layout.GetMetrics(&mut metrics)?;
-            let max = (metrics.height - (rect.3 - rect.1)).max(0.0);
-            self.push_clip(rect);
-            let result = self.draw_layout(rect.0, rect.1 - scroll.clamp(0.0, max), &layout, color);
-            self.pop_clip();
-            result?;
-            Ok(max)
         }
     }
 
@@ -562,6 +410,72 @@ impl Painter<'_> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn fill_bump(
+        &self,
+        _width: f32,
+        seam: f32,
+        cx: f32,
+        half: f32,
+        amp: f32,
+        fill: BumpFill,
+    ) -> Result<ID2D1PathGeometry> {
+        unsafe {
+            let factory: ID2D1Factory = self.dc.GetFactory()?;
+            let geometry = factory.CreatePathGeometry()?;
+            let sink = geometry.Open()?;
+            let pt = |x: f32, y: f32| windows_numerics::Vector2 { X: x, Y: y };
+            let (x0, x1) = (cx - half, cx + half);
+            sink.BeginFigure(pt(x0, seam - 1.0), D2D1_FIGURE_BEGIN_FILLED);
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: pt(x0 + half * 0.55, seam - 1.0),
+                point2: pt(cx - half * 0.28, seam + amp),
+                point3: pt(cx, seam + amp),
+            });
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: pt(cx + half * 0.28, seam + amp),
+                point2: pt(x1 - half * 0.55, seam - 1.0),
+                point3: pt(x1, seam - 1.0),
+            });
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            sink.Close()?;
+
+            match fill {
+                BumpFill::Solid(color) => {
+                    let brush = self.dc.CreateSolidColorBrush(&color, None)?;
+                    self.dc.FillGeometry(&geometry, &brush, None);
+                }
+                BumpFill::Tone { palette, tip, span } => {
+                    use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+                    use windows::Win32::Graphics::Direct2D::{
+                        D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+                    };
+                    let (start, end) = match palette.tone {
+                        Tone::Horizontal => (pt(span.0, 0.0), pt(span.1, 0.0)),
+                        _ => (pt(cx, seam), pt(cx, seam + amp.max(1.0))),
+                    };
+                    if palette.tone == Tone::Single {
+                        let brush = self.dc.CreateSolidColorBrush(&tip, None)?;
+                        self.dc.FillGeometry(&geometry, &brush, None);
+                    } else {
+                        let stops: Vec<D2D1_GRADIENT_STOP> = (0..=8)
+                            .map(|k| D2D1_GRADIENT_STOP {
+                                position: k as f32 / 8.0,
+                                color: palette.at(k as f32 / 8.0, 1.0),
+                            })
+                            .collect();
+                        let along =
+                            self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: start, endPoint: end };
+                        let brush = self.dc.CreateLinearGradientBrush(&props, None, &along)?;
+                        self.dc.FillGeometry(&geometry, &brush, None);
+                    }
+                }
+            }
+            Ok(geometry)
+        }
+    }
+
     pub fn dwrite(&self) -> &IDWriteFactory {
         self.dwrite
     }
@@ -599,7 +513,7 @@ impl Painter<'_> {
             rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             rt.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             rt.SetTransform(&Matrix3x2::translation(-origin.0, -origin.1));
-            let painted = f(&Painter { dc: &rt, dwrite: self.dwrite, icons: self.icons, weather: self.weather });
+            let painted = f(&Painter { dc: &rt, dwrite: self.dwrite, icons: self.icons });
             rt.EndDraw(None, None)?;
             painted?;
             target.GetBitmap()
@@ -1018,87 +932,6 @@ impl Painter<'_> {
         Ok(())
     }
 
-    pub fn fill_ellipse_gradient(
-        &self,
-        oval: (f32, f32, f32, f32),
-        light: D2D1_COLOR_F,
-        shade: D2D1_COLOR_F,
-    ) -> Result<()> {
-        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
-        use windows::Win32::Graphics::Direct2D::{
-            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
-        };
-        let (cx, cy, rx, ry) = oval;
-        let falloff = if shade.a == 0.0 { 1.0 } else { 1.35 };
-        let offset = if shade.a == 0.0 { (0.0, 0.0) } else { (-rx * 0.32, -ry * 0.38) };
-        unsafe {
-            let stops = self.dc.CreateGradientStopCollection(
-                &[
-                    D2D1_GRADIENT_STOP { position: 0.0, color: light },
-                    D2D1_GRADIENT_STOP { position: 1.0, color: shade },
-                ],
-                D2D1_GAMMA_2_2,
-                D2D1_EXTEND_MODE_CLAMP,
-            )?;
-            let brush = self.dc.CreateRadialGradientBrush(
-                &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
-                    center: windows_numerics::Vector2 { X: cx, Y: cy },
-                    gradientOriginOffset: windows_numerics::Vector2 { X: offset.0, Y: offset.1 },
-                    radiusX: rx * falloff,
-                    radiusY: ry * falloff,
-                },
-                None,
-                &stops,
-            )?;
-            self.dc.FillEllipse(
-                &D2D1_ELLIPSE { point: windows_numerics::Vector2 { X: cx, Y: cy }, radiusX: rx, radiusY: ry },
-                &brush,
-            );
-        }
-        Ok(())
-    }
-
-    pub fn bezier(&self, points: [(f32, f32); 4], width: f32, color: D2D1_COLOR_F) -> Result<()> {
-        use windows::Win32::Graphics::Direct2D::Common::D2D1_FIGURE_END_OPEN;
-        unsafe {
-            let factory: ID2D1Factory = self.dc.GetFactory()?;
-            let path = factory.CreatePathGeometry()?;
-            let sink = path.Open()?;
-            let pt = |p: (f32, f32)| windows_numerics::Vector2 { X: p.0, Y: p.1 };
-            sink.BeginFigure(pt(points[0]), D2D1_FIGURE_BEGIN_HOLLOW);
-            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                point1: pt(points[1]),
-                point2: pt(points[2]),
-                point3: pt(points[3]),
-            });
-            sink.EndFigure(D2D1_FIGURE_END_OPEN);
-            sink.Close()?;
-            self.dc.DrawGeometry(&path, &self.dc.CreateSolidColorBrush(&color, None)?, width, None);
-        }
-        Ok(())
-    }
-
-    pub fn fill_curves(&self, start: (f32, f32), curves: &[[(f32, f32); 3]], color: D2D1_COLOR_F) -> Result<()> {
-        unsafe {
-            let factory: ID2D1Factory = self.dc.GetFactory()?;
-            let path = factory.CreatePathGeometry()?;
-            let sink = path.Open()?;
-            let pt = |p: (f32, f32)| windows_numerics::Vector2 { X: p.0, Y: p.1 };
-            sink.BeginFigure(pt(start), D2D1_FIGURE_BEGIN_FILLED);
-            for curve in curves {
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                    point1: pt(curve[0]),
-                    point2: pt(curve[1]),
-                    point3: pt(curve[2]),
-                });
-            }
-            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-            sink.Close()?;
-            self.dc.FillGeometry(&path, &self.dc.CreateSolidColorBrush(&color, None)?, None);
-        }
-        Ok(())
-    }
-
     pub fn line(&self, from: (f32, f32), to: (f32, f32), width: f32, color: D2D1_COLOR_F) -> Result<()> {
         unsafe {
             let brush = self.dc.CreateSolidColorBrush(&color, None)?;
@@ -1134,144 +967,6 @@ impl Painter<'_> {
         unsafe {
             let brush = self.dc.CreateSolidColorBrush(&color, None)?;
             self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
-        }
-        Ok(())
-    }
-
-    pub fn fill_round_gradient(
-        &self,
-        rect: (f32, f32, f32, f32),
-        radius: f32,
-        from: D2D1_COLOR_F,
-        to: D2D1_COLOR_F,
-    ) -> Result<()> {
-        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
-        use windows::Win32::Graphics::Direct2D::{
-            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-        };
-        unsafe {
-            let stops = self.dc.CreateGradientStopCollection(
-                &[D2D1_GRADIENT_STOP { position: 0.0, color: from }, D2D1_GRADIENT_STOP { position: 1.0, color: to }],
-                D2D1_GAMMA_2_2,
-                D2D1_EXTEND_MODE_CLAMP,
-            )?;
-            let brush = self.dc.CreateLinearGradientBrush(
-                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                    startPoint: windows_numerics::Vector2 { X: rect.0, Y: rect.1 },
-                    endPoint: windows_numerics::Vector2 { X: rect.2, Y: rect.3 },
-                },
-                None,
-                &stops,
-            )?;
-            self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
-        }
-        Ok(())
-    }
-
-    pub fn fill_capsule_progress(&self, rect: (f32, f32, f32, f32), fraction: f32, base: (u8, u8, u8)) -> Result<()> {
-        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
-        use windows::Win32::Graphics::Direct2D::{
-            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-        };
-        let (left, top, right, bottom) = rect;
-        let fraction = fraction.clamp(0.0, 1.0);
-        if fraction <= 0.0 || right <= left || bottom <= top {
-            return Ok(());
-        }
-        let stops: [D2D1_GRADIENT_STOP; 5] = std::array::from_fn(|i| {
-            let position = i as f32 / 4.0;
-            let (r, g, b) = crate::platform::media::gradient(base, position);
-            D2D1_GRADIENT_STOP {
-                position,
-                color: rgba(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 0.24),
-            }
-        });
-        unsafe {
-            let collection = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
-            let brush = self.dc.CreateLinearGradientBrush(
-                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                    startPoint: windows_numerics::Vector2 { X: left, Y: top },
-                    endPoint: windows_numerics::Vector2 { X: right, Y: top },
-                },
-                None,
-                &collection,
-            )?;
-            self.push_clip((left, top, left + (right - left) * fraction, bottom));
-            self.dc.FillRoundedRectangle(&rounded(rect, (bottom - top).min(right - left) / 2.0), &brush);
-            self.pop_clip();
-        }
-        Ok(())
-    }
-
-    pub fn cached_icon(
-        &self,
-        rect: (f32, f32, f32, f32),
-        icon: &std::sync::Arc<crate::platform::apps::Icon>,
-        cache: &mut IconBitmapCache,
-        opacity: f32,
-    ) -> Result<()> {
-        use windows::Win32::Graphics::Direct2D::Common::{
-            D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
-        };
-        use windows::Win32::Graphics::Direct2D::{
-            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_BITMAP_PROPERTIES, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-        };
-        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-        if icon.side == 0 || icon.side > 1024 || icon.bgra.len() != (icon.side * icon.side * 4) as usize {
-            return Ok(());
-        }
-        let context = self.dc.cast::<ID2D1DeviceContext>().ok();
-        let domain: windows::core::IUnknown =
-            if let Some(context) = &context { unsafe { context.GetDevice()? }.cast()? } else { self.dc.cast()? };
-        if cache.domain.as_ref().is_none_or(|cached| cached.as_raw() != domain.as_raw()) {
-            cache.bitmaps.clear();
-            cache.domain = Some(domain);
-        }
-        let key = std::sync::Arc::as_ptr(icon) as usize;
-        if !cache.bitmaps.contains_key(&key) {
-            if cache.bitmaps.len() >= 64 {
-                cache.bitmaps.clear();
-            }
-            let properties = D2D1_BITMAP_PROPERTIES {
-                pixelFormat: D2D1_PIXEL_FORMAT {
-                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
-                },
-                dpiX: 96.0,
-                dpiY: 96.0,
-            };
-            let bitmap = unsafe {
-                self.dc.CreateBitmap(
-                    D2D_SIZE_U { width: icon.side, height: icon.side },
-                    Some(icon.bgra.as_ptr().cast()),
-                    icon.side * 4,
-                    &properties,
-                )?
-            };
-            cache.bitmaps.insert(key, (icon.clone(), bitmap));
-        }
-        let bitmap = &cache.bitmaps[&key].1;
-        let dest =
-            D2D_RECT_F { left: rect.0.round(), top: rect.1.round(), right: rect.2.round(), bottom: rect.3.round() };
-        unsafe {
-            if let Some(context) = context {
-                context.DrawBitmap(
-                    bitmap,
-                    Some(&dest),
-                    opacity.clamp(0.0, 1.0),
-                    D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-                    None,
-                    None,
-                );
-            } else {
-                self.dc.DrawBitmap(
-                    bitmap,
-                    Some(&dest),
-                    opacity.clamp(0.0, 1.0),
-                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                    None,
-                );
-            }
         }
         Ok(())
     }

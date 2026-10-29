@@ -16,20 +16,11 @@ impl Combo {
         Self { mods, vk }
     }
 
-    pub const NONE: Combo = Combo::new(0, 0);
-
-    pub fn is_none(self) -> bool {
-        self == Self::NONE
-    }
-
     pub fn valid(self) -> bool {
         self.mods != 0 && self.mods & !(ALT | CTRL | SHIFT | WIN) == 0 && valid_vk(self.vk)
     }
 
     pub fn text(self) -> String {
-        if self.is_none() {
-            return "Not set".into();
-        }
         let mut out = String::new();
         for (bit, name) in [(CTRL, "Ctrl"), (ALT, "Alt"), (SHIFT, "Shift"), (WIN, "Win")] {
             if self.mods & bit != 0 {

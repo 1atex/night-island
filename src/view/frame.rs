@@ -26,116 +26,50 @@ pub fn tab_order(cfg: &Settings) -> Vec<usize> {
 }
 
 pub fn movable_tabs(ui: &UiState) -> Vec<usize> {
-    ui.cfg
-        .header_tabs
-        .iter()
-        .filter_map(|name| TABS.iter().position(|tab| tab.2 == name))
-        .filter(|&i| tab_in_bar(&ui.cfg, TABS[i].0, TABS[i].2))
+    tab_order(&ui.cfg)
+        .into_iter()
+        .filter(|&i| !matches!(TABS[i].0, Tab::Home | Tab::Settings) && tab_in_bar(&ui.cfg, TABS[i].0, TABS[i].2))
         .collect()
-}
-
-pub fn header_has_labels(ui: &UiState) -> bool {
-    movable_tabs(ui).len() <= 5
-}
-
-fn header_label_widths() -> [f32; TABS.len()] {
-    use windows::Win32::Graphics::DirectWrite::*;
-    use windows::core::w;
-    thread_local! {
-        static WIDTHS: std::cell::RefCell<Option<(bool, [f32; TABS.len()])>> = const { std::cell::RefCell::new(None) };
-    }
-    let russian = crate::ui::i18n::is_ru();
-    WIDTHS.with_borrow_mut(|cached| {
-        if let Some((language, widths)) = cached.as_ref()
-            && *language == russian
-        {
-            return *widths;
-        }
-        let measured = (|| -> windows::core::Result<[f32; TABS.len()]> {
-            unsafe {
-                let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-                let format = factory.CreateTextFormat(
-                    w!("Segoe UI"),
-                    None,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    DWRITE_FONT_STYLE_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    13.0,
-                    w!("en-us"),
-                )?;
-                format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
-                let mut widths = [0.0; TABS.len()];
-                for (index, (_, _, name)) in TABS.iter().enumerate() {
-                    let text: Vec<u16> = crate::ui::i18n::tr(name).encode_utf16().collect();
-                    let layout = factory.CreateTextLayout(&text, &format, 10000.0, 40.0)?;
-                    let mut metrics = DWRITE_TEXT_METRICS::default();
-                    layout.GetMetrics(&mut metrics)?;
-                    widths[index] = metrics.widthIncludingTrailingWhitespace;
-                }
-                Ok(widths)
-            }
-        })();
-        let widths = measured
-            .unwrap_or_else(|_| TABS.map(|(_, _, name)| crate::ui::i18n::tr(name).chars().count() as f32 * 8.0));
-        *cached = Some((russian, widths));
-        widths
-    })
 }
 
 pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let active = bar_tab(ui.tab);
     let (x, y, w, _) = pill;
-    let (bh, gap, icon_w) = (36.0 * scale, 4.0 * scale, 36.0 * scale);
-    let top = y + 12.0 * scale;
+    let (bh, gap, icon_w) = (36.0 * scale, 1.0 * scale, 32.0 * scale);
+    let y0 = y + 12.0 * scale;
     let mut left = x + 12.0 * scale;
-    let more = more_rect(pill, scale);
-    let right = vpn_btn_rect(pill, scale, ui).map_or(more.0, |r| r.0);
+    let vpn = if vpn_button(ui) { LOCK_STEP } else { 0.0 };
+    let pin_left = x + w - 78.0 * scale - (3.0 * LOCK_STEP + vpn) * scale;
     let dots = [mic_on(ui), ui.privacy.cam].iter().filter(|on| **on).count() as f32 * DOT_STEP * scale;
-    let room = (right - dots - 12.0 * scale - left).max(icon_w);
-    let home = TABS.iter().position(|tab| tab.0 == Tab::Home).unwrap();
-    let available: Vec<_> = std::iter::once(home).chain(movable_tabs(ui)).collect();
-    let active_index = available.iter().copied().find(|&i| TABS[i].0 == active);
-    let labels = header_has_labels(ui);
-    let label_widths = header_label_widths();
-    let desired: f32 = available.iter().map(|&i| 16.0 + label_widths[i]).sum();
-    let label_scale = ((room / scale - gap / scale * (available.len() - 1) as f32) / desired).min(1.0);
-    let width = |i: usize| {
-        if labels { (16.0 + label_widths[i]) * label_scale * scale } else { icon_w }
+    let room = pin_left - 6.0 * scale - dots - left;
+    let shown = TABS.iter().filter(|(t, _, n)| *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n)).count() as f32;
+    let label = |name: &str| (crate::ui::i18n::tr(name).chars().count() as f32 * 8.6 + 8.0) * scale;
+    let active_extra = TABS
+        .iter()
+        .find(|(t, _, n)| *t == active && *t != Tab::Settings && tab_in_bar(&ui.cfg, *t, n))
+        .map_or(0.0, |(_, _, n)| label(n));
+    let gaps = (shown - 1.0).max(0.0) * gap;
+    let bare_w = if shown * icon_w + gaps + active_extra > room {
+        icon_w * ((room - active_extra - gaps) / (shown * icon_w)).clamp(0.6, 1.0)
+    } else {
+        icon_w
     };
-    let mut selected = Vec::new();
-    let mut used = 0.0;
-    for i in available.iter().copied().filter(|&i| TABS[i].0 == Tab::Home || Some(i) == active_index) {
-        let extra = width(i) + if selected.is_empty() { 0.0 } else { gap };
-        if used + extra <= room + 0.01 {
-            selected.push(i);
-            used += extra;
-        }
-    }
-    for &i in &available {
-        if !selected.contains(&i) && used + gap + width(i) <= room + 0.01 {
-            selected.push(i);
-            used += gap + width(i);
-        }
-    }
     let mut rects = [(0.0, 0.0, 0.0, 0.0); TABS.len()];
-    for i in available.into_iter().filter(|i| selected.contains(i)) {
-        rects[i] = (left, top, left + width(i), top + bh);
-        left += width(i) + gap;
+    for i in tab_order(&ui.cfg) {
+        let (tab, _, name) = TABS[i];
+        if !tab_in_bar(&ui.cfg, tab, name) {
+            continue;
+        }
+        if tab == Tab::Settings {
+            let r = x + w - 12.0 * scale;
+            rects[i] = (r - icon_w, y0, r, y0 + bh);
+            continue;
+        }
+        let width = if tab == active { icon_w + label(name) } else { bare_w };
+        rects[i] = (left, y0, left + width, y0 + bh);
+        left += width + gap;
     }
-    let r = x + w - 12.0 * scale;
-    let settings = TABS.iter().position(|t| t.0 == Tab::Settings).unwrap();
-    rects[settings] = (r - 32.0 * scale, top, r, top + bh);
     rects
-}
-
-pub fn overflow_tabs(pill: Rect, scale: f32, ui: &UiState) -> Vec<usize> {
-    let rects = tab_rects(pill, scale, ui);
-    tab_order(&ui.cfg)
-        .into_iter()
-        .filter(|&i| {
-            TABS[i].0 != Tab::Settings && tab_in_bar(&ui.cfg, TABS[i].0, TABS[i].2) && rects[i].2 <= rects[i].0
-        })
-        .collect()
 }
 
 pub fn tab_drag_target_for(rects: &[Rect], r: &Reorder, items: &[usize], j: usize) -> (f32, f32) {
@@ -192,15 +126,25 @@ pub fn pin_rect(pill: Rect, scale: f32) -> Rect {
 const LOCK_STEP: f32 = 34.0;
 const DOT_STEP: f32 = 20.0;
 
-pub fn more_rect(pill: Rect, scale: f32) -> Rect {
+pub fn lock_rect(pill: Rect, scale: f32) -> Rect {
     let pin = pin_rect(pill, scale);
-    (pin.0 - 66.0 * scale, pin.1, pin.0 - 6.0 * scale, pin.3)
+    (pin.0 - 34.0 * scale, pin.1, pin.0 - 2.0 * scale, pin.3)
+}
+
+pub fn tab_drag_rect(pill: Rect, scale: f32) -> Rect {
+    let lock = lock_rect(pill, scale);
+    (lock.0 - 34.0 * scale, lock.1, lock.0 - 2.0 * scale, lock.3)
+}
+
+pub fn tab_settings_rect(pill: Rect, scale: f32) -> Rect {
+    let sw = tab_drag_rect(pill, scale);
+    (sw.0 - 34.0 * scale, sw.1, sw.0 - 2.0 * scale, sw.3)
 }
 
 pub fn vpn_btn_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
     vpn_button(ui).then(|| {
-        let more = more_rect(pill, scale);
-        (more.0 - LOCK_STEP * scale, more.1, more.0 - 2.0 * scale, more.3)
+        let sw = tab_settings_rect(pill, scale);
+        (sw.0 - 34.0 * scale, sw.1, sw.0 - 2.0 * scale, sw.3)
     })
 }
 
@@ -215,13 +159,15 @@ pub fn mic_on(ui: &UiState) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum HeadHit {
     Pin,
-    More,
+    Lock,
+    TabDrag,
     Mic,
     Cam,
+    TabSettings,
 }
 
 pub fn privacy_dots(pill: Rect, scale: f32, ui: &UiState) -> (Option<Rect>, Option<Rect>) {
-    let sw = more_rect(pill, scale);
+    let sw = tab_settings_rect(pill, scale);
     let size = 11.0 * scale;
     let mid = (sw.1 + sw.3) / 2.0;
     let mut right = vpn_btn_rect(pill, scale, ui).map_or(sw.0, |r| r.0) - 6.0 * scale;
@@ -241,8 +187,14 @@ pub fn hit_head(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Optio
     if inside(pin_rect(pill, scale), px, py) {
         return Some(HeadHit::Pin);
     }
-    if inside(more_rect(pill, scale), px, py) {
-        return Some(HeadHit::More);
+    if inside(lock_rect(pill, scale), px, py) {
+        return Some(HeadHit::Lock);
+    }
+    if inside(tab_drag_rect(pill, scale), px, py) {
+        return Some(HeadHit::TabDrag);
+    }
+    if tab_settings_group(ui.tab).is_some() && inside(tab_settings_rect(pill, scale), px, py) {
+        return Some(HeadHit::TabSettings);
     }
     let pad = 5.0 * scale;
     let near =
@@ -299,24 +251,22 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         }
         let selected = tab == bar_tab(ui.tab);
         let radius = (rect.3 - rect.1) / 2.0;
-        let selection = ui.feedback.sample(300_000 + i as u64, f32::from(selected), f32::from(selected), 180);
-        let hover = ui.feedback.sample(400_000 + i as u64, f32::from(ui.hover_tab == Some(i)), 0.0, 140);
-        let base = if !header_has_labels(ui) && tab != Tab::Settings { 0.045 } else { 0.0 };
-        p.fill_round_rect(
-            *rect,
-            radius,
-            rgba(1.0, 1.0, 1.0, base + (0.16 - base) * selection + 0.09 * hover * (1.0 - selection)),
-        )?;
-        let alpha = 0.62 + 0.38 * selection;
-        if header_has_labels(ui) && tab != Tab::Settings {
-            let font = ((rect.2 - rect.0 - 10.0 * scale) / header_label_widths()[i].max(1.0) * 13.0).min(13.0 * scale);
+        if selected {
+            p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.16))?;
+        } else if ui.hover_tab == Some(i) {
+            p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.09))?;
+        }
+        let alpha = if selected { 1.0 } else { 0.62 };
+        let icon_box = (rect.0, rect.1, rect.0 + 32.0 * scale, rect.3);
+        if selected && tab != Tab::Settings {
+            p.glyph(glyph, icon_box, 17.0 * scale, rgba(1.0, 1.0, 1.0, alpha))?;
             p.text(
                 name,
-                (rect.0 + 4.0 * scale, rect.1, rect.2 - 4.0 * scale, rect.3),
-                font,
+                (rect.0 + 30.0 * scale, rect.1, rect.2 - 4.0 * scale, rect.3),
+                14.0 * scale,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_CENTER,
-                rgba(1.0, 1.0, 1.0, alpha),
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                WHITE,
             )?;
         } else {
             p.glyph(glyph, *rect, 17.0 * scale, rgba(1.0, 1.0, 1.0, alpha))?;
@@ -332,23 +282,26 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         16.0 * scale,
         rgba(1.0, 1.0, 1.0, if ui.pinned { 1.0 } else { 0.62 }),
     )?;
-    let more = more_rect(pill, scale);
-    let overflow_active = overflow_tabs(pill, scale, ui).iter().any(|&i| TABS[i].0 == bar_tab(ui.tab));
-    if overflow_active || ui.hover_head == Some(HeadHit::More) {
-        p.fill_round_rect(
-            more,
-            (more.3 - more.1) / 2.0,
-            if overflow_active { acc(0.2) } else { rgba(1.0, 1.0, 1.0, 0.09) },
-        )?;
+    let sw = tab_drag_rect(pill, scale);
+    let on = ui.cfg.tab_drag;
+    if on || ui.hover_head == Some(HeadHit::TabDrag) {
+        p.fill_round_rect(sw, (sw.3 - sw.1) / 2.0, rgba(1.0, 1.0, 1.0, if on { 0.16 } else { 0.09 }))?;
     }
-    p.text(
-        "More",
-        more,
-        13.0 * scale,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_TEXT_ALIGNMENT_CENTER,
-        rgba(1.0, 1.0, 1.0, 0.78),
-    )?;
+    p.glyph('\u{E8AB}', sw, 16.0 * scale, rgba(1.0, 1.0, 1.0, if on { 1.0 } else { 0.62 }))?;
+    if tab_settings_group(ui.tab).is_some() {
+        let gear = tab_settings_rect(pill, scale);
+        if ui.hover_head == Some(HeadHit::TabSettings) {
+            p.fill_round_rect(gear, (gear.3 - gear.1) / 2.0, rgba(1.0, 1.0, 1.0, 0.09))?;
+        }
+        let alpha = if ui.hover_head == Some(HeadHit::TabSettings) { 1.0 } else { 0.62 };
+        p.glyph('\u{E115}', gear, 16.0 * scale, rgba(1.0, 1.0, 1.0, alpha))?;
+    }
+    let lock = lock_rect(pill, scale);
+    let locked = ui.cfg.lock_drag;
+    if locked || ui.hover_head == Some(HeadHit::Lock) {
+        p.fill_round_rect(lock, (lock.3 - lock.1) / 2.0, rgba(1.0, 1.0, 1.0, if locked { 0.16 } else { 0.09 }))?;
+    }
+    p.glyph(if locked { '' } else { '' }, lock, 16.0 * scale, rgba(1.0, 1.0, 1.0, if locked { 1.0 } else { 0.62 }))?;
     if let Some(r) = vpn_btn_rect(pill, scale, ui) {
         p.glyph(VPN_GLYPH, r, 16.0 * scale, vpn_color(ui))?;
     }
@@ -453,16 +406,6 @@ fn paint_tab(p: &Painter, tab: Tab, pill: Rect, scale: f32, ui: &UiState, clips:
             paint_controls(p, pill, scale, ui)?;
             paint_metrics_row(p, pill, scale, ui)?;
         }
-        Tab::Yandex => paint_yandex(p, pill, scale, &ui.yandex, ui.home.seek, crate::services::yandex::progress())?,
-        Tab::Mixer => paint_mixer(p, pill, scale, &ui.mixer)?,
-        Tab::Notifications => paint_notifications(
-            p,
-            pill,
-            scale,
-            &ui.notifications,
-            ui.cfg.system_notifications,
-            ui.cfg.notification_open_app,
-        )?,
         Tab::Note => paint_note(p, pill, scale, ui)?,
         Tab::Text => paint_text(p, pill, scale, ui)?,
         Tab::Settings => {}
@@ -474,89 +417,6 @@ fn paint_tab(p: &Painter, tab: Tab, pill: Rect, scale: f32, ui: &UiState, clips:
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn removing_an_active_header_tab_moves_it_to_more_without_hiding_the_feature() {
-        let mut ui = UiState::new();
-        ui.tab = Tab::Weather;
-        assert!(ui.cfg.set_header_tab("Weather", false, None));
-        let pill = (0.0, 0.0, 620.0, 400.0);
-        let index = TABS.iter().position(|tab| tab.0 == Tab::Weather).unwrap();
-        assert!(overflow_tabs(pill, 1.0, &ui).contains(&index));
-        assert_eq!(tab_rects(pill, 1.0, &ui)[index], (0.0, 0.0, 0.0, 0.0));
-        assert!(ui.cfg.set_header_tab("Weather", true, None));
-        assert!(!overflow_tabs(pill, 1.0, &ui).contains(&index));
-        assert!(tab_rects(pill, 1.0, &ui)[index].2 > 0.0);
-    }
-
-    #[test]
-    fn compact_header_keeps_active_tabs_and_tools_separate() {
-        let mut ui = UiState::new();
-        ui.privacy.mic = true;
-        ui.privacy.cam = true;
-        ui.vpn = Some(true);
-        ui.cfg.vpn_pill = true;
-        for scale in [0.75, 1.0, 1.25, 1.5, 2.0] {
-            for width in [460.0, 520.0, 620.0, 800.0] {
-                let pill = (17.0, 9.0, width * scale, 400.0 * scale);
-                for (i, &(tab, _, name)) in TABS.iter().enumerate() {
-                    if tab == Tab::Settings || !tab_in_bar(&ui.cfg, tab, name) {
-                        continue;
-                    }
-                    ui.tab = tab;
-                    ui.cfg.header_tabs = crate::data::settings::DEFAULT_HEADER_TABS.map(String::from).to_vec();
-                    ui.cfg.set_header_tab(name, true, Some("Record"));
-                    let rects = tab_rects(pill, scale, &ui);
-                    assert!(rects[i].2 > rects[i].0, "active {name} disappeared at {width}/{scale}");
-                    let overflow = overflow_tabs(pill, scale, &ui);
-                    assert!(!overflow.contains(&i));
-                    let mut boxes: Vec<_> = rects.into_iter().filter(|r| r.2 > r.0).collect();
-                    assert!(boxes.len() <= 7);
-                    boxes.extend([more_rect(pill, scale), pin_rect(pill, scale)]);
-                    boxes.extend(vpn_btn_rect(pill, scale, &ui));
-                    let (mic, cam) = privacy_dots(pill, scale, &ui);
-                    boxes.extend(mic);
-                    boxes.extend(cam);
-                    boxes.sort_by(|a, b| a.0.total_cmp(&b.0));
-                    for pair in boxes.windows(2) {
-                        assert!(pair[0].2 <= pair[1].0 + 0.01, "overlap at {width}/{scale}: {pair:?}");
-                    }
-                    for (j, &(other, _, label)) in TABS.iter().enumerate() {
-                        if other != Tab::Settings && tab_in_bar(&ui.cfg, other, label) {
-                            assert_eq!(overflow.contains(&j), rects[j].2 <= rects[j].0);
-                        }
-                    }
-                    let more = more_rect(pill, scale);
-                    assert!(matches!(
-                        hit_head(pill, scale, &ui, (more.0 + more.2) / 2.0, (more.1 + more.3) / 2.0),
-                        Some(HeadHit::More)
-                    ));
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn sixth_extra_tab_switches_the_whole_header_to_compact_icons() {
-        let mut ui = UiState::new();
-        assert!(header_has_labels(&ui));
-        ui.cfg.set_header_tab("Notifications", true, None);
-        assert!(!header_has_labels(&ui));
-        for scale in [0.75, 1.0, 1.5, 2.0] {
-            let pill = (0.0, 0.0, 640.0 * scale, 384.0 * scale);
-            for &tab in &movable_tabs(&ui) {
-                let rect = tab_rects(pill, scale, &ui)[tab];
-                assert_eq!(rect.2 - rect.0, 36.0 * scale);
-                assert!(!overflow_tabs(pill, scale, &ui).contains(&tab));
-            }
-        }
-        ui.cfg.set_header_tab("Notifications", false, None);
-        assert!(header_has_labels(&ui));
-        ui.cfg.header_tabs =
-            ["Privacy", "Activity", "Controls", "App mixer", "Notifications"].map(String::from).to_vec();
-        let rects = tab_rects((0.0, 0.0, 640.0, 384.0), 1.0, &ui);
-        assert!(movable_tabs(&ui).iter().all(|&i| rects[i].2 > rects[i].0));
-    }
 
     #[test]
     fn every_hideable_tab_exists_and_the_fixed_ones_stay() {

@@ -11,41 +11,6 @@ fn endpoint() -> Result<IAudioEndpointVolume> {
     }
 }
 
-pub fn muted() -> Option<bool> {
-    unsafe { endpoint().ok()?.GetMute().ok().map(|v| v.as_bool()) }
-}
-
-pub fn set_muted(muted: bool) {
-    unsafe {
-        if let Ok(ep) = endpoint() {
-            let _ = ep.SetMute(muted, std::ptr::null());
-        }
-    }
-}
-
-fn microphone() -> Result<IAudioEndpointVolume> {
-    unsafe {
-        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        enumerator.GetDefaultAudioEndpoint(eCapture, eConsole)?.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)
-    }
-}
-
-pub fn microphone_muted() -> Option<bool> {
-    unsafe { microphone().ok()?.GetMute().ok().map(|v| v.as_bool()) }
-}
-
-pub fn toggle_microphone() -> bool {
-    unsafe {
-        let Ok(endpoint) = microphone() else {
-            return false;
-        };
-        let Ok(current) = endpoint.GetMute() else {
-            return false;
-        };
-        endpoint.SetMute(!current.as_bool(), std::ptr::null()).is_ok()
-    }
-}
-
 pub fn get() -> Option<f32> {
     unsafe { endpoint().ok()?.GetMasterVolumeLevelScalar().ok() }
 }
@@ -214,7 +179,7 @@ fn each_session(source: &str, mut f: impl FnMut(&windows::Win32::Media::Audio::I
             let path = String::from_utf16_lossy(&buf[..len as usize]);
             let stem =
                 std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if session_matches(source, &stem, pid, std::process::id())
+            if stem == source.to_lowercase()
                 && let Ok(volume) = control.cast::<ISimpleAudioVolume>()
             {
                 f(&volume);
@@ -223,14 +188,6 @@ fn each_session(source: &str, mut f: impl FnMut(&windows::Win32::Media::Audio::I
         }
     }
     found
-}
-
-fn session_matches(source: &str, stem: &str, pid: u32, own_pid: u32) -> bool {
-    if source == "Night Island · Yandex Music" {
-        pid == own_pid
-    } else {
-        !source.is_empty() && stem.eq_ignore_ascii_case(source)
-    }
 }
 
 pub fn app_volume(source: &str) -> Option<f32> {
@@ -280,19 +237,5 @@ pub fn mic_toggle() -> Option<bool> {
         let muted = !ep.GetMute().ok()?.as_bool();
         ep.SetMute(muted, std::ptr::null()).ok()?;
         Some(muted)
-    }
-}
-
-#[cfg(test)]
-mod source_tests {
-    use super::*;
-
-    #[test]
-    fn wave_volume_targets_only_this_island_process() {
-        assert!(session_matches("Night Island · Yandex Music", "night-island", 42, 42));
-        assert!(!session_matches("Night Island · Yandex Music", "night-island", 43, 42));
-        assert!(session_matches("CHROME", "chrome", 43, 42));
-        assert!(!session_matches("CHROME", "night-island", 42, 42));
-        assert!(!session_matches("", "", 43, 42));
     }
 }

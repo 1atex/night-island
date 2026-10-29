@@ -1,6 +1,5 @@
 use std::ffi::c_void;
 use std::sync::Once;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::Graphics::Dwm::DwmSetWindowAttribute;
 use windows::Win32::Graphics::Gdi::{
@@ -13,29 +12,6 @@ use crate::island::*;
 
 const MAX_SEARCH_CHARS: usize = 40;
 const SCROLL_STEP: f32 = 64.0;
-pub(in crate::island) const WM_SETTINGS_WINDOW_CHANGED: u32 = WM_APP + 72;
-static SETTINGS_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
-
-fn notify_settings_window_changed(hwnd: HWND) {
-    unsafe {
-        let parent = HWND(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut _);
-        if !parent.0.is_null()
-            && !SETTINGS_REFRESH_PENDING.swap(true, Ordering::AcqRel)
-            && PostMessageW(Some(parent), WM_SETTINGS_WINDOW_CHANGED, WPARAM(0), LPARAM(0)).is_err()
-        {
-            SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-        }
-    }
-}
-
-pub(in crate::island) fn on_settings_window_changed() {
-    SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-    with_app(|a| {
-        if let Some(dock) = &mut a.desktop_dock {
-            dock.refresh_windows();
-        }
-    });
-}
 
 impl App {
     pub(in crate::island) fn open_settings_at(&mut self, group: usize) {
@@ -80,7 +56,7 @@ impl App {
             let Ok(hwnd) = CreateWindowExW(
                 WINDOW_EX_STYLE(0),
                 w!("NightIsland.Settings"),
-                &windows::core::HSTRING::from(format!("Night Island · {}", crate::ui::i18n::tr("Settings"))),
+                w!("Night Island"),
                 style,
                 x,
                 y,
@@ -94,14 +70,6 @@ impl App {
                 crate::log_error!("could not create the settings window");
                 return;
             };
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, self.hwnd.0 as isize);
-            for (kind, cx, cy) in [
-                (ICON_SMALL, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)),
-                (ICON_BIG, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)),
-            ] {
-                let icon = crate::ui::tray::app_icon(cx, cy);
-                SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
-            }
             let round: i32 = 2;
             let rounded = DwmSetWindowAttribute(
                 hwnd,
@@ -160,7 +128,6 @@ impl App {
     }
 
     pub(in crate::island) fn render_settings_win(&self) {
-        self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let (Some(hwnd), Some((w, h))) = (self.settings_win, self.sw_client()) else { return };
         if w <= 0 || h <= 0 {
             return;
@@ -195,9 +162,6 @@ impl App {
             let _ = DeleteDC(mem);
             ReleaseDC(Some(hwnd), screen);
         }
-        if self.ui.feedback.active() {
-            self.set_timer(Timer::SwAnim, 16);
-        }
     }
 
     pub(in crate::island) fn on_sw_move(&mut self, x: i32, y: i32, left_down: bool) {
@@ -205,7 +169,7 @@ impl App {
             return self.sw_drag(x);
         }
         if left_down && self.ui.sw.field == Some(view::Field::Search) && self.ui.sw.search_press {
-            self.sw_click_field(view::Field::Search, x, true, true);
+            self.sw_click_field(view::Field::Search, x, true);
             return self.render_settings_win();
         }
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
@@ -234,19 +198,18 @@ impl App {
         let mut moving = false;
         for (key, level) in &mut self.ui.sw.plates {
             let target = if Some(*key) == now { 1.0 } else { 0.0 };
-            let step = if crate::ui::feedback::motion_allowed() { 0.16 } else { 1.0 };
+            let step = 0.16;
             *level = if *level < target { (*level + step).min(target) } else { (*level - step).max(target) };
             moving |= *level != target;
         }
         self.ui.sw.plates.retain(|(key, level)| *level > 0.0 || Some(*key) == now);
         self.render_settings_win();
-        if moving || self.ui.feedback.active() {
+        if moving {
             self.set_timer(Timer::SwAnim, 16);
         }
     }
 
     pub(in crate::island) fn on_sw_down(&mut self, x: i32, y: i32) {
-        self.set_timer(Timer::SwAnim, 16);
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
         if let Some(id) = self.ui.sw.dropdown.take() {
             if let Some(view::SwHit::Pick(_, k)) = hit {
@@ -266,7 +229,7 @@ impl App {
         if let Some(view::SwHit::Field(field)) = hit {
             self.sw_focus(Some(field));
             let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
-            self.sw_click_field(field, x, shift, false);
+            self.sw_click_field(field, x, shift);
             if field == view::Field::Search {
                 self.ui.sw.search_press = true;
                 unsafe {
@@ -337,24 +300,17 @@ impl App {
             view::Field::VoiceKey => &mut self.ui.int.voice_key,
             view::Field::VoiceModel => &mut self.ui.int.voice_model,
             view::Field::VoiceBase => &mut self.ui.int.voice_base,
-            view::Field::TtsKey => &mut self.ui.int.tts_key,
-            view::Field::TtsBase => &mut self.ui.int.tts_base,
-            view::Field::TtsModel => &mut self.ui.int.tts_model,
-            view::Field::TtsVoice => &mut self.ui.int.tts_voice,
             view::Field::WakeWord => &mut self.ui.int.wake,
             view::Field::GroupName => &mut self.ui.int.group_name,
             view::Field::Search => &mut self.ui.int.search,
         })
     }
 
-    fn sw_click_field(&mut self, field: view::Field, x: i32, extend: bool, dragging: bool) {
+    fn sw_click_field(&mut self, field: view::Field, x: i32, extend: bool) {
         let Some((_, inner)) = view::sw_field_rects(self.sw_size(), self.dpi_scale, &self.ui, field) else { return };
         let shown = {
             let text = view::field_edit(&self.ui, field).text();
-            if matches!(
-                field,
-                view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey | view::Field::TtsKey
-            ) {
+            if matches!(field, view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey) {
                 "\u{2022}".repeat(text.chars().count())
             } else {
                 text
@@ -365,7 +321,7 @@ impl App {
             return;
         };
         if let Some(n) = self.sw_edit_mut() {
-            let fx = if (x as f32) < inner.0 && !dragging { 1.0e6 } else { x as f32 - inner.0 };
+            let fx = if (x as f32) < inner.0 { 1.0e6 } else { x as f32 - inner.0 };
             n.click(&layout, fx, 4.0, extend);
         }
     }
@@ -385,13 +341,6 @@ impl App {
         self.ui.int.voice_base.set_text(&self.settings.ai.voice_base);
         self.ui.int.voice_key.set_text("");
         self.ui.int.voice_key_saved = ai::has_voice_key();
-        self.ui.int.tts_key.set_text("");
-        self.ui.int.tts_base.set_text(&self.settings.assistant.tts_base);
-        self.ui.int.tts_model.set_text(&self.settings.assistant.tts_model);
-        self.ui.int.tts_voice.set_text(&self.settings.assistant.tts_voice);
-        self.ui.int.tts_key_saved = ai::has_tts_key(self.settings.assistant.tts_provider);
-        self.ui.int.tts_key_shared =
-            ai::tts_key_is_shared(&self.settings.assistant.tts_base, self.settings.assistant.tts_provider);
         self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
         self.sync_ai_fields();
     }
@@ -405,7 +354,6 @@ impl App {
             self.settings.save();
             self.ui.cfg = self.settings.clone();
             ai::configure(&self.settings.ai);
-            self.restart_wake();
         }
     }
 
@@ -417,7 +365,6 @@ impl App {
         self.settings.save();
         self.ui.cfg = self.settings.clone();
         ai::configure(&self.settings.ai);
-        self.restart_wake();
         self.sync_voice_fields();
         self.notify(Notice::Integrations, '\u{E73E}', "Command name saved");
     }
@@ -442,35 +389,6 @@ impl App {
         ai::configure(&self.settings.ai);
         self.sync_voice_fields();
         self.notify(Notice::Integrations, '\u{E73E}', "Speech service saved");
-    }
-
-    fn save_tts(&mut self) {
-        let key = self.ui.int.tts_key.text();
-        if !key.trim().is_empty() && !ai::save_tts_key(self.settings.assistant.tts_provider, &key) {
-            return self.notify(Notice::Error, '\u{E783}', "That does not look like an API key");
-        }
-        let Some(base) = ai::clean_base(&self.ui.int.tts_base.text()) else {
-            return self.notify(Notice::Error, '\u{E783}', "The server address must be https:// (or local http://)");
-        };
-        let given = self.ui.int.tts_model.text().trim().to_string();
-        let model = if given.is_empty() { self.settings.assistant.tts_model.clone() } else { given };
-        if !ai::valid_model(&model, crate::data::settings::AiProvider::OpenAi) {
-            return self.notify(Notice::Error, '\u{E783}', "That model name is not valid");
-        }
-        let given = self.ui.int.tts_voice.text().trim().to_string();
-        let voice = if given.is_empty() { self.settings.assistant.tts_voice.clone() } else { given };
-        let voice_ok =
-            voice.len() <= 40 && voice.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-        if !voice_ok {
-            return self.notify(Notice::Error, '\u{E783}', "That voice name is not valid");
-        }
-        self.settings.assistant.tts_base = base;
-        self.settings.assistant.tts_model = model;
-        self.settings.assistant.tts_voice = voice;
-        self.settings.save();
-        self.ui.cfg = self.settings.clone();
-        self.sync_voice_fields();
-        self.notify(Notice::Integrations, '\u{E73E}', "Voice service saved");
     }
 
     fn save_ai(&mut self) {
@@ -529,25 +447,26 @@ impl App {
 
     fn capture_key(&mut self, hotkey: Hotkey, vk: u16) {
         use crate::data::keys::{ALT, CTRL, Combo, SHIFT, WIN, valid_vk};
-        let down = |k: u16| unsafe { GetKeyState(i32::from(k)) < 0 || GetAsyncKeyState(i32::from(k)) < 0 };
+        let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetKeyState(k.0 as i32) < 0 };
         let vk32 = u32::from(vk);
         if matches!(vk32, 0x10..=0x12 | 0x5B | 0x5C | 0xA0..=0xA5) {
             return;
         }
         let mut mods = 0;
-        for (bit, keys) in [(CTRL, [0x11, 0xA2, 0xA3]), (ALT, [0x12, 0xA4, 0xA5]), (SHIFT, [0x10, 0xA0, 0xA1])] {
-            if keys.into_iter().any(down) {
+        for (bit, key) in [(CTRL, VK_CONTROL), (ALT, VK_MENU), (SHIFT, VK_SHIFT)] {
+            if down(key) {
                 mods |= bit;
             }
         }
-        if down(0x5B) || down(0x5C) {
+        if unsafe { GetKeyState(0x5B) < 0 || GetKeyState(0x5C) < 0 } {
             mods |= WIN;
         }
-        if mods & ALT != 0 {
+        if down(VK_MENU) {
             self.ui.sw.quiet_sys = true;
         }
         if vk32 == u32::from(VK_ESCAPE.0) {
-            return self.set_hotkey(hotkey, Combo::NONE);
+            self.end_rebind();
+            return self.render_settings_win();
         }
         let combo = if mods == 0 && vk32 == u32::from(VK_DELETE.0) {
             hotkey.default_combo()
@@ -620,18 +539,6 @@ impl App {
                     self.metrics_changed();
                 }
             }
-            view::Act::DockRemove(i) => {
-                if i < self.settings.desktop_dock.pins.len() {
-                    self.settings.desktop_dock.pins.remove(i);
-                    self.save_desktop_dock();
-                }
-            }
-            view::Act::DockHiddenRemove(i) => {
-                if i < self.settings.desktop_dock.hidden_apps.len() {
-                    self.settings.desktop_dock.hidden_apps.remove(i);
-                    self.save_desktop_dock();
-                }
-            }
             view::Act::LyricsAppRemove(i) => {
                 if i < self.settings.lyrics_apps.len() {
                     self.settings.lyrics_apps.remove(i);
@@ -645,32 +552,6 @@ impl App {
                 discord::Status::Authorizing => {}
             },
             view::Act::DiscordMute => discord::set_mute(!self.ui.discord.self_mute),
-            view::Act::YandexMain => {
-                use crate::services::yandex::{self, Command};
-                let state = &self.ui.yandex.state;
-                yandex::send(if state.has_token {
-                    Command::Disconnect
-                } else if state.busy || !state.code.is_empty() {
-                    Command::Cancel
-                } else {
-                    Command::Connect
-                });
-            }
-            view::Act::YandexAutoplay => crate::services::yandex::send(crate::services::yandex::Command::Autoplay(
-                !self.ui.yandex.state.config.autoplay,
-            )),
-            view::Act::YandexBrowser => cmd::shell_open("https://ya.ru/device", None),
-            view::Act::YandexCopy => {
-                self.ui.yandex.copied = clips::sys::write_text(self.hwnd, &self.ui.yandex.state.code);
-            }
-            view::Act::YandexWave => {
-                if let Some(hwnd) = self.settings_win {
-                    unsafe {
-                        let _ = ShowWindow(hwnd, SW_HIDE);
-                    }
-                }
-                self.open_tab(view::Tab::Yandex);
-            }
             view::Act::DiscordDeaf => discord::set_deaf(!self.ui.discord.self_deaf),
             view::Act::DiscordOverlay => self.toggle_overlay(),
             view::Act::SpotifyMain => match self.ui.spotify.status {
@@ -705,11 +586,6 @@ impl App {
             }
             view::Act::AiSave => self.save_ai(),
             view::Act::VoiceSave => self.save_voice(),
-            view::Act::TtsSave => self.save_tts(),
-            view::Act::TtsRemoveKey => {
-                ai::remove_tts_key(self.settings.assistant.tts_provider);
-                self.sync_voice_fields();
-            }
             view::Act::WakeSave => self.save_wake(),
             view::Act::GroupAdd => {
                 let name = self.ui.int.group_name.text();
@@ -767,29 +643,22 @@ impl App {
     fn sw_row(&mut self, id: view::Sid, hit: view::SetHit, x: i32) {
         match hit {
             view::SetHit::Option(n) => {
-                if view::is_assistant_level(id)
-                    || matches!(
-                        id,
-                        view::Sid::Character
-                            | view::Sid::AsstTtsProvider
-                            | view::Sid::PetPerformance
-                            | view::Sid::Edge
-                            | view::Sid::PillBattery
-                            | view::Sid::AiProvider
-                            | view::Sid::CoverMode
-                            | view::Sid::TabAnimKind
-                            | view::Sid::AnimCurve
-                            | view::Sid::TextLayout
-                    )
-                {
+                if matches!(
+                    id,
+                    view::Sid::Character
+                        | view::Sid::Edge
+                        | view::Sid::PillBattery
+                        | view::Sid::AiProvider
+                        | view::Sid::CoverMode
+                        | view::Sid::TabAnimKind
+                        | view::Sid::AnimCurve
+                        | view::Sid::TextLayout
+                ) {
                     view::cycle_set(id, &mut self.settings, n == 1);
                 } else {
                     view::segment_set(id, &mut self.settings, n);
                 }
                 self.setting_changed(id, true);
-                if id == view::Sid::AsstTtsProvider {
-                    self.sync_voice_fields();
-                }
             }
             view::SetHit::Label => {}
             view::SetHit::Select => self.ui.sw.dropdown = Some(id),
@@ -805,26 +674,6 @@ impl App {
                 unsafe { SetCapture(self.settings_win.unwrap_or_default()) };
             }
             view::SetHit::Button => {
-                if matches!(
-                    id,
-                    view::Sid::DockImport | view::Sid::DockMonitor | view::Sid::DockAdd | view::Sid::DockTaskbar
-                ) {
-                    self.desktop_dock_setting(id);
-                }
-                if id == view::Sid::AsstInstall {
-                    self.install_wake_runtime();
-                }
-                if id == view::Sid::AsstLocalInstall {
-                    self.install_local_voice();
-                }
-                if id == view::Sid::AsstInstructions
-                    && let Some(file) = crate::services::assistant::memory::ensure_instructions_file()
-                {
-                    cmd::shell_open(&file.to_string_lossy(), None);
-                }
-                if id == view::Sid::WindowsNotificationsSettings {
-                    cmd::shell_open("ms-settings:notifications", None);
-                }
                 if id == view::Sid::OpenLogs
                     && let Some(dir) = crate::data::log::dir()
                 {
@@ -934,9 +783,6 @@ impl App {
                     view::Field::SpotifyId => view::Act::SpotifySaveId,
                     view::Field::AiKey | view::Field::AiModel | view::Field::AiBase => view::Act::AiSave,
                     view::Field::VoiceKey | view::Field::VoiceModel | view::Field::VoiceBase => view::Act::VoiceSave,
-                    view::Field::TtsKey | view::Field::TtsBase | view::Field::TtsModel | view::Field::TtsVoice => {
-                        view::Act::TtsSave
-                    }
                     view::Field::WakeWord => view::Act::WakeSave,
                     view::Field::GroupName => view::Act::GroupAdd,
                     _ => view::Act::DiscordMain,
@@ -954,10 +800,8 @@ impl App {
                 }
             }
             0x03 | 0x18 => {
-                if !matches!(
-                    field,
-                    view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey | view::Field::TtsKey
-                ) && let Some(n) = self.sw_edit_mut()
+                if !matches!(field, view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey)
+                    && let Some(n) = self.sw_edit_mut()
                     && let Some(text) = n.selected_text()
                 {
                     crate::data::clips::sys::write_text(hwnd, &text);
@@ -1040,10 +884,6 @@ impl App {
 
 extern "system" fn sw_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
-        WM_SHOWWINDOW | WM_SIZE | WM_ACTIVATE => {
-            notify_settings_window_changed(hwnd);
-            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
-        }
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
@@ -1131,140 +971,8 @@ extern "system" fn sw_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         WM_DESTROY => {
             with_app(|a| a.on_sw_destroyed());
-            notify_settings_window_changed(hwnd);
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore = "Creates temporary native settings windows offscreen"]
-    fn native_settings_window_is_listed_minimized_and_refreshes_without_app_borrow() -> Result<()> {
-        unsafe {
-            let instance = GetModuleHandleW(None)?;
-            RegisterClassW(&WNDCLASSW {
-                lpfnWndProc: Some(sw_proc),
-                hInstance: instance.into(),
-                lpszClassName: w!("NightIsland.Settings"),
-                ..Default::default()
-            });
-            let parent = CreateWindowExW(
-                WS_EX_TOOLWINDOW,
-                w!("STATIC"),
-                w!("Settings test parent"),
-                WS_POPUP,
-                -12000,
-                -12000,
-                1,
-                1,
-                None,
-                None,
-                Some(instance.into()),
-                None,
-            )?;
-            struct Windows(Vec<HWND>);
-            impl Drop for Windows {
-                fn drop(&mut self) {
-                    for hwnd in self.0.iter().rev() {
-                        unsafe {
-                            let _ = DestroyWindow(*hwnd);
-                        }
-                    }
-                    SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-                }
-            }
-            let mut windows = Windows(vec![parent]);
-            let hwnd = CreateWindowExW(
-                WS_EX_NOACTIVATE,
-                w!("NightIsland.Settings"),
-                w!("Night Island settings test"),
-                WS_OVERLAPPEDWINDOW,
-                -12000,
-                -12000,
-                400,
-                300,
-                None,
-                None,
-                Some(instance.into()),
-                None,
-            )?;
-            windows.0.push(hwnd);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, parent.0 as isize);
-            SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-            notify_settings_window_changed(hwnd);
-            notify_settings_window_changed(hwnd);
-            let mut message = MSG::default();
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            assert!(
-                !PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            on_settings_window_changed();
-            let listed = crate::platform::desktop_dock::windows();
-            assert!(listed.iter().any(|w| w.handle == hwnd.0 as isize));
-            assert!(!listed.iter().any(|w| w.handle == parent.0 as isize));
-            let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
-            assert!(IsIconic(hwnd).as_bool());
-            assert!(crate::platform::desktop_dock::windows().iter().any(|w| w.handle == hwnd.0 as isize));
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            on_settings_window_changed();
-            let _ = ShowWindow(hwnd, SW_HIDE);
-            assert!(!crate::platform::desktop_dock::windows().iter().any(|w| w.handle == hwnd.0 as isize));
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            on_settings_window_changed();
-            DestroyWindow(hwnd)?;
-            windows.0.pop();
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            assert!(!IsWindow(Some(hwnd)).as_bool());
-        }
-        Ok(())
     }
 }

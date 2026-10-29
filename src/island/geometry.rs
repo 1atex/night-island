@@ -23,7 +23,6 @@ pub(in crate::island) enum OpenEq {
 #[derive(Clone, Copy)]
 pub(in crate::island) struct Room {
     pub bottom: f32,
-    pub liquid: bool,
     pub ring: bool,
     pub open: OpenEq,
     pub vertical: bool,
@@ -34,11 +33,6 @@ pub(in crate::island) fn small_pads(room: &Room, docked: bool) -> (f32, f32, f32
     let base_top = if docked { 0.0 } else { TOP_MARGIN };
     let ring = if room.ring { RING_ROOM } else { 0.0 };
     let inward = room.bottom;
-    if room.liquid {
-        let top = if docked && room.hang == Hang::Down { 0.0 } else { base_top.max(BUMP_ROOM) };
-        let bottom = if docked && room.hang == Hang::Up { ring } else { BUMP_ROOM.max(ring) };
-        return (BUMP_ROOM.max(PAD).max(ring), top, bottom);
-    }
     match room.hang {
         Hang::Down => (PAD.max(ring), base_top.max(ring), inward),
         Hang::Up => (PAD.max(ring), base_top.max(inward).max(ring), ring),
@@ -58,7 +52,6 @@ pub(in crate::island) fn window_room(settings: &Settings) -> Room {
     };
     Room {
         bottom: bump_room_for(settings),
-        liquid: settings.style == Style::Liquid,
         ring: settings.ring_wanted(),
         open,
         vertical: settings.vertical(),
@@ -131,11 +124,6 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn island_work_area(&self) -> view::Rect {
-        let (left, top, right, bottom) = Self::work_area();
-        (left, self.top_panel.as_ref().map_or(top, |panel| panel.top()), right, bottom)
-    }
-
     pub(in crate::island) fn screen_size() -> (f32, f32) {
         unsafe { (GetSystemMetrics(SM_CXSCREEN) as f32, GetSystemMetrics(SM_CYSCREEN) as f32) }
     }
@@ -143,7 +131,7 @@ impl App {
     pub(in crate::island) fn pill_screen(&self, expanded: bool) -> (f32, f32, f32, f32) {
         let s = self.scale;
         let (sw, sh) = Self::screen_size();
-        let (wl, wt, wr, wb) = self.island_work_area();
+        let (wl, wt, wr, wb) = Self::work_area();
         let (cw, ch) = (self.collapsed().0 * s, self.collapsed().1 * s);
         let (ew, eh) = (EXPANDED.0 * s, EXPANDED.1 * s);
         let clamp = |v: f32, lo: f32, hi: f32| v.max(lo).min(hi.max(lo));
@@ -157,7 +145,7 @@ impl App {
         } else {
             match self.settings.float_pos {
                 Some([x, y]) => (clamp(x as f32 - cw / 2.0, 0.0, sw - cw), clamp(y as f32, 0.0, sh - ch)),
-                None => ((sw - cw) / 2.0, self.top_panel.as_ref().map_or(0.0, |p| p.top()) + TOP_MARGIN * s),
+                None => ((sw - cw) / 2.0, TOP_MARGIN * s),
             }
         };
         if !expanded {
@@ -184,15 +172,7 @@ impl App {
             Win::Strip => (pill.0 - PAD * s, 0.0),
             Win::Small => {
                 let (px, py) = self.small_pad();
-                if let Some(tween) = self.pill_motion.width {
-                    if self.settings.vertical() {
-                        (pill.0 - px * s, tween.from.1.min(tween.to.1) - py * s)
-                    } else {
-                        (tween.from.0.min(tween.to.0) - px * s, pill.1 - py * s)
-                    }
-                } else {
-                    (pill.0 - px * s, pill.1 - py * s)
-                }
+                (pill.0 - px * s, pill.1 - py * s)
             }
             Win::Big => {
                 let (px, py, _) = self.big_pad();
@@ -224,21 +204,15 @@ impl App {
     }
 
     pub(in crate::island) fn open_ms(&self) -> u64 {
-        if crate::ui::feedback::motion_allowed() { (OPEN_BASE_MS / self.settings.open_speed) as u64 } else { 1 }
+        (OPEN_BASE_MS / self.settings.open_speed) as u64
     }
 
     pub(in crate::island) fn close_ms(&self) -> u64 {
-        if crate::ui::feedback::motion_allowed() { (CLOSE_BASE_MS / self.settings.close_speed) as u64 } else { 1 }
+        (CLOSE_BASE_MS / self.settings.close_speed) as u64
     }
 
     pub(in crate::island) fn window_size(&self, win: Win) -> (i32, i32) {
-        window_size(
-            self.scale,
-            win,
-            self.docked(),
-            if win == Win::Small { self.width_room() } else { self.cw },
-            &window_room(&self.settings),
-        )
+        window_size(self.scale, win, self.docked(), self.cw, &window_room(&self.settings))
     }
 
     pub(in crate::island) fn pill_full(&self) -> view::Rect {
@@ -255,13 +229,7 @@ impl App {
         } else {
             self.small_pad()
         };
-        let full = if !expanded {
-            let at = self.pill_screen(false);
-            let origin = self.window_origin(self.win);
-            (at.0 - origin.0, at.1 - origin.1, w * self.scale, h * self.scale)
-        } else {
-            (px * self.scale, py * self.scale, w * self.scale, h * self.scale)
-        };
+        let full = (px * self.scale, py * self.scale, w * self.scale, h * self.scale);
         if expanded { view::body_rect(full, self.scale, self.ui.tab) } else { full }
     }
 
@@ -279,19 +247,10 @@ impl App {
         let (win_w, _) = self.window_size(self.win);
         let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings)).0;
         let big = window_size(self.scale, Win::Big, self.docked(), self.cw, &window_room(&self.settings)).0;
-        let ring_w = self.liquid.ring.size().0;
-        for (index, (layer, own_w)) in
-            [(&self.collapsed, small), (&self.expanded, big), (&self.liquid.ring, ring_w)].into_iter().enumerate()
-        {
-            let mut x = (win_w - own_w) as f32 / 2.0;
-            let mut y = 0.0;
-            if index == 0 {
-                let pill = self.pill_rect(false);
-                let pad = self.small_pad();
-                x = pill.0 - pad.0 * self.scale;
-                y = pill.1 - pad.1 * self.scale;
-            }
-            let _ = layer.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
+        let ring_w = if self.win == Win::Big { big } else { small };
+        for (layer, own_w) in [(&self.collapsed, small), (&self.expanded, big), (&self.liquid.ring, ring_w)] {
+            let x = (win_w - own_w) as f32 / 2.0;
+            let _ = layer.sprite.SetOffset(Vector3 { X: x, Y: 0.0, Z: 0.0 });
         }
         self.place_bump();
         self.place_spectrum();
@@ -302,108 +261,32 @@ impl App {
         if self.state != State::Collapsed {
             return;
         }
-        let animate = !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed)
-            && !self.pill_hidden
-            && !self.gaming
-            && !self.notification_card_visible();
-        let normal = view::collapsed_width(&self.ui, COLLAPSED.0);
-        let want = if self.pill_motion.intro.is_some() { self.pill_motion.intro_width } else { normal };
+        let short_lived = self.ui.notice.is_some() || self.ui.volume.is_some() || self.ui.downloading.is_some();
+        let animate = short_lived && !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed);
+        let want = view::collapsed_width(&self.ui, COLLAPSED.0);
         if (want - self.cw).abs() < 0.5 {
             return;
         }
-        let now = Instant::now();
-        let from = self.pill_motion.width.map_or_else(|| self.pill_screen_geometry(), |tween| tween.at(now));
         let old_origin = self.window_origin(Win::Small);
-        let old_target = self.pill_screen_geometry();
-        let attachments: Vec<_> = std::iter::once(&self.pet.char_layer.sprite)
-            .chain(self.music.spectrum.iter())
-            .map(|sprite| (sprite.clone(), sprite.Offset().unwrap_or_default()))
-            .collect();
-        let old_offset = self.collapsed.sprite.Offset().unwrap_or_default();
-        let crossfade = animate && self.pill_motion.intro.is_none();
-        if crossfade {
-            std::mem::swap(&mut self.collapsed, &mut self.pill_motion.previous);
-            let _ = self.collapsed.sprite.StopAnimation(h!("Opacity"));
-            let _ = self.collapsed.sprite.SetIsVisible(true);
-        }
-        self.reset_liquid_pull();
         self.cw = want;
-        let to = self.pill_screen_geometry();
-        let room = if self.settings.vertical() {
-            (from.1 + from.3).max(to.1 + to.3) - from.1.min(to.1)
-        } else {
-            (from.0 + from.2).max(to.0 + to.2) - from.0.min(to.0)
-        } / self.scale;
-        self.pill_motion.width = animate.then_some(super::pill_motion::WidthTween { from, to, room, start: now });
-        if animate {
-            self.set_bump_visible(false);
-            let _ = self.liquid.ring.sprite.SetIsVisible(false);
+        let new_origin = self.window_origin(Win::Small);
+        if let Ok(cur) = self.geometry.Offset() {
+            let _ = self
+                .geometry
+                .SetOffset(Vector2 { X: cur.X + old_origin.0 - new_origin.0, Y: cur.Y + old_origin.1 - new_origin.1 });
         }
         self.place(Win::Small);
-        let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings));
+        let docked = self.docked();
+        let small = window_size(self.scale, Win::Small, docked, self.cw, &window_room(&self.settings));
         let _ = self.collapsed.resize(small);
         self.resize_ring();
         self.fit_bump();
         self.update_offsets();
         if animate {
-            let _ = self.animate_width_geometry(from);
-            let origin = self.window_origin(Win::Small);
-            for (sprite, old) in attachments {
-                let target = sprite.Offset().unwrap_or_default();
-                let start = Vector3 {
-                    X: old.X + old_origin.0 - origin.0 + from.0 - old_target.0,
-                    Y: old.Y + old_origin.1 - origin.1 + from.1 - old_target.1,
-                    Z: 0.0,
-                };
-                let _ = self.animate_pill_vector(&sprite, h!("Offset"), start, target, super::pill_motion::WIDTH_MS);
-            }
-            let (left, right, _) = self.ear_targets(Win::Small, false, false);
-            let radius = EAR * self.scale;
-            for (index, (ear, x)) in self.ears.iter().zip([left, right]).enumerate() {
-                let start_x = if index == 0 { from.0 - origin.0 - radius } else { from.0 + from.2 - origin.0 };
-                let _ = self.animate_pill_vector(
-                    &ear.sprite,
-                    h!("Offset"),
-                    Vector3 { X: start_x, Y: 0.0, Z: 0.0 },
-                    Vector3 { X: x, Y: 0.0, Z: 0.0 },
-                    super::pill_motion::WIDTH_MS,
-                );
-            }
-            self.set_timer(Timer::WidthMotion, super::pill_motion::WIDTH_MS as u32 + 30);
-            if crossfade {
-                let origin = self.window_origin(Win::Small);
-                let previous = &self.pill_motion.previous.sprite;
-                let _ = previous.SetOffset(Vector3 {
-                    X: old_offset.X + old_origin.0 - origin.0,
-                    Y: old_offset.Y + old_origin.1 - origin.1,
-                    Z: 0.0,
-                });
-                let _ = previous.StopAnimation(h!("Opacity"));
-                let _ = previous.SetIsVisible(true);
-                if let Ok(fade) = self.compositor.CreateScalarKeyFrameAnimation() {
-                    let _ = fade.InsertKeyFrame(0.0, 1.0);
-                    let _ = fade.InsertKeyFrame(1.0, 0.0);
-                    let _ = fade.SetDuration(Duration::from_millis(230).into());
-                    let _ = previous.StartAnimation(h!("Opacity"), &fade);
-                }
-                let fade = self.compositor.CreateScalarKeyFrameAnimation();
-                if let Ok(fade) = fade {
-                    let _ = fade.InsertKeyFrame(0.0, 0.0);
-                    let _ = fade.InsertKeyFrame(1.0, 1.0);
-                    let _ = fade.SetDuration(Duration::from_millis(230).into());
-                    let _ = self.collapsed.sprite.StartAnimation(h!("Opacity"), &fade);
-                }
-            }
+            let _ = self.animate_to(false, false);
         } else {
-            self.kill_timer(Timer::WidthMotion);
-            self.stop_pill_attachment_motion();
-            let _ = self.pill_motion.previous.sprite.SetIsVisible(false);
-            for name in [h!("Offset"), h!("Size")] {
+            for name in [windows::core::h!("Offset"), windows::core::h!("Size"), windows::core::h!("CornerRadius")] {
                 let _ = self.geometry.StopAnimation(name);
-            }
-            if self.pill_motion.intro.is_none() {
-                let _ = self.collapsed.sprite.StopAnimation(h!("Opacity"));
-                let _ = self.collapsed.sprite.SetOpacity(1.0);
             }
             let _ = self.set_geometry_now(Win::Small, false, false);
         }
@@ -464,9 +347,6 @@ impl App {
     }
 
     pub(in crate::island) fn set_geometry_now(&self, win: Win, expanded: bool, hidden: bool) -> Result<()> {
-        if expanded || hidden || !self.liquid_on() {
-            self.restore_liquid_body();
-        }
         let (offset, size, radius) = self.pill(win, expanded, hidden);
         self.geometry.SetOffset(offset)?;
         self.geometry.SetSize(size)?;
@@ -506,16 +386,11 @@ impl App {
     }
 
     pub(in crate::island) fn apply_layout(&mut self) {
-        self.finish_cover_motion();
-        self.hide_notification_card();
-        self.cancel_pill_motion();
         self.ui.cfg = self.settings.clone();
         if self.state != State::Expanded {
             self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         }
         self.scale = self.dpi_scale * self.settings.scale_percent as f32 / 100.0;
-        let _ = self.pill_motion.cover.resize(((28.0 * self.scale).ceil() as i32, (28.0 * self.scale).ceil() as i32));
-        let _ = self.pill_motion.title.resize(((240.0 * self.scale).ceil() as i32, (34.0 * self.scale).ceil() as i32));
         self.stop_idle();
         self.liquid.bump_amp = 0.0;
         self.liquid.bump_vel = 0.0;
@@ -530,9 +405,6 @@ impl App {
         self.resize_ring();
         let _ = self.expanded.resize(window_size(self.scale, Win::Big, docked, self.cw, &window_room(&self.settings)));
         let _ = self.liquid.bump.resize(bump_size(self.scale, self.collapsed()));
-        let _ = self.liquid.highlight.resize(small);
-        self.liquid.pull_ready = false;
-        self.liquid.eq_key.set(None);
         let _ = self
             .pet
             .char_layer

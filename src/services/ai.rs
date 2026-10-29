@@ -7,7 +7,6 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 use crate::data::settings::{AiProvider, AiSettings};
-use crate::services::assistant::TtsProvider;
 use crate::services::attach::{Attachment, Kind as FileKind};
 use crate::services::{http, integrations};
 
@@ -15,7 +14,7 @@ pub const WM_AI: u32 = WM_APP + 21;
 
 const USER_AGENT: &str = "NightIsland/0.1";
 const MAX_PROMPT_CHARS: usize = 4000;
-const MAX_ANSWER_CHARS: usize = 24_000;
+const MAX_ANSWER_CHARS: usize = 4000;
 const MAX_OUTPUT_TOKENS: u32 = 600;
 const SYSTEM_PROMPT: &str =
     "Answer briefly and plainly, in the language of the question, in at most a few sentences. No markdown.";
@@ -29,7 +28,7 @@ const CHAT_TURNS: usize = 24;
 pub const WM_CHAT: u32 = WM_APP + 24;
 
 pub const WM_COMMAND: u32 = WM_APP + 30;
-const COMMAND_OUTPUT_TOKENS: u32 = 3000;
+const COMMAND_OUTPUT_TOKENS: u32 = 200;
 
 pub const WM_SORT: u32 = WM_APP + 31;
 pub const SORT_REQUESTS_PER_DAY: u32 = 5;
@@ -40,7 +39,7 @@ pub type Answer = Result<String, String>;
 static CONFIG: OnceLock<Mutex<AiSettings>> = OnceLock::new();
 static RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static CHAT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
-static COMMAND_RESULT: Mutex<Option<(u64, Answer)>> = Mutex::new(None);
+static COMMAND_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static SORT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static BUSY: AtomicBool = AtomicBool::new(false);
 
@@ -98,48 +97,6 @@ pub fn save_voice_key(key: &str) -> bool {
     has_voice_key()
 }
 
-fn tts_secret(provider: TtsProvider) -> &'static str {
-    match provider {
-        TtsProvider::OpenAi => "ai_tts",
-        TtsProvider::Eleven => "ai_tts_eleven",
-        TtsProvider::Fish => "ai_tts_fish",
-    }
-}
-
-pub fn has_tts_key(provider: TtsProvider) -> bool {
-    integrations::dir().is_some_and(|d| d.join(format!("{}.bin", tts_secret(provider))).exists())
-}
-
-pub fn save_tts_key(provider: TtsProvider, key: &str) -> bool {
-    if !valid_key(key) {
-        return false;
-    }
-    integrations::save_secret(tts_secret(provider), key.trim());
-    has_tts_key(provider)
-}
-
-pub fn remove_tts_key(provider: TtsProvider) {
-    integrations::delete_secret(tts_secret(provider));
-}
-
-pub fn tts_credentials(base: &str, provider: TtsProvider) -> Option<(String, String)> {
-    let base = clean_base(base)?;
-    if let Some(key) = integrations::load_secret(tts_secret(provider)) {
-        return Some((base, key));
-    }
-    if provider.needs_own_key() {
-        return None;
-    }
-    let (shared_base, key) = speech_credentials()?;
-    (shared_base == base).then_some((base, key))
-}
-
-pub fn tts_key_is_shared(base: &str, provider: TtsProvider) -> bool {
-    !provider.needs_own_key()
-        && !has_tts_key(provider)
-        && clean_base(base).is_some_and(|b| speech_credentials().is_some_and(|(shared, _)| shared == b))
-}
-
 pub fn remove_voice_key() {
     integrations::delete_secret(VOICE_SECRET);
 }
@@ -157,16 +114,6 @@ fn voice_secret(settings: &AiSettings) -> Option<String> {
 pub fn voice_shares_chat_key(settings: &AiSettings) -> bool {
     settings.voice_separate
         && matches!((clean_base(&settings.voice_base), clean_base(&settings.openai_base)), (Some(a), Some(b)) if a == b)
-}
-
-pub fn speech_credentials() -> Option<(String, String)> {
-    let settings = config();
-    if voice_provider(&settings) != AiProvider::OpenAi {
-        return None;
-    }
-    let base = clean_base(if settings.voice_separate { &settings.voice_base } else { &settings.openai_base })?;
-    let key = integrations::load_secret(&voice_secret(&settings)?)?;
-    Some((base, key))
 }
 
 pub fn voice_ready(settings: &AiSettings) -> bool {
@@ -286,23 +233,16 @@ fn gemini_parts(parts: Vec<Part>) -> Vec<serde_json::Value> {
 }
 
 pub fn build_call(settings: &AiSettings, key: &str, prompt: &str) -> Option<Call> {
-    build(settings, key, &[ChatTurn::text(false, prompt)], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS, false)
+    build(settings, key, &[ChatTurn::text(false, prompt)], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS)
 }
 
 pub fn build_chat_call(settings: &AiSettings, key: &str, turns: &[ChatTurn]) -> Option<Call> {
     let recent = &turns[turns.len().saturating_sub(CHAT_TURNS)..];
     let first_user = recent.iter().position(|t| !t.assistant)?;
-    build(settings, key, &recent[first_user..], CHAT_SYSTEM_PROMPT, CHAT_OUTPUT_TOKENS, false)
+    build(settings, key, &recent[first_user..], CHAT_SYSTEM_PROMPT, CHAT_OUTPUT_TOKENS)
 }
 
-fn build(
-    settings: &AiSettings,
-    key: &str,
-    turns: &[ChatTurn],
-    system: &str,
-    max_tokens: u32,
-    quick: bool,
-) -> Option<Call> {
+fn build(settings: &AiSettings, key: &str, turns: &[ChatTurn], system: &str, max_tokens: u32) -> Option<Call> {
     let provider = settings.provider;
     let model = settings.model(provider);
     if !valid_model(model, provider) {
@@ -334,14 +274,10 @@ fn build(
             all.extend(messages.into_iter().map(|(a, parts)| {
                 json!({"role": if a { "assistant" } else { "user" }, "content": content_json(provider, parts)})
             }));
-            let mut body = json!({"model": model, "max_tokens": max_tokens, "messages": all});
-            if quick && settings.openai_base.to_ascii_lowercase().contains("deepseek.com") {
-                body["thinking"] = json!({"type": "disabled"});
-            }
             Call {
                 url: format!("{}/chat/completions", clean_base(&settings.openai_base)?),
                 headers: vec![("Authorization", format!("Bearer {key}"))],
-                body: body.to_string(),
+                body: json!({"model": model, "max_tokens": max_tokens, "messages": all}).to_string(),
             }
         }
         AiProvider::Gemini => Call {
@@ -404,16 +340,7 @@ pub fn parse_reply(provider: AiProvider, status: u16, body: &str) -> Answer {
     };
     match text.map(|t| tidy(&t)) {
         Some(t) if !t.is_empty() => Ok(t),
-        _ => {
-            let finish = value["choices"][0]["finish_reason"].as_str().unwrap_or("");
-            let thought = value["choices"][0]["message"]["reasoning_content"].as_str().is_some_and(|r| !r.is_empty());
-            crate::log_warn!("AI answer was empty (finish_reason={finish}, reasoning_only={thought})");
-            if thought {
-                Err("The model spent its whole limit thinking and gave no answer".into())
-            } else {
-                Err("The answer was empty".into())
-            }
-        }
+        _ => Err("The answer was empty".into()),
     }
 }
 
@@ -611,7 +538,7 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
     let system = crate::tools::appgroups::system_prompt(groups);
     let turn = ChatTurn::text(false, names.join("\n"));
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS, true));
+        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS));
         if let Ok(mut r) = SORT_RESULT.lock() {
             *r = Some(answer);
         }
@@ -623,23 +550,23 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
     true
 }
 
-pub fn complete(system: &str, user: &str, max_tokens: u32) -> Answer {
-    let settings = config();
-    let turn = ChatTurn::text(false, user);
-    run_with(&settings, |key| build(&settings, key, &[turn], system, max_tokens, true))
-}
-
-pub fn take_command_result() -> Option<(u64, Answer)> {
+pub fn take_command_result() -> Option<Answer> {
     COMMAND_RESULT.lock().ok()?.take()
 }
 
-pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String, serial: u64) -> bool {
-    let (raw, settings) = (hwnd.0 as isize, config());
+pub fn ask_command(hwnd: HWND, command: &str) -> bool {
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let (raw, settings, turn) = (hwnd.0 as isize, config(), ChatTurn::text(false, command));
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| build(&settings, key, &turns, &system, COMMAND_OUTPUT_TOKENS, true));
+        let answer = run_with(&settings, |key| {
+            build(&settings, key, &[turn], crate::tools::voicecmd::SYSTEM_PROMPT, COMMAND_OUTPUT_TOKENS)
+        });
         if let Ok(mut r) = COMMAND_RESULT.lock() {
-            *r = Some((serial, answer));
+            *r = Some(answer);
         }
+        BUSY.store(false, Ordering::SeqCst);
         unsafe {
             let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_COMMAND, WPARAM(0), LPARAM(0));
         }
@@ -660,44 +587,6 @@ pub fn ask_chat(hwnd: HWND, turns: Vec<ChatTurn>) -> bool {
         let answer = run_with(&settings, |key| build_chat_call(&settings, key, &turns));
         if let Ok(mut r) = CHAT_RESULT.lock() {
             *r = Some(answer);
-        }
-        BUSY.store(false, Ordering::SeqCst);
-        unsafe {
-            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_CHAT, WPARAM(0), LPARAM(0));
-        }
-    });
-    true
-}
-
-pub fn build_pet_call(
-    settings: &AiSettings,
-    key: &str,
-    turn: &ChatTurn,
-    current: &crate::ui::pet_design::PetDesign,
-) -> Option<Call> {
-    let context =
-        format!("{}\nCurrent design: {}", crate::ui::pet_design::DESIGN_PROMPT, serde_json::to_string(current).ok()?);
-    build(settings, key, std::slice::from_ref(turn), &context, 1000, false)
-}
-
-pub fn ask_pet(hwnd: HWND, turn: ChatTurn, current: &crate::ui::pet_design::PetDesign) -> bool {
-    if BUSY.swap(true, Ordering::SeqCst) {
-        return false;
-    }
-    let (raw, settings, current) = (hwnd.0 as isize, config(), current.clone());
-    std::thread::spawn(move || {
-        let mut answer = run_with(&settings, |key| build_pet_call(&settings, key, &turn, &current));
-        if let Err(error) = &answer {
-            let lower = error.to_lowercase();
-            if !turn.attachments.is_empty()
-                && (lower.contains("image") || lower.contains("vision") || lower.contains("multimodal"))
-                && (lower.contains("support") || lower.contains("invalid") || lower.contains("accept"))
-            {
-                answer = Err("This model did not accept the photo. Select Text only and describe your pet, or choose a vision model.".into());
-            }
-        }
-        if let Ok(mut result) = CHAT_RESULT.lock() {
-            *result = Some(answer);
         }
         BUSY.store(false, Ordering::SeqCst);
         unsafe {
@@ -840,56 +729,6 @@ mod tests {
             kind: FileKind::Image,
             mime: "image/png",
             data: std::sync::Arc::new(vec![7; size]),
-        }
-    }
-
-    #[test]
-    #[ignore = "Sends two requests to the configured AI provider using an explicitly supplied test image"]
-    fn configured_provider_creates_pets_from_text_and_reference() {
-        let path = std::env::var_os("NI_PET_TEST_REFERENCE")
-            .expect("NI_PET_TEST_REFERENCE must name a non-private test image");
-        let image = crate::services::attach::load(std::path::Path::new(&path)).expect("test image must load");
-        let settings = crate::data::settings::Settings::load().ai;
-        assert!(has_key(settings.provider), "No configured API key");
-        let current = crate::ui::pet_design::PetDesign::default();
-        for attachments in [vec![], vec![image]] {
-            let with_image = !attachments.is_empty();
-            let turn = ChatTurn { assistant: false, text: "Создай коричневого медведя с синим шарфом. Если есть изображение, используй медведя справа как образец.".into(), attachments };
-            let answer = run_with(&settings, |key| build_pet_call(&settings, key, &turn, &current))
-                .expect("pet generation request failed");
-            let pet = crate::ui::pet_design::PetDesign::from_reply(&answer).expect("provider returned an invalid pet");
-            assert_eq!(pet.body, crate::ui::pet_design::PetBody::Bear);
-            assert_eq!(pet.accessory, crate::ui::pet_design::PetAccessory::Scarf);
-            println!("Configured provider returned a valid pet; reference image: {with_image}");
-        }
-    }
-
-    #[test]
-    fn pet_requests_keep_the_design_context_and_photo_for_every_provider() {
-        let design = crate::ui::pet_design::PetDesign { name: "Mochi".into(), ..Default::default() };
-        for provider in [AiProvider::Claude, AiProvider::OpenAi, AiProvider::Gemini] {
-            for with_photo in [false, true] {
-                let turn = file_turn("Make the scarf blue", if with_photo { vec![picture(3)] } else { vec![] });
-                let call = build_pet_call(&settings(provider), "test-key", &turn, &design).unwrap();
-                let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
-                let (system, photo) = match provider {
-                    AiProvider::Claude => {
-                        (body["system"].as_str().unwrap(), !body["messages"][0]["content"][0]["source"].is_null())
-                    }
-                    AiProvider::OpenAi => (
-                        body["messages"][0]["content"].as_str().unwrap(),
-                        !body["messages"][1]["content"][0]["image_url"].is_null(),
-                    ),
-                    AiProvider::Gemini => (
-                        body["systemInstruction"]["parts"][0]["text"].as_str().unwrap(),
-                        !body["contents"][0]["parts"][0]["inlineData"].is_null(),
-                    ),
-                };
-                assert!(system.contains("Mochi") && system.contains("Return ONLY one JSON object"));
-                assert_eq!(photo, with_photo, "{provider:?}");
-                assert!(call.body.contains("Make the scarf blue"));
-                assert!(!call.body.contains("test-key"));
-            }
         }
     }
 

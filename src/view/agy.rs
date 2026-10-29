@@ -180,13 +180,9 @@ fn selected_part(sel: Option<TextRange>, index: usize, len: u32) -> Option<(u32,
 }
 
 pub(in crate::view) fn paint_history(p: &Painter, pill: Rect, scale: f32, h: &History, running: bool) -> Result<()> {
+    use crate::services::agy::Kind;
     let mut view = agy_view(pill, scale, h.input_h);
     view.3 -= h.reserve;
-    paint_history_in(p, view, scale, h, running)
-}
-
-pub(in crate::view) fn paint_history_in(p: &Painter, view: Rect, scale: f32, h: &History, running: bool) -> Result<()> {
-    use crate::services::agy::Kind;
     let width = view.2 - view.0 - 10.0 * scale;
     if let Some(geom) = h.geom {
         geom.borrow_mut().clear();

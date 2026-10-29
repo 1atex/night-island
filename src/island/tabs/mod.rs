@@ -10,7 +10,6 @@ mod controls;
 mod home;
 mod integrations;
 mod metrics;
-mod mixer;
 mod note;
 mod privacy;
 mod record;
@@ -21,18 +20,11 @@ mod steam;
 mod tabbar;
 mod text;
 mod weather;
-mod yandex;
 
 pub(in crate::island) use self::clipboard::ClipboardState;
 
 impl App {
     pub(in crate::island) fn select_tab(&mut self, tab: view::Tab) {
-        if tab != self.ui.tab {
-            self.finish_cover_motion();
-        }
-        self.finish_seek();
-        self.finish_mixer();
-        self.close_home_mixer();
         if tab != self.ui.tab || !matches!(tab, view::Tab::Note | view::Tab::Text) {
             self.end_edit(true);
         }
@@ -64,14 +56,11 @@ impl App {
         }
         if tab == view::Tab::Chat {
             self.refresh_chat();
-            self.sync_pet_studio();
         }
         if tab == view::Tab::Privacy {
             self.reload_uses();
         }
-        self.start_progress_timer();
         self.sync_metrics();
-        self.sync_mixer();
         if tab == view::Tab::Steam {
             self.reload_steam();
         }

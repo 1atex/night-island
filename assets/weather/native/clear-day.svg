@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-
-
-<defs id="element-2"><linearGradient id="wx-clear-day-sun" x1="0" y1="0" x2=".3" y2="1"><stop stop-color="#FFE5A4" id="element-4"/><stop offset="1" stop-color="#F5BD55" id="element-5"/></linearGradient></defs>
-<g id="element-7"><path d="M17.500 11.500l1.500 0.000" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-8"/><path d="M15.889 15.389l1.061 1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-9"/><path d="M12.000 17.000l0.000 1.500" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-10"/><path d="M8.111 15.389l-1.061 1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-11"/><path d="M6.500 11.500l-1.500 0.000" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-12"/><path d="M8.111 7.611l-1.061 -1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-13"/><path d="M12.000 6.000l-0.000 -1.500" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-14"/><path d="M15.889 7.611l1.061 -1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round" id="element-15"/></g><circle cx="12" cy="11.5" r="4" fill="url(#wx-clear-day-sun)" stroke="#F3B747" stroke-width=".55" id="element-16"/>
-</svg>

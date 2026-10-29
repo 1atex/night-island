@@ -1,7 +1,6 @@
 pub mod agents;
 pub mod agy;
 pub mod ai;
-pub mod assistant;
 pub mod attach;
 pub mod discord;
 pub mod everything;
@@ -13,4 +12,3 @@ pub mod spotify;
 pub mod sync;
 pub mod update;
 pub mod weather;
-pub mod yandex;

@@ -187,52 +187,7 @@ impl App {
             return;
         }
         let track_changed = now.title != self.ui.media.title;
-        if now.title != self.ui.media.title || now.source != self.ui.media.source || now.cover != self.ui.media.cover {
-            self.finish_cover_motion();
-        }
-        if (track_changed || now.artist != self.ui.media.artist || now.source != self.ui.media.source)
-            && self.ui.tab != view::Tab::Yandex
-        {
-            if self.pointer.seek_drag {
-                unsafe {
-                    let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
-                }
-            }
-            self.pointer.seek_drag = false;
-            self.ui.home.seek = None;
-        }
-        if now.source != self.ui.media.source {
-            self.pointer.vol_drag = false;
-        }
-        if now.title != self.ui.media.title
-            || now.artist != self.ui.media.artist
-            || now.source != self.ui.media.source
-            || now.cover != self.ui.media.cover
-        {
-            self.ui.home.track_transition.retarget(
-                &self.ui.media,
-                self.state == State::Expanded
-                    && self.ui.tab == view::Tab::Home
-                    && !now.title.is_empty()
-                    && crate::ui::feedback::motion_allowed(),
-            );
-        }
         self.ui.media = now;
-        if self.ui.home.vol_track {
-            match volume::app_volume(&self.ui.media.source) {
-                Some(level) => self.ui.home.app_vol = level,
-                None => self.ui.home.vol_track = false,
-            }
-        }
-        self.start_progress_timer();
-        if self.pill_motion.intro.is_some()
-            && (!self.ui.media.playing
-                || self.pill_motion.track != (self.ui.media.title.clone(), self.ui.media.source.clone()))
-        {
-            self.cancel_pill_motion();
-        }
-        self.maybe_start_music_intro();
-        self.refresh_music_intro();
         if track_changed && self.ui.media.source == "SPOTIFY" {
             spotify::refresh();
         }

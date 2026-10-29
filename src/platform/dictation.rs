@@ -22,71 +22,16 @@ const AUDCLNT_BUFFERFLAGS_SILENT: u32 = 0x2;
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static WANTED: AtomicBool = AtomicBool::new(false);
-static AUTO_STOP: AtomicBool = AtomicBool::new(false);
 static RESULT: Mutex<Option<std::result::Result<Vec<u8>, &'static str>>> = Mutex::new(None);
-
-const CALIBRATE_MS: u32 = 300;
-const NO_SPEECH_MS: u32 = 7_000;
-const END_QUIET_MS: u32 = 1_300;
-const MIN_THRESHOLD: i16 = 900;
-const MAX_THRESHOLD: i16 = 6_000;
-
-pub struct Endpoint {
-    seen_ms: u32,
-    floor: i16,
-    threshold: i16,
-    spoke: bool,
-    quiet_ms: u32,
-}
-
-impl Endpoint {
-    pub fn new() -> Self {
-        Self { seen_ms: 0, floor: 0, threshold: MIN_THRESHOLD, spoke: false, quiet_ms: 0 }
-    }
-
-    pub fn feed(&mut self, chunk: &[i16]) -> bool {
-        let ms = (chunk.len() as u64 * 1000 / u64::from(RATE)) as u32;
-        let peak = chunk.iter().map(|s| s.saturating_abs()).max().unwrap_or(0);
-        if self.seen_ms < CALIBRATE_MS {
-            self.floor = self.floor.max(peak);
-            self.threshold = self.floor.saturating_mul(2).clamp(MIN_THRESHOLD, MAX_THRESHOLD);
-            self.seen_ms += ms;
-            return false;
-        }
-        self.seen_ms = self.seen_ms.saturating_add(ms);
-        if peak >= self.threshold {
-            self.spoke = true;
-            self.quiet_ms = 0;
-        } else {
-            self.quiet_ms += ms;
-        }
-        if self.spoke { self.quiet_ms >= END_QUIET_MS } else { self.seen_ms >= NO_SPEECH_MS }
-    }
-}
-
-impl Default for Endpoint {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 pub fn active() -> bool {
     RUNNING.load(Ordering::SeqCst)
 }
 
-pub fn start_auto(hwnd: HWND) -> bool {
-    begin(hwnd, true)
-}
-
 pub fn start(hwnd: HWND) -> bool {
-    begin(hwnd, false)
-}
-
-fn begin(hwnd: HWND, auto: bool) -> bool {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return false;
     }
-    AUTO_STOP.store(auto, Ordering::SeqCst);
     WANTED.store(true, Ordering::SeqCst);
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
@@ -145,17 +90,6 @@ pub fn wav(samples: &[i16]) -> Vec<u8> {
 }
 
 fn capture() -> Result<Vec<i16>> {
-    let mut samples: Vec<i16> = Vec::with_capacity(RATE as usize * 10);
-    let mut endpoint = Endpoint::new();
-    let auto = AUTO_STOP.load(Ordering::SeqCst);
-    stream(|chunk| {
-        samples.extend_from_slice(chunk);
-        WANTED.load(Ordering::SeqCst) && samples.len() < RATE as usize * MAX_SECS && !(auto && endpoint.feed(chunk))
-    })?;
-    Ok(samples)
-}
-
-pub fn stream(mut on_chunk: impl FnMut(&[i16]) -> bool) -> Result<()> {
     unsafe {
         CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
         let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
@@ -180,10 +114,9 @@ pub fn stream(mut on_chunk: impl FnMut(&[i16]) -> bool) -> Result<()> {
         )?;
         let capture: IAudioCaptureClient = client.GetService()?;
         client.Start()?;
-        let mut chunk: Vec<i16> = Vec::with_capacity(RATE as usize / 4);
-        'run: loop {
+        let mut samples: Vec<i16> = Vec::with_capacity(RATE as usize * 10);
+        while WANTED.load(Ordering::SeqCst) && samples.len() < RATE as usize * MAX_SECS {
             std::thread::sleep(Duration::from_millis(30));
-            chunk.clear();
             while capture.GetNextPacketSize().unwrap_or(0) > 0 {
                 let (mut data, mut frames, mut flags) = (std::ptr::null_mut(), 0u32, 0u32);
                 if capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None).is_err() {
@@ -191,18 +124,15 @@ pub fn stream(mut on_chunk: impl FnMut(&[i16]) -> bool) -> Result<()> {
                 }
                 let n = frames as usize;
                 if flags & AUDCLNT_BUFFERFLAGS_SILENT != 0 || data.is_null() {
-                    chunk.resize(chunk.len() + n, 0);
+                    samples.resize(samples.len() + n, 0);
                 } else {
-                    chunk.extend((0..n).map(|i| (data as *const i16).add(i).read_unaligned()));
+                    samples.extend((0..n).map(|i| (data as *const i16).add(i).read_unaligned()));
                 }
                 let _ = capture.ReleaseBuffer(frames);
             }
-            if !on_chunk(&chunk) {
-                break 'run;
-            }
         }
         let _ = client.Stop();
-        Ok(())
+        Ok(samples)
     }
 }
 
@@ -234,37 +164,6 @@ mod tests {
         let peak = samples.iter().map(|s| s.saturating_abs()).max().unwrap_or(0);
         println!("{} samples ({:.2} s), peak {peak}", samples.len(), samples.len() as f32 / RATE as f32);
         assert!(samples.len() > RATE as usize);
-    }
-
-    fn run(endpoint: &mut Endpoint, level: i16, ms: u32) -> Option<u32> {
-        let chunk = vec![level; (RATE * 30 / 1000) as usize];
-        (0..ms / 30).find(|_| endpoint.feed(&chunk)).map(|i| (i + 1) * 30)
-    }
-
-    #[test]
-    fn the_recording_ends_after_a_pause_that_follows_speech() {
-        let mut e = Endpoint::new();
-        assert_eq!(run(&mut e, 200, 400), None);
-        assert_eq!(run(&mut e, 9000, 1500), None);
-        let ended = run(&mut e, 200, 3000).expect("the pause ends it");
-        assert!((END_QUIET_MS..END_QUIET_MS + 60).contains(&ended), "ended after {ended} ms");
-    }
-
-    #[test]
-    fn a_noisy_room_raises_the_speech_threshold() {
-        let mut e = Endpoint::new();
-        assert_eq!(run(&mut e, 2500, 400), None);
-        assert_eq!(run(&mut e, 3000, 5000), None);
-        assert!(!e.spoke, "steady noise is not speech");
-        assert_eq!(run(&mut e, 12000, 300), None);
-        assert!(e.spoke);
-    }
-
-    #[test]
-    fn nobody_speaking_gives_up_after_a_while() {
-        let mut e = Endpoint::new();
-        let ended = run(&mut e, 100, 20_000).expect("gives up");
-        assert!((NO_SPEECH_MS..NO_SPEECH_MS + 400).contains(&ended), "gave up after {ended} ms");
     }
 
     #[test]
