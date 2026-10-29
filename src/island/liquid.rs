@@ -102,13 +102,10 @@ impl App {
         self.update_eq();
         if self.ring_active() {
             self.paint_ring();
-        } else if self.open_eq_active() {
-            self.paint_open_eq();
-        }
-        if self.settings.music_eq && TICKS.replace(TICKS.get().wrapping_add(1)).is_multiple_of(20) {
-            self.place_spectrum();
         } else if self.spikes_active() {
             self.paint_spikes();
+        } else if self.open_eq_active() {
+            self.paint_open_eq();
         }
         self.repaint_collapsed();
     }
@@ -320,6 +317,14 @@ impl App {
         }
         if self.ring_active() {
             self.paint_ring();
+        } else if self.open_eq_active() {
+            self.paint_open_eq();
+        }
+        if self.settings.music_eq
+            && self.state == State::Collapsed
+            && TICKS.replace(TICKS.get().wrapping_add(1)).is_multiple_of(20)
+        {
+            self.place_spectrum();
         }
         if self.spikes_active()
             && self.liquid.bump_amp < 0.3
