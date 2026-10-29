@@ -56,10 +56,12 @@ pub enum Tone {
 pub struct Palette {
     pub base: (u8, u8, u8),
     pub tone: Tone,
+    pub flip: bool,
 }
 
 impl Palette {
     pub fn at(&self, t: f32, alpha: f32) -> D2D1_COLOR_F {
+        let t = if self.flip && self.tone == Tone::Horizontal { 1.0 - t } else { t };
         let (r, g, b) = crate::platform::media::gradient(self.base, t.clamp(0.0, 1.0));
         D2D1_COLOR_F { r: f32::from(r) / 255.0, g: f32::from(g) / 255.0, b: f32::from(b) / 255.0, a: alpha }
     }

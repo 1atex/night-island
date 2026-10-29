@@ -272,7 +272,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
         }
     }
     if progress_strip_on(ui) {
-        p.rotated(pill, ccw, |p, local| paint_progress_strip(p, local, scale, ui))?;
+        p.rotated((x, y, x + w, y + h), ccw, |p, local| paint_progress_strip(p, local, scale, ui))?;
     }
     Ok(())
 }

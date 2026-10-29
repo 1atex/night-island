@@ -111,7 +111,11 @@ impl App {
             EqGradient::Vertical => crate::ui::gfx::Tone::Vertical,
             EqGradient::Horizontal => crate::ui::gfx::Tone::Horizontal,
         };
-        crate::ui::gfx::Palette { base, tone }
+        crate::ui::gfx::Palette { base, tone, flip: false }
+    }
+
+    fn flipped(&self, palette: crate::ui::gfx::Palette) -> crate::ui::gfx::Palette {
+        crate::ui::gfx::Palette { flip: self.settings.hang() == Hang::Up, ..palette }
     }
 
     pub(in crate::island) fn refresh_eq_shape(&mut self) {
@@ -142,7 +146,7 @@ impl App {
             })
             .collect();
         let depth = self.settings.liquid_strength * s * 0.9 * self.settings.eq_strength;
-        let palette = self.eq_palette();
+        let palette = self.flipped(self.eq_palette());
         let shape = match self.settings.eq_style {
             crate::data::settings::EqStyle::Wave => crate::ui::gfx::EdgeShape::Wave,
             crate::data::settings::EqStyle::Bars => crate::ui::gfx::EdgeShape::Bars,
@@ -251,7 +255,17 @@ impl App {
             let (pw, ph) = self.collapsed();
             ((px * s, py * s, pw * s, ph * s), pw.min(ph) * s / 2.0)
         };
-        let (l, t, w, h) = frame;
+        let hang = if self.state == State::Expanded { Hang::Down } else { self.settings.hang() };
+        let (l0, t0, w0, h0) = frame;
+        let (ccx, ccy) = (l0 + w0 / 2.0, t0 + h0 / 2.0);
+        let (w, h) = if matches!(hang, Hang::Left | Hang::Right) { (h0, w0) } else { (w0, h0) };
+        let (l, t) = (ccx - w / 2.0, ccy - h / 2.0);
+        let turn = |dx: f32, dy: f32| match hang {
+            Hang::Down => (dx, dy),
+            Hang::Up => (-dx, -dy),
+            Hang::Right => (dy, -dx),
+            Hang::Left => (-dy, dx),
+        };
         let r = radius.min(h / 2.0).min(w / 2.0);
         let (sw, sh) = (w - 2.0 * r, h - 2.0 * r);
         let quarter = std::f32::consts::FRAC_PI_2 * r;
@@ -318,7 +332,9 @@ impl App {
             .map(|i| {
                 let (x, y, nx, ny) = outline(perimeter * (i as f32 + 0.5) / n as f32);
                 let d = (smooth[i].clamp(0.0, 1.0) * depth).min(free.max(0.0));
-                RingPt { x, y, nx, ny, d }
+                let (px, py) = turn(x - ccx, y - ccy);
+                let (nx, ny) = turn(nx, ny);
+                RingPt { x: ccx + px, y: ccy + py, nx, ny, d }
             })
             .collect();
         let tip = self.eq_tip();
@@ -507,10 +523,10 @@ impl App {
             BumpTint::Off => None,
             BumpTint::Progress if view::progress_strip_on(&self.ui) => {
                 let base = self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
-                let palette = Palette { base, tone: Tone::Horizontal };
+                let palette = Palette { base, tone: Tone::Horizontal, flip: self.settings.hang() == Hang::Up };
                 Some((palette, palette.at(0.5, 1.0)))
             }
-            _ => Some((self.eq_palette(), self.eq_tip())),
+            _ => Some((self.flipped(self.eq_palette()), self.eq_tip())),
         }
     }
 
