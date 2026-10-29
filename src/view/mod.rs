@@ -30,6 +30,7 @@ mod integrations;
 mod metrics;
 mod note;
 mod pill;
+mod pill_vertical;
 mod privacy;
 mod record;
 mod remind;
@@ -46,8 +47,8 @@ pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
 pub use self::{
     activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
-    integrations::*, metrics::*, note::*, pill::*, privacy::*, record::*, remind::*, settings::*, settings_window::*,
-    steam::*, text::*, weather::*, widgets::*,
+    integrations::*, metrics::*, note::*, pill::*, pill_vertical::*, privacy::*, record::*, remind::*, settings::*,
+    settings_window::*, steam::*, text::*, weather::*, widgets::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);

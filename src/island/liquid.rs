@@ -56,6 +56,9 @@ impl App {
     pub(in crate::island) fn place_spectrum(&self) {
         let s = self.scale;
         let (win_w, _) = self.window_size(self.win);
+        if self.settings.vertical() {
+            return self.place_spectrum_upright(win_w as f32);
+        }
         let pill_left = (win_w as f32 - self.cw * s) / 2.0;
         let Some(bars) = view::music_slots(&self.ui, s, self.cw * s).bars else { return };
         let x0 = pill_left + bars.0;
@@ -63,7 +66,22 @@ impl App {
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetSize(Vector2 { X: SPEC_W * s, Y: SPEC_H * s });
             let _ = bar.SetCenterPoint(Vector3 { X: 0.0, Y: SPEC_H * s / 2.0, Z: 0.0 });
+            let _ = bar.SetRotationAngleInDegrees(0.0);
             let _ = bar.SetOffset(Vector3 { X: x0 + (i / 2) as f32 * (SPEC_W + SPEC_GAP) * s, Y: y, Z: 0.0 });
+        }
+    }
+
+    fn place_spectrum_upright(&self, win_w: f32) {
+        let s = self.scale;
+        let Some(bars) = view::vertical_slots(&self.ui, s, self.cw * s).bars else { return };
+        let cx = win_w / 2.0;
+        let top = self.win_pad().1 * s + bars.0;
+        for (i, bar) in self.music.spectrum.iter().enumerate() {
+            let _ = bar.SetSize(Vector2 { X: SPEC_W * s, Y: SPEC_H * s });
+            let _ = bar.SetCenterPoint(Vector3 { X: 0.0, Y: SPEC_H * s / 2.0, Z: 0.0 });
+            let _ = bar.SetRotationAngleInDegrees(90.0);
+            let y = top + (i / 2) as f32 * (SPEC_W + SPEC_GAP) * s - SPEC_H * s / 2.0;
+            let _ = bar.SetOffset(Vector3 { X: cx, Y: y, Z: 0.0 });
         }
     }
 
@@ -231,7 +249,8 @@ impl App {
             ((px * s, py * s, EXPANDED.0 * s, EXPANDED.1 * s), EXPANDED_RADIUS * s)
         } else {
             let (px, py) = self.small_pad();
-            ((px * s, py * s, self.cw * s, COLLAPSED.1 * s), COLLAPSED.1 * s / 2.0)
+            let (pw, ph) = self.collapsed();
+            ((px * s, py * s, pw * s, ph * s), pw.min(ph) * s / 2.0)
         };
         let (l, t, w, h) = frame;
         let r = radius.min(h / 2.0).min(w / 2.0);

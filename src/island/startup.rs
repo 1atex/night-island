@@ -304,6 +304,10 @@ impl App {
         app.apply_character();
         app.ui.cfg = app.settings.clone();
         app.ui.char_inset = if app.settings.character == Character::None { 0.0 } else { CHAR_INSET };
+        app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
+        if app.settings.vertical() {
+            app.apply_layout();
+        }
         app.ui.mic_muted = volume::mic_muted();
         vpn::set_enabled(true);
         vpn::start_watch(app.hwnd);

@@ -181,10 +181,10 @@ impl App {
     }
 
     fn sw_plates_move(&mut self) {
-        if let Some(now) = view::Plate::of(self.ui.sw.hover) {
-            if !self.ui.sw.plates.iter().any(|(k, _)| *k == now) {
-                self.ui.sw.plates.push((now, 0.0));
-            }
+        if let Some(now) = view::Plate::of(self.ui.sw.hover)
+            && !self.ui.sw.plates.iter().any(|(k, _)| *k == now)
+        {
+            self.ui.sw.plates.push((now, 0.0));
         }
         self.set_timer(Timer::SwAnim, 16);
     }

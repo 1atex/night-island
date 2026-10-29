@@ -25,6 +25,11 @@ pub(in crate::island) struct Room {
     pub bottom: f32,
     pub ring: bool,
     pub open: OpenEq,
+    pub vertical: bool,
+}
+
+pub(in crate::island) fn collapsed_dims(vertical: bool, cw: f32) -> (f32, f32) {
+    if vertical { (view::VERT_W, cw) } else { (cw, COLLAPSED.1) }
 }
 
 pub(in crate::island) fn window_room(settings: &Settings) -> Room {
@@ -33,7 +38,7 @@ pub(in crate::island) fn window_room(settings: &Settings) -> Room {
         (true, false) => OpenEq::Under,
         (true, true) => OpenEq::Around,
     };
-    Room { bottom: bump_room_for(settings), ring: settings.ring_wanted(), open }
+    Room { bottom: bump_room_for(settings), ring: settings.ring_wanted(), open, vertical: settings.vertical() }
 }
 
 pub(in crate::island) fn big_pad(open: OpenEq, docked: bool) -> (f32, f32, f32) {
@@ -46,7 +51,7 @@ pub(in crate::island) fn big_pad(open: OpenEq, docked: bool) -> (f32, f32, f32) 
 }
 
 pub(in crate::island) fn window_size(scale: f32, win: Win, docked: bool, cw: f32, room: &Room) -> (i32, i32) {
-    let (w, h) = if win == Win::Big { EXPANDED } else { (cw, COLLAPSED.1) };
+    let (w, h) = if win == Win::Big { EXPANDED } else { collapsed_dims(room.vertical, cw) };
     let base_top = if docked { 0.0 } else { TOP_MARGIN };
     let (pad, top) = match win {
         Win::Small if room.ring => (PAD.max(RING_ROOM), base_top.max(RING_ROOM)),
@@ -65,6 +70,10 @@ pub(in crate::island) fn window_size(scale: f32, win: Win, docked: bool, cw: f32
 }
 
 impl App {
+    pub(in crate::island) fn collapsed(&self) -> (f32, f32) {
+        collapsed_dims(self.settings.vertical(), self.cw)
+    }
+
     pub(in crate::island) fn edge(&self) -> Edge {
         self.settings.dock_edge
     }
@@ -105,7 +114,7 @@ impl App {
         let s = self.scale;
         let (sw, sh) = Self::screen_size();
         let (wl, wt, wr, wb) = Self::work_area();
-        let (cw, ch) = (self.cw * s, COLLAPSED.1 * s);
+        let (cw, ch) = (self.collapsed().0 * s, self.collapsed().1 * s);
         let (ew, eh) = (EXPANDED.0 * s, EXPANDED.1 * s);
         let clamp = |v: f32, lo: f32, hi: f32| v.max(lo).min(hi.max(lo));
         let (cx, cy) = if self.docked() {
@@ -202,7 +211,7 @@ impl App {
     }
 
     pub(in crate::island) fn pill_rect(&self, expanded: bool) -> view::Rect {
-        let (w, h) = if expanded { EXPANDED } else { (self.cw, COLLAPSED.1) };
+        let (w, h) = if expanded { EXPANDED } else { self.collapsed() };
         let (px, py) = if expanded {
             let (x, t, _) = self.big_pad();
             (x, t)
@@ -273,12 +282,12 @@ impl App {
     }
 
     pub(in crate::island) fn pill(&self, win: Win, expanded: bool, hidden: bool) -> (Vector2, Vector2, Vector2) {
-        let (w, h) = if expanded { EXPANDED } else { (self.cw, COLLAPSED.1) };
+        let (w, h) = if expanded { EXPANDED } else { self.collapsed() };
         let docked = self.docked();
         let radius = if expanded {
             EXPANDED_RADIUS
         } else if docked {
-            DOCK_RADIUS.min(h / 2.0)
+            DOCK_RADIUS.min(w.min(h) / 2.0)
         } else {
             h / 2.0
         } * self.scale;
@@ -366,6 +375,10 @@ impl App {
     }
 
     pub(in crate::island) fn apply_layout(&mut self) {
+        self.ui.cfg = self.settings.clone();
+        if self.state != State::Expanded {
+            self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
+        }
         self.scale = self.dpi_scale * self.settings.scale_percent as f32 / 100.0;
         self.stop_idle();
         self.liquid.bump_amp = 0.0;

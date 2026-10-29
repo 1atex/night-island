@@ -55,8 +55,22 @@ pub(in crate::view) fn paint_battery(
 }
 
 pub fn indicators(pill: Rect, scale: f32, ui: &UiState) -> (Option<Rect>, Option<Rect>) {
-    let (x, y, _, h) = pill;
+    let (x, y, w, h) = pill;
     let size = 7.0 * scale;
+    if ui.cfg.vertical() {
+        let left = x + (w - size) / 2.0;
+        let mut top = y + (16.0 + ui.char_inset) * scale;
+        let mut next = |on: bool| {
+            on.then(|| {
+                let r = (left, top, left + size, top + size);
+                top += 15.0 * scale;
+                r
+            })
+        };
+        let mic = next(ui.privacy.mic || ui.mic_muted == Some(true));
+        let cam = next(ui.privacy.cam);
+        return (mic, cam);
+    }
     let gap = 2.5 * scale;
     let left = x + (15.0 + ui.char_inset) * scale;
     let mic_on = ui.privacy.mic || ui.mic_muted == Some(true);
@@ -96,10 +110,15 @@ pub fn vpn_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
     if !vpn_visible(ui) {
         return None;
     }
-    let (x, y, _, h) = pill;
+    let (x, y, w, h) = pill;
     let any = ui.privacy.mic || ui.mic_muted == Some(true) || ui.privacy.cam;
-    let left = x + (15.0 + ui.char_inset) * scale + if any { 12.0 * scale } else { 0.0 };
     let size = 14.0 * scale;
+    if ui.cfg.vertical() {
+        let dots = usize::from(ui.privacy.mic || ui.mic_muted == Some(true)) + usize::from(ui.privacy.cam);
+        let top = y + (16.0 + ui.char_inset + dots as f32 * 15.0) * scale;
+        return Some((x + (w - size) / 2.0, top, x + (w + size) / 2.0, top + size));
+    }
+    let left = x + (15.0 + ui.char_inset) * scale + if any { 12.0 * scale } else { 0.0 };
     Some((left, y + h / 2.0 - size / 2.0, left + size, y + h / 2.0 + size / 2.0))
 }
 
@@ -157,7 +176,7 @@ pub struct LyricUi {
 }
 
 pub fn lyric_visible(ui: &UiState) -> bool {
-    ui.cfg.music_lyrics && ui.lyric.lines.is_some()
+    ui.cfg.music_lyrics && ui.lyric.lines.is_some() && !ui.cfg.vertical()
 }
 
 pub fn cover_aspect(ui: &UiState) -> f32 {
@@ -221,7 +240,7 @@ pub fn agents_active(ui: &UiState) -> bool {
     ui.agents.iter().any(|s| matches!(s.state, State::Working | State::Waiting))
 }
 
-fn agent_label(ui: &UiState) -> (String, windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F) {
+pub(in crate::view) fn agent_label(ui: &UiState) -> (String, windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F) {
     use crate::services::agents::State;
     let active: Vec<_> = ui.agents.iter().filter(|s| matches!(s.state, State::Working | State::Waiting)).collect();
     let waiting = active.iter().any(|s| s.state == State::Waiting);
@@ -308,6 +327,9 @@ pub(in crate::view) fn downloading_label(name: &str) -> String {
 }
 
 pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
+    if ui.cfg.vertical() {
+        return vertical_length(ui);
+    }
     let chars = |s: &str| crate::ui::i18n::tr(s).chars().count() as f32;
     if let Some((_, text)) = &ui.notice {
         return (ui.char_inset + 40.0 + chars(text) * 7.6 + 20.0).clamp(base, 460.0);
@@ -373,7 +395,7 @@ pub fn progress_strip_on(ui: &UiState) -> bool {
     ui.cfg.music_progress && music_pill(ui) && crate::platform::media::progress().is_some()
 }
 
-fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+pub(in crate::view) fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let Some((pos, len)) = crate::platform::media::progress().filter(|_| progress_strip_on(ui)) else { return Ok(()) };
     if ui.cfg.progress_style != crate::data::settings::ProgressStyle::Strip {
         return paint_progress_outline(p, pill, scale, ui, (pos / len).clamp(0.0, 1.0));
@@ -465,6 +487,9 @@ fn paint_progress_outline(p: &Painter, pill: Rect, scale: f32, ui: &UiState, fra
 }
 
 pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    if ui.cfg.vertical() {
+        return paint_collapsed_vertical(p, pill, scale, ui);
+    }
     paint_collapsed_body(p, pill, scale, ui)?;
     paint_progress_strip(p, pill, scale, ui)
 }

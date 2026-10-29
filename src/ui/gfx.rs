@@ -546,6 +546,33 @@ impl Painter<'_> {
         old
     }
 
+    pub fn rotated<R>(
+        &self,
+        rect: (f32, f32, f32, f32),
+        ccw: bool,
+        f: impl FnOnce(&Painter, (f32, f32, f32, f32)) -> R,
+    ) -> R {
+        let (l, t, r, b) = rect;
+        let local = (0.0, 0.0, b - t, r - l);
+        let mut old = Matrix3x2::identity();
+        unsafe { self.dc.GetTransform(&mut old) };
+        let (tx, ty) = if ccw { (l, b) } else { (r, t) };
+        let (m12, m21) = if ccw { (-1.0, 1.0) } else { (1.0, -1.0) };
+        unsafe {
+            self.dc.SetTransform(&Matrix3x2 {
+                M11: 0.0,
+                M12: m12,
+                M21: m21,
+                M22: 0.0,
+                M31: tx + old.M31,
+                M32: ty + old.M32,
+            });
+        }
+        let result = f(self, local);
+        unsafe { self.dc.SetTransform(&old) };
+        result
+    }
+
     pub fn set_transform(&self, m: &Matrix3x2) {
         unsafe { self.dc.SetTransform(m) };
     }

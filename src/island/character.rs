@@ -20,8 +20,14 @@ impl App {
     pub(in crate::island) fn place_char(&self) {
         let s = self.scale;
         let (win_w, _) = self.window_size(self.win);
-        let x = (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s;
-        let y = self.win_pad().1 * s + (COLLAPSED.1 - characters::BOX_H) * s / 2.0;
+        let (x, y) = if self.settings.vertical() {
+            ((win_w as f32 - characters::BOX_W * s) / 2.0, self.win_pad().1 * s + 6.0 * s)
+        } else {
+            (
+                (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s,
+                self.win_pad().1 * s + (COLLAPSED.1 - characters::BOX_H) * s / 2.0,
+            )
+        };
         let _ = self.pet.char_layer.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
     }
 
@@ -98,8 +104,14 @@ impl App {
             if GetCursorPos(&mut pt).is_ok() && GetWindowRect(self.hwnd, &mut rc).is_ok() {
                 let s = self.scale;
                 let (win_w, _) = self.window_size(self.win);
-                let cx = rc.left as f32 + (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s + cw / 2.0;
-                let cy = rc.top as f32 + self.win_pad().1 * s + COLLAPSED.1 * s / 2.0 + ch * 0.0;
+                let (cx, cy) = if self.settings.vertical() {
+                    (rc.left as f32 + win_w as f32 / 2.0, rc.top as f32 + self.win_pad().1 * s + 6.0 * s + ch / 2.0)
+                } else {
+                    (
+                        rc.left as f32 + (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s + cw / 2.0,
+                        rc.top as f32 + self.win_pad().1 * s + COLLAPSED.1 * s / 2.0,
+                    )
+                };
                 (((pt.x as f32 - cx) / 260.0).clamp(-1.0, 1.0), ((pt.y as f32 - cy) / 200.0).clamp(-1.0, 1.0))
             } else {
                 (0.0, 0.0)

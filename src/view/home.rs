@@ -1025,7 +1025,8 @@ mod tests {
     #[test]
     fn readouts_say_something_before_any_data_arrives() {
         crate::ui::i18n::set_ru(false);
-        let ui = UiState::new();
+        let mut ui = UiState::new();
+        ui.cfg.activity_track = false;
         assert_eq!(info_value(&ui, Info::Metric(Metric::Cpu)), "\u{2026}");
         assert_eq!(info_value(&ui, Info::Reminder), "None");
         assert_eq!(info_value(&ui, Info::Steam), "Not playing");

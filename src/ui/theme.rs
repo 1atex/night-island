@@ -120,11 +120,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_look_is_black_and_periwinkle() {
+    fn the_default_look_is_graphite() {
         let (panel, accent) = colors(&Settings::default());
-        assert_eq!(to8(panel), (0, 0, 0));
+        assert_eq!(to8(panel), (23, 23, 26));
         let (r, g, b) = to8(accent);
-        assert!(r.abs_diff(166) <= 3 && g.abs_diff(179) <= 3 && b == 255, "{r},{g},{b}");
+        assert!(r.abs_diff(195) <= 3 && g.abs_diff(204) <= 3 && b.abs_diff(217) <= 3, "{r},{g},{b}");
     }
 
     #[test]
