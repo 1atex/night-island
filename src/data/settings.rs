@@ -800,9 +800,6 @@ impl Settings {
     }
 
     pub fn hotkey_using(&self, hotkey: Hotkey, combo: Combo) -> Option<Hotkey> {
-        if combo.is_none() {
-            return None;
-        }
         Hotkey::ALL.into_iter().find(|h| *h != hotkey && self.combo(*h) == combo)
     }
 
@@ -821,13 +818,10 @@ impl Settings {
 
     fn sanitize_keys(&mut self) {
         let known: Vec<&str> = Hotkey::ALL.iter().map(|h| h.key()).collect();
-        self.keys.retain(|name, combo| known.contains(&name.as_str()) && (combo.valid() || combo.is_none()));
+        self.keys.retain(|name, combo| known.contains(&name.as_str()) && combo.valid());
         let mut seen: Vec<Combo> = Vec::new();
         for h in Hotkey::ALL {
             let combo = self.combo(h);
-            if combo.is_none() {
-                continue;
-            }
             if seen.contains(&combo) {
                 self.keys.remove(h.key());
                 if seen.contains(&self.combo(h)) {

@@ -20,7 +20,7 @@ const MAX_LINE_CHARS: usize = 160;
 const MAX_SOURCE_LINES: usize = 6000;
 const MAX_CANDIDATES: usize = 20;
 const CACHE_TRACKS: usize = 24;
-const USER_AGENT: &str = concat!("NightIsland/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = "NightIsland/0.1 (https://gitlab.night-watchers.com/Shurik24/night-island)";
 const RETRY_WAITS: [Duration; 5] = [
     Duration::from_secs(2),
     Duration::from_secs(5),

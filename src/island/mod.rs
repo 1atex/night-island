@@ -90,8 +90,8 @@ mod voice;
 mod window;
 
 use self::{
-    character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*, tabs::ClipboardState,
-    timers::Timer, window::*,
+    appearance::*, character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*,
+    tabs::ClipboardState, timers::Timer, window::*,
 };
 pub use startup::run;
 
@@ -148,7 +148,6 @@ struct App {
     music: MusicBars,
     gaming: bool,
     pill_hidden: bool,
-    ghost_stage: u8,
     metrics_on: Option<u32>,
     steam_game: Option<(u32, std::time::Instant)>,
     ghosted: bool,
