@@ -4,8 +4,8 @@ use windows::Graphics::SizeInt32;
 use windows::UI::Composition::{CompositionDrawingSurface, CompositionGraphicsDevice, Compositor, SpriteVisual};
 use windows::Win32::Foundation::{HMODULE, POINT};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED,
-    D2D1_FILL_MODE_WINDING,
+    D2D_RECT_F, D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_BEGIN_HOLLOW,
+    D2D1_FIGURE_END_CLOSED, D2D1_FILL_MODE_WINDING,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
@@ -28,6 +28,22 @@ use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::System::WinRT::Composition::{ICompositionDrawingSurfaceInterop, ICompositorInterop};
 use windows::core::{BOOL, Interface, PCWSTR, Result, w};
 use windows_numerics::Matrix3x2;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum EdgeShape {
+    Spikes,
+    Bars,
+    Wave,
+}
+
+#[derive(Clone, Copy)]
+pub struct RingPt {
+    pub x: f32,
+    pub y: f32,
+    pub nx: f32,
+    pub ny: f32,
+    pub d: f32,
+}
 
 pub const WHITE: D2D1_COLOR_F = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 
@@ -527,6 +543,7 @@ impl Painter<'_> {
         depth: f32,
         color: D2D1_COLOR_F,
         tip: D2D1_COLOR_F,
+        shape: EdgeShape,
     ) -> Result<ID2D1PathGeometry> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
         use windows::Win32::Graphics::Direct2D::{
@@ -538,18 +555,92 @@ impl Painter<'_> {
             let top = seam - 1.0;
             let slot = width / levels.len().max(1) as f32;
             let half = slot * 0.5;
-            let spike = |sink: &ID2D1GeometrySink, cx: f32, d: f32| {
-                sink.AddLine(pt(cx - half, top));
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                    point1: pt(cx - half * 0.45, top),
-                    point2: pt(cx - half * 0.18, seam + d),
-                    point3: pt(cx, seam + d),
-                });
-                sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                    point1: pt(cx + half * 0.18, seam + d),
-                    point2: pt(cx + half * 0.45, top),
-                    point3: pt(cx + half, top),
-                });
+            let tinted = (tip.r, tip.g, tip.b) != (color.r, color.g, color.b);
+            let stops = [
+                D2D1_GRADIENT_STOP { position: 0.0, color: D2D1_COLOR_F { a: 0.0, ..tip } },
+                D2D1_GRADIENT_STOP { position: 0.55, color: D2D1_COLOR_F { a: 0.85, ..tip } },
+                D2D1_GRADIENT_STOP { position: 1.0, color: tip },
+            ];
+            let collection = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+            let solid = self.dc.CreateSolidColorBrush(&color, None)?;
+
+            if shape == EdgeShape::Wave {
+                let n = levels.len();
+                let mut ys: Vec<f32> = (0..n)
+                    .map(|i| {
+                        let near = |k: isize| levels[(i as isize + k).clamp(0, n as isize - 1) as usize];
+                        (near(-1) * 0.25 + levels[i] * 0.5 + near(1) * 0.25).clamp(0.0, 1.0) * depth
+                    })
+                    .collect();
+                for (i, y) in ys.iter_mut().enumerate() {
+                    let edge = (i.min(n - 1 - i) as f32 / 2.5).min(1.0);
+                    *y *= edge;
+                }
+                let mut points: Vec<(f32, f32)> = vec![(0.0, seam)];
+                points.extend(ys.iter().enumerate().map(|(i, d)| ((i as f32 + 0.5) * slot, seam + d)));
+                points.push((width, seam));
+                let geometry = factory.CreatePathGeometry()?;
+                let sink = geometry.Open()?;
+                sink.SetFillMode(D2D1_FILL_MODE_WINDING);
+                sink.BeginFigure(pt(0.0, top), D2D1_FIGURE_BEGIN_FILLED);
+                sink.AddLine(pt(points[0].0, points[0].1));
+                for i in 0..points.len() - 1 {
+                    let p0 = points[i.saturating_sub(1)];
+                    let (p1, p2) = (points[i], points[i + 1]);
+                    let p3 = points[(i + 2).min(points.len() - 1)];
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: pt(p1.0 + (p2.0 - p0.0) / 6.0, (p1.1 + (p2.1 - p0.1) / 6.0).max(seam)),
+                        point2: pt(p2.0 - (p3.0 - p1.0) / 6.0, (p2.1 - (p3.1 - p1.1) / 6.0).max(seam)),
+                        point3: pt(p2.0, p2.1),
+                    });
+                }
+                sink.AddLine(pt(width, top));
+                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                sink.Close()?;
+                self.dc.FillGeometry(&geometry, &solid, None);
+                if tinted {
+                    let reach = ys.iter().copied().fold(1.0, f32::max);
+                    let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                        startPoint: pt(width / 2.0, seam + reach * 0.1),
+                        endPoint: pt(width / 2.0, seam + reach),
+                    };
+                    let brush = self.dc.CreateLinearGradientBrush(&props, None, &collection)?;
+                    self.dc.FillGeometry(&geometry, &brush, None);
+                }
+                return Ok(geometry);
+            }
+
+            let bars = shape == EdgeShape::Bars;
+            let extent = if bars { slot * 0.34 } else { half };
+            let outline = |sink: &ID2D1GeometrySink, cx: f32, d: f32| {
+                if bars {
+                    let r = extent.min(d * 0.5);
+                    sink.AddLine(pt(cx - extent, top));
+                    sink.AddLine(pt(cx - extent, seam + d - r));
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: pt(cx - extent, seam + d - r * 0.45),
+                        point2: pt(cx - extent * 0.45, seam + d),
+                        point3: pt(cx, seam + d),
+                    });
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: pt(cx + extent * 0.45, seam + d),
+                        point2: pt(cx + extent, seam + d - r * 0.45),
+                        point3: pt(cx + extent, seam + d - r),
+                    });
+                    sink.AddLine(pt(cx + extent, top));
+                } else {
+                    sink.AddLine(pt(cx - half, top));
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: pt(cx - half * 0.45, top),
+                        point2: pt(cx - half * 0.18, seam + d),
+                        point3: pt(cx, seam + d),
+                    });
+                    sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                        point1: pt(cx + half * 0.18, seam + d),
+                        point2: pt(cx + half * 0.45, top),
+                        point3: pt(cx + half, top),
+                    });
+                }
             };
             let spikes: Vec<(f32, f32)> = levels
                 .iter()
@@ -562,26 +653,20 @@ impl Painter<'_> {
             sink.SetFillMode(D2D1_FILL_MODE_WINDING);
             sink.BeginFigure(pt(0.0, top), D2D1_FIGURE_BEGIN_FILLED);
             for &(cx, d) in &spikes {
-                spike(&sink, cx, d);
+                outline(&sink, cx, d);
             }
             sink.AddLine(pt(width, top));
             sink.EndFigure(D2D1_FIGURE_END_CLOSED);
             sink.Close()?;
-            self.dc.FillGeometry(&geometry, &self.dc.CreateSolidColorBrush(&color, None)?, None);
-            if (tip.r, tip.g, tip.b) == (color.r, color.g, color.b) {
+            self.dc.FillGeometry(&geometry, &solid, None);
+            if !tinted {
                 return Ok(geometry);
             }
-            let stops = [
-                D2D1_GRADIENT_STOP { position: 0.0, color: D2D1_COLOR_F { a: 0.0, ..tip } },
-                D2D1_GRADIENT_STOP { position: 0.55, color: D2D1_COLOR_F { a: 0.85, ..tip } },
-                D2D1_GRADIENT_STOP { position: 1.0, color: tip },
-            ];
-            let collection = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
             for &(cx, d) in &spikes {
                 let one = factory.CreatePathGeometry()?;
                 let sink = one.Open()?;
-                sink.BeginFigure(pt(cx - half, top), D2D1_FIGURE_BEGIN_FILLED);
-                spike(&sink, cx, d);
+                sink.BeginFigure(pt(cx - extent, top), D2D1_FIGURE_BEGIN_FILLED);
+                outline(&sink, cx, d);
                 sink.EndFigure(D2D1_FIGURE_END_CLOSED);
                 sink.Close()?;
                 let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
@@ -593,6 +678,75 @@ impl Painter<'_> {
             }
             Ok(geometry)
         }
+    }
+
+    pub fn fill_ring(&self, points: &[RingPt], aura: bool, color: D2D1_COLOR_F, ray: f32) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_FILL_MODE_ALTERNATE;
+        let n = points.len();
+        if n < 3 {
+            return Ok(());
+        }
+        let reach = points.iter().map(|p| p.d).fold(1.0, f32::max);
+        unsafe {
+            let factory: ID2D1Factory = self.dc.GetFactory()?;
+            let pt = |x: f32, y: f32| windows_numerics::Vector2 { X: x, Y: y };
+            if !aura {
+                for p in points.iter().filter(|p| p.d >= 0.8) {
+                    let alpha = (0.4 + 0.6 * (p.d / reach)).clamp(0.0, 1.0);
+                    let brush = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: alpha, ..color }, None)?;
+                    let (tx, ty) = (-p.ny, p.nx);
+                    let half = ray / 2.0;
+                    let (bx, by) = (p.x - p.nx * 2.0, p.y - p.ny * 2.0);
+                    let (ex, ey) = (p.x + p.nx * (p.d - half), p.y + p.ny * (p.d - half));
+                    let quad = factory.CreatePathGeometry()?;
+                    let sink = quad.Open()?;
+                    sink.BeginFigure(pt(bx + tx * half, by + ty * half), D2D1_FIGURE_BEGIN_FILLED);
+                    sink.AddLine(pt(ex + tx * half, ey + ty * half));
+                    sink.AddLine(pt(ex - tx * half, ey - ty * half));
+                    sink.AddLine(pt(bx - tx * half, by - ty * half));
+                    sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                    sink.Close()?;
+                    self.dc.FillGeometry(&quad, &brush, None);
+                    self.dc.FillEllipse(&D2D1_ELLIPSE { point: pt(ex, ey), radiusX: half, radiusY: half }, &brush);
+                }
+                return Ok(());
+            }
+            let outer: Vec<(f32, f32)> =
+                points.iter().map(|p| (p.x + p.nx * p.d.max(0.5), p.y + p.ny * p.d.max(0.5))).collect();
+            let band = factory.CreatePathGeometry()?;
+            let sink = band.Open()?;
+            sink.SetFillMode(D2D1_FILL_MODE_ALTERNATE);
+            sink.BeginFigure(pt(outer[0].0, outer[0].1), D2D1_FIGURE_BEGIN_FILLED);
+            let edge = factory.CreatePathGeometry()?;
+            let edge_sink = edge.Open()?;
+            edge_sink.BeginFigure(pt(outer[0].0, outer[0].1), D2D1_FIGURE_BEGIN_HOLLOW);
+            for i in 0..n {
+                let p0 = outer[(i + n - 1) % n];
+                let (p1, p2) = (outer[i], outer[(i + 1) % n]);
+                let p3 = outer[(i + 2) % n];
+                let seg = D2D1_BEZIER_SEGMENT {
+                    point1: pt(p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0),
+                    point2: pt(p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0),
+                    point3: pt(p2.0, p2.1),
+                };
+                sink.AddBezier(&seg);
+                edge_sink.AddBezier(&seg);
+            }
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            edge_sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            edge_sink.Close()?;
+            sink.BeginFigure(pt(points[0].x, points[0].y), D2D1_FIGURE_BEGIN_FILLED);
+            for p in &points[1..] {
+                sink.AddLine(pt(p.x, p.y));
+            }
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            sink.Close()?;
+            let fill = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: 0.38, ..color }, None)?;
+            self.dc.FillGeometry(&band, &fill, None);
+            let line = self.dc.CreateSolidColorBrush(&D2D1_COLOR_F { a: 0.95, ..color }, None)?;
+            self.dc.DrawGeometry(&edge, &line, (ray * 0.55).max(1.2), None);
+        }
+        Ok(())
     }
 
     pub fn fill_ellipse(&self, cx: f32, cy: f32, rx: f32, ry: f32, color: D2D1_COLOR_F) -> Result<()> {

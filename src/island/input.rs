@@ -306,7 +306,7 @@ impl App {
             self.ui.home.hover_act = hover_act;
             self.ui.hover_head = hover_head;
             if self.ui.tab == view::Tab::Activity {
-                self.set_timer(Timer::UiAnim, 16);
+                self.set_timer(Timer::UiAnim, self.frame_ms());
             }
             self.repaint_expanded();
         }

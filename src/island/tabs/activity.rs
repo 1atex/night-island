@@ -200,7 +200,7 @@ impl App {
 
     pub(in crate::island) fn restart_activity_anim(&mut self) {
         self.ui.activity.restart_draw();
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
     }
 
     pub(in crate::island) fn ui_anim_tick(&mut self) {
@@ -234,7 +234,7 @@ impl App {
         }
         self.repaint_expanded();
         if again {
-            self.set_timer(Timer::UiAnim, 16);
+            self.set_timer(Timer::UiAnim, self.frame_ms());
         }
     }
 
@@ -248,7 +248,7 @@ impl App {
         let dir = if index(to) >= index(from) { 1.0 } else { -1.0 };
         let ms = (240.0 / self.settings.tab_anim_speed.max(0.1)) as u32;
         self.ui.tab_change = Some(view::TabChange { from, start: std::time::Instant::now(), ms, dir });
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
     }
 
     fn pick_app(&mut self, shown: usize) {
@@ -257,7 +257,7 @@ impl App {
         self.ui.activity.picking = Some(app);
         self.ui.activity.picked_at = Some(std::time::Instant::now());
         self.ui.activity.glow.clear();
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
     }
 
     fn move_app(&mut self, choice: usize) {
@@ -269,7 +269,7 @@ impl App {
         self.reload_activity();
         self.ui.activity.glow.clear();
         self.ui.activity.opened_at = Some(std::time::Instant::now());
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
         let name = crate::ui::i18n::tr(&group.name).into_owned();
         self.notify_for(Notice::Integrations, '\u{E73E}', &format!("{app} \u{2192} {name}"), 2500);
     }
@@ -301,7 +301,7 @@ impl App {
                 self.ui.activity.scroll = 0;
                 self.ui.activity.glow.clear();
                 self.ui.activity.opened_at = Some(std::time::Instant::now());
-                self.set_timer(Timer::UiAnim, 16);
+                self.set_timer(Timer::UiAnim, self.frame_ms());
             }
             Some(view::ActivityHit::Back) => {
                 if self.ui.activity.picking.take().is_none() {
@@ -311,7 +311,7 @@ impl App {
                     self.ui.activity.drawn_at = Some(std::time::Instant::now());
                 }
                 self.ui.activity.glow.clear();
-                self.set_timer(Timer::UiAnim, 16);
+                self.set_timer(Timer::UiAnim, self.frame_ms());
             }
             Some(view::ActivityHit::App(i)) => self.pick_app(i),
             Some(view::ActivityHit::Pick(i)) => self.move_app(i),

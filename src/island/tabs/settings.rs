@@ -131,6 +131,7 @@ impl App {
                         lockkeys::stop();
                     }
                 }
+                EqStyle | EqStrength => self.refresh_eq_shape(),
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
                 | PillBattery | SpikeColor | Spikes => {
                     self.update_eq();

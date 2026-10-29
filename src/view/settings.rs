@@ -31,6 +31,9 @@ pub enum Sid {
     MusicLyrics,
     MusicProgress,
     CoverMode,
+    FrameRate,
+    EqStyle,
+    EqStrength,
     TabClipboard,
     TabText,
     TabNote,
@@ -172,6 +175,7 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
         Sid::Size => (80.0, 200.0, 5.0),
         Sid::LiquidReach => (60.0, 300.0, 5.0),
         Sid::LiquidStrength => (6.0, 40.0, 1.0),
+        Sid::EqStrength => (0.4, 2.0, 0.1),
         Sid::LiquidSoftness => (0.0, 1.0, 0.05),
         Sid::Tint => (0.2, 1.0, 0.05),
         Sid::PillOpacity => (0.2, 1.0, 0.05),
@@ -194,6 +198,7 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
         Sid::Size => c.scale_percent as f32,
         Sid::LiquidReach => c.liquid_reach,
         Sid::LiquidStrength => c.liquid_strength,
+        Sid::EqStrength => c.eq_strength,
         Sid::LiquidSoftness => c.liquid_softness,
         Sid::Tint => c.tint_open,
         Sid::PillOpacity => c.pill_opacity,
@@ -219,6 +224,7 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
     match id {
         Sid::Size => format!("{v:.0}%"),
         Sid::LiquidReach | Sid::LiquidStrength => format!("{v:.0} px"),
+        Sid::EqStrength => format!("\u{00D7}{v:.1}"),
         Sid::LiquidSoftness | Sid::Tint | Sid::PillOpacity | Sid::GhostOpacity | Sid::PanelSat | Sid::AccentSat => {
             format!("{:.0}%", v * 100.0)
         }
@@ -240,6 +246,7 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
         Sid::Size => c.scale_percent = v as u32,
         Sid::LiquidReach => c.liquid_reach = v,
         Sid::LiquidStrength => c.liquid_strength = v,
+        Sid::EqStrength => c.eq_strength = v,
         Sid::LiquidSoftness => c.liquid_softness = v,
         Sid::Tint => c.tint_open = v,
         Sid::PillOpacity => c.pill_opacity = v,
@@ -396,6 +403,8 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
         Sid::CoverMode => c.cover_mode = c.cover_mode.step(forward),
+        Sid::FrameRate => c.frame_rate = c.frame_rate.step(forward),
+        Sid::EqStyle => c.eq_style = c.eq_style.step(forward),
         Sid::TabAnimKind => c.tab_anim = c.tab_anim.step(forward),
         Sid::TextLayout => c.text_layout = c.text_layout.step(forward),
         Sid::AnimCurve => c.anim_curve = c.anim_curve.step(forward),
@@ -414,6 +423,8 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
         Sid::CoverMode => c.cover_mode.name(),
+        Sid::FrameRate => c.frame_rate.name(),
+        Sid::EqStyle => c.eq_style.name(),
         Sid::TabAnimKind => c.tab_anim.name(),
         Sid::TextLayout => c.text_layout.name(),
         Sid::AnimCurve => c.anim_curve.name(),
@@ -432,6 +443,8 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
         Sid::PillBattery => all(&BatteryStyle::ALL, c.pill_battery, |v| v.name()),
         Sid::Edge => all(&Edge::ALL, c.dock_edge, |v| v.name()),
         Sid::CoverMode => all(&CoverMode::ALL, c.cover_mode, |v| v.name()),
+        Sid::FrameRate => all(&FrameRate::ALL, c.frame_rate, |v| v.name()),
+        Sid::EqStyle => all(&EqStyle::ALL, c.eq_style, |v| v.name()),
         Sid::TabAnimKind => all(&TabAnim::ALL, c.tab_anim, |v| v.name()),
         Sid::AnimCurve => all(&AnimCurve::ALL, c.anim_curve, |v| v.name()),
         Sid::TextLayout => all(&TextLayout::ALL, c.text_layout, |v| v.name()),
@@ -450,6 +463,8 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
             c.dock_offset = 0.5;
         }
         Sid::CoverMode => c.cover_mode = CoverMode::ALL[k.min(2)],
+        Sid::FrameRate => c.frame_rate = FrameRate::ALL[k.min(3)],
+        Sid::EqStyle => c.eq_style = EqStyle::ALL[k.min(4)],
         Sid::TabAnimKind => c.tab_anim = TabAnim::ALL[k.min(4)],
         Sid::AnimCurve => c.anim_curve = AnimCurve::ALL[k.min(3)],
         Sid::TextLayout => c.text_layout = TextLayout::ALL[k.min(2)],

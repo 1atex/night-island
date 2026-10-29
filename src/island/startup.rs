@@ -127,6 +127,7 @@ pub fn run() -> Result<()> {
 
 impl App {
     pub(in crate::island) fn new(hwnd: HWND, dpi_scale: f32, settings: Settings) -> Result<Self> {
+        crate::island::timers::raise_timer_resolution();
         let compositor = Compositor::new()?;
         let target = unsafe { compositor.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, true)? };
 
@@ -158,6 +159,9 @@ impl App {
         let char_layer = gpu.layer(&compositor, char_px)?;
         char_layer.sprite.SetIsVisible(false)?;
 
+        let ring =
+            gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, bump_room_for(&settings)))?;
+        ring.sprite.SetIsVisible(false)?;
         let bump = gpu.layer(&compositor, bump_size(scale, COLLAPSED.0))?;
         bump.sprite.SetIsVisible(false)?;
         bump.sprite.SetCenterPoint(Vector3 { X: bump.size().0 as f32 / 2.0, Y: 0.0, Z: 0.0 })?;
@@ -177,6 +181,7 @@ impl App {
         let visual = compositor.CreateContainerVisual()?;
         visual.SetRelativeSizeAdjustment(full)?;
         let children = visual.Children()?;
+        children.InsertAtBottom(&ring.sprite)?;
         children.InsertAtTop(&backdrop)?;
         children.InsertAtTop(&tint)?;
         children.InsertAtTop(&expanded.sprite)?;
@@ -252,6 +257,7 @@ impl App {
             collapsed,
             expanded,
             liquid: Liquid {
+                ring,
                 bump,
                 bump_fill,
                 bump_blur,

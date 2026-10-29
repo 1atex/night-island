@@ -208,6 +208,68 @@ impl CoverMode {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FrameRate {
+    #[default]
+    Fps30,
+    Fps60,
+    Monitor,
+    Adaptive,
+}
+
+impl FrameRate {
+    pub fn name(self) -> &'static str {
+        match self {
+            FrameRate::Fps30 => "30 FPS",
+            FrameRate::Fps60 => "60 FPS",
+            FrameRate::Monitor => "Monitor refresh rate",
+            FrameRate::Adaptive => "Adaptive",
+        }
+    }
+
+    pub const ALL: [FrameRate; 4] = [FrameRate::Fps30, FrameRate::Fps60, FrameRate::Monitor, FrameRate::Adaptive];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 4 } else { (i + 3) % 4 }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EqStyle {
+    #[default]
+    Spikes,
+    Wave,
+    Bars,
+    Halo,
+    Aura,
+}
+
+impl EqStyle {
+    pub fn name(self) -> &'static str {
+        match self {
+            EqStyle::Spikes => "Spikes",
+            EqStyle::Wave => "Wave",
+            EqStyle::Bars => "Bars",
+            EqStyle::Halo => "Halo around the pill",
+            EqStyle::Aura => "Aura around the pill",
+        }
+    }
+
+    pub const ALL: [EqStyle; 5] = [EqStyle::Spikes, EqStyle::Wave, EqStyle::Bars, EqStyle::Halo, EqStyle::Aura];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 5 } else { (i + 4) % 5 }]
+    }
+
+    pub fn around(self) -> bool {
+        matches!(self, EqStyle::Halo | EqStyle::Aura)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -246,6 +308,9 @@ pub struct Settings {
     pub music_lyrics: bool,
     pub music_progress: bool,
     pub cover_mode: CoverMode,
+    pub frame_rate: FrameRate,
+    pub eq_style: EqStyle,
+    pub eq_strength: f32,
     pub text_layout: TextLayout,
     pub dev_tools: bool,
     pub shared_lyrics: bool,
@@ -333,6 +398,9 @@ impl Default for Settings {
             music_lyrics: false,
             music_progress: true,
             cover_mode: CoverMode::Crop,
+            frame_rate: FrameRate::Fps30,
+            eq_style: EqStyle::Spikes,
+            eq_strength: 1.0,
             text_layout: TextLayout::Categories,
             dev_tools: false,
             shared_lyrics: false,
@@ -710,6 +778,7 @@ impl Settings {
         self.tint_open = clamp_f(self.tint_open, 0.2, 1.0, d.tint_open);
         self.liquid_reach = clamp_f(self.liquid_reach, 60.0, 300.0, d.liquid_reach);
         self.liquid_strength = clamp_f(self.liquid_strength, 6.0, 40.0, d.liquid_strength);
+        self.eq_strength = clamp_f(self.eq_strength, 0.4, 2.0, d.eq_strength);
         self.liquid_softness = clamp_f(self.liquid_softness, 0.0, 1.0, d.liquid_softness);
         self.open_delay_ms = self.open_delay_ms.clamp(0, 1000);
         self.close_delay_ms = self.close_delay_ms.clamp(0, 3000);

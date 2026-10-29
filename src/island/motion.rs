@@ -107,7 +107,9 @@ impl App {
         self.set_blur(false);
         self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         self.place(Win::Small);
-        let _ = self.collapsed.resize(window_size(self.scale, Win::Small, self.docked(), self.cw, self.bump_room()));
+        let small = window_size(self.scale, Win::Small, self.docked(), self.cw, self.bump_room());
+        let _ = self.collapsed.resize(small);
+        let _ = self.liquid.ring.resize(small);
         let _ = self.set_geometry_now(Win::Small, false, false);
         self.schedule_autohide();
         self.start_liquid();

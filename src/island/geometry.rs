@@ -138,7 +138,7 @@ impl App {
 
     pub(in crate::island) fn update_offsets(&self) {
         let (win_w, _) = self.window_size(self.win);
-        for layer in [&self.collapsed, &self.expanded] {
+        for layer in [&self.collapsed, &self.expanded, &self.liquid.ring] {
             let x = (win_w - layer.size().0) as f32 / 2.0;
             let _ = layer.sprite.SetOffset(Vector3 { X: x, Y: 0.0, Z: 0.0 });
         }
@@ -167,7 +167,9 @@ impl App {
         }
         self.place(Win::Small);
         let docked = self.docked();
-        let _ = self.collapsed.resize(window_size(self.scale, Win::Small, docked, self.cw, self.bump_room()));
+        let small = window_size(self.scale, Win::Small, docked, self.cw, self.bump_room());
+        let _ = self.collapsed.resize(small);
+        let _ = self.liquid.ring.resize(small);
         self.fit_bump();
         self.update_offsets();
         if animate {
@@ -283,7 +285,9 @@ impl App {
         let expanded = self.state == State::Expanded;
         let hidden = matches!(self.state, State::Hidden | State::Hiding);
         let _ = self.set_geometry_now(win, expanded, hidden);
-        let _ = self.collapsed.resize(window_size(self.scale, Win::Small, docked, self.cw, self.bump_room()));
+        let small = window_size(self.scale, Win::Small, docked, self.cw, self.bump_room());
+        let _ = self.collapsed.resize(small);
+        let _ = self.liquid.ring.resize(small);
         let _ = self.expanded.resize(window_size(self.scale, Win::Big, docked, self.cw, 0.0));
         let _ = self.liquid.bump.resize(bump_size(self.scale, self.cw));
         let _ = self

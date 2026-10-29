@@ -24,7 +24,7 @@ impl App {
         if let Some(drag) = self.ui.tab_drag.as_mut() {
             drag.reorder.cursor = cursor;
             self.step_tab_drag();
-            self.set_timer(Timer::UiAnim, 16);
+            self.set_timer(Timer::UiAnim, self.frame_ms());
             return self.repaint_expanded();
         }
         let Some((i, x0, y0)) = self.ui.tab_press else { return };
@@ -42,7 +42,7 @@ impl App {
         unsafe {
             let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
         }
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
         self.repaint_expanded();
     }
 

@@ -307,7 +307,7 @@ impl App {
                     r.cursor = (fx, fy);
                 }
                 self.step_reorder();
-                self.set_timer(Timer::UiAnim, 16);
+                self.set_timer(Timer::UiAnim, self.frame_ms());
                 self.repaint_expanded();
                 return None;
             }
@@ -334,7 +334,7 @@ impl App {
         unsafe {
             let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
         }
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
         self.repaint_expanded();
         None
     }
@@ -383,7 +383,7 @@ impl App {
         if let Some(r) = self.ui.home.tile_reorder.as_mut() {
             r.cursor = cursor;
             self.step_tile_reorder();
-            self.set_timer(Timer::UiAnim, 16);
+            self.set_timer(Timer::UiAnim, self.frame_ms());
             return self.repaint_expanded();
         }
         let Some((slot, x0, y0)) = self.ui.home.tile_press else { return };
@@ -399,7 +399,7 @@ impl App {
         unsafe {
             let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
         }
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
         self.repaint_expanded();
     }
 

@@ -38,12 +38,13 @@ const ISLAND: [(Sid, &str, Kind); 12] = [
     (Sid::CloseDelay, "Close delay", Kind::Slider),
 ];
 
-const ANIMATIONS: [(Sid, &str, Kind); 5] = [
+const ANIMATIONS: [(Sid, &str, Kind); 6] = [
     (Sid::AnimCurve, "Animation curve", Kind::Cycle),
     (Sid::TabAnimKind, "Tab change", Kind::Cycle),
     (Sid::TabAnimSpeed, "Tab change speed", Kind::Slider),
     (Sid::OpenSpeed, "Open speed", Kind::Slider),
     (Sid::CloseSpeed, "Close speed", Kind::Slider),
+    (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
 const APPEARANCE: [(Sid, &str, Kind); 5] = [
@@ -54,7 +55,7 @@ const APPEARANCE: [(Sid, &str, Kind); 5] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 12] = [
+const PILL: [(Sid, &str, Kind); 14] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
@@ -66,6 +67,8 @@ const PILL: [(Sid, &str, Kind); 12] = [
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
     (Sid::MusicProgress, "Song progress strip", Kind::Toggle),
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
+    (Sid::EqStyle, "Equalizer shape", Kind::Cycle),
+    (Sid::EqStrength, "Equalizer strength", Kind::Slider),
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 

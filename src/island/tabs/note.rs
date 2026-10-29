@@ -463,7 +463,7 @@ impl App {
                 r.cursor = cursor;
             }
             self.step_tree_reorder();
-            self.set_timer(Timer::UiAnim, 16);
+            self.set_timer(Timer::UiAnim, self.frame_ms());
             return self.repaint_expanded();
         }
         let Some(id) = self.ui.notes.drag_from else { return };
@@ -476,7 +476,7 @@ impl App {
         let Some(index) = rows.iter().position(|(_, i)| i.id == id) else { return };
         let Some(slot) = index.checked_sub(self.ui.notes.scroll).filter(|s| *s < slots.len()) else { return };
         self.ui.notes.reorder = Some(view::Reorder::new(&slots, slot, cursor));
-        self.set_timer(Timer::UiAnim, 16);
+        self.set_timer(Timer::UiAnim, self.frame_ms());
         self.repaint_expanded();
     }
 

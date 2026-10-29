@@ -1,4 +1,22 @@
+use std::cell::Cell;
+
 use crate::island::*;
+
+thread_local! {
+    static MONITOR_HZ: Cell<(Option<Instant>, u32)> = const { Cell::new((None, 0)) };
+    static FRAME_COST: Cell<f32> = const { Cell::new(0.0) };
+}
+
+#[link(name = "winmm")]
+unsafe extern "system" {
+    fn timeBeginPeriod(period: u32) -> u32;
+}
+
+pub(in crate::island) fn raise_timer_resolution() {
+    unsafe {
+        timeBeginPeriod(1);
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::island) enum Timer {
@@ -94,7 +112,64 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn frame_ms(&self) -> u32 {
+        use crate::data::settings::FrameRate;
+        let monitor = (1000.0 / self.monitor_hz()).round().clamp(4.0, 33.0) as u32;
+        match self.settings.frame_rate {
+            FrameRate::Fps30 => 33,
+            FrameRate::Fps60 => 16,
+            FrameRate::Monitor => monitor,
+            FrameRate::Adaptive => {
+                let cost = FRAME_COST.get();
+                if cost > monitor as f32 * 0.8 { ((cost * 1.25).ceil() as u32).min(33) } else { monitor }
+            }
+        }
+    }
+
+    fn monitor_hz(&self) -> f32 {
+        use windows::Win32::Graphics::Gdi::{
+            DEVMODEW, ENUM_CURRENT_SETTINGS, EnumDisplaySettingsW, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST,
+            MONITORINFO, MONITORINFOEXW, MonitorFromWindow,
+        };
+        let (at, hz) = MONITOR_HZ.get();
+        if let Some(at) = at
+            && hz > 0
+            && at.elapsed() < Duration::from_secs(3)
+        {
+            return hz as f32;
+        }
+        let mut found = 60;
+        unsafe {
+            let monitor = MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFOEXW::default();
+            info.monitorInfo.cbSize = size_of::<MONITORINFOEXW>() as u32;
+            if GetMonitorInfoW(monitor, (&raw mut info).cast::<MONITORINFO>()).as_bool() {
+                let mut mode = DEVMODEW { dmSize: size_of::<DEVMODEW>() as u16, ..Default::default() };
+                if EnumDisplaySettingsW(windows::core::PCWSTR(info.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut mode)
+                    .as_bool()
+                    && mode.dmDisplayFrequency > 1
+                {
+                    found = mode.dmDisplayFrequency;
+                }
+            }
+        }
+        MONITOR_HZ.set((Some(Instant::now()), found));
+        found as f32
+    }
+
     pub(in crate::island) fn on_timer(&mut self, id: usize) {
+        let started = Instant::now();
+        let frame = matches!(
+            Timer::from_id(id),
+            Some(Timer::Spectrum | Timer::Liquid | Timer::UiAnim | Timer::Lyric | Timer::Char)
+        );
+        self.on_timer_inner(id);
+        if frame {
+            FRAME_COST.set(FRAME_COST.get() * 0.8 + started.elapsed().as_secs_f32() * 1000.0 * 0.2);
+        }
+    }
+
+    fn on_timer_inner(&mut self, id: usize) {
         let Some(timer) = Timer::from_id(id) else { return };
         self.kill_timer(timer);
         match timer {

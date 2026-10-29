@@ -5,7 +5,6 @@ pub(in crate::island) const BUMP_DEPTH_MAX: f32 = 40.0;
 pub(in crate::island) const BUMP_HALF: f32 = 44.0;
 pub(in crate::island) const IDLE_AMP: f32 = 5.0;
 pub(in crate::island) const BUMP_SEAM: f32 = 3.0;
-pub(in crate::island) const SPECTRUM_MS: u32 = 33;
 pub(in crate::island) const SPEC_W: f32 = 3.0;
 pub(in crate::island) const SPEC_GAP: f32 = 3.0;
 pub(in crate::island) const SPEC_H: f32 = 24.0;
@@ -22,6 +21,7 @@ pub(in crate::island) fn bump_size(scale: f32, width: f32) -> (i32, i32) {
 
 pub(in crate::island) struct Liquid {
     pub(in crate::island) bump: Layer,
+    pub(in crate::island) ring: Layer,
     pub(in crate::island) bump_fill: SpriteVisual,
     pub(in crate::island) bump_blur: SpriteVisual,
     pub(in crate::island) bump_shape: CompositionPathGeometry,
@@ -64,7 +64,30 @@ impl App {
     }
 
     pub(in crate::island) fn spikes_active(&self) -> bool {
-        self.liquid_on() && self.settings.edge_spikes && self.music.spectrum_running && self.state == State::Collapsed
+        self.liquid_on()
+            && self.settings.edge_spikes
+            && !self.settings.eq_style.around()
+            && self.music.spectrum_running
+            && self.state == State::Collapsed
+    }
+
+    pub(in crate::island) fn ring_active(&self) -> bool {
+        self.settings.edge_spikes
+            && self.settings.eq_style.around()
+            && self.music.spectrum_running
+            && self.state == State::Collapsed
+    }
+
+    pub(in crate::island) fn refresh_eq_shape(&mut self) {
+        let _ = self.liquid.ring.sprite.SetIsVisible(false);
+        self.set_bump_visible(false);
+        self.update_eq();
+        if self.ring_active() {
+            self.paint_ring();
+        } else if self.spikes_active() {
+            self.paint_spikes();
+        }
+        self.repaint_collapsed();
     }
 
     pub(in crate::island) fn paint_spikes(&self) {
@@ -80,7 +103,12 @@ impl App {
                 audio::level(lo) * (1.0 - f) + audio::level(lo + 1) * f
             })
             .collect();
-        let depth = self.settings.liquid_strength * s * 0.9;
+        let depth = self.settings.liquid_strength * s * 0.9 * self.settings.eq_strength;
+        let shape = match self.settings.eq_style {
+            crate::data::settings::EqStyle::Wave => crate::ui::gfx::EdgeShape::Wave,
+            crate::data::settings::EqStyle::Bars => crate::ui::gfx::EdgeShape::Bars,
+            _ => crate::ui::gfx::EdgeShape::Spikes,
+        };
         let _ = self.liquid.bump.paint(&self.gpu, |p| {
             let (pr, pg, pb) = crate::ui::theme::panel();
             let base = crate::ui::gfx::rgba(pr, pg, pb, 1.0);
@@ -92,16 +120,88 @@ impl App {
             } else {
                 base
             };
-            if let Ok(shape) = p.fill_spikes(w as f32, self.seam_px(), &levels, depth, base, tip) {
+            if let Ok(shape) = p.fill_spikes(w as f32, self.seam_px(), &levels, depth, base, tip, shape) {
                 self.clip_bump_blur(&shape);
             }
         });
         self.set_bump_visible(levels.iter().any(|l| *l * depth > 0.8));
     }
 
+    pub(in crate::island) fn paint_ring(&self) {
+        use crate::ui::gfx::RingPt;
+        let s = self.scale;
+        let (win_w, win_h) = self.window_size(Win::Small);
+        let (l, t) = (PAD * s, self.top_margin() * s);
+        let (w, h) = (self.cw * s, COLLAPSED.1 * s);
+        let r = h / 2.0;
+        let straight = (w - h).max(0.0);
+        let perimeter = 2.0 * straight + 2.0 * std::f32::consts::PI * r;
+        let n = ((perimeter / (9.0 * s)) as usize).clamp(24, 160) & !1;
+        let room = (l, (win_w as f32 - l - w).max(0.0), t, (win_h as f32 - t - h).max(0.0));
+        let depth = self.settings.liquid_strength * s * 0.9 * self.settings.eq_strength;
+        let (cx, cy) = (l + w / 2.0, t + h / 2.0);
+        let half = straight / 2.0;
+        let outline = |at: f32| -> (f32, f32, f32, f32) {
+            let arc = std::f32::consts::PI * r;
+            if at < half {
+                (cx + at, cy + r, 0.0, 1.0)
+            } else if at < half + arc {
+                let a = (at - half) / r;
+                (cx + half + r * a.sin(), cy + r * a.cos(), a.sin(), a.cos())
+            } else if at < half + arc + straight {
+                (cx + half - (at - half - arc), cy - r, 0.0, -1.0)
+            } else if at < half + 2.0 * arc + straight {
+                let a = std::f32::consts::PI + (at - half - arc - straight) / r;
+                (cx - half + r * a.sin(), cy + r * a.cos(), a.sin(), a.cos())
+            } else {
+                (cx - half + (at - half - 2.0 * arc - straight), cy + r, 0.0, 1.0)
+            }
+        };
+        let levels: Vec<f32> = (0..n)
+            .map(|i| {
+                let at = perimeter * (i as f32 + 0.5) / n as f32;
+                let u = at.min(perimeter - at) / (perimeter / 2.0);
+                let t = u * (audio::BANDS - 1) as f32;
+                let lo = (t as usize).min(audio::BANDS - 2);
+                let f = t - lo as f32;
+                audio::level(lo) * (1.0 - f) + audio::level(lo + 1) * f
+            })
+            .collect();
+        let smooth: Vec<f32> =
+            (0..n).map(|i| levels[(i + n - 1) % n] * 0.25 + levels[i] * 0.5 + levels[(i + 1) % n] * 0.25).collect();
+        let points: Vec<RingPt> = (0..n)
+            .map(|i| {
+                let (x, y, nx, ny) = outline(perimeter * (i as f32 + 0.5) / n as f32);
+                let fit = |room: f32, dir: f32| if dir.abs() > 0.001 { room / dir.abs() } else { f32::MAX };
+                let free = fit(if nx > 0.0 { room.1 } else { room.0 }, nx)
+                    .min(fit(if ny > 0.0 { room.3 } else { room.2 }, ny));
+                let d = (smooth[i].clamp(0.0, 1.0) * depth).min((free - 2.0).max(0.0));
+                RingPt { x, y, nx, ny, d }
+            })
+            .collect();
+        let tip = {
+            let (r, g, b) = if self.settings.spike_color {
+                self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8)
+            } else {
+                crate::ui::theme::accent_u8()
+            };
+            let (r, g, b) = (f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0);
+            let k = 1.0 / r.max(g).max(b).max(0.05);
+            crate::ui::gfx::rgba((r * k).min(1.0), (g * k).min(1.0), (b * k).min(1.0), 1.0)
+        };
+        let aura = self.settings.eq_style == crate::data::settings::EqStyle::Aura;
+        let _ = self.liquid.ring.paint(&self.gpu, |p| {
+            let _ = p.fill_ring(&points, aura, tip, 3.0 * s);
+        });
+        let _ = self.liquid.ring.sprite.SetIsVisible(points.iter().any(|p| p.d > 0.8));
+    }
+
     pub(in crate::island) fn spectrum_tick(&mut self) {
         if !self.music.spectrum_running {
             return;
+        }
+        if self.ring_active() {
+            self.paint_ring();
         }
         if self.spikes_active()
             && self.liquid.bump_amp < 0.3
@@ -111,7 +211,7 @@ impl App {
             self.paint_spikes();
         }
         if !self.settings.music_eq {
-            self.set_timer(Timer::Spectrum, SPECTRUM_MS);
+            self.set_timer(Timer::Spectrum, self.frame_ms());
             return;
         }
         for (i, bar) in self.music.spectrum.iter().enumerate() {
@@ -124,7 +224,7 @@ impl App {
                 let _ = bar.SetScale(Vector3 { X: 1.0, Y: target, Z: 1.0 });
             }
         }
-        self.set_timer(Timer::Spectrum, SPECTRUM_MS);
+        self.set_timer(Timer::Spectrum, self.frame_ms());
     }
 
     pub(in crate::island) fn update_spectrum(&mut self, show: bool) {
@@ -139,6 +239,9 @@ impl App {
             return;
         }
         self.music.spectrum_running = show;
+        if !show {
+            let _ = self.liquid.ring.sprite.SetIsVisible(false);
+        }
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetIsVisible(bars_visible && i % 2 == 0);
             let _ = bar.SetScale(Vector3 { X: 1.0, Y: 0.14, Z: 1.0 });
@@ -152,7 +255,7 @@ impl App {
         if show {
             self.place_spectrum();
             audio::start();
-            self.set_timer(Timer::Spectrum, SPECTRUM_MS);
+            self.set_timer(Timer::Spectrum, self.frame_ms());
         } else {
             audio::stop();
             self.kill_timer(Timer::Spectrum);
@@ -167,7 +270,7 @@ impl App {
             && self.ui.volume.is_none()
             && self.ui.downloading.is_none()
             && self.ui.notice.is_none();
-        let spikes = self.liquid_on() && self.settings.edge_spikes;
+        let spikes = self.settings.edge_spikes && (self.liquid_on() || self.settings.eq_style.around());
         self.update_spectrum(visible && (self.settings.music_eq || spikes));
         self.update_lyrics(visible);
         self.start_progress_timer();
@@ -373,6 +476,6 @@ impl App {
         }
         self.paint_bump_with(self.liquid.bump_amp, self.liquid.bump_cx);
         self.set_bump_visible(self.liquid.bump_amp > 0.2);
-        self.set_timer(Timer::Liquid, 16);
+        self.set_timer(Timer::Liquid, self.frame_ms());
     }
 }

@@ -3,7 +3,6 @@ use crate::services::lyrics;
 
 const LEAD_MS: u32 = 250;
 const SLIDE_MS: u32 = 180;
-const SLIDE_FRAME_MS: u32 = 20;
 const MAX_WAIT_MS: u32 = 1000;
 const MIN_WAIT_MS: u32 = 120;
 
@@ -44,7 +43,7 @@ impl App {
         }
         if visible && self.ui.lyric.lines.is_some() {
             self.sync_lyric_line();
-            self.set_timer(Timer::Lyric, SLIDE_FRAME_MS);
+            self.set_timer(Timer::Lyric, self.frame_ms());
         } else {
             self.kill_timer(Timer::Lyric);
         }
@@ -86,7 +85,7 @@ impl App {
         if changed || animating {
             self.repaint_collapsed();
         }
-        let wait = if animating { SLIDE_FRAME_MS } else { self.ms_to_next_lyric() };
+        let wait = if animating { self.frame_ms() } else { self.ms_to_next_lyric() };
         self.set_timer(Timer::Lyric, wait);
     }
 
