@@ -7,7 +7,6 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::PCWSTR;
 
-use crate::ui::gfx::Gpu;
 use crate::ui::menu::Entry;
 
 pub const WM_TRAY: u32 = WM_APP + 1;
@@ -76,7 +75,7 @@ pub fn click(lparam: LPARAM) -> Click {
     }
 }
 
-pub fn menu(scale: f32, with_gpu: &dyn Fn(&mut dyn FnMut(&Gpu))) -> Option<usize> {
+pub fn menu(scale: f32, with_gpu: crate::ui::menu::WithGpu) -> Option<usize> {
     let entries = vec![
         Entry::item(ID_TOGGLE, "Open / close island").glyph('\u{E8A7}'),
         Entry::item(ID_SETTINGS, "Settings").glyph('\u{E713}'),

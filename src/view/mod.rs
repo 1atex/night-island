@@ -89,8 +89,8 @@ pub const TABS: [(Tab, char, &str); 15] = [
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
 
-pub const SUBTABS: [(Tab, [(Tab, char, &str); 2]); 1] =
-    [(Tab::Ai, [(Tab::Chat, '\u{E8F2}', "Chat"), (Tab::Agy, '\u{E943}', "AGY")])];
+pub type SubTabs = [(Tab, char, &'static str); 2];
+pub const SUBTABS: [(Tab, SubTabs); 1] = [(Tab::Ai, [(Tab::Chat, '\u{E8F2}', "Chat"), (Tab::Agy, '\u{E943}', "AGY")])];
 
 pub const SUB_H: f32 = 36.0;
 

@@ -195,7 +195,7 @@ fn cover_info(session: &windows::Media::Control::GlobalSystemMediaTransportContr
         let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;
         let transform = BitmapTransform::new().ok()?;
         let (sw, sh) = (decoder.PixelWidth().ok()?.max(1), decoder.PixelHeight().ok()?.max(1));
-        let k = (SIZE as f32 / sw.min(sh) as f32).min(LONG_MAX as f32 / sw.max(sh) as f32).min(1.0).max(0.0);
+        let k = (SIZE as f32 / sw.min(sh) as f32).min(LONG_MAX as f32 / sw.max(sh) as f32).clamp(0.0, 1.0);
         let (tw, th) = if sw.min(sh) <= SIZE {
             (sw, sh)
         } else {

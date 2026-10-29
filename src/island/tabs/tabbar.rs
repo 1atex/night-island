@@ -9,14 +9,7 @@ impl App {
         let items = drag.items.clone();
         let mut reorder =
             std::mem::replace(&mut drag.reorder, view::Reorder::new(&[(0.0, 0.0, 0.0, 0.0)], 0, (0.0, 0.0)));
-        let moving = reorder.step_with(
-            &slots,
-            |r, j| {
-                let t = view::tab_drag_target_for(&rects, r, &items, j);
-                t
-            },
-            cursor,
-        );
+        let moving = reorder.step_with(&slots, |r, j| view::tab_drag_target_for(&rects, r, &items, j), cursor);
         if let Some(drag) = self.ui.tab_drag.as_mut() {
             drag.reorder = reorder;
         }

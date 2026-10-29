@@ -316,13 +316,9 @@ fn render(gpu: &Gpu, hwnd: HWND) {
     });
 }
 
-pub fn show(
-    entries: Vec<Entry>,
-    at: (i32, i32),
-    above: bool,
-    scale: f32,
-    with_gpu: &dyn Fn(&mut dyn FnMut(&Gpu)),
-) -> Option<usize> {
+pub type WithGpu<'a> = &'a dyn Fn(&mut dyn FnMut(&Gpu));
+
+pub fn show(entries: Vec<Entry>, at: (i32, i32), above: bool, scale: f32, with_gpu: WithGpu) -> Option<usize> {
     if entries.is_empty() || MENU.with_borrow(|m| m.is_some()) {
         return None;
     }
