@@ -55,7 +55,7 @@ const APPEARANCE: [(Sid, &str, Kind); 5] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 17] = [
+const PILL: [(Sid, &str, Kind); 18] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
@@ -72,6 +72,7 @@ const PILL: [(Sid, &str, Kind); 17] = [
     (Sid::EqStrength, "Equalizer strength", Kind::Slider),
     (Sid::EqGradient, "Equalizer colours", Kind::Cycle),
     (Sid::EqWhenOpen, "Equalizer while the island is open", Kind::Toggle),
+    (Sid::BumpTint, "Liquid edge colour while music plays", Kind::Cycle),
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
@@ -264,6 +265,7 @@ pub struct SwUi {
     pub scroll: f32,
     pub search: String,
     pub hover: Option<SwHit>,
+    pub plates: Vec<(Plate, f32)>,
     pub drag: Option<Sid>,
     pub field: Option<Field>,
     pub dropdown: Option<Sid>,
@@ -271,6 +273,24 @@ pub struct SwUi {
     pub search_press: bool,
     pub capturing: Option<Hotkey>,
     pub quiet_sys: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Plate {
+    Row(Sid),
+    Field(Field),
+    Act(Act),
+}
+
+impl Plate {
+    pub fn of(hit: Option<SwHit>) -> Option<Plate> {
+        match hit? {
+            SwHit::Row(id, _) => Some(Plate::Row(id)),
+            SwHit::Field(f) => Some(Plate::Field(f)),
+            SwHit::Act(a) => Some(Plate::Act(a)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1000,13 +1020,19 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
     }
 }
 
-fn row_hover(p: &Painter, row: Rect, scale: f32) -> Result<()> {
+fn row_hover(p: &Painter, row: Rect, scale: f32, ui: &UiState, plate: Plate) -> Result<()> {
+    let level = ui.sw.plates.iter().find(|(k, _)| *k == plate).map_or(0.0, |(_, v)| *v);
+    if level < 0.01 {
+        return Ok(());
+    }
     p.fill_round_rect(
-        (row.0 - 8.0 * scale, row.1 + 2.0 * scale, row.2 + 8.0 * scale, row.3 - 2.0 * scale),
+        (row.0 - HOVER_BLEED * scale, row.1 + 2.0 * scale, row.2 + HOVER_BLEED * scale, row.3 - 2.0 * scale),
         10.0 * scale,
-        rgba(1.0, 1.0, 1.0, 0.04),
+        rgba(1.0, 1.0, 1.0, 0.045 * level),
     )
 }
+
+const HOVER_BLEED: f32 = 14.0;
 
 pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiState) -> Result<()> {
     let l = layout(size, scale);
@@ -1101,7 +1127,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
         rgba(1.0, 1.0, 1.0, 0.6),
     )?;
 
-    p.push_clip(l.content);
+    p.push_clip((l.content.0 - HOVER_BLEED * scale, l.content.1, l.content.2 + HOVER_BLEED * scale, l.content.3));
     let result = (|| -> Result<()> {
         let placed = placed(size, scale, ui);
         if placed.is_empty() {
@@ -1153,9 +1179,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                     )?;
                 }
                 Item::Row(id, label, kind) => {
-                    if matches!(ui.sw.hover, Some(SwHit::Row(h, _)) if h == id) {
-                        row_hover(p, row, scale)?;
-                    }
+                    row_hover(p, row, scale, ui, Plate::Row(id))?;
                     p.text(
                         label,
                         label_area,
@@ -1195,9 +1219,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                     )?;
                 }
                 Item::Field(field, label, hint) => {
-                    if ui.sw.hover == Some(SwHit::Field(field)) {
-                        row_hover(p, row, scale)?;
-                    }
+                    row_hover(p, row, scale, ui, Plate::Field(field))?;
                     p.text(
                         label,
                         label_area,
@@ -1239,9 +1261,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                     )?;
                 }
                 Item::Pair(act, label, button, active) => {
-                    if ui.sw.hover == Some(SwHit::Act(act)) {
-                        row_hover(p, row, scale)?;
-                    }
+                    row_hover(p, row, scale, ui, Plate::Act(act))?;
                     p.text(
                         &label,
                         label_area,

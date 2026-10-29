@@ -54,10 +54,11 @@ pub(in crate::island) enum Timer {
     VpnWait = 32,
     SteamPoll = 33,
     Tip = 34,
+    SwAnim = 35,
 }
 
 impl Timer {
-    const ALL: [Timer; 34] = [
+    const ALL: [Timer; 35] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -92,6 +93,7 @@ impl Timer {
         Timer::VpnWait,
         Timer::SteamPoll,
         Timer::Tip,
+        Timer::SwAnim,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -189,6 +191,7 @@ impl App {
             Timer::Lyric => self.lyric_tick(),
             Timer::LockKey => self.report_lockkeys(),
             Timer::SwCaret => self.sw_caret_tick(),
+            Timer::SwAnim => self.sw_anim_tick(),
             Timer::PillBack => self.restore_pill(),
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),

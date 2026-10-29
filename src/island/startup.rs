@@ -269,6 +269,7 @@ impl App {
                 bump_cx_vel: 0.0,
                 last_tick: Instant::now(),
                 idle_running: false,
+                idle_key: None,
             },
             music: MusicBars {
                 spectrum,

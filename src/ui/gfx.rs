@@ -52,7 +52,7 @@ pub enum Tone {
     Horizontal,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     pub base: (u8, u8, u8),
     pub tone: Tone,
@@ -63,6 +63,12 @@ impl Palette {
         let (r, g, b) = crate::platform::media::gradient(self.base, t.clamp(0.0, 1.0));
         D2D1_COLOR_F { r: f32::from(r) / 255.0, g: f32::from(g) / 255.0, b: f32::from(b) / 255.0, a: alpha }
     }
+}
+
+#[derive(Clone, Copy)]
+pub enum BumpFill {
+    Solid(D2D1_COLOR_F),
+    Tone { palette: Palette, tip: D2D1_COLOR_F, span: (f32, f32) },
 }
 
 pub type D2D1Colour = D2D1_COLOR_F;
@@ -410,7 +416,7 @@ impl Painter<'_> {
         cx: f32,
         half: f32,
         amp: f32,
-        color: D2D1_COLOR_F,
+        fill: BumpFill,
     ) -> Result<ID2D1PathGeometry> {
         unsafe {
             let factory: ID2D1Factory = self.dc.GetFactory()?;
@@ -432,8 +438,38 @@ impl Painter<'_> {
             sink.EndFigure(D2D1_FIGURE_END_CLOSED);
             sink.Close()?;
 
-            let brush = self.dc.CreateSolidColorBrush(&color, None)?;
-            self.dc.FillGeometry(&geometry, &brush, None);
+            match fill {
+                BumpFill::Solid(color) => {
+                    let brush = self.dc.CreateSolidColorBrush(&color, None)?;
+                    self.dc.FillGeometry(&geometry, &brush, None);
+                }
+                BumpFill::Tone { palette, tip, span } => {
+                    use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+                    use windows::Win32::Graphics::Direct2D::{
+                        D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+                    };
+                    let (start, end) = match palette.tone {
+                        Tone::Horizontal => (pt(span.0, 0.0), pt(span.1, 0.0)),
+                        _ => (pt(cx, seam), pt(cx, seam + amp.max(1.0))),
+                    };
+                    if palette.tone == Tone::Single {
+                        let brush = self.dc.CreateSolidColorBrush(&tip, None)?;
+                        self.dc.FillGeometry(&geometry, &brush, None);
+                    } else {
+                        let stops: Vec<D2D1_GRADIENT_STOP> = (0..=8)
+                            .map(|k| D2D1_GRADIENT_STOP {
+                                position: k as f32 / 8.0,
+                                color: palette.at(k as f32 / 8.0, 1.0),
+                            })
+                            .collect();
+                        let along =
+                            self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: start, endPoint: end };
+                        let brush = self.dc.CreateLinearGradientBrush(&props, None, &along)?;
+                        self.dc.FillGeometry(&geometry, &brush, None);
+                    }
+                }
+            }
             Ok(geometry)
         }
     }

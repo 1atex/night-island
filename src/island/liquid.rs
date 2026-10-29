@@ -38,6 +38,7 @@ pub(in crate::island) struct Liquid {
     pub(in crate::island) bump_cx_vel: f32,
     pub(in crate::island) last_tick: Instant,
     pub(in crate::island) idle_running: bool,
+    pub(in crate::island) idle_key: Option<crate::ui::gfx::Palette>,
 }
 
 pub(in crate::island) struct MusicBars {
@@ -457,19 +458,43 @@ impl App {
         BUMP_HALF * s * (0.6 + 0.4 * (amp / max).min(1.0))
     }
 
+    pub(in crate::island) fn bump_look(&self) -> Option<(crate::ui::gfx::Palette, crate::ui::gfx::D2D1Colour)> {
+        use crate::data::settings::BumpTint;
+        use crate::ui::gfx::{Palette, Tone};
+        if !self.ui.media.playing {
+            return None;
+        }
+        match self.settings.bump_tint {
+            BumpTint::Off => None,
+            BumpTint::Progress if view::progress_strip_on(&self.ui) => {
+                let base = self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
+                let palette = Palette { base, tone: Tone::Horizontal };
+                Some((palette, palette.at(0.5, 1.0)))
+            }
+            _ => Some((self.eq_palette(), self.eq_tip())),
+        }
+    }
+
+    fn bump_fill_for(&self, width: f32) -> crate::ui::gfx::BumpFill {
+        use crate::ui::gfx::BumpFill;
+        match self.bump_look() {
+            Some((palette, tip)) => {
+                let half = COLLAPSED.1 * self.scale / 2.0;
+                BumpFill::Tone { palette, tip, span: (-half, width + half) }
+            }
+            None => {
+                let (r, g, b) = crate::ui::theme::panel();
+                BumpFill::Solid(crate::ui::gfx::rgba(r, g, b, 1.0))
+            }
+        }
+    }
+
     pub(in crate::island) fn paint_bump_with(&self, amp: f32, cx: f32) {
         let (w, _) = self.liquid.bump.size();
         let half = self.bump_half(amp);
+        let fill = self.bump_fill_for(w as f32);
         let _ = self.liquid.bump.paint(&self.gpu, |p| {
-            let (r, g, b) = crate::ui::theme::panel();
-            if let Ok(shape) = p.fill_bump(
-                w as f32,
-                self.seam_px(),
-                w as f32 / 2.0 + cx,
-                half,
-                amp,
-                crate::ui::gfx::rgba(r, g, b, 1.0),
-            ) {
+            if let Ok(shape) = p.fill_bump(w as f32, self.seam_px(), w as f32 / 2.0 + cx, half, amp, fill) {
                 self.clip_bump_blur(&shape);
             }
         });
@@ -538,6 +563,8 @@ impl App {
         }
         self.liquid.idle_running = true;
         let s = self.scale;
+        let look = self.bump_look();
+        self.liquid.idle_key = look.map(|(palette, _)| palette);
         self.paint_bump_with(IDLE_AMP * s, 0.0);
         self.set_bump_visible(true);
         let result = (|| -> Result<()> {
@@ -553,6 +580,9 @@ impl App {
             scale_anim.SetIterationBehavior(AnimationIterationBehavior::Forever)?;
             self.liquid.bump.sprite.StartAnimation(h!("Scale"), &scale_anim.cast::<CompositionAnimation>()?)?;
 
+            if look.is_some_and(|(palette, _)| palette.tone == crate::ui::gfx::Tone::Horizontal) {
+                return Ok(());
+            }
             let (win_w, _) = self.window_size(self.win);
             let base_x = (win_w - self.liquid.bump.size().0) as f32 / 2.0;
             let base_y = (self.win_pad().1 + COLLAPSED.1) * s - BUMP_SEAM * s;
@@ -597,6 +627,9 @@ impl App {
         if !active {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
+            if self.liquid.idle_running && self.liquid.idle_key != self.bump_look().map(|(palette, _)| palette) {
+                self.stop_idle();
+            }
             if !self.spikes_active() && !self.ring_active() {
                 self.start_idle();
             }

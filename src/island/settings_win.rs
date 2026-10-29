@@ -175,7 +175,37 @@ impl App {
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
         if hit != self.ui.sw.hover {
             self.ui.sw.hover = hit;
+            self.sw_plates_move();
             self.render_settings_win();
+        }
+    }
+
+    fn sw_plates_move(&mut self) {
+        if let Some(now) = view::Plate::of(self.ui.sw.hover) {
+            if !self.ui.sw.plates.iter().any(|(k, _)| *k == now) {
+                self.ui.sw.plates.push((now, 0.0));
+            }
+        }
+        self.set_timer(Timer::SwAnim, 16);
+    }
+
+    pub(in crate::island) fn sw_anim_tick(&mut self) {
+        if self.settings_win.is_none() {
+            self.ui.sw.plates.clear();
+            return;
+        }
+        let now = view::Plate::of(self.ui.sw.hover);
+        let mut moving = false;
+        for (key, level) in &mut self.ui.sw.plates {
+            let target = if Some(*key) == now { 1.0 } else { 0.0 };
+            let step = 0.16;
+            *level = if *level < target { (*level + step).min(target) } else { (*level - step).max(target) };
+            moving |= *level != target;
+        }
+        self.ui.sw.plates.retain(|(key, level)| *level > 0.0 || Some(*key) == now);
+        self.render_settings_win();
+        if moving {
+            self.set_timer(Timer::SwAnim, 16);
         }
     }
 
@@ -674,6 +704,7 @@ impl App {
             self.ui.sw.search = text;
             self.ui.sw.scroll = 0.0;
             self.ui.sw.hover = None;
+            self.ui.sw.plates.clear();
         }
     }
 

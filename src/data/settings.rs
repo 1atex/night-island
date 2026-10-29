@@ -298,6 +298,32 @@ impl EqGradient {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum BumpTint {
+    Off,
+    #[default]
+    Equalizer,
+    Progress,
+}
+
+impl BumpTint {
+    pub fn name(self) -> &'static str {
+        match self {
+            BumpTint::Off => "Off",
+            BumpTint::Equalizer => "Equalizer colours",
+            BumpTint::Progress => "Progress colours",
+        }
+    }
+
+    pub const ALL: [BumpTint; 3] = [BumpTint::Off, BumpTint::Equalizer, BumpTint::Progress];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum ProgressStyle {
     #[default]
     Strip,
@@ -366,6 +392,7 @@ pub struct Settings {
     pub eq_strength: f32,
     pub eq_gradient: EqGradient,
     pub eq_when_open: bool,
+    pub bump_tint: BumpTint,
     pub progress_style: ProgressStyle,
     pub text_layout: TextLayout,
     pub dev_tools: bool,
@@ -459,6 +486,7 @@ impl Default for Settings {
             eq_strength: 1.0,
             eq_gradient: EqGradient::Single,
             eq_when_open: false,
+            bump_tint: BumpTint::Equalizer,
             progress_style: ProgressStyle::Strip,
             text_layout: TextLayout::Categories,
             dev_tools: false,

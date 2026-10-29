@@ -140,6 +140,10 @@ impl App {
                     self.update_eq();
                     self.refresh_eq_shape();
                 }
+                BumpTint => {
+                    self.stop_idle();
+                    self.liquid_tick();
+                }
                 EqStrength | EqGradient => self.refresh_eq_shape(),
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
                 | PillBattery | SpikeColor => {
