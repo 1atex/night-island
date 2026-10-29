@@ -34,9 +34,9 @@ pub(in crate::view) const CTL_COLS: usize = 5;
 
 const CTL_SMALL_COLS: usize = 4;
 
-pub(in crate::view) const CTL_BIG_H: f32 = 124.0;
+pub(in crate::view) const CTL_BIG_H: f32 = 112.0;
 
-pub(in crate::view) const CTL_SMALL_H: f32 = 70.0;
+pub(in crate::view) const CTL_SMALL_H: f32 = 60.0;
 
 pub(in crate::view) const CTL_GAP: f32 = 12.0;
 
