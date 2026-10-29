@@ -48,10 +48,6 @@ pub(in crate::island) struct MusicBars {
 }
 
 impl App {
-    pub(in crate::island) fn bump_room(&self) -> f32 {
-        bump_room_for(&self.settings)
-    }
-
     pub(in crate::island) fn liquid_on(&self) -> bool {
         self.settings.style == Style::Liquid && !(self.docked() && self.edge() != Edge::Top)
     }
@@ -106,6 +102,8 @@ impl App {
         self.update_eq();
         if self.ring_active() {
             self.paint_ring();
+        } else if self.open_eq_active() {
+            self.paint_open_eq();
         }
         if self.settings.music_eq && TICKS.replace(TICKS.get().wrapping_add(1)).is_multiple_of(20) {
             self.place_spectrum();
@@ -153,35 +151,130 @@ impl App {
         self.set_bump_visible(levels.iter().any(|l| *l * depth > 0.8));
     }
 
+    fn eq_tip(&self) -> crate::ui::gfx::D2D1Colour {
+        let (r, g, b) = if self.settings.spike_color {
+            self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8)
+        } else {
+            crate::ui::theme::accent_u8()
+        };
+        let (r, g, b) = (f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0);
+        let k = 1.0 / r.max(g).max(b).max(0.05);
+        crate::ui::gfx::rgba((r * k).min(1.0), (g * k).min(1.0), (b * k).min(1.0), 1.0)
+    }
+
+    fn edge_levels(&self, count: usize) -> Vec<f32> {
+        let mid = count / 2;
+        (0..count)
+            .map(|i| {
+                let t = i.abs_diff(mid) as f32 / mid.max(1) as f32 * (audio::BANDS - 1) as f32;
+                let lo = (t as usize).min(audio::BANDS - 2);
+                let f = t - lo as f32;
+                audio::level(lo) * (1.0 - f) + audio::level(lo + 1) * f
+            })
+            .collect()
+    }
+
+    pub(in crate::island) fn open_eq_active(&self) -> bool {
+        self.music.spectrum_running
+            && self.state == State::Expanded
+            && self.settings.eq_when_open
+            && self.settings.edge_spikes
+    }
+
+    pub(in crate::island) fn paint_open_eq(&self) {
+        if self.settings.eq_style.around() {
+            self.paint_ring();
+        } else {
+            self.paint_open_under();
+        }
+    }
+
+    fn paint_open_under(&self) {
+        let s = self.scale;
+        let (px, py, _) = self.big_pad();
+        let (l, t) = (px * s, py * s);
+        let (w, h) = (EXPANDED.0 * s, EXPANDED.1 * s);
+        let r = EXPANDED_RADIUS * s;
+        let width = (w - 2.0 * r).max(40.0 * s);
+        let count = (((width / s / 20.0) as usize) | 1).clamp(9, 41);
+        let levels = self.edge_levels(count);
+        let depth = (self.settings.liquid_strength * s * 0.9 * self.settings.eq_strength).min(RING_ROOM * s - 2.0);
+        let shape = match self.settings.eq_style {
+            crate::data::settings::EqStyle::Wave => crate::ui::gfx::EdgeShape::Wave,
+            crate::data::settings::EqStyle::Bars => crate::ui::gfx::EdgeShape::Bars,
+            _ => crate::ui::gfx::EdgeShape::Spikes,
+        };
+        let (tip, palette) = (self.eq_tip(), self.eq_palette());
+        let seam = 3.0 * s;
+        let _ = self.liquid.ring.paint(&self.gpu, |p| {
+            let clear = crate::ui::gfx::rgba(tip.r, tip.g, tip.b, 0.0);
+            let old = p.push_offset(l + r, t + h - seam);
+            let _ = p.fill_spikes(width, seam, &levels, depth, clear, tip, shape, palette);
+            p.set_transform(&old);
+        });
+        let _ = self.liquid.ring.sprite.SetIsVisible(levels.iter().any(|v| *v * depth > 0.8));
+    }
+
     pub(in crate::island) fn paint_ring(&self) {
         use crate::ui::gfx::RingPt;
         let s = self.scale;
-        let (px, py) = self.small_pad();
-        let (l, t) = (px * s, py * s);
-        let (w, h) = (self.cw * s, COLLAPSED.1 * s);
-        let r = h / 2.0;
-        let straight = (w - h).max(0.0);
-        let perimeter = 2.0 * straight + 2.0 * std::f32::consts::PI * r;
-        let n = ((perimeter / (9.0 * s)) as usize).clamp(24, 160) & !1;
+        let (frame, radius) = if self.state == State::Expanded {
+            let (px, py, _) = self.big_pad();
+            ((px * s, py * s, EXPANDED.0 * s, EXPANDED.1 * s), EXPANDED_RADIUS * s)
+        } else {
+            let (px, py) = self.small_pad();
+            ((px * s, py * s, self.cw * s, COLLAPSED.1 * s), COLLAPSED.1 * s / 2.0)
+        };
+        let (l, t, w, h) = frame;
+        let r = radius.min(h / 2.0).min(w / 2.0);
+        let (sw, sh) = (w - 2.0 * r, h - 2.0 * r);
+        let quarter = std::f32::consts::FRAC_PI_2 * r;
+        let perimeter = 2.0 * sw + 2.0 * sh + 4.0 * quarter;
+        let n = ((perimeter / (9.0 * s)) as usize).clamp(24, 220) & !1;
         let free = RING_ROOM * s - 2.0;
         let depth = self.settings.liquid_strength * s * 0.9 * self.settings.eq_strength;
         let (cx, cy) = (l + w / 2.0, t + h / 2.0);
-        let half = straight / 2.0;
+        let hx = sw / 2.0;
+        let (vy, pi) = (sh / 2.0, std::f32::consts::PI);
         let outline = |at: f32| -> (f32, f32, f32, f32) {
-            let arc = std::f32::consts::PI * r;
-            if at < half {
-                (cx + at, cy + r, 0.0, 1.0)
-            } else if at < half + arc {
-                let a = (at - half) / r;
-                (cx + half + r * a.sin(), cy + r * a.cos(), a.sin(), a.cos())
-            } else if at < half + arc + straight {
-                (cx + half - (at - half - arc), cy - r, 0.0, -1.0)
-            } else if at < half + 2.0 * arc + straight {
-                let a = std::f32::consts::PI + (at - half - arc - straight) / r;
-                (cx - half + r * a.sin(), cy + r * a.cos(), a.sin(), a.cos())
-            } else {
-                (cx - half + (at - half - 2.0 * arc - straight), cy + r, 0.0, 1.0)
+            let corner = |centre: (f32, f32), from: f32, k: f32| {
+                let a = from + k / r;
+                (centre.0 + r * a.sin(), centre.1 + r * a.cos(), a.sin(), a.cos())
+            };
+            let mut k = at;
+            if k < hx {
+                return (cx + k, cy + h / 2.0, 0.0, 1.0);
             }
+            k -= hx;
+            if k < quarter {
+                return corner((cx + hx, cy + vy), 0.0, k);
+            }
+            k -= quarter;
+            if k < sh {
+                return (cx + w / 2.0, cy + vy - k, 1.0, 0.0);
+            }
+            k -= sh;
+            if k < quarter {
+                return corner((cx + hx, cy - vy), pi / 2.0, k);
+            }
+            k -= quarter;
+            if k < sw {
+                return (cx + hx - k, cy - h / 2.0, 0.0, -1.0);
+            }
+            k -= sw;
+            if k < quarter {
+                return corner((cx - hx, cy - vy), pi, k);
+            }
+            k -= quarter;
+            if k < sh {
+                return (cx - w / 2.0, cy - vy + k, -1.0, 0.0);
+            }
+            k -= sh;
+            if k < quarter {
+                return corner((cx - hx, cy + vy), 1.5 * pi, k);
+            }
+            k -= quarter;
+            (cx - hx + k, cy + h / 2.0, 0.0, 1.0)
         };
         let levels: Vec<f32> = (0..n)
             .map(|i| {
@@ -202,16 +295,7 @@ impl App {
                 RingPt { x, y, nx, ny, d }
             })
             .collect();
-        let tip = {
-            let (r, g, b) = if self.settings.spike_color {
-                self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8)
-            } else {
-                crate::ui::theme::accent_u8()
-            };
-            let (r, g, b) = (f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0);
-            let k = 1.0 / r.max(g).max(b).max(0.05);
-            crate::ui::gfx::rgba((r * k).min(1.0), (g * k).min(1.0), (b * k).min(1.0), 1.0)
-        };
+        let tip = self.eq_tip();
         let aura = self.settings.eq_style == crate::data::settings::EqStyle::Aura;
         let palette = self.eq_palette();
         let _ = self.liquid.ring.paint(&self.gpu, |p| {
@@ -252,7 +336,7 @@ impl App {
     }
 
     pub(in crate::island) fn update_spectrum(&mut self, show: bool) {
-        let bars_visible = show && self.settings.music_eq;
+        let bars_visible = show && self.settings.music_eq && self.state == State::Collapsed;
         if show == self.music.spectrum_running {
             for (i, bar) in self.music.spectrum.iter().enumerate() {
                 let _ = bar.SetIsVisible(bars_visible && i % 2 == 0);
@@ -262,6 +346,9 @@ impl App {
             }
             if show && (self.spikes_active() || self.ring_active()) {
                 self.stop_idle();
+            }
+            if self.state != State::Collapsed {
+                self.set_bump_visible(false);
             }
             return;
         }
@@ -296,16 +383,22 @@ impl App {
             && self.ui.downloading.is_none()
             && self.ui.notice.is_none();
         let spikes = self.settings.edge_spikes && (self.liquid_on() || self.settings.eq_style.around());
+        let open = self.state == State::Expanded
+            && self.settings.eq_when_open
+            && self.settings.edge_spikes
+            && !self.gaming
+            && (!self.pill_hidden || self.ghosted)
+            && self.ui.media.playing;
         let analysing = self.ui.media.playing
             && !self.gaming
             && (!self.pill_hidden || self.ghosted)
-            && (self.settings.music_eq || spikes);
+            && (self.settings.music_eq || spikes || open);
         if analysing {
             audio::start();
         } else {
             audio::stop();
         }
-        self.update_spectrum(visible && (self.settings.music_eq || spikes));
+        self.update_spectrum((visible && (self.settings.music_eq || spikes)) || open);
         self.update_lyrics(visible);
         self.start_progress_timer();
     }

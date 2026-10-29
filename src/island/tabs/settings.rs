@@ -135,6 +135,11 @@ impl App {
                     self.apply_layout();
                     self.refresh_eq_shape();
                 }
+                EqWhenOpen => {
+                    self.apply_layout();
+                    self.update_eq();
+                    self.refresh_eq_shape();
+                }
                 EqStrength | EqGradient => self.refresh_eq_shape(),
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
                 | PillBattery | SpikeColor => {

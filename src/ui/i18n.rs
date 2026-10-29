@@ -355,6 +355,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Su" => "Вс",
         "Pick date and time" => "Выбрать дату и время",
         "Unpin" => "Открепить",
+        "Equalizer while the island is open" => "Эквалайзер при открытом острове",
         "One colour" => "Один цвет",
         "Gradient outwards" => "Градиент наружу",
         "Gradient left to right" => "Градиент слева направо",

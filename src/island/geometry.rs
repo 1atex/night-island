@@ -13,16 +13,54 @@ pub(in crate::island) static SNAP_FIT: std::sync::atomic::AtomicBool = std::sync
 
 pub(in crate::island) const RING_ROOM: f32 = 40.0;
 
-pub(in crate::island) fn window_size(scale: f32, win: Win, docked: bool, cw: f32, room: f32, ring: bool) -> (i32, i32) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::island) enum OpenEq {
+    Off,
+    Under,
+    Around,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::island) struct Room {
+    pub bottom: f32,
+    pub ring: bool,
+    pub open: OpenEq,
+}
+
+pub(in crate::island) fn window_room(settings: &Settings) -> Room {
+    let open = match (settings.eq_when_open && settings.edge_spikes, settings.eq_style.around()) {
+        (false, _) => OpenEq::Off,
+        (true, false) => OpenEq::Under,
+        (true, true) => OpenEq::Around,
+    };
+    Room { bottom: bump_room_for(settings), ring: settings.ring_wanted(), open }
+}
+
+pub(in crate::island) fn big_pad(open: OpenEq, docked: bool) -> (f32, f32, f32) {
+    let top = if docked { 0.0 } else { TOP_MARGIN };
+    match open {
+        OpenEq::Off => (PAD, top, PAD),
+        OpenEq::Under => (PAD, top, PAD.max(RING_ROOM)),
+        OpenEq::Around => (PAD.max(RING_ROOM), top.max(RING_ROOM), PAD.max(RING_ROOM)),
+    }
+}
+
+pub(in crate::island) fn window_size(scale: f32, win: Win, docked: bool, cw: f32, room: &Room) -> (i32, i32) {
     let (w, h) = if win == Win::Big { EXPANDED } else { (cw, COLLAPSED.1) };
     let base_top = if docked { 0.0 } else { TOP_MARGIN };
-    let (pad, top) =
-        if ring && win == Win::Small { (PAD.max(RING_ROOM), base_top.max(RING_ROOM)) } else { (PAD, base_top) };
+    let (pad, top) = match win {
+        Win::Small if room.ring => (PAD.max(RING_ROOM), base_top.max(RING_ROOM)),
+        Win::Big => {
+            let (x, t, _) = big_pad(room.open, docked);
+            (x, t)
+        }
+        _ => (PAD, base_top),
+    };
     let width = ((w + 2.0 * pad) * scale).round() as i32;
     match win {
         Win::Strip => (width, STRIP_H),
-        Win::Small => (width, ((h + top + room) * scale).round() as i32),
-        Win::Big => (width, ((h + top + PAD) * scale).round() as i32),
+        Win::Small => (width, ((h + top + room.bottom) * scale).round() as i32),
+        Win::Big => (width, ((h + top + big_pad(room.open, docked).2) * scale).round() as i32),
     }
 }
 
@@ -109,7 +147,10 @@ impl App {
                 let (px, py) = self.small_pad();
                 (pill.0 - px * s, pill.1 - py * s)
             }
-            Win::Big => (pill.0 - PAD * s, pill.1 - self.top_margin() * s),
+            Win::Big => {
+                let (px, py, _) = self.big_pad();
+                (pill.0 - px * s, pill.1 - py * s)
+            }
         }
     }
 
@@ -130,7 +171,16 @@ impl App {
     }
 
     pub(in crate::island) fn win_pad(&self) -> (f32, f32) {
-        if self.win == Win::Big { (PAD, self.top_margin()) } else { self.small_pad() }
+        if self.win == Win::Big {
+            let (x, t, _) = self.big_pad();
+            (x, t)
+        } else {
+            self.small_pad()
+        }
+    }
+
+    pub(in crate::island) fn big_pad(&self) -> (f32, f32, f32) {
+        big_pad(window_room(&self.settings).open, self.docked())
     }
 
     pub(in crate::island) fn open_ms(&self) -> u64 {
@@ -142,27 +192,31 @@ impl App {
     }
 
     pub(in crate::island) fn window_size(&self, win: Win) -> (i32, i32) {
-        window_size(self.scale, win, self.docked(), self.cw, self.bump_room(), self.settings.ring_wanted())
+        window_size(self.scale, win, self.docked(), self.cw, &window_room(&self.settings))
     }
 
     pub(in crate::island) fn pill_full(&self) -> view::Rect {
         let (w, h) = EXPANDED;
-        (PAD * self.scale, self.top_margin() * self.scale, w * self.scale, h * self.scale)
+        let (px, py, _) = self.big_pad();
+        (px * self.scale, py * self.scale, w * self.scale, h * self.scale)
     }
 
     pub(in crate::island) fn pill_rect(&self, expanded: bool) -> view::Rect {
         let (w, h) = if expanded { EXPANDED } else { (self.cw, COLLAPSED.1) };
-        let (px, py) = if expanded { (PAD, self.top_margin()) } else { self.small_pad() };
+        let (px, py) = if expanded {
+            let (x, t, _) = self.big_pad();
+            (x, t)
+        } else {
+            self.small_pad()
+        };
         let full = (px * self.scale, py * self.scale, w * self.scale, h * self.scale);
         if expanded { view::body_rect(full, self.scale, self.ui.tab) } else { full }
     }
 
     pub(in crate::island) fn update_offsets(&self) {
         let (win_w, _) = self.window_size(self.win);
-        let small =
-            window_size(self.scale, Win::Small, self.docked(), self.cw, self.bump_room(), self.settings.ring_wanted())
-                .0;
-        let big = window_size(self.scale, Win::Big, self.docked(), self.cw, 0.0, false).0;
+        let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings)).0;
+        let big = window_size(self.scale, Win::Big, self.docked(), self.cw, &window_room(&self.settings)).0;
         for (layer, own_w) in [(&self.collapsed, small), (&self.expanded, big), (&self.liquid.ring, small)] {
             let x = (win_w - own_w) as f32 / 2.0;
             let _ = layer.sprite.SetOffset(Vector3 { X: x, Y: 0.0, Z: 0.0 });
@@ -192,9 +246,9 @@ impl App {
         }
         self.place(Win::Small);
         let docked = self.docked();
-        let small = window_size(self.scale, Win::Small, docked, self.cw, self.bump_room(), self.settings.ring_wanted());
+        let small = window_size(self.scale, Win::Small, docked, self.cw, &window_room(&self.settings));
         let _ = self.collapsed.resize(small);
-        let _ = self.liquid.ring.resize(small);
+        let _ = self.liquid.ring.resize(self.window_size(self.win));
         self.fit_bump();
         self.update_offsets();
         if animate {
@@ -257,6 +311,7 @@ impl App {
             let _ =
                 SetWindowPos(self.hwnd, Some(HWND_TOPMOST), x.round() as i32, y.round() as i32, w, h, SWP_NOACTIVATE);
         }
+        let _ = self.liquid.ring.resize(self.window_size(win));
         self.update_offsets();
     }
 
@@ -310,10 +365,10 @@ impl App {
         let expanded = self.state == State::Expanded;
         let hidden = matches!(self.state, State::Hidden | State::Hiding);
         let _ = self.set_geometry_now(win, expanded, hidden);
-        let small = window_size(self.scale, Win::Small, docked, self.cw, self.bump_room(), self.settings.ring_wanted());
+        let small = window_size(self.scale, Win::Small, docked, self.cw, &window_room(&self.settings));
         let _ = self.collapsed.resize(small);
-        let _ = self.liquid.ring.resize(small);
-        let _ = self.expanded.resize(window_size(self.scale, Win::Big, docked, self.cw, 0.0, false));
+        let _ = self.liquid.ring.resize(self.window_size(self.win));
+        let _ = self.expanded.resize(window_size(self.scale, Win::Big, docked, self.cw, &window_room(&self.settings)));
         let _ = self.liquid.bump.resize(bump_size(self.scale, self.cw));
         let _ = self
             .pet

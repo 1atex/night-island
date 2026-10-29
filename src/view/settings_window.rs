@@ -55,7 +55,7 @@ const APPEARANCE: [(Sid, &str, Kind); 5] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 16] = [
+const PILL: [(Sid, &str, Kind); 17] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
@@ -71,6 +71,7 @@ const PILL: [(Sid, &str, Kind); 16] = [
     (Sid::EqStyle, "Equalizer shape", Kind::Cycle),
     (Sid::EqStrength, "Equalizer strength", Kind::Slider),
     (Sid::EqGradient, "Equalizer colours", Kind::Cycle),
+    (Sid::EqWhenOpen, "Equalizer while the island is open", Kind::Toggle),
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 

@@ -65,6 +65,8 @@ impl Palette {
     }
 }
 
+pub type D2D1Colour = D2D1_COLOR_F;
+
 pub const WHITE: D2D1_COLOR_F = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
 
 pub fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
