@@ -65,62 +65,144 @@ pub fn pill_metrics_on(cfg: &Settings) -> bool {
     cfg.metrics_pill.iter().any(|k| Metric::from_key(k).is_some())
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Cell {
+    One(Metric),
+    Net,
+}
+
+fn cells(shown: &[Metric]) -> Vec<Cell> {
+    let both = shown.contains(&Metric::NetDown) && shown.contains(&Metric::NetUp);
+    let mut out = Vec::new();
+    for m in shown {
+        match m {
+            Metric::NetDown | Metric::NetUp if both => {
+                if !out.contains(&Cell::Net) {
+                    out.push(Cell::Net);
+                }
+            }
+            m => out.push(Cell::One(*m)),
+        }
+    }
+    out
+}
+
+fn metric_glyph(m: Metric) -> char {
+    match m {
+        Metric::Cpu => '\u{E950}',
+        Metric::Ram => '\u{E964}',
+        Metric::Gpu => '\u{E7F4}',
+        Metric::Disk => '\u{EDA2}',
+        Metric::NetDown => '\u{E74B}',
+        Metric::NetUp => '\u{E74A}',
+        Metric::Uptime => '\u{E823}',
+    }
+}
+
 pub(in crate::view) fn paint_metrics_row(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let (x, y, w, h) = pill;
-    let shown: Vec<Metric> = ui.cfg.metrics_tab.iter().filter_map(|k| Metric::from_key(k)).take(4).collect();
+    let shown: Vec<Metric> = ui.cfg.metrics_tab.iter().filter_map(|k| Metric::from_key(k)).collect();
     let Some(sample) = ui.metrics.sample.as_ref().filter(|_| !shown.is_empty()) else { return Ok(()) };
+    let list = cells(&shown);
     let side = SIDE_PAD * scale;
     let gap = CTL_GAP * scale;
     let top = y + (62.0 + CTL_BIG_H + CTL_GAP + CTL_SMALL_H + CTL_GAP) * scale;
     let bottom = y + h - 14.0 * scale;
-    if bottom - top < 40.0 * scale {
+    let avail = bottom - top;
+    if avail < 30.0 * scale {
         return Ok(());
     }
-    let tile_w = (w - 2.0 * side - 3.0 * gap) / 4.0;
-    for (slot, m) in shown.iter().enumerate() {
-        let left = x + side + slot as f32 * (tile_w + gap);
-        let t = (left, top, left + tile_w, bottom.min(top + 66.0 * scale));
+    let cols = list.len().clamp(1, 3);
+    let rows = list.len().div_ceil(3).max(1);
+    let row_gap = 8.0 * scale;
+    let th = ((avail - (rows - 1) as f32 * row_gap) / rows as f32).min(66.0 * scale);
+    let roomy = th >= 56.0 * scale;
+    let tile_w = (w - 2.0 * side - (cols - 1) as f32 * gap) / cols as f32;
+    let (ar, ag, ab) = crate::ui::theme::accent_u8();
+    let accent = (f32::from(ar) / 255.0, f32::from(ag) / 255.0, f32::from(ab) / 255.0);
+    for (slot, cell) in list.iter().enumerate() {
+        let (col, row) = ((slot % 3) as f32, (slot / 3) as f32);
+        let left = x + side + col * (tile_w + gap);
+        let t = (left, top + row * (th + row_gap), left + tile_w, top + row * (th + row_gap) + th);
         p.fill_round_rect(t, 16.0 * scale, rgba(1.0, 1.0, 1.0, 0.06))?;
-        let value = m.value(sample).unwrap_or(0.0);
-        let color = if m.is_percent() && value >= 90.0 {
-            rgba(1.0, 0.42, 0.38, 1.0)
-        } else if m.is_percent() && value >= 70.0 {
-            rgba(1.0, 0.75, 0.3, 1.0)
-        } else {
-            let (r, g, b) = crate::ui::theme::accent_u8();
-            rgba(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0)
+        let level = match cell {
+            Cell::One(m) if m.is_percent() => m.value(sample).unwrap_or(0.0),
+            _ => 0.0,
         };
-        let pad = 12.0 * scale;
-        p.text(
-            m.label(),
-            (t.0 + pad, t.1 + 6.0 * scale, t.2 - pad, t.1 + 24.0 * scale),
-            11.5 * scale,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
-            rgba(1.0, 1.0, 1.0, 0.55),
-        )?;
-        p.text(
-            &m.text(sample),
-            (t.0 + pad, t.1 + 22.0 * scale, t.2 - pad, t.1 + 46.0 * scale),
-            18.0 * scale,
-            DWRITE_FONT_WEIGHT_BOLD,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
-            WHITE,
-        )?;
-        if let Some(detail) = m.detail(sample) {
-            p.text(
-                &detail,
-                (t.0 + pad, t.1 + 44.0 * scale, t.2 - pad, t.1 + 62.0 * scale),
-                10.5 * scale,
-                DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                rgba(1.0, 1.0, 1.0, 0.45),
-            )?;
-        } else if m.is_percent() {
-            let bar = (t.0 + pad, t.3 - 10.0 * scale, t.2 - pad, t.3 - 6.0 * scale);
-            p.fill_round_rect(bar, 2.0 * scale, rgba(1.0, 1.0, 1.0, 0.1))?;
-            let fill = bar.0 + (bar.2 - bar.0) * (value / 100.0).clamp(0.0, 1.0);
-            p.fill_round_rect((bar.0, bar.1, fill.max(bar.0 + 2.0 * scale), bar.3), 2.0 * scale, color)?;
+        let tint = if level >= 90.0 {
+            (1.0, 0.42, 0.38)
+        } else if level >= 70.0 {
+            (1.0, 0.75, 0.3)
+        } else {
+            accent
+        };
+        let d = (th - 14.0 * scale).min(34.0 * scale);
+        let circle = (t.0 + 10.0 * scale, (t.1 + t.3 - d) / 2.0, t.0 + 10.0 * scale + d, (t.1 + t.3 + d) / 2.0);
+        p.fill_round_rect(circle, d / 2.0, rgba(tint.0, tint.1, tint.2, 0.28))?;
+        let glyph = match cell {
+            Cell::One(m) => metric_glyph(*m),
+            Cell::Net => '\u{E839}',
+        };
+        p.glyph(glyph, circle, d * 0.5, rgba(tint.0.max(0.8), tint.1.max(0.8), tint.2.max(0.8), 1.0))?;
+        let text_left = circle.2 + 10.0 * scale;
+        let text_right = t.2 - 10.0 * scale;
+        match cell {
+            Cell::One(m) => {
+                let detail = m.detail(sample).filter(|_| roomy);
+                let (label_h, value_h) = if roomy { (18.0, 24.0) } else { (14.0, 20.0) };
+                let block = (label_h + value_h + if detail.is_some() { 16.0 } else { 0.0 }) * scale;
+                let first = (t.1 + t.3) / 2.0 - block / 2.0;
+                p.text(
+                    m.label(),
+                    (text_left, first, text_right, first + label_h * scale),
+                    if roomy { 11.5 } else { 10.5 } * scale,
+                    DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_TEXT_ALIGNMENT_LEADING,
+                    rgba(1.0, 1.0, 1.0, 0.55),
+                )?;
+                let value_top = first + label_h * scale - 2.0 * scale;
+                p.text(
+                    &m.text(sample),
+                    (text_left, value_top, text_right, first + (label_h + value_h) * scale),
+                    if roomy { 18.0 } else { 14.5 } * scale,
+                    DWRITE_FONT_WEIGHT_BOLD,
+                    DWRITE_TEXT_ALIGNMENT_LEADING,
+                    WHITE,
+                )?;
+                if let Some(detail) = detail {
+                    p.text(
+                        &detail,
+                        (text_left, first + (label_h + value_h) * scale - 2.0 * scale, text_right, first + block),
+                        10.5 * scale,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, 0.45),
+                    )?;
+                }
+                if m.is_percent() {
+                    let bar = (t.0 + 14.0 * scale, t.3 - 6.0 * scale, t.2 - 14.0 * scale, t.3 - 3.5 * scale);
+                    p.fill_round_rect(bar, 1.5 * scale, rgba(1.0, 1.0, 1.0, 0.1))?;
+                    let fill = (bar.0 + (bar.2 - bar.0) * (level / 100.0).clamp(0.0, 1.0)).max(bar.0 + 2.0 * scale);
+                    p.fill_round_rect((bar.0, bar.1, fill, bar.3), 1.5 * scale, rgba(tint.0, tint.1, tint.2, 1.0))?;
+                }
+            }
+            Cell::Net => {
+                let lines = [(Metric::NetDown, '\u{E74B}'), (Metric::NetUp, '\u{E74A}')];
+                let line_h = ((t.3 - t.1) - 12.0 * scale) / 2.0;
+                for (i, (m, arrow)) in lines.into_iter().enumerate() {
+                    let top = t.1 + 6.0 * scale + i as f32 * line_h;
+                    let arrow_box = (text_left - 2.0 * scale, top, text_left + 14.0 * scale, top + line_h);
+                    p.glyph(arrow, arrow_box, 11.0 * scale, rgba(1.0, 1.0, 1.0, 0.6))?;
+                    p.text(
+                        &m.text(sample),
+                        (text_left + 16.0 * scale, top, text_right, top + line_h),
+                        if roomy { 15.0 } else { 13.0 } * scale,
+                        DWRITE_FONT_WEIGHT_BOLD,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        WHITE,
+                    )?;
+                }
+            }
         }
     }
     Ok(())

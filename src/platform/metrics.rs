@@ -1,6 +1,6 @@
 use std::ffi::c_void;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use windows::Win32::Foundation::{FILETIME, HWND, LPARAM, WPARAM};
@@ -153,11 +153,27 @@ pub fn latest() -> Option<Sample> {
     LATEST.lock().ok().and_then(|g| g.clone())
 }
 
+static EVERY_MS: AtomicU64 = AtomicU64::new(2000);
+static RUNNING: AtomicBool = AtomicBool::new(false);
+
 pub fn start(hwnd: HWND, every: Duration) {
+    EVERY_MS.store(every.as_millis().max(500) as u64, Ordering::SeqCst);
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
     let id = RUN.fetch_add(1, Ordering::SeqCst) + 1;
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
         let mut reader = Reader::new();
+        let _ = reader.read();
+        let wait = |ms: u64| {
+            let mut slept = 0;
+            while slept < ms && RUN.load(Ordering::SeqCst) == id {
+                std::thread::sleep(Duration::from_millis(100));
+                slept += 100;
+            }
+        };
+        wait(1000);
         while RUN.load(Ordering::SeqCst) == id {
             let sample = reader.read();
             if RUN.load(Ordering::SeqCst) != id {
@@ -169,10 +185,10 @@ pub fn start(hwnd: HWND, every: Duration) {
             unsafe {
                 let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_METRICS, WPARAM(0), LPARAM(0));
             }
-            let mut slept = Duration::ZERO;
-            while slept < every && RUN.load(Ordering::SeqCst) == id {
+            let mut slept = 0;
+            while slept < EVERY_MS.load(Ordering::SeqCst) && RUN.load(Ordering::SeqCst) == id {
                 std::thread::sleep(Duration::from_millis(100));
-                slept += Duration::from_millis(100);
+                slept += 100;
             }
         }
     });
@@ -180,6 +196,7 @@ pub fn start(hwnd: HWND, every: Duration) {
 
 pub fn stop() {
     RUN.fetch_add(1, Ordering::SeqCst);
+    RUNNING.store(false, Ordering::SeqCst);
     if let Ok(mut g) = LATEST.lock() {
         *g = None;
     }
