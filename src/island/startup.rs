@@ -181,7 +181,6 @@ impl App {
         let visual = compositor.CreateContainerVisual()?;
         visual.SetRelativeSizeAdjustment(full)?;
         let children = visual.Children()?;
-        children.InsertAtBottom(&ring.sprite)?;
         children.InsertAtTop(&backdrop)?;
         children.InsertAtTop(&tint)?;
         children.InsertAtTop(&expanded.sprite)?;
@@ -210,6 +209,7 @@ impl App {
         let root = compositor.CreateContainerVisual()?;
         root.SetRelativeSizeAdjustment(full)?;
         let root_children = root.Children()?;
+        root_children.InsertAtTop(&ring.sprite)?;
         root_children.InsertAtTop(&visual)?;
         root_children.InsertAtTop(&bump.sprite)?;
         for ear in &ears {

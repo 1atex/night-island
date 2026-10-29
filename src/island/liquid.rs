@@ -1,4 +1,10 @@
+use std::cell::Cell;
+
 use crate::island::*;
+
+thread_local! {
+    static TICKS: Cell<u32> = const { Cell::new(0) };
+}
 
 pub(in crate::island) const BUMP_ROOM: f32 = 52.0;
 pub(in crate::island) const BUMP_DEPTH_MAX: f32 = 40.0;
@@ -84,6 +90,9 @@ impl App {
         self.update_eq();
         if self.ring_active() {
             self.paint_ring();
+        }
+        if self.settings.music_eq && TICKS.replace(TICKS.get().wrapping_add(1)) % 20 == 0 {
+            self.place_spectrum();
         } else if self.spikes_active() {
             self.paint_spikes();
         }
@@ -236,6 +245,9 @@ impl App {
             if bars_visible {
                 self.place_spectrum();
             }
+            if show && (self.spikes_active() || self.ring_active()) {
+                self.stop_idle();
+            }
             return;
         }
         self.music.spectrum_running = show;
@@ -246,7 +258,7 @@ impl App {
             let _ = bar.SetIsVisible(bars_visible && i % 2 == 0);
             let _ = bar.SetScale(Vector3 { X: 1.0, Y: 0.14, Z: 1.0 });
         }
-        if show && self.spikes_active() {
+        if show && (self.spikes_active() || self.ring_active()) {
             self.stop_idle();
         } else if !show {
             self.set_bump_visible(false);
@@ -254,10 +266,8 @@ impl App {
         self.music.spectrum_scale = [0.14; audio::BANDS];
         if show {
             self.place_spectrum();
-            audio::start();
             self.set_timer(Timer::Spectrum, self.frame_ms());
         } else {
-            audio::stop();
             self.kill_timer(Timer::Spectrum);
         }
     }
@@ -271,6 +281,15 @@ impl App {
             && self.ui.downloading.is_none()
             && self.ui.notice.is_none();
         let spikes = self.settings.edge_spikes && (self.liquid_on() || self.settings.eq_style.around());
+        let analysing = self.ui.media.playing
+            && !self.gaming
+            && (!self.pill_hidden || self.ghosted)
+            && (self.settings.music_eq || spikes);
+        if analysing {
+            audio::start();
+        } else {
+            audio::stop();
+        }
         self.update_spectrum(visible && (self.settings.music_eq || spikes));
         self.update_lyrics(visible);
         self.start_progress_timer();
@@ -452,7 +471,7 @@ impl App {
         if !active {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
-            if !self.spikes_active() {
+            if !self.spikes_active() && !self.ring_active() {
                 self.start_idle();
             }
             self.set_timer(Timer::Liquid, 90);
