@@ -485,7 +485,6 @@ impl App {
             view::Tab::Privacy => self.click_privacy(x, y),
             view::Tab::Activity => self.click_activity(x, y),
             view::Tab::Steam => self.click_steam(x, y),
-            view::Tab::System => {}
             view::Tab::Settings => {}
         }
     }

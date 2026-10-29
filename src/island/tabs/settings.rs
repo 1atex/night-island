@@ -131,8 +131,8 @@ impl App {
                         lockkeys::stop();
                     }
                 }
-                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | PillWeather | PillBattery
-                | SpikeColor | Spikes => {
+                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
+                | PillBattery | SpikeColor | Spikes => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }

@@ -170,6 +170,7 @@ impl App {
         let spikes = self.liquid_on() && self.settings.edge_spikes;
         self.update_spectrum(visible && (self.settings.music_eq || spikes));
         self.update_lyrics(visible);
+        self.start_progress_timer();
     }
 
     pub(in crate::island) fn fit_bump(&mut self) {

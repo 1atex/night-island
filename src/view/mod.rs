@@ -66,12 +66,11 @@ pub enum Tab {
     Privacy,
     Activity,
     Steam,
-    System,
     Controls,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 15] = [
+pub const TABS: [(Tab, char, &str); 14] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Text, '\u{E8E9}', "Text"),
@@ -84,7 +83,6 @@ pub const TABS: [(Tab, char, &str); 15] = [
     (Tab::Privacy, '\u{EA18}', "Privacy"),
     (Tab::Activity, '\u{E823}', "Activity"),
     (Tab::Steam, '\u{E7FC}', "Steam"),
-    (Tab::System, '\u{E9D9}', "System"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
@@ -92,7 +90,7 @@ pub const TABS: [(Tab, char, &str); 15] = [
 pub type SubTabs = [(Tab, char, &'static str); 2];
 pub const SUBTABS: [(Tab, SubTabs); 1] = [(Tab::Ai, [(Tab::Chat, '\u{E8F2}', "Chat"), (Tab::Agy, '\u{E943}', "AGY")])];
 
-pub const SUB_H: f32 = 36.0;
+pub const SUB_H: f32 = 26.0;
 
 pub fn body_rect(pill: Rect, scale: f32, tab: Tab) -> Rect {
     if bar_tab(tab) != tab { (pill.0, pill.1 + SUB_H * scale, pill.2, pill.3 - SUB_H * scale) } else { pill }

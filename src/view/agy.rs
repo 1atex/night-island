@@ -45,19 +45,19 @@ pub fn agy_field_height(scale: f32, measured: f32) -> f32 {
 
 pub(in crate::view) fn agy_view(pill: Rect, scale: f32, input_h: f32) -> Rect {
     let (l, r) = agy_side(pill, scale);
-    (l, pill.1 + 94.0 * scale, r, pill.1 + 368.0 * scale - agy_field_height(scale, input_h) - 8.0 * scale)
+    (l, pill.1 + 94.0 * scale, r, pill.1 + pill.3 - 16.0 * scale - agy_field_height(scale, input_h) - 8.0 * scale)
 }
 
 pub fn agy_input(pill: Rect, scale: f32, input_h: f32) -> (Rect, Rect) {
     let (l, r) = agy_side(pill, scale);
     let h = agy_field_height(scale, input_h);
-    let frame = (l, pill.1 + 368.0 * scale - h, r - 90.0 * scale, pill.1 + 368.0 * scale);
+    let frame = (l, pill.1 + pill.3 - 16.0 * scale - h, r - 90.0 * scale, pill.1 + pill.3 - 16.0 * scale);
     (frame, (frame.0 + 12.0 * scale, frame.1 + 8.0 * scale, frame.2 - 10.0 * scale, frame.3 - 8.0 * scale))
 }
 
 pub(in crate::view) fn agy_send_button(pill: Rect, scale: f32) -> Rect {
     let (_, r) = agy_side(pill, scale);
-    (r - 82.0 * scale, pill.1 + 332.0 * scale, r, pill.1 + 368.0 * scale)
+    (r - 82.0 * scale, pill.1 + pill.3 - 52.0 * scale, r, pill.1 + pill.3 - 16.0 * scale)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

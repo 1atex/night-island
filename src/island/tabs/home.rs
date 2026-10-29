@@ -118,7 +118,7 @@ impl App {
     fn home_info_click(&mut self, id: usize) {
         let Some(view::Tile::Info(_, _, info)) = view::tile_kind(id) else { return };
         let tab = match info {
-            view::Info::Metric(_) => Some(view::Tab::System),
+            view::Info::Metric(_) => Some(view::Tab::Controls),
             view::Info::ScreenTime => Some(view::Tab::Activity),
             view::Info::Weather => Some(view::Tab::Weather),
             view::Info::Reminder => Some(view::Tab::Note),
@@ -214,7 +214,8 @@ impl App {
     }
 
     pub(in crate::island) fn start_progress_timer(&self) {
-        if self.state == State::Expanded && self.ui.tab == view::Tab::Home && self.ui.media.playing {
+        let home = self.state == State::Expanded && self.ui.tab == view::Tab::Home && self.ui.media.playing;
+        if home || (self.state == State::Collapsed && view::progress_strip_on(&self.ui)) {
             self.set_timer(Timer::Progress, 1000);
         }
     }

@@ -151,7 +151,8 @@ impl App {
         if self.state != State::Collapsed {
             return;
         }
-        let animate = !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed);
+        let short_lived = self.ui.notice.is_some() || self.ui.volume.is_some() || self.ui.downloading.is_some();
+        let animate = short_lived && !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed);
         let want = view::collapsed_width(&self.ui, COLLAPSED.0);
         if (want - self.cw).abs() < 0.5 {
             return;

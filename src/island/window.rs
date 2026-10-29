@@ -93,6 +93,15 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             }
             LRESULT(0)
         }
+        WM_MBUTTONUP => {
+            let (x, y) = point_from(lparam);
+            with_app(|a| {
+                if let Some((index, _)) = a.dock_target_at(x, y) {
+                    a.apply_dock_choice(Some(3), index, "");
+                }
+            });
+            LRESULT(0)
+        }
         WM_RBUTTONUP => {
             let (x, y) = point_from(lparam);
             let mut target = None;

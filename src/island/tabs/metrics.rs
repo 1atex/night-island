@@ -5,8 +5,9 @@ use crate::island::*;
 impl App {
     fn metrics_wanted(&self) -> bool {
         let pill = view::pill_metrics_on(&self.settings);
-        let tab =
-            self.state == State::Expanded && self.ui.tab == view::Tab::System && !self.settings.metrics_tab.is_empty();
+        let tab = self.state == State::Expanded
+            && self.ui.tab == view::Tab::Controls
+            && !self.settings.metrics_tab.is_empty();
         let home = self.state == State::Expanded
             && self.ui.tab == view::Tab::Home
             && (self.ui.home.edit
@@ -42,7 +43,7 @@ impl App {
         if view::pill_metrics_on(&self.settings) {
             self.repaint_collapsed();
         }
-        if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::System | view::Tab::Home) {
+        if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.repaint_expanded();
         }
     }

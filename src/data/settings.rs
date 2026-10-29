@@ -244,6 +244,7 @@ pub struct Settings {
     pub vpn_pill: bool,
     pub voice_paste: bool,
     pub music_lyrics: bool,
+    pub music_progress: bool,
     pub cover_mode: CoverMode,
     pub text_layout: TextLayout,
     pub dev_tools: bool,
@@ -330,6 +331,7 @@ impl Default for Settings {
             metrics_pill: Vec::new(),
             metrics_secs: 2,
             music_lyrics: false,
+            music_progress: true,
             cover_mode: CoverMode::Crop,
             text_layout: TextLayout::Categories,
             dev_tools: false,
@@ -586,8 +588,8 @@ impl NotifySettings {
     }
 }
 
-pub const HIDEABLE_TABS: [&str; 11] =
-    ["System", "Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
+pub const HIDEABLE_TABS: [&str; 10] =
+    ["Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
 
 impl Settings {
     pub fn tab_hidden(&self, name: &str) -> bool {

@@ -306,14 +306,6 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         p.glyph(VPN_GLYPH, r, 16.0 * scale, vpn_color(ui))?;
     }
     let (mic, cam) = privacy_dots(pill, scale, ui);
-    let dot = |r: Rect, color: windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F, hover: bool| -> Result<()> {
-        if hover {
-            let grow = 3.0 * scale;
-            let halo = (r.0 - grow, r.1 - grow, r.2 + grow, r.3 + grow);
-            p.fill_round_rect(halo, (halo.2 - halo.0) / 2.0, rgba(color.r, color.g, color.b, 0.25))?;
-        }
-        p.fill_round_rect(r, (r.2 - r.0) / 2.0, color)
-    };
     if let Some(r) = mic {
         let (glyph, color) = super::pill::mic_look(ui);
         if ui.hover_head == Some(HeadHit::Mic) {
@@ -326,7 +318,15 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         p.glyph(glyph, (cx - half, cy - half, cx + half, cy + half), 14.0 * scale, color)?;
     }
     if let Some(r) = cam {
-        dot(r, rgba(0.3, 0.85, 0.45, 1.0), ui.hover_head == Some(HeadHit::Cam))?;
+        let color = rgba(0.3, 0.85, 0.45, 1.0);
+        if ui.hover_head == Some(HeadHit::Cam) {
+            let grow = 3.0 * scale;
+            let halo = (r.0 - grow, r.1 - grow, r.2 + grow, r.3 + grow);
+            p.fill_round_rect(halo, (halo.2 - halo.0) / 2.0, rgba(color.r, color.g, color.b, 0.25))?;
+        }
+        let (cx, cy) = ((r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0);
+        let half = 8.0 * scale;
+        p.glyph('\u{E714}', (cx - half, cy - half, cx + half, cy + half), 14.0 * scale, color)?;
     }
 
     if let Some((strip, chips)) = subtab_strip(pill, scale, ui) {
@@ -401,9 +401,11 @@ fn paint_tab(p: &Painter, tab: Tab, pill: Rect, scale: f32, ui: &UiState, clips:
         Tab::Privacy => paint_privacy(p, pill, scale, ui)?,
         Tab::Activity => paint_activity(p, pill, scale, ui)?,
         Tab::Steam => paint_steam(p, pill, scale, ui)?,
-        Tab::System => paint_system(p, pill, scale, ui)?,
         Tab::Clipboard => paint_clipboard(p, pill, scale, ui, clips)?,
-        Tab::Controls => paint_controls(p, pill, scale, ui)?,
+        Tab::Controls => {
+            paint_controls(p, pill, scale, ui)?;
+            paint_metrics_row(p, pill, scale, ui)?;
+        }
         Tab::Note => paint_note(p, pill, scale, ui)?,
         Tab::Text => paint_text(p, pill, scale, ui)?,
         Tab::Settings => {}

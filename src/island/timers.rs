@@ -142,6 +142,12 @@ impl App {
                 if self.state == State::Expanded && self.ui.tab == view::Tab::Home {
                     self.repaint_expanded();
                     self.start_progress_timer();
+                } else if self.state == State::Collapsed && view::progress_strip_on(&self.ui) {
+                    let c = self.pill_rect(false);
+                    let _ = self.collapsed.paint(&self.gpu, |p| {
+                        let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
+                    });
+                    self.start_progress_timer();
                 }
             }
             Timer::DlStale => {

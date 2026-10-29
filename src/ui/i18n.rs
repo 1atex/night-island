@@ -160,6 +160,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Battery on the pill" => "Батарея на пилюле",
         "Track title" => "Название трека",
         "Synced lyrics" => "Текст песни",
+        "Song progress strip" => "Полоска прогресса песни",
         "Tabs" => "Вкладки",
         "Shared lyrics cache" => "Общий кэш текстов",
         "Check for updates" => "Проверять обновления",

@@ -135,7 +135,9 @@ pub(in crate::view) fn paint_indicators(p: &Painter, pill: Rect, scale: f32, ui:
         p.glyph(glyph, (cx - half, cy - half, cx + half, cy + half), 11.0 * scale, color)?;
     }
     if let Some(r) = cam {
-        p.fill_round_rect(r, 3.5 * scale, rgba(0.3, 0.85, 0.45, 1.0))?;
+        let (cx, cy) = ((r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0);
+        let half = 6.0 * scale;
+        p.glyph('\u{E714}', (cx - half, cy - half, cx + half, cy + half), 11.0 * scale, rgba(0.3, 0.85, 0.45, 1.0))?;
     }
     if let Some(r) = vpn_rect(pill, scale, ui) {
         p.glyph(VPN_GLYPH, r, 12.0 * scale, vpn_color(ui))?;
@@ -367,7 +369,42 @@ fn paint_lyrics(p: &Painter, slot: Rect, scale: f32, lyric: &LyricUi) -> Result<
     result
 }
 
+pub fn progress_strip_on(ui: &UiState) -> bool {
+    ui.cfg.music_progress && music_pill(ui) && crate::platform::media::progress().is_some()
+}
+
+fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    let Some((pos, len)) = crate::platform::media::progress().filter(|_| progress_strip_on(ui)) else { return Ok(()) };
+    let (x, y, w, h) = pill;
+    let thick = 3.0 * scale;
+    let r = h / 2.0;
+    let rise = r - thick;
+    let inset = (r - (r * r - rise * rise).max(0.0).sqrt()).max(0.0) + 1.0 * scale;
+    let (left, right) = (x + inset, x + w - inset);
+    let top = y + h - thick - 0.5 * scale;
+    p.fill_round_rect((left, top, right, top + thick), thick / 2.0, rgba(1.0, 1.0, 1.0, 0.1))?;
+    let filled = left + (right - left) * (pos / len).clamp(0.0, 1.0);
+    let base = ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
+    const STEPS: usize = 40;
+    let step = (right - left) / STEPS as f32;
+    for i in 0..STEPS {
+        let a = left + i as f32 * step;
+        if a >= filled {
+            break;
+        }
+        let (r, g, b) = crate::platform::media::gradient(base, i as f32 / (STEPS - 1) as f32);
+        let c = rgba(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0);
+        p.fill_rect((a, top, (a + step + 0.5).min(filled), top + thick), c)?;
+    }
+    Ok(())
+}
+
 pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    paint_collapsed_body(p, pill, scale, ui)?;
+    paint_progress_strip(p, pill, scale, ui)
+}
+
+fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let (x, y, w, h) = pill;
     let inset = ui.char_inset * scale;
     if let Some((glyph, text)) = &ui.notice {

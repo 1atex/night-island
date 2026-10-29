@@ -71,12 +71,17 @@ impl App {
                 return;
             };
             let round: i32 = 2;
-            let _ = DwmSetWindowAttribute(
+            let rounded = DwmSetWindowAttribute(
                 hwnd,
                 windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(33),
                 (&raw const round).cast::<c_void>(),
                 4,
             );
+            if rounded.is_err() {
+                let radius = (24.0 * dpi).round() as i32;
+                let region = windows::Win32::Graphics::Gdi::CreateRoundRectRgn(0, 0, ow + 1, oh + 1, radius, radius);
+                windows::Win32::Graphics::Gdi::SetWindowRgn(hwnd, Some(region), true);
+            }
             let _ = SetWindowPos(
                 hwnd,
                 None,

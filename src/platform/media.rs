@@ -100,6 +100,59 @@ fn pick(manager: &Manager) -> Option<Session> {
     manager.GetCurrentSession().ok()
 }
 
+struct Report {
+    pos: f32,
+    raw: (f32, i64),
+    len: f32,
+    playing: bool,
+}
+
+#[derive(Default)]
+struct Tracker {
+    track: (String, String),
+    raw: Option<(f32, i64)>,
+    pending: Option<(f32, Instant)>,
+}
+
+static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
+
+fn update_timeline(track: &(String, String), r: Report) {
+    let (Ok(mut tracker), Ok(mut line)) = (TRACKER.lock(), TIMELINE.lock()) else { return };
+    let t = tracker.get_or_insert_with(Tracker::default);
+    let now = Instant::now();
+    let current = line.as_ref().map(|&(pos, len, at, playing)| {
+        let moved = if playing { pos + at.elapsed().as_secs_f32() } else { pos };
+        (moved.clamp(0.0, len.max(0.0)), len)
+    });
+    let new_track = t.track != *track || current.is_none_or(|(_, len)| (len - r.len).abs() > 1.5);
+    let accept = |line: &mut Option<(f32, f32, Instant, bool)>, pos: f32| *line = Some((pos, r.len, now, r.playing));
+    if new_track {
+        t.track = track.clone();
+        t.pending = None;
+        t.raw = Some(r.raw);
+        return accept(&mut line, r.pos);
+    }
+    let Some((estimate, _)) = current else { return };
+    let news = t.raw != Some(r.raw);
+    t.raw = Some(r.raw);
+    let was_playing = line.as_ref().is_some_and(|l| l.3);
+    if !news {
+        if was_playing != r.playing {
+            accept(&mut line, estimate);
+        }
+        return;
+    }
+    let far = (r.pos - estimate).abs() > 4.0;
+    if !far || !r.playing {
+        t.pending = None;
+        return accept(&mut line, r.pos);
+    }
+    match t.pending.take() {
+        Some((was, at)) if (r.pos - (was + at.elapsed().as_secs_f32())).abs() < 3.0 => accept(&mut line, r.pos),
+        _ => t.pending = Some((r.pos, now)),
+    }
+}
+
 fn fetch(manager: &Manager) -> Media {
     let Some(session) = pick(manager) else { return Media::default() };
     let players = manager.GetSessions().map_or(0, |s| s.Size().unwrap_or(0)).min(255) as u8;
@@ -134,10 +187,15 @@ fn fetch(manager: &Manager) -> Media {
     if let Ok(t) = session.GetTimelineProperties() {
         let secs = |d: Option<windows::Foundation::TimeSpan>| d.map_or(0.0, |t| t.Duration as f32 / 1e7);
         let (start, end, pos) = (secs(t.StartTime().ok()), secs(t.EndTime().ok()), secs(t.Position().ok()));
-        let age = if playing { t.LastUpdatedTime().ok().map_or(0.0, report_age) } else { 0.0 };
-        if let Ok(mut g) = TIMELINE.lock() {
-            *g = Some((pos - start + age, end - start, Instant::now(), playing));
-        }
+        let stamp = t.LastUpdatedTime().ok();
+        let age = if playing { stamp.map_or(0.0, report_age) } else { 0.0 };
+        let report = Report {
+            pos: pos - start + age,
+            raw: (pos, stamp.map_or(0, |s| s.UniversalTime)),
+            len: end - start,
+            playing,
+        };
+        update_timeline(&(title.clone(), artist.clone()), report);
         if let Ok(mut s) = TIMELINE_START.lock() {
             *s = start;
         }
@@ -183,7 +241,7 @@ fn report_age(stamp: windows::Foundation::DateTime) -> f32 {
     const EPOCH_GAP: f64 = 11_644_473_600.0;
     let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else { return 0.0 };
     let age = now.as_secs_f64() + EPOCH_GAP - stamp.UniversalTime as f64 / 1e7;
-    if (0.0..=120.0).contains(&age) { age as f32 } else { 0.0 }
+    if (0.0..=21_600.0).contains(&age) { age as f32 } else { 0.0 }
 }
 
 fn cover_info(session: &windows::Media::Control::GlobalSystemMediaTransportControlsSession) -> CoverInfo {

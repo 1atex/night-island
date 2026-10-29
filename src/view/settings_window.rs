@@ -54,7 +54,7 @@ const APPEARANCE: [(Sid, &str, Kind); 5] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 11] = [
+const PILL: [(Sid, &str, Kind); 12] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
@@ -64,6 +64,7 @@ const PILL: [(Sid, &str, Kind); 11] = [
     (Sid::CoverMode, "Cover shape", Kind::Cycle),
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
+    (Sid::MusicProgress, "Song progress strip", Kind::Toggle),
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
@@ -157,7 +158,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (3, "Music"), (9, "Edges")],
+        sections: &[(0, "Pill"), (3, "Music"), (10, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',
@@ -182,7 +183,7 @@ pub fn tab_settings_group(tab: crate::view::Tab) -> Option<usize> {
         Tab::Text => "Appearance",
         Tab::Weather => "General",
         Tab::Activity => "Activity",
-        Tab::System => "System",
+        Tab::Controls => "System",
         Tab::Chat | Tab::Ai => "AI",
         Tab::Agy => "Agents",
         Tab::Steam => "Integrations",
@@ -1020,11 +1021,12 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
         rgba(1.0, 1.0, 1.0, 0.9),
     )?;
     let (min, close) = title_buttons(size, scale);
+    let pill = |r: Rect| (r.0 + 4.0 * scale, r.1 + 6.0 * scale, r.2 - 4.0 * scale, r.3 - 6.0 * scale);
     if ui.sw.hover == Some(SwHit::Minimize) {
-        p.fill_rect(min, rgba(1.0, 1.0, 1.0, 0.1))?;
+        p.fill_round_rect(pill(min), 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.1))?;
     }
     if ui.sw.hover == Some(SwHit::Close) {
-        p.fill_rect(close, rgba(0.9, 0.2, 0.2, 0.9))?;
+        p.fill_round_rect(pill(close), 9.0 * scale, rgba(0.9, 0.2, 0.2, 0.9))?;
     }
     let (cx, cy) = ((min.0 + min.2) / 2.0, (min.1 + min.3) / 2.0);
     p.fill_rect((cx - 5.0 * scale, cy, cx + 5.0 * scale, cy + scale.max(1.0)), rgba(1.0, 1.0, 1.0, 0.9))?;
