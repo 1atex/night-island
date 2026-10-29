@@ -316,7 +316,7 @@ impl App {
 
     pub(in crate::island) fn place_bump(&self) {
         let (win_w, _) = self.window_size(self.win);
-        let x = (win_w - self.liquid.bump.size().0) as f32 / 2.0;
+        let x = (win_w - bump_size(self.scale, self.cw).0) as f32 / 2.0;
         let y = (self.top_margin() + COLLAPSED.1) * self.scale - BUMP_SEAM * self.scale;
         let _ = self.liquid.bump.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
     }

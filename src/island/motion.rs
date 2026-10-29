@@ -110,6 +110,7 @@ impl App {
         let small = window_size(self.scale, Win::Small, self.docked(), self.cw, self.bump_room());
         let _ = self.collapsed.resize(small);
         let _ = self.liquid.ring.resize(small);
+        self.fit_bump();
         let _ = self.set_geometry_now(Win::Small, false, false);
         self.schedule_autohide();
         self.start_liquid();

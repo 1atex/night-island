@@ -138,8 +138,10 @@ impl App {
 
     pub(in crate::island) fn update_offsets(&self) {
         let (win_w, _) = self.window_size(self.win);
-        for layer in [&self.collapsed, &self.expanded, &self.liquid.ring] {
-            let x = (win_w - layer.size().0) as f32 / 2.0;
+        let small = window_size(self.scale, Win::Small, self.docked(), self.cw, self.bump_room()).0;
+        let big = window_size(self.scale, Win::Big, self.docked(), self.cw, 0.0).0;
+        for (layer, own_w) in [(&self.collapsed, small), (&self.expanded, big), (&self.liquid.ring, small)] {
+            let x = (win_w - own_w) as f32 / 2.0;
             let _ = layer.sprite.SetOffset(Vector3 { X: x, Y: 0.0, Z: 0.0 });
         }
         self.place_bump();
