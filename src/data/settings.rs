@@ -280,33 +280,6 @@ impl EqStyle {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum EqResponse {
-    Calm,
-    #[default]
-    Responsive,
-    Energetic,
-}
-
-impl EqResponse {
-    pub const ALL: [Self; 3] = [Self::Calm, Self::Responsive, Self::Energetic];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Calm => "Calm",
-            Self::Responsive => "Responsive",
-            Self::Energetic => "Energetic",
-        }
-    }
-
-    pub fn step(self, forward: bool) -> Self {
-        let count = Self::ALL.len();
-        let index = Self::ALL.iter().position(|value| *value == self).unwrap_or(0);
-        Self::ALL[if forward { (index + 1) % count } else { (index + count - 1) % count }]
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum EqGradient {
     #[default]
     Single,
@@ -360,11 +333,10 @@ impl BumpTint {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ProgressStyle {
+    #[default]
     Strip,
     OutlineFromLeft,
     OutlineBottom,
-    #[default]
-    Fill,
 }
 
 impl ProgressStyle {
@@ -373,68 +345,22 @@ impl ProgressStyle {
             ProgressStyle::Strip => "Strip along the bottom",
             ProgressStyle::OutlineFromLeft => "Outline from the left side",
             ProgressStyle::OutlineBottom => "Outline, the bottom fills",
-            ProgressStyle::Fill => "Fill the island",
         }
     }
 
-    pub const ALL: [ProgressStyle; 4] =
-        [ProgressStyle::Strip, ProgressStyle::OutlineFromLeft, ProgressStyle::OutlineBottom, ProgressStyle::Fill];
+    pub const ALL: [ProgressStyle; 3] =
+        [ProgressStyle::Strip, ProgressStyle::OutlineFromLeft, ProgressStyle::OutlineBottom];
 
     pub fn step(self, forward: bool) -> Self {
         let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
-        let count = Self::ALL.len();
-        Self::ALL[if forward { (i + 1) % count } else { (i + count - 1) % count }]
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum InterfaceFont {
-    #[default]
-    Segoe,
-    Montserrat,
-    SanFrancisco,
-    Custom,
-}
-
-impl InterfaceFont {
-    pub const ALL: [Self; 4] = [Self::Segoe, Self::Montserrat, Self::SanFrancisco, Self::Custom];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Custom => "Custom font",
-            Self::Segoe => "Segoe UI",
-            Self::Montserrat => "Montserrat",
-            Self::SanFrancisco if crate::ui::fonts::sf_available() => "SF Pro",
-            Self::SanFrancisco => "SF Pro (not installed)",
-        }
-    }
-
-    pub fn step(self, forward: bool) -> Self {
-        let index = Self::ALL.iter().position(|font| *font == self).unwrap_or(0);
-        Self::ALL[(index + if forward { 1 } else { Self::ALL.len() - 1 }) % Self::ALL.len()]
+        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
-    pub sounds: crate::data::sounds::SoundSettings,
-    pub interface_font: InterfaceFont,
-    pub interface_font_file: String,
-    pub tour_revision: u8,
-    pub top_panel: crate::data::top_panel::TopPanelSettings,
-    pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
-    pub legacy_icons: bool,
-    pub live_activities: bool,
-    pub live_music_priority: bool,
-    pub live_reminders: bool,
-    pub live_recording: bool,
-    pub live_downloads: bool,
-    pub header_icons: bool,
-    pub header_icon_colors: bool,
-    pub header_active_accent: bool,
     pub weather: bool,
     pub weather_city: String,
     pub weather_lat: Option<f64>,
@@ -454,45 +380,23 @@ pub struct Settings {
     pub dock_edge: Edge,
     pub dock_offset: f32,
     pub float_pos: Option<[i32; 2]>,
-    pub system_notifications: bool,
-    pub wave_ratings: bool,
-    pub wave_legacy_layout: bool,
-    pub wave_search: bool,
-    pub notification_tiles: u8,
-    pub notification_open_app: bool,
-    pub ai_notification_cards: bool,
-    pub ai_compact_replies: bool,
-    pub notification_adaptive_size: bool,
-    pub pet_notifications: bool,
-    pub music_track_intro: bool,
-    pub pet_music_curiosity: bool,
-    pub pet_return_animation: bool,
-    pub liquid_idle_travel: bool,
     pub pill_weather: bool,
-    pub pill_weather_side: WeatherSide,
     pub pill_battery: BatteryStyle,
     pub music_eq: bool,
     pub music_title: bool,
     pub music_cover: bool,
-    pub prefer_playing_media: bool,
     pub metrics_tab: Vec<String>,
     pub metrics_pill: Vec<String>,
     pub metrics_secs: u32,
-    pub memory_tools: bool,
-    pub memory_watch: bool,
-    pub memory_excluded: Vec<String>,
     pub activity_track: bool,
     pub activity_ai: bool,
     pub vpn_pill: bool,
     pub voice_paste: bool,
     pub music_lyrics: bool,
     pub music_progress: bool,
-    pub pill_unified_layout: bool,
-    pub eq_smooth: bool,
     pub cover_mode: CoverMode,
     pub frame_rate: FrameRate,
     pub eq_style: EqStyle,
-    pub eq_response: EqResponse,
     pub eq_strength: f32,
     pub eq_gradient: EqGradient,
     pub eq_when_open: bool,
@@ -504,7 +408,6 @@ pub struct Settings {
     pub update_check: bool,
     pub update_beta: bool,
     pub ai: AiSettings,
-    pub assistant: crate::services::assistant::Assistant,
     pub hidden_tabs: Vec<String>,
     pub notify: NotifySettings,
     pub spike_color: bool,
@@ -513,15 +416,6 @@ pub struct Settings {
     pub record_system_audio: bool,
     pub record_mic: bool,
     pub character: Character,
-    pub pet_performance: crate::ui::pet_motion::PetPerformance,
-    pub pet_voice_reactions: bool,
-    pub pet_voice_input: bool,
-    pub pet_autonomy: bool,
-    pub custom_pet: crate::ui::pet_design::PetDesign,
-    #[serde(alias = "spark_detached")]
-    pub character_detached: bool,
-    #[serde(alias = "spark_pos")]
-    pub character_pos: Option<[i32; 2]>,
     pub edge_spikes: bool,
     pub style: Style,
     pub capture_hidden: bool,
@@ -538,11 +432,9 @@ pub struct Settings {
     pub open_delay_ms: u32,
     pub close_delay_ms: u32,
     pub open_speed: f32,
-    pub island_animations: bool,
     pub close_speed: f32,
     pub tab_anim: TabAnim,
     pub tab_order: Vec<String>,
-    pub header_tabs: Vec<String>,
     pub tab_drag: bool,
     pub last_tab: String,
     pub remember_tab: bool,
@@ -556,31 +448,13 @@ pub struct Settings {
     pub ghost_click_through: bool,
     pub ghost_hold: bool,
     pub home_actions: Vec<u8>,
-    pub home_widgets: bool,
-    pub home_weather_widget: bool,
-    pub home_widget_sizes: BTreeMap<u8, crate::data::home_widgets::WidgetSize>,
     pub lyrics_apps: Vec<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            sounds: Default::default(),
-            tour_revision: 0,
-            top_panel: Default::default(),
-            desktop_dock: Default::default(),
             language: Language::Ru,
-            legacy_icons: false,
-            live_activities: true,
-            live_music_priority: true,
-            live_reminders: true,
-            live_recording: true,
-            live_downloads: true,
-            header_icons: true,
-            header_icon_colors: false,
-            header_active_accent: true,
-            interface_font: InterfaceFont::Segoe,
-            interface_font_file: String::new(),
             weather: true,
             weather_city: String::new(),
             weather_lat: None,
@@ -600,59 +474,34 @@ impl Default for Settings {
             dock_edge: Edge::Top,
             dock_offset: 0.5,
             float_pos: None,
-            system_notifications: false,
-            wave_ratings: true,
-            wave_legacy_layout: false,
-            wave_search: true,
-            notification_tiles: 4,
-            notification_open_app: false,
-            ai_notification_cards: true,
-            ai_compact_replies: true,
-            notification_adaptive_size: true,
-            pet_notifications: true,
-            music_track_intro: true,
-            pet_music_curiosity: true,
-            pet_return_animation: true,
-            liquid_idle_travel: true,
             pill_weather: true,
-            pill_weather_side: WeatherSide::Left,
             pill_battery: BatteryStyle::Percent,
             music_eq: true,
             music_title: true,
             music_cover: true,
-            prefer_playing_media: false,
             voice_paste: true,
-            pet_voice_reactions: true,
-            pet_voice_input: true,
             activity_track: true,
             activity_ai: false,
             vpn_pill: true,
             metrics_tab: ["cpu", "ram", "net_down", "net_up", "gpu", "disk", "uptime"].map(String::from).to_vec(),
             metrics_pill: Vec::new(),
             metrics_secs: 2,
-            memory_tools: true,
-            memory_watch: true,
-            memory_excluded: Vec::new(),
             music_lyrics: true,
             music_progress: true,
-            pill_unified_layout: true,
-            eq_smooth: true,
             cover_mode: CoverMode::Fit,
             frame_rate: FrameRate::Adaptive,
             eq_style: EqStyle::Bars,
-            eq_response: EqResponse::Responsive,
             eq_strength: 1.5,
             eq_gradient: EqGradient::Horizontal,
             eq_when_open: true,
             bump_tint: BumpTint::Equalizer,
-            progress_style: ProgressStyle::Fill,
+            progress_style: ProgressStyle::OutlineBottom,
             text_layout: TextLayout::Categories,
             dev_tools: false,
             shared_lyrics: true,
             update_check: true,
             update_beta: false,
             ai: AiSettings::default(),
-            assistant: crate::services::assistant::Assistant::default(),
             hidden_tabs: Vec::new(),
             notify: NotifySettings::default(),
             spike_color: true,
@@ -660,12 +509,7 @@ impl Default for Settings {
             record_fps: 60,
             record_system_audio: true,
             record_mic: true,
-            character: Character::Spark,
-            pet_performance: Default::default(),
-            pet_autonomy: true,
-            custom_pet: Default::default(),
-            character_detached: false,
-            character_pos: None,
+            character: Character::None,
             edge_spikes: true,
             style: Style::Liquid,
             capture_hidden: false,
@@ -682,10 +526,8 @@ impl Default for Settings {
             open_delay_ms: 50,
             close_delay_ms: 50,
             open_speed: 1.0,
-            island_animations: true,
             tab_anim: TabAnim::Zoom,
             tab_order: Vec::new(),
-            header_tabs: DEFAULT_HEADER_TABS.map(String::from).to_vec(),
             tab_drag: false,
             last_tab: String::new(),
             remember_tab: true,
@@ -699,9 +541,6 @@ impl Default for Settings {
             ghost_opacity: 0.3,
             ghost_click_through: true,
             ghost_hold: false,
-            home_widgets: true,
-            home_weather_widget: true,
-            home_widget_sizes: BTreeMap::new(),
             home_actions: Vec::new(),
             lyrics_apps: Vec::new(),
         }
@@ -912,45 +751,8 @@ impl NotifySettings {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum WeatherSide {
-    #[default]
-    Left,
-    Right,
-}
-
-impl WeatherSide {
-    pub const ALL: [Self; 2] = [Self::Left, Self::Right];
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Left => "Left of the clock",
-            Self::Right => "Right of the clock",
-        }
-    }
-    pub fn step(self, _forward: bool) -> Self {
-        if self == Self::Left { Self::Right } else { Self::Left }
-    }
-}
-
-pub const HEADER_TAB_LIMIT: usize = HIDEABLE_TABS.len();
-pub const DEFAULT_HEADER_TABS: [&str; 5] = ["Clipboard", "Text", "Note", "Weather", "Record"];
-
-pub const HIDEABLE_TABS: [&str; 13] = [
-    "Clipboard",
-    "Text",
-    "Note",
-    "Weather",
-    "Record",
-    "AI",
-    "Privacy",
-    "Activity",
-    "Steam",
-    "Controls",
-    "App mixer",
-    "Notifications",
-    "My Wave",
-];
+pub const HIDEABLE_TABS: [&str; 10] =
+    ["Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
 
 impl Settings {
     pub fn hang(&self) -> Hang {
@@ -971,26 +773,6 @@ impl Settings {
 
     pub fn ring_wanted(&self) -> bool {
         self.edge_spikes && self.eq_style.around()
-    }
-
-    pub fn set_header_tab(&mut self, name: &str, pinned: bool, replace: Option<&str>) -> bool {
-        if !HIDEABLE_TABS.contains(&name) {
-            return false;
-        }
-        if !pinned {
-            self.header_tabs.retain(|item| item != name);
-        } else if !self.header_tabs.iter().any(|item| item == name) {
-            if let Some(old) = replace {
-                let Some(index) = self.header_tabs.iter().position(|item| item == old) else { return false };
-                self.header_tabs[index] = name.to_string();
-            } else if self.header_tabs.len() < HEADER_TAB_LIMIT {
-                self.header_tabs.push(name.to_string());
-            } else {
-                return false;
-            }
-        }
-        self.set_tab_hidden(name, false);
-        true
     }
 
     pub fn tab_hidden(&self, name: &str) -> bool {
@@ -1018,9 +800,6 @@ impl Settings {
     }
 
     pub fn hotkey_using(&self, hotkey: Hotkey, combo: Combo) -> Option<Hotkey> {
-        if combo.is_none() {
-            return None;
-        }
         Hotkey::ALL.into_iter().find(|h| *h != hotkey && self.combo(*h) == combo)
     }
 
@@ -1039,13 +818,10 @@ impl Settings {
 
     fn sanitize_keys(&mut self) {
         let known: Vec<&str> = Hotkey::ALL.iter().map(|h| h.key()).collect();
-        self.keys.retain(|name, combo| known.contains(&name.as_str()) && (combo.valid() || combo.is_none()));
+        self.keys.retain(|name, combo| known.contains(&name.as_str()) && combo.valid());
         let mut seen: Vec<Combo> = Vec::new();
         for h in Hotkey::ALL {
             let combo = self.combo(h);
-            if combo.is_none() {
-                continue;
-            }
             if seen.contains(&combo) {
                 self.keys.remove(h.key());
                 if seen.contains(&self.combo(h)) {
@@ -1062,24 +838,8 @@ impl Settings {
         Some(dir.join("settings.json"))
     }
 
-    const TOUR_REVISION: u8 = 4;
-
-    pub fn tour_pending(&self) -> bool {
-        self.tour_revision < Self::TOUR_REVISION
-    }
-
-    pub fn dismiss_tour(&mut self) {
-        self.tour_revision = self.tour_revision.max(Self::TOUR_REVISION);
-    }
-
     pub fn load() -> Self {
-        Self::load_from(Self::path())
-    }
-
-    fn load_from(path: Option<PathBuf>) -> Self {
-        let file = path.map(fs::File::open);
-        let fresh = file.as_ref().is_some_and(|f| f.as_ref().is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound));
-        let file = file.and_then(Result::ok);
+        let file = Self::path().and_then(|p| fs::File::open(p).ok());
         let existed = file.is_some();
         let parsed = file.and_then(|f| {
             let mut buf = String::new();
@@ -1089,27 +849,14 @@ impl Settings {
         if existed && parsed.is_none() {
             crate::log_warn!("settings.json is unreadable, using defaults");
         }
-        let mut s = parsed.unwrap_or_else(|| {
-            let mut defaults = Self::default();
-            if !fresh {
-                defaults.dismiss_tour();
-            }
-            defaults
-        });
+        let mut s = parsed.unwrap_or_default();
         s.sanitize();
         s
     }
 
     pub fn sanitize(&mut self) {
-        self.sounds.sanitize();
-        self.home_widget_sizes.retain(|id, _| usize::from(*id) < HOME_ACTION_COUNT);
-        self.desktop_dock.sanitize();
-        self.top_panel.sanitize();
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
-        if ![1, 2, 4].contains(&self.notification_tiles) {
-            self.notification_tiles = 4;
-        }
         let (chat, agy) = (self.tab_hidden("Chat"), self.tab_hidden("AGY"));
         self.hidden_tabs.retain(|t| t != "Chat" && t != "AGY");
         if chat && agy && !self.tab_hidden("AI") {
@@ -1123,7 +870,6 @@ impl Settings {
         }
         self.hidden_tabs = seen;
         self.ai.sanitize();
-        self.assistant.sanitize();
         self.record_fps = self.record_fps.clamp(10, 60);
         self.pill_opacity = clamp_f(self.pill_opacity, 0.2, 1.0, 1.0);
         let valid = |v: Option<f64>, lim: f64| v.filter(|x| x.is_finite() && x.abs() <= lim);
@@ -1137,11 +883,6 @@ impl Settings {
             self.weather_city.chars().filter(|c| !c.is_control()).take(60).collect::<String>().trim().to_string();
         self.dock_offset = clamp_f(self.dock_offset, 0.0, 1.0, 0.5);
         self.float_pos = self.float_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
-        self.custom_pet.sanitize();
-        self.character_pos = self.character_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
-        if self.character == Character::None {
-            self.character_detached = false;
-        }
         self.overlay_pos = self.overlay_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
         self.panel_hue = clamp_f(self.panel_hue, 0.0, 360.0, d.panel_hue);
         self.panel_sat = clamp_f(self.panel_sat, 0.0, 1.0, d.panel_sat);
@@ -1169,16 +910,6 @@ impl Settings {
                 ok
             });
         }
-        {
-            let mut seen = Vec::new();
-            self.header_tabs.retain(|name| {
-                if seen.len() >= HEADER_TAB_LIMIT || !HIDEABLE_TABS.contains(&name.as_str()) || seen.contains(name) {
-                    return false;
-                }
-                seen.push(name.clone());
-                true
-            });
-        }
         if self.ai_sub != "Chat" && self.ai_sub != "AGY" {
             self.ai_sub = "Chat".into();
         }
@@ -1186,15 +917,6 @@ impl Settings {
         self.hide_pill_secs = self.hide_pill_secs.clamp(5, 10);
         self.ghost_opacity = clamp_f(self.ghost_opacity, 0.05, 1.0, d.ghost_opacity);
         self.metrics_secs = self.metrics_secs.clamp(1, 10);
-        self.memory_excluded = self
-            .memory_excluded
-            .iter()
-            .take(128)
-            .filter(|path| path.len() <= 2048 && !path.contains(['\0', '\r', '\n']))
-            .map(|path| crate::data::desktop_dock::key(path))
-            .collect();
-        self.memory_excluded.sort();
-        self.memory_excluded.dedup();
         for list in [&mut self.metrics_tab, &mut self.metrics_pill] {
             let mut seen: Vec<String> = Vec::new();
             for key in std::mem::take(list) {
@@ -1211,15 +933,6 @@ impl Settings {
             }
         }
         self.home_actions = seen;
-        let items = |sizes: &BTreeMap<u8, crate::data::home_widgets::WidgetSize>| {
-            self.home_actions.iter().map(|id| (*id, sizes.get(id).copied().unwrap_or_default())).collect::<Vec<_>>()
-        };
-        for id in self.home_actions.iter().rev() {
-            if crate::data::home_widgets::pack(&items(&self.home_widget_sizes), 0).is_some() {
-                break;
-            }
-            self.home_widget_sizes.remove(id);
-        }
         self.sanitize_keys();
         let mut apps: Vec<String> = Vec::new();
         for a in &self.lyrics_apps {
@@ -1232,9 +945,6 @@ impl Settings {
     }
 
     pub fn save(&self) {
-        if cfg!(test) {
-            return;
-        }
         let Some(path) = Self::path() else { return };
         let Some(dir) = path.parent() else { return };
         if fs::create_dir_all(dir).is_err() {
@@ -1251,96 +961,6 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_current_tour_opens_for_new_and_existing_profiles_once() {
-        let path = std::env::temp_dir().join(format!("ni-tour-settings-{}.json", std::process::id()));
-        assert!(Settings::load_from(Some(path.clone())).tour_pending());
-        fs::write(&path, r#"{"scale_percent":120,"tour_revision":2}"#).unwrap();
-        let mut settings = Settings::load_from(Some(path.clone()));
-        assert!(settings.tour_pending());
-        assert_eq!(settings.scale_percent, 120);
-        settings.dismiss_tour();
-        fs::write(&path, serde_json::to_vec(&settings).unwrap()).unwrap();
-        let settings = Settings::load_from(Some(path.clone()));
-        assert!(!settings.tour_pending());
-        assert_eq!(settings.scale_percent, 120);
-        fs::write(&path, "invalid").unwrap();
-        assert!(!Settings::load_from(Some(path.clone())).tour_pending());
-        fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn older_settings_keep_spark_and_custom_pets_survive_restarts() {
-        use crate::ui::pet_motion::PetPerformance;
-        let legacy: Settings = serde_json::from_str(r#"{"character":"spark"}"#).unwrap();
-        assert_eq!(legacy.character, Character::Spark);
-        assert_eq!(legacy.pet_performance, PetPerformance::Balanced);
-        assert!(legacy.pet_autonomy);
-        for performance in PetPerformance::ALL {
-            let mut settings =
-                Settings { character: Character::Custom, pet_performance: performance, ..Default::default() };
-            settings.pet_autonomy = false;
-            settings.custom_pet.name = "Мишка".into();
-            settings.custom_pet.ear_size = 40.0;
-            settings.sanitize();
-            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-            assert_eq!(restored.character, Character::Custom);
-            assert_eq!(restored.pet_performance, performance);
-            assert!(!restored.pet_autonomy);
-            assert_eq!(restored.custom_pet, settings.custom_pet);
-            assert_eq!(restored.custom_pet.ear_size, 1.25);
-        }
-    }
-
-    #[test]
-    fn equalizer_response_migrates_without_replacing_existing_preferences() {
-        let mut settings: Settings =
-            serde_json::from_str(r#"{"eq_style":"bars","eq_strength":1.0,"bump_tint":"progress","eq_smooth":true}"#)
-                .unwrap();
-        assert_eq!(settings.eq_response, EqResponse::Responsive);
-        for response in EqResponse::ALL {
-            settings.eq_response = response;
-            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-            assert_eq!(restored.eq_response, response);
-            assert_eq!(restored.eq_style, EqStyle::Bars);
-            assert_eq!(restored.eq_strength, 1.0);
-            assert_eq!(restored.bump_tint, BumpTint::Progress);
-            assert!(restored.eq_smooth);
-        }
-    }
-
-    #[test]
-    fn weather_side_defaults_to_left_and_survives_settings_round_trips() {
-        let legacy: Settings = serde_json::from_str(r#"{"pill_weather":true}"#).unwrap();
-        assert_eq!(legacy.pill_weather_side, WeatherSide::Left);
-        for side in WeatherSide::ALL {
-            let settings = Settings { pill_weather_side: side, ..Settings::default() };
-            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-            assert_eq!(restored.pill_weather_side, side);
-        }
-    }
-
-    #[test]
-    fn header_tabs_add_without_replacing_and_can_move_back_to_more() {
-        let mut settings = Settings::default();
-        assert!(settings.set_header_tab("AI", true, None));
-        assert_eq!(settings.header_tabs.len(), 6);
-        assert!(settings.set_header_tab("AI", false, None));
-        assert!(settings.set_header_tab("AI", true, Some("Record")));
-        assert!(settings.header_tabs.iter().any(|name| name == "AI"));
-        assert!(!settings.header_tabs.iter().any(|name| name == "Record"));
-        assert!(settings.set_header_tab("AI", false, None));
-        assert!(!settings.tab_hidden("AI"));
-        settings.set_tab_hidden("Privacy", true);
-        assert!(settings.set_header_tab("Privacy", true, None));
-        assert!(!settings.tab_hidden("Privacy"));
-        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert_eq!(restored.header_tabs, settings.header_tabs);
-        let mut invalid: Settings = serde_json::from_str(r#"{"header_tabs":["Home","AI","AI","evil","Settings","Weather","Record","Privacy","Activity","Controls"]}"#).unwrap();
-        invalid.sanitize();
-        assert_eq!(invalid.header_tabs, ["AI", "Weather", "Record", "Privacy", "Activity", "Controls"]);
-    }
 
     #[test]
     fn notices_keep_their_old_defaults_and_read_partial_files() {
@@ -1463,66 +1083,6 @@ mod tests {
         assert!(s.auto_hide);
         assert_eq!(s.style, Style::Liquid);
         assert!(serde_json::from_str::<Settings>("not json").is_err());
-    }
-
-    #[test]
-    fn player_priority_is_opt_in_and_persists() {
-        let mut settings: Settings = serde_json::from_str("{}").unwrap();
-        assert!(!settings.prefer_playing_media);
-        settings.prefer_playing_media = true;
-        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert!(restored.prefer_playing_media);
-    }
-
-    #[test]
-    fn new_profiles_use_spark_and_fill_without_overriding_saved_choices() {
-        let fresh: Settings = serde_json::from_str("{}").unwrap();
-        assert_eq!(fresh.character, Character::Spark);
-        assert_eq!(fresh.progress_style, ProgressStyle::Fill);
-        let saved: Settings = serde_json::from_str(r#"{"character":"none","progress_style":"outlinebottom"}"#).unwrap();
-        assert_eq!(saved.character, Character::None);
-        assert_eq!(saved.progress_style, ProgressStyle::OutlineBottom);
-    }
-
-    #[test]
-    fn progress_modes_remain_selectable_and_round_trip() {
-        for (i, mode) in ProgressStyle::ALL.iter().copied().enumerate() {
-            let json = serde_json::to_string(&mode).unwrap();
-            assert_eq!(serde_json::from_str::<ProgressStyle>(&json).unwrap(), mode);
-            assert_eq!(mode.step(true), ProgressStyle::ALL[(i + 1) % ProgressStyle::ALL.len()]);
-            assert_eq!(mode.step(false).step(true), mode);
-        }
-        assert_eq!(ProgressStyle::Strip.step(false), ProgressStyle::Fill);
-    }
-
-    #[test]
-    fn desktop_character_position_and_mode_survive_settings_round_trips() {
-        let mut settings: Settings =
-            serde_json::from_str(r#"{"character":"spark","character_detached":true,"character_pos":[-200,400]}"#)
-                .unwrap();
-        settings.sanitize();
-        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert!(restored.character_detached);
-        assert_eq!(restored.character_pos, Some([-200, 400]));
-        settings.character = Character::None;
-        settings.sanitize();
-        assert!(!settings.character_detached);
-    }
-
-    #[test]
-    fn roaming_supports_every_character_and_preserves_old_spark_settings() {
-        for character in Character::ALL.into_iter().filter(|c| *c != Character::None) {
-            let mut settings = Settings { character, character_detached: true, ..Settings::default() };
-            settings.sanitize();
-            assert!(settings.character_detached, "{character:?}");
-            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-            assert_eq!(restored.character, character);
-            assert!(restored.character_detached);
-        }
-        let old: Settings =
-            serde_json::from_str(r#"{"character":"spark","spark_detached":true,"spark_pos":[120,340]}"#).unwrap();
-        assert!(old.character_detached);
-        assert_eq!(old.character_pos, Some([120, 340]));
     }
 }
 

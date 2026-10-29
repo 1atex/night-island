@@ -334,11 +334,6 @@ pub fn shell_open(target: &str, verb: Option<&str>) {
     }
 }
 
-pub fn shell_run(program: &str, args: &str) -> bool {
-    let (program, args) = (HSTRING::from(program), HSTRING::from(args));
-    unsafe { ShellExecuteW(None, w!("open"), &program, &args, None, SW_SHOWNORMAL).0 as isize > 32 }
-}
-
 pub fn reveal(path: &std::path::Path) {
     let arg = format!("/select,\"{}\"", path.display());
     let _ = std::process::Command::new("explorer.exe").raw_arg(arg).spawn();

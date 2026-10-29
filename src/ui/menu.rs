@@ -3,7 +3,8 @@ use std::sync::Once;
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS,
+    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING,
+    DWRITE_TEXT_METRICS,
 };
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, CreateCompatibleDC,
@@ -18,8 +19,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos, GetWindowRect, HWND_TOPMOST,
     IDC_ARROW, LoadCursorW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, PostQuitMessage, QS_ALLINPUT,
     RegisterClassW, SW_SHOW, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow, TranslateMessage, ULW_ALPHA,
-    UpdateLayeredWindow, WA_INACTIVE, WM_ACTIVATE, WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT,
-    WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    UpdateLayeredWindow, WA_INACTIVE, WM_ACTIVATE, WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT, WM_RBUTTONUP,
+    WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{Result, w};
 
@@ -48,10 +49,6 @@ impl Entry {
         self
     }
 
-    pub fn info(label: &str) -> Self {
-        Self::item(0, label)
-    }
-
     pub fn divider() -> Self {
         Self { id: 0, label: String::new(), glyph: None, danger: false }
     }
@@ -69,47 +66,9 @@ struct Menu {
     rows: Vec<(f32, f32, f32, f32)>,
     margin: f32,
     size: (i32, i32),
-    scroll: f32,
-    max_scroll: f32,
     hover: Option<usize>,
     dirty: bool,
     done: Option<Option<usize>>,
-}
-
-impl Menu {
-    fn viewport(&self) -> (f32, f32) {
-        (self.margin + PAD * self.scale, self.size.1 as f32 - self.margin - PAD * self.scale)
-    }
-
-    fn row(&self, index: usize) -> (f32, f32, f32, f32) {
-        let r = self.rows[index];
-        (r.0, r.1 - self.scroll, r.2, r.3 - self.scroll)
-    }
-
-    fn hit(&self, x: f32, y: f32) -> Option<usize> {
-        let (top, bottom) = self.viewport();
-        if y < top || y >= bottom {
-            return None;
-        }
-        self.entries.iter().enumerate().position(|(i, e)| {
-            let r = self.row(i);
-            e.id != 0 && x >= r.0 && x < r.2 && y >= r.1 && y < r.3
-        })
-    }
-
-    fn reveal_hover(&mut self) {
-        let Some(i) = self.hover else { return };
-        let r = self.row(i);
-        let (top, bottom) = self.viewport();
-        let adjustment = if r.1 < top {
-            r.1 - top
-        } else if r.3 > bottom {
-            r.3 - bottom
-        } else {
-            0.0
-        };
-        self.scroll = (self.scroll + adjustment).clamp(0.0, self.max_scroll);
-    }
 }
 
 thread_local! {
@@ -119,7 +78,15 @@ thread_local! {
 fn measure(gpu: &Gpu, text: &str, size: f32) -> f32 {
     let measured = || -> Result<f32> {
         unsafe {
-            let format = crate::ui::fonts::format(gpu.dwrite(), size, DWRITE_FONT_WEIGHT_NORMAL)?;
+            let format = gpu.dwrite().CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                w!("en-us"),
+            )?;
             let wide: Vec<u16> = text.encode_utf16().collect();
             let layout = gpu.dwrite().CreateTextLayout(&wide, &format, 600.0 * size, 100.0 * size)?;
             let mut m = DWRITE_TEXT_METRICS::default();
@@ -136,7 +103,11 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             let (x, y) = (lparam.0 as i16 as f32, (lparam.0 >> 16) as i16 as f32);
             MENU.with_borrow_mut(|m| {
                 if let Some(m) = m {
-                    let at = m.hit(x, y);
+                    let at = m
+                        .rows
+                        .iter()
+                        .enumerate()
+                        .position(|(i, r)| m.entries[i].id != 0 && x >= r.0 && x < r.2 && y >= r.1 && y < r.3);
                     if at != m.hover {
                         m.hover = at;
                         m.dirty = true;
@@ -145,22 +116,10 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             });
             LRESULT(0)
         }
-        WM_MOUSEWHEEL => {
-            let delta = (wparam.0 >> 16) as i16 as f32 / 120.0;
-            MENU.with_borrow_mut(|m| {
-                if let Some(m) = m {
-                    m.scroll = (m.scroll - delta * ITEM_H * 3.0 * m.scale).clamp(0.0, m.max_scroll);
-                    m.hover = None;
-                    m.dirty = true;
-                }
-            });
-            LRESULT(0)
-        }
         WM_LBUTTONUP | WM_RBUTTONUP => {
-            let (x, y) = (lparam.0 as i16 as f32, (lparam.0 >> 16) as i16 as f32);
             MENU.with_borrow_mut(|m| {
                 if let Some(m) = m
-                    && let Some(i) = m.hit(x, y)
+                    && let Some(i) = m.hover
                 {
                     m.done = Some(Some(m.entries[i].id));
                 }
@@ -186,12 +145,10 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                     k if k == VK_ESCAPE.0 => m.done = Some(None),
                     k if k == VK_DOWN.0 => {
                         m.hover = step(m.hover, 1);
-                        m.reveal_hover();
                         m.dirty = true;
                     }
                     k if k == VK_UP.0 => {
                         m.hover = step(m.hover, -1);
-                        m.reveal_hover();
                         m.dirty = true;
                     }
                     k if k == VK_RETURN.0 => {
@@ -269,61 +226,30 @@ fn paint_body(p: &Painter, m: &Menu) -> Result<()> {
     p.fill_round_rect(body, radius, rgba(lift(r), lift(g), lift(b), 0.98))?;
     p.stroke_round_rect(body, radius, 1.0, rgba(1.0, 1.0, 1.0, 0.12))?;
     let (ar, ag, ab) = theme::accent();
-    let (top, bottom) = m.viewport();
-    p.push_clip((body.0 + PAD * scale, top, body.2 - PAD * scale, bottom));
-    let drawn = (|| -> Result<()> {
-        for (i, e) in m.entries.iter().enumerate() {
-            let row = m.row(i);
-            if row.3 <= top || row.1 >= bottom {
-                continue;
-            }
-            if e.id == 0 {
-                if e.label.is_empty() {
-                    let y = (row.1 + row.3) / 2.0;
-                    p.fill_rect((row.0 + 8.0 * scale, y, row.2 - 8.0 * scale, y + 1.0), rgba(1.0, 1.0, 1.0, 0.1))?;
-                } else {
-                    p.text(
-                        &e.label,
-                        (row.0 + 10.0 * scale, row.1, row.2 - 10.0 * scale, row.3),
-                        12.0 * scale,
-                        DWRITE_FONT_WEIGHT_NORMAL,
-                        DWRITE_TEXT_ALIGNMENT_LEADING,
-                        rgba(1.0, 1.0, 1.0, 0.62),
-                    )?;
-                }
-                continue;
-            }
-            let hot = m.hover == Some(i);
-            if hot {
-                let tint = if e.danger { rgba(0.95, 0.3, 0.3, 0.22) } else { rgba(ar, ag, ab, 0.28) };
-                p.fill_round_rect(row, 8.0 * scale, tint)?;
-            }
-            let colour =
-                if e.danger { rgba(1.0, 0.55, 0.55, 1.0) } else { rgba(1.0, 1.0, 1.0, if hot { 1.0 } else { 0.9 }) };
-            if let Some(glyph) = e.glyph {
-                p.glyph(glyph, (row.0 + 6.0 * scale, row.1, row.0 + 34.0 * scale, row.3), 15.0 * scale, colour)?;
-            }
-            p.text(
-                &e.label,
-                (row.0 + 38.0 * scale, row.1, row.2 - 10.0 * scale, row.3),
-                FONT * scale,
-                DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                colour,
-            )?;
+    for (i, e) in m.entries.iter().enumerate() {
+        let row = m.rows[i];
+        if e.id == 0 {
+            let y = (row.1 + row.3) / 2.0;
+            p.fill_rect((row.0 + 8.0 * scale, y, row.2 - 8.0 * scale, y + 1.0), rgba(1.0, 1.0, 1.0, 0.1))?;
+            continue;
         }
-        Ok(())
-    })();
-    p.pop_clip();
-    drawn?;
-    if m.max_scroll > 0.0 {
-        let height = (bottom - top).max(1.0);
-        let thumb = (height * height / (height + m.max_scroll)).max(20.0 * scale).min(height);
-        let y = top + (height - thumb) * m.scroll / m.max_scroll;
-        p.fill_round_rect(
-            (body.2 - 4.0 * scale, y, body.2 - 2.0 * scale, y + thumb),
-            scale,
-            rgba(1.0, 1.0, 1.0, 0.32),
+        let hot = m.hover == Some(i);
+        if hot {
+            let tint = if e.danger { rgba(0.95, 0.3, 0.3, 0.22) } else { rgba(ar, ag, ab, 0.28) };
+            p.fill_round_rect(row, 8.0 * scale, tint)?;
+        }
+        let colour =
+            if e.danger { rgba(1.0, 0.55, 0.55, 1.0) } else { rgba(1.0, 1.0, 1.0, if hot { 1.0 } else { 0.9 }) };
+        if let Some(glyph) = e.glyph {
+            p.glyph(glyph, (row.0 + 6.0 * scale, row.1, row.0 + 34.0 * scale, row.3), 15.0 * scale, colour)?;
+        }
+        p.text(
+            &e.label,
+            (row.0 + 38.0 * scale, row.1, row.2 - 10.0 * scale, row.3),
+            FONT * scale,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            colour,
         )?;
     }
     Ok(())
@@ -396,14 +322,6 @@ pub fn show(entries: Vec<Entry>, at: (i32, i32), above: bool, scale: f32, with_g
     if entries.is_empty() || MENU.with_borrow(|m| m.is_some()) {
         return None;
     }
-    let mut work = RECT { left: at.0 - 640, top: at.1 - 360, right: at.0 + 640, bottom: at.1 + 360 };
-    unsafe {
-        let monitor = MonitorFromPoint(POINT { x: at.0, y: at.1 }, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-        if GetMonitorInfoW(monitor, &mut mi).as_bool() {
-            work = mi.rcWork;
-        }
-    }
     let margin = (12.0 * scale).ceil();
     let mut widest = 0.0f32;
     with_gpu(&mut |gpu| {
@@ -412,25 +330,18 @@ pub fn show(entries: Vec<Entry>, at: (i32, i32), above: bool, scale: f32, with_g
             widest = widest.max(measure(gpu, &label, FONT * scale));
         }
     });
-    let inner_w = (widest + (38.0 + 14.0) * scale + 2.0 * PAD * scale)
-        .max(MIN_W * scale)
-        .min((work.right - work.left) as f32 - 2.0 * margin)
-        .max(1.0)
-        .ceil();
+    let inner_w = (widest + (38.0 + 14.0) * scale + 2.0 * PAD * scale).max(MIN_W * scale).ceil();
     let mut rows = Vec::with_capacity(entries.len());
     let mut y = margin + PAD * scale;
     for e in &entries {
-        let h = if e.id == 0 { if e.label.is_empty() { DIVIDER_H } else { 24.0 } } else { ITEM_H } * scale;
+        let h = if e.id == 0 { DIVIDER_H } else { ITEM_H } * scale;
         rows.push((margin + PAD * scale, y, margin + inner_w - PAD * scale, y + h));
         y += h;
     }
     let inner_h = y + PAD * scale - margin;
-    let wanted_h = (inner_h + 2.0 * margin).ceil();
-    let size = ((inner_w + 2.0 * margin).ceil() as i32, (wanted_h as i32).min(work.bottom - work.top).max(1));
-    let max_scroll = (wanted_h - size.1 as f32).max(0.0);
+    let size = ((inner_w + 2.0 * margin).ceil() as i32, (inner_h + 2.0 * margin).ceil() as i32);
     let first = entries.iter().position(|e| e.id != 0);
-    let menu =
-        Menu { entries, scale, rows, margin, size, scroll: 0.0, max_scroll, hover: first, dirty: true, done: None };
+    let menu = Menu { entries, scale, rows, margin, size, hover: first, dirty: true, done: None };
     MENU.with_borrow_mut(|m| *m = Some(menu));
 
     let hwnd = create_window();
@@ -505,51 +416,4 @@ pub fn show(entries: Vec<Entry>, at: (i32, i32), above: bool, scale: f32, with_g
         let _ = DestroyWindow(hwnd);
     }
     choice
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn long_menu_scroll_keeps_keyboard_selection_visible_and_info_unselectable() {
-        for scale in [1.0, 1.5, 2.0] {
-            let mut entries = vec![Entry::info("Application"), Entry::divider()];
-            entries.extend((1..=30).map(|id| Entry::item(id, "Window")));
-            let margin = 12.0 * scale;
-            let mut y = margin + PAD * scale;
-            let rows: Vec<_> = entries
-                .iter()
-                .map(|e| {
-                    let h = if e.id == 0 { if e.label.is_empty() { DIVIDER_H } else { 24.0 } } else { ITEM_H } * scale;
-                    let row = (margin, y, 280.0 * scale, y + h);
-                    y += h;
-                    row
-                })
-                .collect();
-            let mut menu = Menu {
-                entries,
-                scale,
-                rows,
-                margin,
-                size: ((310.0 * scale) as i32, (240.0 * scale) as i32),
-                scroll: 0.0,
-                max_scroll: (y + PAD * scale + margin - 240.0 * scale).max(0.0),
-                hover: None,
-                dirty: true,
-                done: None,
-            };
-            let title = menu.row(0);
-            assert_eq!(menu.hit(30.0 * scale, (title.1 + title.3) / 2.0), None);
-            menu.hover = Some(menu.entries.len() - 1);
-            menu.reveal_hover();
-            let last = menu.row(menu.entries.len() - 1);
-            assert!(last.3 <= menu.viewport().1 + 0.01);
-            assert_eq!(menu.hit(30.0 * scale, (last.1 + last.3) / 2.0), menu.hover);
-            assert_eq!(menu.hit(30.0 * scale, menu.viewport().1 + 1.0), None);
-            menu.hover = Some(2);
-            menu.reveal_hover();
-            assert!(menu.row(2).1 >= menu.viewport().0 - 0.01);
-        }
-    }
 }

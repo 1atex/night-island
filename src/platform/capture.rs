@@ -160,42 +160,6 @@ fn file_name() -> String {
     format!("Screenshot_{:04}{:02}{:02}_{:02}{:02}{:02}.png", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond)
 }
 
-pub fn shrink(bgra: &[u8], w: i32, h: i32, max_side: i32) -> (Vec<u8>, i32, i32) {
-    let longest = w.max(h);
-    if max_side <= 0 || longest <= max_side {
-        return (bgra.to_vec(), w, h);
-    }
-    let (nw, nh) = (((w * max_side) / longest).max(1), ((h * max_side) / longest).max(1));
-    let mut out = Vec::with_capacity((nw * nh * 4) as usize);
-    for y in 0..nh {
-        let (y0, y1) = (y * h / nh, ((y + 1) * h / nh).max(y * h / nh + 1).min(h));
-        for x in 0..nw {
-            let (x0, x1) = (x * w / nw, ((x + 1) * w / nw).max(x * w / nw + 1).min(w));
-            let mut sum = [0u32; 3];
-            for sy in y0..y1 {
-                for sx in x0..x1 {
-                    let i = ((sy * w + sx) * 4) as usize;
-                    sum[0] += u32::from(bgra[i]);
-                    sum[1] += u32::from(bgra[i + 1]);
-                    sum[2] += u32::from(bgra[i + 2]);
-                }
-            }
-            let n = ((y1 - y0) * (x1 - x0)) as u32;
-            out.extend_from_slice(&[(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8, 255]);
-        }
-    }
-    (out, nw, nh)
-}
-
-pub fn screen_png(owner: HWND, max_side: i32) -> Option<Vec<u8>> {
-    let grab = grab_screen(owner)?;
-    let (left, top) = (-grab.origin.x, -grab.origin.y);
-    let (width, height) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
-    let (bgra, w, h) = grab.region(RECT { left, top, right: left + width, bottom: top + height })?;
-    let (small, nw, nh) = shrink(&bgra, w, h, max_side);
-    encode_png(&small, nw, nh)
-}
-
 fn encode_png(bgra: &[u8], w: i32, h: i32) -> Option<Vec<u8>> {
     let rgba: Vec<u8> = bgra.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
     let mut out = Vec::new();
@@ -909,57 +873,5 @@ extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn flat(w: i32, h: i32, bgr: [u8; 3]) -> Vec<u8> {
-        (0..w * h).flat_map(|_| [bgr[0], bgr[1], bgr[2], 255]).collect()
-    }
-
-    #[test]
-    fn a_small_picture_is_left_alone() {
-        let src = flat(8, 4, [1, 2, 3]);
-        let (out, w, h) = shrink(&src, 8, 4, 100);
-        assert_eq!((w, h, out), (8, 4, src));
-    }
-
-    #[test]
-    fn a_big_picture_is_averaged_down_with_its_proportions() {
-        let src = flat(1920, 1080, [10, 20, 30]);
-        let (out, w, h) = shrink(&src, 1920, 1080, 960);
-        assert_eq!((w, h), (960, 540));
-        assert_eq!(out.len(), 960 * 540 * 4);
-        assert!(out.chunks_exact(4).all(|p| p == [10, 20, 30, 255]));
-        let (_, w, h) = shrink(&flat(100, 1000, [0, 0, 0]), 100, 1000, 10);
-        assert_eq!((w, h), (1, 10));
-    }
-
-    #[test]
-    fn averaging_blends_neighbours() {
-        let mut src = flat(2, 1, [0, 0, 0]);
-        src[4..7].copy_from_slice(&[200, 100, 50]);
-        let (out, w, h) = shrink(&src, 2, 1, 1);
-        assert_eq!((w, h), (1, 1));
-        assert_eq!(&out[..4], &[100, 50, 25, 255]);
-    }
-
-    #[test]
-    fn nonsense_limits_do_not_panic() {
-        let src = flat(4, 4, [9, 9, 9]);
-        assert_eq!(shrink(&src, 4, 4, 0).1, 4);
-        assert_eq!(shrink(&src, 4, 4, -5).1, 4);
-        assert_eq!(shrink(&src, 4, 4, 1).1, 1);
-    }
-
-    #[test]
-    #[ignore = "needs a desktop"]
-    fn the_primary_screen_becomes_a_png() {
-        let png = screen_png(HWND::default(), 1280).expect("a screenshot");
-        assert_eq!(&png[1..4], b"PNG");
-        println!("{} bytes", png.len());
     }
 }

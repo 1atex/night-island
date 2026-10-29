@@ -3,7 +3,6 @@ use crate::view::*;
 pub fn content_tip(pill: Rect, scale: f32, ui: &UiState, clips: usize, px: f32, py: f32) -> Option<(String, Rect)> {
     match ui.tab {
         Tab::Home => home_tip(pill, scale, ui, px, py),
-        Tab::Yandex => yandex_tip(pill, scale, &ui.yandex, px, py),
         Tab::Note => {
             let tree = note_tree(pill, scale);
             let reminder = ui.notes.remind.is_some();
@@ -31,9 +30,8 @@ pub fn content_tip(pill: Rect, scale: f32, ui: &UiState, clips: usize, px: f32, 
             }
         }
         Tab::Chat => {
-            let (new, chats, attach, pet) = chat_buttons(pill, scale);
+            let (new, chats, attach) = chat_buttons(pill, scale);
             let (text, rect) = match hit_chat(pill, scale, px, py, ui)? {
-                ChatHit::Pet => (if ui.chat.pet.enabled { "Back to chat" } else { "Create or change your pet" }, pet),
                 ChatHit::New => ("New chat", new),
                 ChatHit::Chats => ("Saved chats", chats),
                 ChatHit::Attach => ("Attach a file", attach),
@@ -66,35 +64,6 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
     let (text, rect): (String, Rect) = match hit_home(pill, scale, px, py, ui)? {
         HomeHit::Media(i) => (["Previous", "Play or pause", "Next"][i].into(), media_btn(pill, scale, i, wide)),
         HomeHit::Extra(i) => (["Shuffle", "Repeat", "Like"][i].into(), extra_btn(pill, scale, i, wide)),
-        HomeHit::WaveRate(rating) => {
-            use crate::services::yandex::Rating;
-            let like = rating == Rating::Like;
-            let label = match (like, ui.yandex.state.rating == rating) {
-                (true, true) => "Remove like",
-                (true, false) => "Like",
-                (false, true) => "Remove dislike",
-                (false, false) => "Dislike and skip",
-            };
-            (label.into(), wave_rating_button(pill, scale, ui, like))
-        }
-        HomeHit::NotificationClose => {
-            ("Dismiss notification".into(), home_notification_close(home_notification_rect(pill, scale, ui)?, scale))
-        }
-        HomeHit::WidgetHandle(id) => (
-            "Drag tiles to arrange; pull a corner to resize".into(),
-            widget_resize_handle(home_widget_rects(pill, scale, ui).into_iter().find(|v| v.0 == id)?.1, scale),
-        ),
-        HomeHit::Wave => ("Open My Wave settings".into(), wave_link(pill, scale, ui)),
-        HomeHit::Notification | HomeHit::NotificationExpand => (
-            if matches!(hit_home(pill, scale, px, py, ui), Some(HomeHit::Notification)) && ui.cfg.notification_open_app
-            {
-                "Open sender app"
-            } else {
-                "Expand notification"
-            }
-            .into(),
-            home_notification_rect(pill, scale, ui)?,
-        ),
         HomeHit::Player => ("Next player".into(), player_btn(pill, scale, wide)),
         HomeHit::Edit => {
             (if ui.home.edit { "Done" } else { "Choose the tiles" }.into(), edit_button(pill, scale, wide))
@@ -103,16 +72,15 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
             let row = volume_row(pill, scale, wide);
             (
                 if ui.home.vol_track {
-                    "Player volume: left-click for system, right-click for mixer"
+                    "Volume of this program: press for the system"
                 } else {
-                    "System volume: left-click for player, right-click for mixer"
+                    "System volume: press for the playing program"
                 }
                 .into(),
                 (row.0 + 2.0 * scale, row.1, row.0 + 42.0 * scale, row.3),
             )
         }
         HomeHit::Device => ("Sound output".into(), device_chip(pill, scale, wide)),
-        HomeHit::Mixer(_) => return None,
         HomeHit::DiscordMute => ("Mute".into(), strip_toggle(pill, scale, 1)),
         HomeHit::DiscordDeaf => ("Deafen".into(), strip_toggle(pill, scale, 0)),
         HomeHit::DiscordOverlay => ("Voice overlay".into(), strip_toggle(pill, scale, 2)),

@@ -6,7 +6,6 @@ impl App {
         self.refresh_reminder_labels();
         self.schedule_reminder();
         self.refresh_note_remind();
-        self.repaint_collapsed();
     }
 
     pub(in crate::island) fn refresh_reminder_labels(&mut self) {
@@ -51,7 +50,9 @@ impl App {
         let Some(r) = due else { return self.schedule_reminder() };
         self.ui.remind.alert = Some((r.id, r.text.clone()));
         self.ui.cmd.open = false;
-        crate::platform::sounds::play(crate::platform::sounds::Cue::Reminder, 100);
+        unsafe {
+            let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(MB_ICONASTERISK);
+        }
         self.kill_timer(Timer::Collapse);
         self.expand();
         self.repaint_expanded();

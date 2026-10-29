@@ -204,28 +204,11 @@ impl App {
     }
 
     pub(in crate::island) fn ui_anim_tick(&mut self) {
-        if self.cover_flight_until.is_some_and(|until| Instant::now() >= until) {
-            self.finish_cover_motion();
-        }
-        if !self.ui.home.track_transition.active() {
-            self.ui.home.track_transition.finish();
-        }
         if self.state != State::Expanded {
             self.ui.tab_change = None;
             return;
         }
-        let live_moving = self.ui.live_changed.is_some_and(|at| at.elapsed().as_millis() < 280);
-        let mut again = self.ui.home.widgets.editor_active()
-            || self.ui.home.widgets.motion.borrow().active()
-            || live_moving
-            || matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) && self.ui.yandex.animate_colours();
-        if let Some((_, start)) = self.ui.home.mixer_motion {
-            if start.elapsed().as_millis() >= 220 {
-                self.ui.home.mixer_motion = None;
-            } else {
-                again = true;
-            }
-        }
+        let mut again = false;
         if let Some(change) = self.ui.tab_change {
             if change.start.elapsed().as_millis() as u32 >= change.ms {
                 self.ui.tab_change = None;
@@ -250,15 +233,8 @@ impl App {
             again |= moving || self.ui.activity.animating();
         }
         self.repaint_expanded();
-        let preview = if !self.gaming && !self.pill_hidden && self.ui.tab == view::Tab::Chat {
-            self.ui.chat.pet.preview_interval()
-        } else {
-            None
-        };
         if again {
             self.set_timer(Timer::UiAnim, self.frame_ms());
-        } else if let Some(interval) = preview {
-            self.set_timer(Timer::UiAnim, interval);
         }
     }
 

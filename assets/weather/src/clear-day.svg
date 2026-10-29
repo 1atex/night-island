@@ -1,6 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" class="wx-clear-day" width="128" height="128" viewBox="0 0 24 24" fill="none" role="img" aria-labelledby="wx-clear-day-title wx-clear-day-desc">
-<title id="wx-clear-day-title">Ясно · день</title>
-<desc id="wx-clear-day-desc">Солнце с медленно вращающимися лучами.</desc>
-<defs><linearGradient id="wx-clear-day-sun" x1="0" y1="0" x2=".3" y2="1"><stop stop-color="#FFE5A4"/><stop offset="1" stop-color="#F5BD55"/></linearGradient><style>.wx-clear-day .rays{animation:wx-clear-day-turn 90s linear infinite}.wx-clear-day .sun-disc{animation:wx-clear-day-breathe 10s ease-in-out infinite}@keyframes wx-clear-day-turn{to{transform:rotate(360deg)}}@keyframes wx-clear-day-breathe{0%,100%{opacity:1}50%{opacity:.96}}@media(prefers-reduced-motion:reduce){.wx-clear-day *{animation:none!important}.wx-clear-day .drop,.wx-clear-day .flake,.wx-clear-day .hail{opacity:.85}.wx-clear-day .bolt{opacity:1}.wx-clear-day .wind-line,.wx-clear-day .funnel-line{stroke-dasharray:none}}</style></defs>
-<g style="transform-origin:12px 11.5px" class="rays"><path d="M17.500 11.500l1.500 0.000" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/><path d="M15.889 15.389l1.061 1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/><path d="M12.000 17.000l0.000 1.500" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/><path d="M8.111 15.389l-1.061 1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/><path d="M6.500 11.500l-1.500 0.000" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/><path d="M8.111 7.611l-1.061 -1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/><path d="M12.000 6.000l-0.000 -1.500" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/><path d="M15.889 7.611l1.061 -1.061" stroke="#F3B747" stroke-width=".95" stroke-linecap="round"/></g><circle class="sun-disc" cx="12" cy="11.5" r="4" fill="url(#wx-clear-day-sun)" stroke="#F3B747" stroke-width=".55"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<defs>
+		<linearGradient id="a" x1="26.75" y1="22.91" x2="37.25" y2="41.09" gradientUnits="userSpaceOnUse">
+			<stop offset="0" stop-color="#fbbf24"/>
+			<stop offset="0.45" stop-color="#fbbf24"/>
+			<stop offset="1" stop-color="#f59e0b"/>
+		</linearGradient>
+	</defs>
+	<circle cx="32" cy="32" r="10.5" stroke="#f8af18" stroke-miterlimit="10" stroke-width="0.5" fill="url(#a)"/>
+	<path d="M32,15.71V9.5m0,45V48.29M43.52,20.48l4.39-4.39M16.09,47.91l4.39-4.39m0-23-4.39-4.39M47.91,47.91l-4.39-4.39M15.71,32H9.5m45,0H48.29" fill="none" stroke="#fbbf24" stroke-linecap="round" stroke-miterlimit="10" stroke-width="3"/>
 </svg>

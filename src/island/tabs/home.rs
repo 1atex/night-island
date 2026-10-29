@@ -2,7 +2,6 @@ use crate::island::*;
 
 impl App {
     pub(in crate::island) fn open_dev_menu(&mut self) {
-        self.close_home_mixer();
         let items = volume::devices();
         self.ui.home.dev_menu = (!items.is_empty()).then_some((items, 0));
         self.repaint_expanded();
@@ -31,44 +30,13 @@ impl App {
         }
         let pill = self.pill_rect(true);
         match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
-            Some(view::HomeHit::WidgetControl(control)) => self.widget_control(control),
-            Some(view::HomeHit::WidgetHandle(id)) => self.begin_widget_resize(id, x, y),
-            Some(view::HomeHit::Action(id)) if self.ui.home.widgets.editing && !self.ui.home.edit => {
-                self.begin_widget_drag(id as u8, x, y);
-            }
-            Some(view::HomeHit::Live(index)) => self.open_live_activity(index),
-            Some(view::HomeHit::Notification) => {
-                if self.settings.notification_open_app {
-                    self.activate_notification();
-                } else {
-                    self.expand_notification_text();
-                }
-            }
-            Some(view::HomeHit::WaveRate(rating)) => {
-                if let Some(id) = self.ui.yandex.state.current_id.clone() {
-                    crate::services::yandex::send(crate::services::yandex::Command::Rate(id, rating));
-                }
-            }
-            Some(view::HomeHit::NotificationClose) => {
-                self.dismiss_home_notification();
-            }
-            Some(view::HomeHit::NotificationExpand) => self.expand_notification_text(),
-            Some(view::HomeHit::Mixer(_)) => self.click_mixer(x, y),
             Some(view::HomeHit::Media(i)) => media::control(match i {
                 0 => media::Control::Previous,
                 1 => media::Control::PlayPause,
                 _ => media::Control::Next,
             }),
             Some(view::HomeHit::Player) => media::next_player(),
-            Some(view::HomeHit::Wave) => self.select_tab(view::Tab::Yandex),
             Some(view::HomeHit::Action(i)) if self.ui.home.edit => self.toggle_home_action(i),
-            Some(view::HomeHit::Action(i))
-                if self.settings.home_widgets
-                    || self.ui.notifications.preview.is_some()
-                    || !self.ui.live.is_empty() =>
-            {
-                self.home_action(i)
-            }
             Some(view::HomeHit::Action(i)) => {
                 match self.settings.home_actions.iter().position(|&a| usize::from(a) == i) {
                     Some(slot) => self.ui.home.tile_press = Some((slot, x, y)),
@@ -76,11 +44,6 @@ impl App {
                 }
             }
             Some(view::HomeHit::Edit) => {
-                if self.settings.home_widgets {
-                    self.toggle_widget_editor();
-                    return;
-                }
-                self.close_home_mixer();
                 self.ui.home.edit = !self.ui.home.edit;
                 self.ui.home.edit_scroll = 0;
                 self.ui.home.hover_act = None;
@@ -106,19 +69,19 @@ impl App {
             Some(view::HomeHit::DiscordMute) => discord::set_mute(!self.ui.discord.self_mute),
             Some(view::HomeHit::DiscordDeaf) => discord::set_deaf(!self.ui.discord.self_deaf),
             Some(view::HomeHit::Seek(f)) => {
-                self.begin_seek(f);
+                self.pointer.seek_drag = true;
+                self.ui.home.seek = Some(f);
+                self.repaint_expanded();
             }
             Some(view::HomeHit::VolumeIcon) => {
-                self.close_home_mixer();
                 if self.ui.home.vol_track {
                     self.ui.home.vol_track = false;
-                } else if let Some(level) = volume::app_volume(&self.ui.media.source) {
+                } else if let Some(v) =
+                    volume::app_volume(&self.ui.media.source).filter(|_| !self.ui.media.source.is_empty())
+                {
+                    self.ui.home.app_vol = v;
                     self.ui.home.vol_track = true;
-                    self.ui.home.app_vol = level;
-                } else {
-                    self.notify(Notice::Error, '\u{E767}', "Player volume is unavailable. Right-click for the mixer");
                 }
-                self.refresh_home();
                 self.repaint_expanded();
             }
             Some(view::HomeHit::Volume) => {
@@ -135,58 +98,16 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn right_click_home_volume(&mut self, x: i32, y: i32) -> bool {
-        if self.state != State::Expanded || self.ui.tab != view::Tab::Home || self.ui.home.dev_menu.is_some() {
-            return false;
-        }
-        if !matches!(
-            view::hit_home(self.pill_rect(true), self.scale, x as f32, y as f32, &self.ui),
-            Some(view::HomeHit::VolumeIcon)
-        ) {
-            return false;
-        }
-        self.finish_mixer();
-        let from = view::home_mixer_progress(&self.ui);
-        self.ui.home.mixer_open = !self.ui.home.mixer_open;
-        self.ui.home.mixer_motion = Some((from, Instant::now()));
-        self.ui.home.edit = false;
-        self.ui.home.dev_menu = None;
-        self.ui.home.dock_open = false;
-        self.sync_mixer();
-        self.set_timer(Timer::UiAnim, self.frame_ms());
-        self.repaint_expanded();
-        true
-    }
-
     fn toggle_home_action(&mut self, id: usize) {
         let id = id as u8;
-        if self.settings.home_widgets
-            && !self.settings.home_actions.contains(&id)
-            && !view::can_resize_widget(&self.ui, id, crate::data::home_widgets::WidgetSize::Tile)
-        {
-            self.ui.home.widgets.status = crate::ui::i18n::tr("Not enough room in the grid").into_owned();
-            self.repaint_expanded();
-            return;
-        }
         match self.settings.home_actions.iter().position(|&a| a == id) {
             Some(at) => {
                 self.settings.home_actions.remove(at);
-                self.settings.home_widget_sizes.remove(&id);
-                if id == view::weather_widget_id() {
-                    self.settings.home_weather_widget = false;
-                }
             }
             None if self.settings.home_actions.len() >= view::MAX_HOME_TILES => {
                 return self.notify(Notice::Error, '\u{E783}', "Up to 8 tiles fit: take one off first");
             }
-            None => {
-                self.settings.home_widget_sizes.remove(&id);
-                self.settings.home_actions.push(id);
-            }
-        }
-        if self.ui.home.widgets.editing {
-            self.ui.home.widgets.selected = self.settings.home_actions.contains(&id).then_some(id);
-            self.ui.home.widgets.status.clear();
+            None => self.settings.home_actions.push(id),
         }
         self.settings.save();
         self.ui.cfg = self.settings.clone();
@@ -216,24 +137,13 @@ impl App {
         if !self.pointer.vol_drag {
             return;
         }
-        if self.ui.tab == view::Tab::Yandex {
-            let level =
-                view::wave_volume_level_for(self.pill_rect(true), self.scale, x as f32, self.ui.yandex.legacy_layout);
-            let current = self.ui.yandex.volume_preview.unwrap_or(self.ui.yandex.state.config.volume);
-            if level != current && crate::services::yandex::set_volume(f32::from(level) / 100.0) {
-                self.ui.yandex.volume_preview = Some(level);
-                self.repaint_expanded();
-            }
-            return;
-        }
         let (tl, tr, _) = view::volume_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
         let level = ((x as f32 - tl) / (tr - tl).max(1.0)).clamp(0.0, 1.0);
         let current = if self.ui.home.vol_track { self.ui.home.app_vol } else { self.ui.home.vol };
         if (level - current).abs() > 0.004 {
             if self.ui.home.vol_track {
-                if volume::set_app_volume(&self.ui.media.source, level) {
-                    self.ui.home.app_vol = level;
-                }
+                self.ui.home.app_vol = level;
+                volume::set_app_volume(&self.ui.media.source, level);
             } else {
                 self.ui.home.vol = level;
                 volume::set(level);
@@ -242,25 +152,12 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn begin_seek(&mut self, fraction: f32) {
-        self.pointer.seek_drag = true;
-        self.ui.home.seek = Some(fraction.clamp(0.0, 1.0));
-        unsafe {
-            windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
-        }
-        self.repaint_expanded();
-    }
-
     pub(in crate::island) fn drag_seek(&mut self, x: i32) {
         if !self.pointer.seek_drag {
             return;
         }
-        self.ui.home.seek = Some(if self.ui.tab == view::Tab::Yandex {
-            view::wave_fraction(self.pill_rect(true), self.scale, x as f32)
-        } else {
-            let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
-            ((x as f32 - l) / (r - l).max(1.0)).clamp(0.0, 1.0)
-        });
+        let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
+        self.ui.home.seek = Some(((x as f32 - l) / (r - l).max(1.0)).clamp(0.0, 1.0));
         self.repaint_expanded();
     }
 
@@ -269,17 +166,8 @@ impl App {
             return;
         }
         self.pointer.seek_drag = false;
-        unsafe {
-            let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
-        }
-        let wave = self.ui.tab == view::Tab::Yandex;
-        let progress = if wave { crate::services::yandex::progress() } else { media::progress() };
-        if let (Some(f), Some((_, len))) = (self.ui.home.seek.take(), progress) {
-            if wave {
-                crate::services::yandex::send(crate::services::yandex::Command::Seek(f * len));
-            } else {
-                media::seek(f * len);
-            }
+        if let (Some(f), Some((_, len))) = (self.ui.home.seek.take(), media::progress()) {
+            media::seek(f * len);
         }
         self.repaint_expanded();
     }
@@ -326,28 +214,10 @@ impl App {
     }
 
     pub(in crate::island) fn start_progress_timer(&self) {
-        let home = self.state == State::Expanded
-            && match self.ui.tab {
-                view::Tab::Home => self.ui.media.playing,
-                view::Tab::Yandex => self.ui.yandex.state.media.playing,
-                _ => false,
-            };
-        let pill = self.progress_pill_visible() && view::progress_strip_on(&self.ui);
-        if home || pill {
-            let interval = if pill && view::pill_progress_fill_on(&self.ui) { self.frame_ms() } else { 1000 };
-            self.set_timer(Timer::Progress, interval);
-        } else {
-            self.kill_timer(Timer::Progress);
+        let home = self.state == State::Expanded && self.ui.tab == view::Tab::Home && self.ui.media.playing;
+        if home || (self.state == State::Collapsed && view::progress_strip_on(&self.ui)) {
+            self.set_timer(Timer::Progress, 1000);
         }
-    }
-
-    pub(in crate::island) fn progress_pill_visible(&self) -> bool {
-        self.pill_motion.intro.is_none()
-            && !self.notification_card_visible()
-            && self.state == State::Collapsed
-            && !self.gaming
-            && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
-            && unsafe { IsWindowVisible(self.hwnd).as_bool() }
     }
 
     pub(in crate::island) fn reload_dock(&mut self) {
@@ -506,9 +376,6 @@ impl App {
     }
 
     pub(in crate::island) fn drag_tiles(&mut self, x: i32, y: i32) {
-        if self.drag_widget_resize(x, y) || self.drag_widget(x, y) {
-            return;
-        }
         if self.state != State::Expanded || self.ui.tab != view::Tab::Home {
             return;
         }
@@ -537,9 +404,6 @@ impl App {
     }
 
     pub(in crate::island) fn finish_tile_press(&mut self) {
-        if self.finish_widget_resize() || self.finish_widget_drag() {
-            return;
-        }
         let press = self.ui.home.tile_press.take();
         if let Some(r) = self.ui.home.tile_reorder.take() {
             unsafe {

@@ -1,5 +1,4 @@
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -51,15 +50,7 @@ pub struct Media {
 static TIMELINE: Mutex<Option<(f32, f32, Instant, bool)>> = Mutex::new(None);
 static TIMELINE_START: Mutex<f32> = Mutex::new(0.0);
 
-#[cfg(test)]
-pub fn debug_progress(pos: f32, length: f32) {
-    *TIMELINE.lock().unwrap() = Some((pos, length, Instant::now(), false));
-}
-
 pub fn progress() -> Option<(f32, f32)> {
-    if selected() == Source::Wave {
-        return crate::services::yandex::progress();
-    }
     let (pos, len, at, playing) = (*TIMELINE.lock().ok()?)?;
     if len <= 0.0 {
         return None;
@@ -75,58 +66,14 @@ pub enum Control {
     Next,
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
-struct External {
-    id: String,
-    media: Media,
-}
-
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
-enum Source {
-    #[default]
-    None,
-    Wave,
-    External(String),
-}
-
-static SNAPSHOT: Mutex<Option<External>> = Mutex::new(None);
-static SELECTED: Mutex<Source> = Mutex::new(Source::None);
-static PREFER_PLAYING: AtomicBool = AtomicBool::new(false);
-
-pub fn configure_priority(enabled: bool) {
-    PREFER_PLAYING.store(enabled, Ordering::Relaxed);
-}
-
-fn selected() -> Source {
-    SELECTED.lock().map(|s| s.clone()).unwrap_or_default()
-}
-
-fn choose_source(prefer: bool, wave: Option<&Media>, external: &External, previous: &Source) -> Source {
-    let keep_external = matches!(previous, Source::External(id) if *id == external.id);
-    if let Some(wave) = wave
-        && (!prefer || wave.playing || external.id.is_empty() || (!external.media.playing && !keep_external))
-    {
-        return Source::Wave;
-    }
-    if external.id.is_empty() { Source::None } else { Source::External(external.id.clone()) }
-}
+static SNAPSHOT: Mutex<Option<Media>> = Mutex::new(None);
 type CoverInfo = (Option<(u8, u8, u8)>, Option<Arc<Cover>>);
 type CoverCache = ((String, String), Option<(u8, u8, u8)>, Option<Arc<Cover>>);
 static COVER: Mutex<Option<CoverCache>> = Mutex::new(None);
 static COVER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 pub fn snapshot() -> Media {
-    let wave = crate::services::yandex::media();
-    let external = SNAPSHOT.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
-    let source = choose_source(PREFER_PLAYING.load(Ordering::Relaxed), wave.as_ref(), &external, &selected());
-    if let Ok(mut chosen) = SELECTED.lock() {
-        *chosen = source.clone();
-    }
-    match source {
-        Source::Wave => wave.unwrap_or_default(),
-        Source::External(_) => external.media,
-        Source::None => Media::default(),
-    }
+    SNAPSHOT.lock().ok().and_then(|g| g.clone()).unwrap_or_default()
 }
 
 fn clip(s: windows::core::HSTRING) -> String {
@@ -144,65 +91,13 @@ fn app_id(session: &Session) -> String {
 
 fn pick(manager: &Manager) -> Option<Session> {
     let chosen = CHOSEN.lock().ok().and_then(|c| c.clone());
-    let current = manager.GetCurrentSession().ok().map(|s| app_id(&s));
-    let sessions: Vec<_> = manager.GetSessions().ok()?.into_iter().filter(|s| !own_session(&app_id(s))).collect();
-    let candidates: Vec<_> = sessions.iter().map(|s| (app_id(s), is_playing(s))).collect();
-    let previous = match selected() {
-        Source::External(id) => Some(id),
-        _ => None,
-    };
-    let index = choose_external(
-        &candidates,
-        chosen.as_deref(),
-        current.as_deref(),
-        previous.as_deref(),
-        PREFER_PLAYING.load(Ordering::Relaxed),
-    )?;
-    sessions.into_iter().nth(index)
-}
-
-fn is_playing(session: &Session) -> bool {
-    session.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|s| s == Status::Playing)
-}
-
-pub(crate) fn own_session(id: &str) -> bool {
-    std::env::current_exe().ok().is_some_and(|path| {
-        id.eq_ignore_ascii_case(&path.to_string_lossy())
-            || path.file_name().is_some_and(|name| id.eq_ignore_ascii_case(&name.to_string_lossy()))
-            || path.file_stem().is_some_and(|stem| id.eq_ignore_ascii_case(&stem.to_string_lossy()))
-    })
-}
-
-fn choose_external(
-    sessions: &[(String, bool)],
-    chosen: Option<&str>,
-    current: Option<&str>,
-    previous: Option<&str>,
-    prefer: bool,
-) -> Option<usize> {
-    let find = |id: Option<&str>| id.and_then(|id| sessions.iter().position(|s| s.0 == id));
-    let manual = find(chosen);
-    let current = find(current);
-    let previous = find(previous);
-    if prefer {
-        for i in [manual, current, previous].into_iter().flatten() {
-            if sessions[i].1 {
-                return Some(i);
-            }
-        }
-        if let Some(i) = sessions.iter().position(|s| s.1) {
-            return Some(i);
-        }
-        if previous.is_some() {
-            return previous;
-        }
+    if let Some(id) = chosen
+        && let Ok(sessions) = manager.GetSessions()
+        && let Some(found) = sessions.into_iter().find(|s| app_id(s) == id)
+    {
+        return Some(found);
     }
-    manual.or(current).or(previous).or_else(|| (!sessions.is_empty()).then_some(0))
-}
-
-fn target_session(manager: &Manager, source: &Source) -> Option<Session> {
-    let Source::External(id) = source else { return None };
-    manager.GetSessions().ok()?.into_iter().find(|s| app_id(s) == *id)
+    manager.GetCurrentSession().ok()
 }
 
 struct Report {
@@ -261,19 +156,15 @@ fn update_timeline(track: &(String, String), r: Report) {
     t.pending = Some((r.raw, r.pos, now));
 }
 
-fn fetch(manager: &Manager) -> External {
-    let Some(session) = pick(manager) else {
-        clear_timeline();
-        return External::default();
-    };
-    let players =
-        manager.GetSessions().map_or(0, |s| s.into_iter().filter(|s| !own_session(&app_id(s))).count()).min(255) as u8;
+fn fetch(manager: &Manager) -> Media {
+    let Some(session) = pick(manager) else { return Media::default() };
+    let players = manager.GetSessions().map_or(0, |s| s.Size().unwrap_or(0)).min(255) as u8;
     let (mut title, mut artist) = (String::new(), String::new());
     if let Ok(props) = session.TryGetMediaPropertiesAsync().and_then(|op| op.join()) {
         title = props.Title().map(clip).unwrap_or_default();
         artist = props.Artist().map(clip).unwrap_or_default();
     }
-    let playing = is_playing(&session);
+    let playing = session.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|s| s == Status::Playing);
 
     let key = (title.clone(), artist.clone());
     let cached =
@@ -307,23 +198,12 @@ fn fetch(manager: &Manager) -> External {
             len: end - start,
             playing,
         };
-        update_timeline(&(format!("{}\n{title}", app_id(&session)), artist.clone()), report);
+        update_timeline(&(title.clone(), artist.clone()), report);
         if let Ok(mut s) = TIMELINE_START.lock() {
             *s = start;
         }
-    } else {
-        clear_timeline();
     }
-    External { id: app_id(&session), media: Media { title, artist, playing, accent, cover, source, players } }
-}
-
-fn clear_timeline() {
-    if let Ok(mut line) = TIMELINE.lock() {
-        *line = None;
-    }
-    if let Ok(mut start) = TIMELINE_START.lock() {
-        *start = 0.0;
-    }
+    Media { title, artist, playing, accent, cover, source, players }
 }
 
 fn refresh(manager: &Manager) -> bool {
@@ -341,17 +221,13 @@ fn refresh(manager: &Manager) -> bool {
 }
 
 pub fn next_player() {
-    if selected() == Source::Wave {
-        crate::services::yandex::send(crate::services::yandex::Command::Stop);
-        return;
-    }
     std::thread::spawn(|| {
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
         let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else { return };
         let Ok(sessions) = manager.GetSessions() else { return };
-        let ids: Vec<String> = sessions.into_iter().map(|s| app_id(&s)).filter(|id| !own_session(id)).collect();
+        let ids: Vec<String> = sessions.into_iter().map(|s| app_id(&s)).collect();
         if ids.len() < 2 {
             return;
         }
@@ -434,61 +310,6 @@ fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     ((h + 360.0) % 360.0, if max == 0.0 { 0.0 } else { d / max }, max)
 }
 
-pub fn cover_url(url: &str) -> Option<Arc<Cover>> {
-    cover_url_sized(url, 300)
-}
-
-pub fn cover_url_sized(url: &str, side: u32) -> Option<Arc<Cover>> {
-    let reply = crate::services::http::get_bytes(url, 3_000_000, None)?;
-    if reply.status != 200 {
-        return None;
-    }
-    cover_bytes_sized(&reply.body, side)
-}
-
-pub fn cover_bytes_sized(bytes: &[u8], side: u32) -> Option<Arc<Cover>> {
-    let side = side.clamp(16, 300);
-    if bytes.is_empty() || bytes.len() > 3_000_000 {
-        return None;
-    }
-    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
-    let stream = InMemoryRandomAccessStream::new().ok()?;
-    let writer = DataWriter::CreateDataWriter(&stream).ok()?;
-    writer.WriteBytes(bytes).ok()?;
-    writer.StoreAsync().ok()?.join().ok()?;
-    stream.Seek(0).ok()?;
-    let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;
-    if decoder.PixelWidth().ok()? > 2048 || decoder.PixelHeight().ok()? > 2048 {
-        return None;
-    }
-    let transform = BitmapTransform::new().ok()?;
-    transform.SetScaledWidth(side).ok()?;
-    transform.SetScaledHeight(side).ok()?;
-    let bitmap = decoder
-        .GetSoftwareBitmapTransformedAsync(
-            BitmapPixelFormat::Bgra8,
-            BitmapAlphaMode::Premultiplied,
-            &transform,
-            ExifOrientationMode::IgnoreExifOrientation,
-            ColorManagementMode::DoNotColorManage,
-        )
-        .ok()?
-        .join()
-        .ok()?;
-    let buffer = Buffer::Create(side * side * 4).ok()?;
-    bitmap.CopyToBuffer(&buffer).ok()?;
-    let mut bgra = vec![0; (side * side * 4) as usize];
-    DataReader::FromBuffer(&buffer).ok()?.ReadBytes(&mut bgra).ok()?;
-    Some(Arc::new(Cover {
-        id: COVER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        size: side,
-        full_w: side,
-        full_h: side,
-        full: bgra.clone(),
-        bgra,
-    }))
-}
-
 pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     let c = v * s;
     let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
@@ -559,14 +380,14 @@ pub fn start(hwnd: HWND) {
     });
 }
 
-#[cfg(any(feature = "demo", test))]
+#[cfg(feature = "demo")]
 pub fn debug_timeline(pos: f32, len: f32) {
     if let Ok(mut g) = TIMELINE.lock() {
         *g = Some((pos, len, Instant::now(), false));
     }
 }
 
-#[cfg(any(feature = "demo", test))]
+#[cfg(feature = "demo")]
 pub fn debug_cover(side: u32, rgba: &[u8]) -> Option<Arc<Cover>> {
     if rgba.len() < (side * side * 4) as usize {
         return None;
@@ -584,11 +405,6 @@ pub fn debug_cover(side: u32, rgba: &[u8]) -> Option<Arc<Cover>> {
 }
 
 pub fn seek(secs: f32) {
-    let source = selected();
-    if source == Source::Wave {
-        crate::services::yandex::send(crate::services::yandex::Command::Seek(secs));
-        return;
-    }
     let start = TIMELINE_START.lock().map_or(0.0, |s| *s);
     if let Ok(mut g) = TIMELINE.lock()
         && let Some((_, len, _, playing)) = *g
@@ -600,28 +416,18 @@ pub fn seek(secs: f32) {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
         let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else { return };
-        let Some(session) = target_session(&manager, &source) else { return };
+        let Some(session) = pick(&manager) else { return };
         let _ = session.TryChangePlaybackPositionAsync(((secs + start) as f64 * 1e7) as i64).and_then(|op| op.join());
     });
 }
 
 pub fn control(action: Control) {
-    let source = selected();
-    if source == Source::Wave {
-        use crate::services::yandex::{self, Command};
-        yandex::send(match action {
-            Control::Previous => Command::Previous,
-            Control::PlayPause => Command::Toggle,
-            Control::Next => Command::Next,
-        });
-        return;
-    }
     std::thread::spawn(move || {
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
         let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else { return };
-        let Some(session) = target_session(&manager, &source) else { return };
+        let Some(session) = pick(&manager) else { return };
         let _ = match action {
             Control::Previous => session.TrySkipPreviousAsync().and_then(|op| op.join()),
             Control::PlayPause => session.TryTogglePlayPauseAsync().and_then(|op| op.join()),
@@ -633,57 +439,6 @@ pub fn control(action: Control) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn priority_follows_playing_browser_and_keeps_its_pause_controls() {
-        let mut wave = Media { playing: true, ..Default::default() };
-        let mut browser = External { id: "browser".into(), media: Media { playing: true, ..Default::default() } };
-        let mut selected = choose_source(true, Some(&wave), &browser, &Source::None);
-        assert_eq!(selected, Source::Wave);
-        wave.playing = false;
-        selected = choose_source(true, Some(&wave), &browser, &selected);
-        assert_eq!(selected, Source::External("browser".into()));
-        browser.media.playing = false;
-        assert_eq!(choose_source(true, Some(&wave), &browser, &selected), selected);
-        wave.playing = true;
-        assert_eq!(choose_source(true, Some(&wave), &browser, &selected), Source::Wave);
-        wave.playing = false;
-        assert_eq!(choose_source(true, Some(&wave), &External::default(), &selected), Source::Wave);
-    }
-
-    #[test]
-    fn disabled_priority_keeps_wave_until_stopped() {
-        let wave = Media::default();
-        let browser = External { id: "browser".into(), media: Media { playing: true, ..Default::default() } };
-        assert_eq!(choose_source(false, Some(&wave), &browser, &Source::None), Source::Wave);
-        assert_eq!(choose_source(false, None, &browser, &Source::Wave), Source::External("browser".into()));
-        assert_eq!(choose_source(true, Some(&wave), &External::default(), &Source::None), Source::Wave);
-        assert_eq!(choose_source(true, None, &External::default(), &Source::Wave), Source::None);
-    }
-
-    #[test]
-    fn playing_session_beats_stale_current_and_manual_sessions() {
-        let mut sessions = vec![("spotify".into(), false), ("browser".into(), true)];
-        assert_eq!(choose_external(&sessions, Some("spotify"), Some("spotify"), None, true), Some(1));
-        assert_eq!(choose_external(&sessions, Some("spotify"), Some("browser"), None, false), Some(0));
-        sessions[1].1 = false;
-        assert_eq!(choose_external(&sessions, None, Some("spotify"), Some("browser"), true), Some(1));
-        sessions[0].1 = true;
-        assert_eq!(choose_external(&sessions, None, Some("browser"), Some("browser"), true), Some(0));
-        sessions[1].1 = true;
-        assert_eq!(choose_external(&sessions, None, Some("browser"), Some("spotify"), true), Some(1));
-        assert_eq!(choose_external(&[], Some("closed"), Some("closed"), None, true), None);
-    }
-
-    #[test]
-    fn own_media_session_is_not_an_external_player() {
-        let path = std::env::current_exe().unwrap();
-        assert!(own_session(&path.to_string_lossy()));
-        assert!(own_session(&path.to_string_lossy().to_uppercase()));
-        assert!(own_session(&path.file_name().unwrap().to_string_lossy()));
-        assert!(!own_session("chrome.exe"));
-        assert!(!own_session(""));
-    }
 
     fn solid(r: u8, g: u8, b: u8, count: usize) -> Vec<u8> {
         std::iter::repeat_n([b, g, r, 255], count).flatten().collect()

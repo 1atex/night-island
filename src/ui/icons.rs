@@ -1,41 +1,7 @@
-mod modern;
-
-pub const SIGN_OUT_GLYPH: char = '\u{F8FA}';
-pub const DISCORD_GLYPH: char = '\u{F8FC}';
-pub const SPOTIFY_GLYPH: char = '\u{F8FB}';
-pub const YANDEX_MUSIC_GLYPH: char = '\u{F8FD}';
-pub(super) const YANDEX_MUSIC_PATH: &str = include_str!("../../assets/brands/yandex-music.path");
-
-use std::sync::atomic::{AtomicBool, Ordering};
-
-pub(super) use modern::Cache;
-
-static LEGACY: AtomicBool = AtomicBool::new(false);
-
-pub fn set_legacy(enabled: bool) {
-    LEGACY.store(enabled, Ordering::Relaxed);
-}
-
-pub(super) fn legacy() -> bool {
-    LEGACY.load(Ordering::Relaxed)
-}
-
-#[cfg(test)]
-pub(super) fn modern_glyphs() -> impl Iterator<Item = char> {
-    ('\u{E000}'..='\u{F8FF}').filter(|&ch| modern::has_glyph(ch))
-}
-
 pub fn lookup(ch: char) -> Option<(&'static str, &'static str)> {
     const NEW: &str = "0 -960 960 960";
     const OLD: &str = "0 0 24 24";
     Some(match ch {
-        SIGN_OUT_GLYPH => (
-            OLD,
-            "M5 3H11V5H5V19H11V21H5C3.9 21 3 20.1 3 19V5C3 3.9 3.9 3 5 3ZM15.6 6.6L21 12L15.6 17.4L14.2 16L17.2 13H8V11H17.2L14.2 8Z",
-        ),
-        DISCORD_GLYPH => (OLD, include_str!("../../assets/brands/discord.path")),
-        SPOTIFY_GLYPH => (OLD, include_str!("../../assets/brands/spotify.path")),
-        YANDEX_MUSIC_GLYPH => (OLD, YANDEX_MUSIC_PATH),
         '\u{E006}' => (
             NEW,
             "M480-147q-14 0-28.5-5T426-168l-69-63q-106-97-191.5-192.5T80-634q0-94 63-157t157-63q53 0 100 22.5t80 61.5q33-39 80-61.5T660-854q94 0 157 63t63 157q0 115-85 211T602-230l-68 62q-11 11-25.5 16t-28.5 5Zm-38-543q-29-41-62-62.5T300-774q-60 0-100 40t-40 100q0 52 37 110.5T285.5-410q51.5 55 106 103t88.5 79q34-31 88.5-79t106-103Q726-465 763-523.5T800-634q0-60-40-100t-100-40q-47 0-80 21.5T518-690q-7 10-17 15t-21 5q-11 0-21-5t-17-15Zm38 189Z",

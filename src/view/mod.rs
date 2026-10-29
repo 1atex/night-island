@@ -22,22 +22,13 @@ mod agy;
 mod chat;
 mod clipboard;
 mod command;
-mod companion_popup;
 mod controls;
 mod discord;
 mod frame;
-mod guide;
 mod home;
-mod home_widgets;
 mod integrations;
-mod live;
-mod memory_tools;
 mod metrics;
-mod mixer;
-mod music_intro;
 mod note;
-mod notifications;
-mod pet_studio;
 mod pill;
 mod pill_vertical;
 mod privacy;
@@ -49,27 +40,18 @@ mod settings_window;
 mod steam;
 mod text;
 mod tips;
-mod wave_theme;
 mod weather;
 mod widgets;
-mod yandex;
 
 pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
 pub use self::{
-    activity::*, agy::*, chat::*, clipboard::*, command::*, companion_popup::*, controls::*, discord::*, frame::*,
-    home::*, integrations::*, metrics::*, mixer::*, music_intro::*, note::*, notifications::*, pill::*,
-    pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
-    widgets::*, yandex::*,
+    activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
+    integrations::*, metrics::*, note::*, pill::*, pill_vertical::*, privacy::*, record::*, remind::*, settings::*,
+    settings_window::*, steam::*, text::*, weather::*, widgets::*,
 };
-pub use guide::*;
-pub use home_widgets::*;
-pub use live::*;
-pub use memory_tools::*;
-pub use pet_studio::*;
 
 pub type Rect = (f32, f32, f32, f32);
-pub use wave_theme::{WaveColours, wave_colour};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -86,13 +68,10 @@ pub enum Tab {
     Activity,
     Steam,
     Controls,
-    Mixer,
-    Notifications,
-    Yandex,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 17] = [
+pub const TABS: [(Tab, char, &str); 14] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Text, '\u{E8E9}', "Text"),
@@ -106,9 +85,6 @@ pub const TABS: [(Tab, char, &str); 17] = [
     (Tab::Activity, '\u{E823}', "Activity"),
     (Tab::Steam, '\u{E7FC}', "Steam"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
-    (Tab::Mixer, '\u{E9E9}', "App mixer"),
-    (Tab::Notifications, '\u{EA8F}', "Notifications"),
-    (Tab::Yandex, crate::ui::icons::YANDEX_MUSIC_GLYPH, "My Wave"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
 
@@ -154,11 +130,6 @@ pub struct TabDrag {
 }
 
 pub struct UiState {
-    pub feedback: crate::ui::feedback::Feedback,
-    pub pressed_action: Option<usize>,
-    pub cover_in_flight: bool,
-    pub track_in_flight: bool,
-    pub composited_progress: bool,
     pub tab: Tab,
     pub tab_drag: Option<TabDrag>,
     pub tab_press: Option<(usize, i32, i32)>,
@@ -173,9 +144,6 @@ pub struct UiState {
     pub editing: bool,
     pub caret_on: bool,
     pub media: Media,
-    pub mixer: MixerUi,
-    pub notifications: NotificationsUi,
-    pub yandex: YandexUi,
     pub lyric: LyricUi,
     pub update: crate::services::update::Status,
     pub notes: NotesUi,
@@ -208,8 +176,6 @@ pub struct UiState {
     pub chat: ChatUi,
     pub privacy_log: PrivacyUi,
     pub activity: ActivityUi,
-    pub live: Vec<LiveActivity>,
-    pub live_changed: Option<std::time::Instant>,
     pub steam: SteamUi,
     pub metrics: MetricsUi,
     pub agents: Vec<crate::services::agents::Session>,
@@ -219,17 +185,10 @@ impl UiState {
     pub fn new() -> Self {
         Self {
             tab: Tab::Home,
-            feedback: Default::default(),
-            pressed_action: None,
-            cover_in_flight: false,
-            track_in_flight: false,
-            composited_progress: false,
             agy: AgyUi::default(),
             chat: ChatUi::default(),
             privacy_log: PrivacyUi::default(),
             activity: ActivityUi::default(),
-            live: Vec::new(),
-            live_changed: None,
             steam: SteamUi::default(),
             metrics: MetricsUi::default(),
             agents: Vec::new(),
@@ -240,9 +199,6 @@ impl UiState {
             clip: ClipUi::default(),
             city: CityUi::default(),
             home: HomeUi::default(),
-            mixer: MixerUi::default(),
-            notifications: NotificationsUi::default(),
-            yandex: YandexUi::default(),
             hover_tab: None,
             hover_sub: None,
             note: TextEdit::default(),
@@ -285,18 +241,6 @@ fn inside(r: Rect, px: f32, py: f32) -> bool {
     px >= r.0 && px < r.2 && py >= r.1 && py < r.3
 }
 
-pub(crate) fn rounded_body_contains((left, top, width, height): Rect, radius: f32, point: (f32, f32)) -> bool {
-    let x = point.0 - left;
-    let y = point.1 - top;
-    if !inside((0.0, 0.0, width, height), x, y) {
-        return false;
-    }
-    let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
-    let dx = x - x.clamp(radius, width - radius);
-    let dy = y - y.clamp(radius, height - radius);
-    dx * dx + dy * dy <= radius * radius
-}
-
 const DIM: f32 = 0.6;
 
 fn acc(alpha: f32) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {
@@ -307,15 +251,3 @@ fn acc(alpha: f32) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {
 const GREEN: (f32, f32, f32) = (0.4, 0.85, 0.55);
 
 const RED: (f32, f32, f32) = (1.0, 0.35, 0.35);
-
-impl UiState {
-    pub fn action_hover(&self, id: usize) -> f32 {
-        self.feedback.sample(id as u64, f32::from(self.home.hover_act == Some(id)), 0.0, 140)
-    }
-
-    pub fn action_rect(&self, id: usize, rect: Rect) -> Rect {
-        let pressed = self.feedback.sample(100_000 + id as u64, f32::from(self.pressed_action == Some(id)), 0.0, 90);
-        let inset = (rect.2 - rect.0).min(rect.3 - rect.1) * 0.035 * pressed;
-        (rect.0 + inset, rect.1 + inset, rect.2 - inset, rect.3 - inset)
-    }
-}

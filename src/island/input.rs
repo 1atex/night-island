@@ -2,11 +2,8 @@ use crate::island::*;
 
 #[derive(Default)]
 pub(in crate::island) struct Pointer {
-    pub(in crate::island) expand_pending: std::cell::Cell<bool>,
-    pub(in crate::island) decoration_through: bool,
     pub(in crate::island) tracking: bool,
     pub(in crate::island) press: Option<((i32, i32), (i32, i32))>,
-    pub(in crate::island) character_press: Option<(i32, i32)>,
     pub(in crate::island) moving: Option<((i32, i32), (i32, i32))>,
     pub(in crate::island) drag_from: Option<(usize, i32, i32)>,
     pub(in crate::island) selecting: bool,
@@ -18,24 +15,6 @@ pub(in crate::island) struct Pointer {
 
 impl App {
     pub(in crate::island) fn mouse_down(&mut self, x: i32, y: i32) {
-        if self.state == State::Expanded {
-            self.ui.pressed_action = self.ui.home.hover_act;
-            self.repaint_expanded();
-        }
-        if self.can_release_character(x, y) {
-            let mut point = windows::Win32::Foundation::POINT::default();
-            unsafe {
-                if GetCursorPos(&mut point).is_ok() {
-                    self.pointer.character_press = Some((point.x, point.y));
-                    windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
-                }
-            }
-            self.kill_timer(Timer::Expand);
-            self.kill_timer(Timer::Autohide);
-            self.reset_liquid_pull();
-            self.set_tip(None);
-            return;
-        }
         if self.state == State::Collapsed && self.ui.notice.is_none() && self.on_pill(x, y) {
             let mut pt = windows::Win32::Foundation::POINT::default();
             unsafe {
@@ -106,16 +85,6 @@ impl App {
     }
 
     pub(in crate::island) fn mouse_up(&mut self) {
-        if self.ui.pressed_action.take().is_some() {
-            self.repaint_expanded();
-        }
-        if self.pointer.character_press.take().is_some() {
-            unsafe {
-                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
-            }
-            self.set_character_detached(true);
-            return;
-        }
         let press = self.pointer.press.take();
         if self.pointer.moving.take().is_none() {
             if let Some((_, (x, y))) = press {
@@ -132,14 +101,13 @@ impl App {
         }
         let s = self.scale;
         let (sw, sh) = Self::screen_size();
-        let (wl, wt, wr, wb) = self.island_work_area();
+        let (wl, wt, wr, wb) = Self::work_area();
         let (cw, ch) = if self.state == State::Expanded {
             (EXPANDED.0 * s, EXPANDED.1 * s)
         } else {
             (self.collapsed().0 * s, self.collapsed().1 * s)
         };
-        let pill = if self.state == State::Expanded { self.pill_full() } else { self.pill_rect(false) };
-        let (px, py) = (rc.left as f32 + pill.0, rc.top as f32 + pill.1);
+        let (px, py) = (rc.left as f32 + self.win_pad().0 * s, rc.top as f32 + self.win_pad().1 * s);
         let (mid_x, mid_y) = (px + cw / 2.0, py + ch / 2.0);
         if self.docked() {
             let near = [
@@ -189,7 +157,6 @@ impl App {
         if self.state != State::Expanded {
             return;
         }
-        let Some((x, y)) = self.open_content_point(x, y) else { return };
         let pill = self.pill_rect(true);
         let (fx, fy) = (x as f32, y as f32);
         if self.ui.remind.alert.is_some() {
@@ -217,35 +184,6 @@ impl App {
                 self.repaint_expanded();
             }
             return;
-        }
-        if self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open) {
-            let hover = self.mixer_hit(fx, fy);
-            if self.ui.mixer.hover != hover {
-                self.ui.mixer.hover = hover;
-                self.repaint_expanded();
-            }
-            self.ui.hand = hover.is_some();
-        }
-        if self.ui.tab == view::Tab::Yandex {
-            let hover = view::hit_yandex(pill, self.scale, &self.ui.yandex, fx, fy);
-            if hover != self.ui.yandex.hover {
-                self.ui.yandex.hover = hover;
-                self.repaint_expanded();
-            }
-        }
-        if self.ui.tab == view::Tab::Notifications {
-            let hover = view::hit_notifications(
-                pill,
-                self.scale,
-                fx,
-                fy,
-                &self.ui.notifications,
-                self.settings.notification_open_app,
-            );
-            if hover != self.ui.notifications.hover {
-                self.ui.notifications.hover = hover;
-                self.repaint_expanded();
-            }
         }
         let hover_tab = view::hit_tab(self.pill_full(), self.scale, fx, fy, &self.ui);
         let hover_clip = match self.ui.tab {
@@ -329,10 +267,6 @@ impl App {
                 Some(view::ChatHit::RowDelete(i)) => Some(1240 + i),
                 Some(view::ChatHit::ChipRemove(i)) => Some(1260 + i),
                 Some(view::ChatHit::Setup) => Some(1210),
-                Some(view::ChatHit::Pet) => Some(1204),
-                Some(view::ChatHit::PetAction(view::PetStudioHit::Apply)) => Some(1280),
-                Some(view::ChatHit::PetAction(view::PetStudioHit::Photo)) => Some(1281),
-                Some(view::ChatHit::PetAction(view::PetStudioHit::TextOnly)) => Some(1282),
                 _ => None,
             }
         } else if self.ui.tab == view::Tab::Weather {
@@ -343,8 +277,6 @@ impl App {
             }
         } else if self.ui.tab == view::Tab::Home {
             match view::hit_home(pill, self.scale, fx, fy, &self.ui) {
-                Some(view::HomeHit::WidgetControl(_)) => Some(2200),
-                Some(view::HomeHit::WidgetHandle(id)) => Some(2000 + usize::from(id)),
                 Some(view::HomeHit::Action(i)) => Some(i),
                 Some(view::HomeHit::Device) => Some(100),
                 Some(view::HomeHit::Media(i)) => Some(500 + i),
@@ -359,14 +291,6 @@ impl App {
                 Some(view::HomeHit::VolumeIcon) => Some(530),
                 Some(view::HomeHit::Edit) => Some(550),
                 Some(view::HomeHit::Player) => Some(560),
-                Some(view::HomeHit::Wave) => Some(561),
-                Some(view::HomeHit::Live(index)) => Some(570 + index),
-                Some(view::HomeHit::Notification) => Some(562),
-                Some(view::HomeHit::WaveRate(rating)) => {
-                    Some(if rating == crate::services::yandex::Rating::Like { 564 } else { 565 })
-                }
-                Some(view::HomeHit::NotificationClose) => Some(566),
-                Some(view::HomeHit::NotificationExpand) => Some(563),
                 _ => None,
             }
         } else {
@@ -392,11 +316,7 @@ impl App {
             || hover_clip.is_some()
             || hover_ctl.is_some()
             || hover_note.is_some()
-            || hover_text.is_some()
-            || ((self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open))
-                && self.ui.mixer.hover.is_some())
-            || (self.ui.tab == view::Tab::Yandex && self.ui.yandex.hover.is_some())
-            || (self.ui.tab == view::Tab::Notifications && self.ui.notifications.hover.is_some());
+            || hover_text.is_some();
         let hover_sub = view::hit_subtab(self.pill_full(), self.scale, fx, fy, &self.ui);
         self.ui.hand |= hover_sub.is_some();
         if hover_tab != self.ui.hover_tab
@@ -432,7 +352,14 @@ impl App {
             view::HeadHit::Pin => {
                 (if self.ui.pinned { "Let it close" } else { "Keep open" }, view::pin_rect(self.pill_full(), s))
             }
-            view::HeadHit::More => ("More tabs and actions", view::more_rect(self.pill_full(), s)),
+            view::HeadHit::Lock => (
+                if self.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" },
+                view::lock_rect(self.pill_full(), s),
+            ),
+            view::HeadHit::TabDrag => (
+                if self.settings.tab_drag { "Stop moving tabs" } else { "Move tabs by dragging" },
+                view::tab_drag_rect(self.pill_full(), s),
+            ),
             view::HeadHit::Mic => {
                 let muted = self.ui.mic_muted == Some(true);
                 (
@@ -441,6 +368,7 @@ impl App {
                 )
             }
             view::HeadHit::Cam => ("Camera in use", view::privacy_dots(self.pill_full(), s, &self.ui).1?),
+            view::HeadHit::TabSettings => ("Settings of this tab", view::tab_settings_rect(self.pill_full(), s)),
         };
         Some((text.to_string(), below(rect)))
     }
@@ -474,7 +402,6 @@ impl App {
         if self.state != State::Expanded {
             return;
         }
-        let Some((x, y)) = self.open_content_point(x, y) else { return };
         if self.ui.remind.alert.is_some() {
             return self.click_alert(x, y);
         }
@@ -490,12 +417,29 @@ impl App {
                 self.repaint_expanded();
                 return;
             }
-            Some(view::HeadHit::More) => {
-                self.want_header_menu = true;
+            Some(view::HeadHit::Lock) => {
+                self.settings.lock_drag = !self.settings.lock_drag;
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.render_settings_win();
+                self.repaint_expanded();
+                return;
+            }
+            Some(view::HeadHit::TabDrag) => {
+                self.settings.tab_drag = !self.settings.tab_drag;
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.repaint_expanded();
                 return;
             }
             Some(view::HeadHit::Mic) => return self.toggle_mic(),
             Some(view::HeadHit::Cam) => return,
+            Some(view::HeadHit::TabSettings) => {
+                if let Some(group) = view::tab_settings_group(self.ui.tab) {
+                    self.open_settings_at(group);
+                }
+                return;
+            }
             None => {}
         }
         if view::hit_vpn_btn(self.pill_full(), self.scale, &self.ui, x as f32, y as f32) {
@@ -530,9 +474,6 @@ impl App {
         match self.ui.tab {
             view::Tab::Clipboard => self.click_clip(x, y),
             view::Tab::Controls => self.click_ctl(x, y),
-            view::Tab::Yandex => self.click_yandex(x, y),
-            view::Tab::Mixer => self.click_mixer(x, y),
-            view::Tab::Notifications => self.click_notifications(x, y),
             view::Tab::Note => self.click_note(x, y),
             view::Tab::Text => self.click_text(x, y),
             view::Tab::Record => self.click_record(x, y),
@@ -570,14 +511,6 @@ impl App {
             *scroll = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(view::home_edit_rows()) };
             return self.repaint_expanded();
         }
-        if self.ui.tab == view::Tab::Yandex && self.ui.yandex.open_group.is_some() {
-            self.scroll_wave_group(if delta > 0 { -2 } else { 2 });
-            return;
-        }
-        if self.ui.tab == view::Tab::Yandex && self.ui.yandex.show_library && self.ui.yandex.track_menu.is_none() {
-            self.move_wave_library(if delta > 0 { -1 } else { 1 });
-            return;
-        }
         if self.ui.tab == view::Tab::Steam {
             let most = self.ui.steam.games.len().saturating_sub(view::steam_rows(self.pill_rect(true), self.scale));
             let scroll = &mut self.ui.steam.scroll;
@@ -600,43 +533,6 @@ impl App {
             let step = 54.0 * self.scale * if delta > 0 { 1.0 } else { -1.0 };
             self.ui.chat.hist = (self.ui.chat.hist + step).clamp(0.0, self.ui.chat.max.get());
             return self.repaint_expanded();
-        }
-        if self.ui.tab == view::Tab::Notifications {
-            if self.ui.notifications.full {
-                let amount = if delta > 0 { -48.0 } else { 48.0 } * self.scale;
-                self.ui.notifications.detail_scroll =
-                    (self.ui.notifications.detail_scroll + amount).clamp(0.0, self.ui.notifications.detail_max.get());
-                return self.repaint_expanded();
-            }
-            let max = self
-                .ui
-                .notifications
-                .state
-                .records
-                .len()
-                .saturating_sub(view::notifications_rows(self.pill_rect(true), self.scale));
-            self.ui.notifications.scroll = if delta > 0 {
-                self.ui.notifications.scroll.saturating_sub(1)
-            } else {
-                (self.ui.notifications.scroll + 1).min(max)
-            };
-            return self.repaint_expanded();
-        }
-        if self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open) {
-            if self.ui.mixer.dragging.is_none() {
-                let max = self.ui.mixer.state.apps.len().saturating_sub(if self.ui.tab == view::Tab::Home {
-                    3
-                } else {
-                    view::mixer_visible_rows(self.pill_rect(true), self.scale)
-                });
-                self.ui.mixer.scroll = if delta > 0 {
-                    self.ui.mixer.scroll.saturating_sub(1)
-                } else {
-                    (self.ui.mixer.scroll + 1).min(max)
-                };
-                self.repaint_expanded();
-            }
-            return;
         }
         let rows = if self.ui.tab == view::Tab::Agy {
             view::agy_rows()
@@ -689,75 +585,17 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn on_interactive_body(&self, x: i32, y: i32) -> bool {
-        if self.can_release_character(x, y) {
-            return true;
-        }
-        let (at, size, radius) = self.pill(self.win, false, false);
-        if let Some(tween) = self.pill_motion.width {
-            let rect = tween.at(Instant::now());
-            let origin = self.window_origin(self.win);
-            return view::rounded_body_contains(rect, radius.X, (x as f32 + origin.0, y as f32 + origin.1));
-        }
-        view::rounded_body_contains((at.X, at.Y, size.X, size.Y), radius.X, (x as f32, y as f32))
-    }
-
-    pub(in crate::island) fn set_decoration_through(&mut self, through: bool) {
-        if self.pointer.decoration_through == through {
-            return;
-        }
-        self.pointer.decoration_through = through;
-        if through && self.pointer.tracking {
-            self.on_mouse_leave();
-        }
-        let through = through || (self.ghosted && self.settings.ghost_click_through);
-        unsafe {
-            let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
-            let bits = (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0) as isize;
-            SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, if through { ex | bits } else { ex & !bits });
-            if through {
-                let _ = SetLayeredWindowAttributes(self.hwnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
-            }
-        }
-    }
-
-    pub(in crate::island) fn update_decoration_input(&mut self) {
-        let mut point = windows::Win32::Foundation::POINT::default();
-        let mut window = windows::Win32::Foundation::RECT::default();
-        let valid = unsafe { GetCursorPos(&mut point).is_ok() && GetWindowRect(self.hwnd, &mut window).is_ok() };
-        let through = valid
-            && self.state == State::Collapsed
-            && (self.liquid_on() || self.pill_motion.width.is_some())
-            && !self.character_interacting()
-            && (!self.pill_motion_busy() || self.pill_motion.width.is_some())
-            && !self.on_interactive_body(point.x - window.left, point.y - window.top);
-        let was_through = self.pointer.decoration_through;
-        self.set_decoration_through(through);
-        if was_through
-            && !through
-            && valid
-            && self.state == State::Collapsed
-            && !self.character_interacting()
-            && self.on_interactive_body(point.x - window.left, point.y - window.top)
-        {
-            self.on_mouse_move(point.x - window.left, point.y - window.top);
-        }
-    }
-
     pub(in crate::island) fn on_pill(&self, x: i32, y: i32) -> bool {
         let s = self.scale;
-        let (left, top, w, h) = self.pill_rect(false);
+        let (win_w, _) = self.window_size(self.win);
+        let (w, h) = (self.collapsed().0 * s, self.collapsed().1 * s);
+        let (left, top) = ((win_w as f32 - w) / 2.0, self.win_pad().1 * s);
         let tol = 3.0 * s;
         let (fx, fy) = (x as f32, y as f32);
-        let above = if self.liquid_on() { tol } else { tol + 40.0 };
-        fx >= left - tol && fx < left + w + tol && fy >= top - above && fy < top + h + tol
+        fx >= left - tol && fx < left + w + tol && fy >= top - tol - 40.0 && fy < top + h + tol
     }
 
     pub(in crate::island) fn on_mouse_move(&mut self, x: i32, y: i32) {
-        if self.character_interacting() {
-            self.kill_timer(Timer::Expand);
-            return;
-        }
         unsafe {
             if !self.pointer.tracking {
                 self.pointer.tracking = true;
@@ -772,34 +610,25 @@ impl App {
         }
         self.kill_timer(Timer::Collapse);
         self.kill_timer(Timer::Autohide);
-        if self.state == State::Collapsing && self.transition_hit(x, y) == Some(true) {
-            self.expand();
-        }
         if self.state != State::Expanded {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed
                 && view::hit_mic_dot(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32);
-            let over_spark = self.can_release_character(x, y);
             self.ui.hand = self.state == State::Collapsed
                 && self.on_pill(x, y)
-                && (over_mic || over_spark || self.recording.is_some() || self.notice_link.is_some());
+                && (over_mic || self.recording.is_some() || self.notice_link.is_some());
             let hover = over_mic.then_some(view::HeadHit::Mic);
             if self.state == State::Collapsed && hover != self.ui.hover_head {
                 self.ui.hover_head = hover;
                 self.repaint_collapsed();
             }
-            let tip = if over_spark {
-                let (w, h) = self.char_size();
-                Some(("Click or drag to release the character".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
-            } else {
-                hover.and_then(|_| {
-                    let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
-                    let text = if self.ui.mic_muted == Some(true) { "Unmute microphone" } else { "Mute microphone" };
-                    Some((text.to_string(), ((dot.0 + dot.2) / 2.0, dot.3 + 10.0 * self.scale)))
-                })
-            };
+            let tip = hover.and_then(|_| {
+                let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
+                let text = if self.ui.mic_muted == Some(true) { "Unmute microphone" } else { "Mute microphone" };
+                Some((text.to_string(), ((dot.0 + dot.2) / 2.0, dot.3 + 10.0 * self.scale)))
+            });
             self.set_tip(tip);
-            if !over_mic && !over_spark && (hidden || self.on_pill(x, y)) {
+            if !over_mic && (hidden || self.on_pill(x, y)) {
                 self.set_timer(Timer::Expand, self.settings.open_delay_ms.max(1));
             } else {
                 self.kill_timer(Timer::Expand);
@@ -808,7 +637,6 @@ impl App {
     }
 
     pub(in crate::island) fn on_mouse_leave(&mut self) {
-        self.ui.pressed_action = None;
         self.pointer.tracking = false;
         let had_hover = self.ui.hover_tab.take().is_some()
             | self.ui.clip.hover.take().is_some()
@@ -826,41 +654,18 @@ impl App {
             self.repaint_expanded();
         }
         self.kill_timer(Timer::Expand);
-        if self.pointer.character_press.is_some() || self.pet.desktop.as_ref().is_some_and(|desktop| desktop.dragging())
-        {
-            return;
-        }
         match self.state {
             State::Expanded
                 if self.ui.remind.alert.is_some()
                     || self.ui.pinned
                     || self.popup_open
-                    || self.pointer.moving.is_some()
-                    || self.ui.home.widgets.interacting() => {}
+                    || self.pointer.moving.is_some() => {}
             State::Expanded if self.ui.editing => {
                 self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1500))
             }
             State::Expanded => self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1)),
             State::Collapsed => self.schedule_autohide(),
             _ => {}
-        }
-    }
-}
-
-#[cfg(test)]
-mod input_tests {
-    use super::*;
-
-    #[test]
-    fn decorative_pull_does_not_enlarge_the_clickable_body() {
-        for scale in [0.75, 1.0, 1.5, 2.0] {
-            let frame = (50.0 * scale, 40.0 * scale, 220.0 * scale, 36.0 * scale);
-            for point in [(160.0, 50.0), (60.0, 58.0), (260.0, 58.0)] {
-                assert!(view::rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
-            }
-            for point in [(160.0, 85.0), (35.0, 58.0), (285.0, 58.0), (51.0, 41.0), (160.0, 30.0)] {
-                assert!(!view::rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
-            }
         }
     }
 }

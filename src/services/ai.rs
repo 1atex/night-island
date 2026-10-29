@@ -7,7 +7,6 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 use crate::data::settings::{AiProvider, AiSettings};
-use crate::services::assistant::TtsProvider;
 use crate::services::attach::{Attachment, Kind as FileKind};
 use crate::services::{http, integrations};
 
@@ -15,7 +14,7 @@ pub const WM_AI: u32 = WM_APP + 21;
 
 const USER_AGENT: &str = "NightIsland/0.1";
 const MAX_PROMPT_CHARS: usize = 4000;
-const MAX_ANSWER_CHARS: usize = 24_000;
+const MAX_ANSWER_CHARS: usize = 4000;
 const MAX_OUTPUT_TOKENS: u32 = 600;
 const SYSTEM_PROMPT: &str =
     "Answer briefly and plainly, in the language of the question, in at most a few sentences. No markdown.";
@@ -29,12 +28,7 @@ const CHAT_TURNS: usize = 24;
 pub const WM_CHAT: u32 = WM_APP + 24;
 
 pub const WM_COMMAND: u32 = WM_APP + 30;
-const COMMAND_OUTPUT_TOKENS: u32 = 3000;
-static REPLY_TOKENS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(COMMAND_OUTPUT_TOKENS);
-
-pub fn set_reply_tokens(tokens: u32) {
-    REPLY_TOKENS.store(tokens, std::sync::atomic::Ordering::Relaxed);
-}
+const COMMAND_OUTPUT_TOKENS: u32 = 200;
 
 pub const WM_SORT: u32 = WM_APP + 31;
 pub const SORT_REQUESTS_PER_DAY: u32 = 5;
@@ -45,13 +39,9 @@ pub type Answer = Result<String, String>;
 static CONFIG: OnceLock<Mutex<AiSettings>> = OnceLock::new();
 static RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static CHAT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
-static COMMAND_RESULT: Mutex<Option<(u64, Answer)>> = Mutex::new(None);
+static COMMAND_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static SORT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static BUSY: AtomicBool = AtomicBool::new(false);
-
-pub fn busy() -> bool {
-    BUSY.load(Ordering::SeqCst)
-}
 
 pub fn configure(settings: &AiSettings) {
     let cell = CONFIG.get_or_init(|| Mutex::new(AiSettings::default()));
@@ -107,48 +97,6 @@ pub fn save_voice_key(key: &str) -> bool {
     has_voice_key()
 }
 
-fn tts_secret(provider: TtsProvider) -> &'static str {
-    match provider {
-        TtsProvider::OpenAi => "ai_tts",
-        TtsProvider::Eleven => "ai_tts_eleven",
-        TtsProvider::Fish => "ai_tts_fish",
-    }
-}
-
-pub fn has_tts_key(provider: TtsProvider) -> bool {
-    integrations::dir().is_some_and(|d| d.join(format!("{}.bin", tts_secret(provider))).exists())
-}
-
-pub fn save_tts_key(provider: TtsProvider, key: &str) -> bool {
-    if !valid_key(key) {
-        return false;
-    }
-    integrations::save_secret(tts_secret(provider), key.trim());
-    has_tts_key(provider)
-}
-
-pub fn remove_tts_key(provider: TtsProvider) {
-    integrations::delete_secret(tts_secret(provider));
-}
-
-pub fn tts_credentials(base: &str, provider: TtsProvider) -> Option<(String, String)> {
-    let base = clean_base(base)?;
-    if let Some(key) = integrations::load_secret(tts_secret(provider)) {
-        return Some((base, key));
-    }
-    if provider.needs_own_key() {
-        return None;
-    }
-    let (shared_base, key) = speech_credentials()?;
-    (shared_base == base).then_some((base, key))
-}
-
-pub fn tts_key_is_shared(base: &str, provider: TtsProvider) -> bool {
-    !provider.needs_own_key()
-        && !has_tts_key(provider)
-        && clean_base(base).is_some_and(|b| speech_credentials().is_some_and(|(shared, _)| shared == b))
-}
-
 pub fn remove_voice_key() {
     integrations::delete_secret(VOICE_SECRET);
 }
@@ -166,16 +114,6 @@ fn voice_secret(settings: &AiSettings) -> Option<String> {
 pub fn voice_shares_chat_key(settings: &AiSettings) -> bool {
     settings.voice_separate
         && matches!((clean_base(&settings.voice_base), clean_base(&settings.openai_base)), (Some(a), Some(b)) if a == b)
-}
-
-pub fn speech_credentials() -> Option<(String, String)> {
-    let settings = config();
-    if voice_provider(&settings) != AiProvider::OpenAi {
-        return None;
-    }
-    let base = clean_base(if settings.voice_separate { &settings.voice_base } else { &settings.openai_base })?;
-    let key = integrations::load_secret(&voice_secret(&settings)?)?;
-    Some((base, key))
 }
 
 pub fn voice_ready(settings: &AiSettings) -> bool {
@@ -295,23 +233,16 @@ fn gemini_parts(parts: Vec<Part>) -> Vec<serde_json::Value> {
 }
 
 pub fn build_call(settings: &AiSettings, key: &str, prompt: &str) -> Option<Call> {
-    build(settings, key, &[ChatTurn::text(false, prompt)], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS, false)
+    build(settings, key, &[ChatTurn::text(false, prompt)], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS)
 }
 
 pub fn build_chat_call(settings: &AiSettings, key: &str, turns: &[ChatTurn]) -> Option<Call> {
     let recent = &turns[turns.len().saturating_sub(CHAT_TURNS)..];
     let first_user = recent.iter().position(|t| !t.assistant)?;
-    build(settings, key, &recent[first_user..], CHAT_SYSTEM_PROMPT, CHAT_OUTPUT_TOKENS, false)
+    build(settings, key, &recent[first_user..], CHAT_SYSTEM_PROMPT, CHAT_OUTPUT_TOKENS)
 }
 
-fn build(
-    settings: &AiSettings,
-    key: &str,
-    turns: &[ChatTurn],
-    system: &str,
-    max_tokens: u32,
-    quick: bool,
-) -> Option<Call> {
+fn build(settings: &AiSettings, key: &str, turns: &[ChatTurn], system: &str, max_tokens: u32) -> Option<Call> {
     let provider = settings.provider;
     let model = settings.model(provider);
     if !valid_model(model, provider) {
@@ -343,21 +274,10 @@ fn build(
             all.extend(messages.into_iter().map(|(a, parts)| {
                 json!({"role": if a { "assistant" } else { "user" }, "content": content_json(provider, parts)})
             }));
-            let base = clean_base(&settings.openai_base)?;
-            let token_limit = if base == "https://api.openai.com" || base.starts_with("https://api.openai.com/") {
-                "max_completion_tokens"
-            } else {
-                "max_tokens"
-            };
-            let mut body = json!({"model": model, "messages": all});
-            body[token_limit] = json!(max_tokens);
-            if quick && settings.openai_base.to_ascii_lowercase().contains("deepseek.com") {
-                body["thinking"] = json!({"type": "disabled"});
-            }
             Call {
-                url: format!("{base}/chat/completions"),
+                url: format!("{}/chat/completions", clean_base(&settings.openai_base)?),
                 headers: vec![("Authorization", format!("Bearer {key}"))],
-                body: body.to_string(),
+                body: json!({"model": model, "max_tokens": max_tokens, "messages": all}).to_string(),
             }
         }
         AiProvider::Gemini => Call {
@@ -420,22 +340,7 @@ pub fn parse_reply(provider: AiProvider, status: u16, body: &str) -> Answer {
     };
     match text.map(|t| tidy(&t)) {
         Some(t) if !t.is_empty() => Ok(t),
-        _ => {
-            let finish = value["choices"][0]["finish_reason"]
-                .as_str()
-                .or(value["candidates"][0]["finishReason"].as_str())
-                .or(value["stop_reason"].as_str())
-                .unwrap_or("");
-            let thought = value["choices"][0]["message"]["reasoning_content"].as_str().is_some_and(|r| !r.is_empty());
-            crate::log_warn!("AI answer was empty (finish_reason={finish}, reasoning_only={thought})");
-            if matches!(finish, "length" | "MAX_TOKENS" | "max_tokens") {
-                Err(CUT_OFF.into())
-            } else if thought {
-                Err("The model spent its whole limit thinking and gave no answer".into())
-            } else {
-                Err("The answer was empty".into())
-            }
-        }
+        _ => Err("The answer was empty".into()),
     }
 }
 
@@ -489,20 +394,35 @@ fn whisper_model(base: &str) -> &'static str {
 fn openai_voice_call(base: &str, model: &str, key: &str, wav: &[u8]) -> VoiceCall {
     let mut body: Vec<u8> = Vec::with_capacity(wav.len() + 512);
     let field = |name: &str, value: &str| {
-        format!("--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
+        format!(
+            "--{MULTIPART_BOUNDARY}
+Content-Disposition: form-data; name=\"{name}\"
+
+{value}
+"
+        )
     };
     body.extend_from_slice(field("model", model).as_bytes());
     body.extend_from_slice(field("response_format", "json").as_bytes());
     body.extend_from_slice(
         format!(
-            "--{MULTIPART_BOUNDARY}\r\n\
-             Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\n\
-             Content-Type: audio/wav\r\n\r\n"
+            "--{MULTIPART_BOUNDARY}
+Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"
+Content-Type: audio/wav
+
+"
         )
         .as_bytes(),
     );
     body.extend_from_slice(wav);
-    body.extend_from_slice(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n").as_bytes());
+    body.extend_from_slice(
+        format!(
+            "
+--{MULTIPART_BOUNDARY}--
+"
+        )
+        .as_bytes(),
+    );
     VoiceCall {
         url: format!("{base}/audio/transcriptions"),
         headers: vec![("Authorization", format!("Bearer {key}"))],
@@ -550,9 +470,6 @@ pub fn build_voice_call(settings: &AiSettings, key: &str, wav: &[u8]) -> Option<
 }
 
 pub fn parse_transcript(provider: AiProvider, status: u16, body: &str) -> Answer {
-    if provider == AiProvider::OpenAi && matches!(status, 404 | 405 | 501) {
-        return Err("Speech endpoint unavailable; check the separate speech service".into());
-    }
     if provider == AiProvider::OpenAi && (200..300).contains(&status) {
         let value: serde_json::Value = serde_json::from_str(body).map_err(|_| "The reply was not understood")?;
         return match value["text"].as_str().map(tidy) {
@@ -604,7 +521,7 @@ fn transcribe_now(settings: &AiSettings, wav: &[u8]) -> Answer {
         }
         None => {
             crate::log_warn!("Speech request could not be made");
-            Err("No connection to the service or the request timed out".into())
+            Err("No connection to the service".into())
         }
     }
 }
@@ -621,7 +538,7 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
     let system = crate::tools::appgroups::system_prompt(groups);
     let turn = ChatTurn::text(false, names.join("\n"));
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS, true));
+        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS));
         if let Ok(mut r) = SORT_RESULT.lock() {
             *r = Some(answer);
         }
@@ -633,36 +550,23 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
     true
 }
 
-pub const CUT_OFF: &str = "The model ran out of its limit before it began to answer";
-const GROWN_TOKENS_CAP: u32 = 16_000;
-
-fn run_growing(settings: &AiSettings, turns: &[ChatTurn], system: &str, tokens: u32) -> Answer {
-    let first = run_with(settings, |key| build(settings, key, turns, system, tokens, true));
-    if first.as_ref().err().is_some_and(|why| why == CUT_OFF) {
-        let more = (tokens.saturating_mul(4)).min(GROWN_TOKENS_CAP.max(tokens));
-        crate::log_info!("AI: the limit of {tokens} tokens ran out, asking again with {more}");
-        return run_with(settings, |key| build(settings, key, turns, system, more, true));
-    }
-    first
-}
-
-pub fn complete(system: &str, user: &str, max_tokens: u32) -> Answer {
-    let settings = config();
-    let turn = ChatTurn::text(false, user);
-    run_growing(&settings, &[turn], system, max_tokens)
-}
-
-pub fn take_command_result() -> Option<(u64, Answer)> {
+pub fn take_command_result() -> Option<Answer> {
     COMMAND_RESULT.lock().ok()?.take()
 }
 
-pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String, serial: u64) -> bool {
-    let (raw, settings) = (hwnd.0 as isize, config());
+pub fn ask_command(hwnd: HWND, command: &str) -> bool {
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let (raw, settings, turn) = (hwnd.0 as isize, config(), ChatTurn::text(false, command));
     std::thread::spawn(move || {
-        let answer = run_growing(&settings, &turns, &system, REPLY_TOKENS.load(std::sync::atomic::Ordering::Relaxed));
+        let answer = run_with(&settings, |key| {
+            build(&settings, key, &[turn], crate::tools::voicecmd::SYSTEM_PROMPT, COMMAND_OUTPUT_TOKENS)
+        });
         if let Ok(mut r) = COMMAND_RESULT.lock() {
-            *r = Some((serial, answer));
+            *r = Some(answer);
         }
+        BUSY.store(false, Ordering::SeqCst);
         unsafe {
             let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_COMMAND, WPARAM(0), LPARAM(0));
         }
@@ -692,44 +596,6 @@ pub fn ask_chat(hwnd: HWND, turns: Vec<ChatTurn>) -> bool {
     true
 }
 
-pub fn build_pet_call(
-    settings: &AiSettings,
-    key: &str,
-    turn: &ChatTurn,
-    current: &crate::ui::pet_design::PetDesign,
-) -> Option<Call> {
-    let context =
-        format!("{}\nCurrent design: {}", crate::ui::pet_design::DESIGN_PROMPT, serde_json::to_string(current).ok()?);
-    build(settings, key, std::slice::from_ref(turn), &context, 1000, false)
-}
-
-pub fn ask_pet(hwnd: HWND, turn: ChatTurn, current: &crate::ui::pet_design::PetDesign) -> bool {
-    if BUSY.swap(true, Ordering::SeqCst) {
-        return false;
-    }
-    let (raw, settings, current) = (hwnd.0 as isize, config(), current.clone());
-    std::thread::spawn(move || {
-        let mut answer = run_with(&settings, |key| build_pet_call(&settings, key, &turn, &current));
-        if let Err(error) = &answer {
-            let lower = error.to_lowercase();
-            if !turn.attachments.is_empty()
-                && (lower.contains("image") || lower.contains("vision") || lower.contains("multimodal"))
-                && (lower.contains("support") || lower.contains("invalid") || lower.contains("accept"))
-            {
-                answer = Err("This model did not accept the photo. Select Text only and describe your pet, or choose a vision model.".into());
-            }
-        }
-        if let Ok(mut result) = CHAT_RESULT.lock() {
-            *result = Some(answer);
-        }
-        BUSY.store(false, Ordering::SeqCst);
-        unsafe {
-            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_CHAT, WPARAM(0), LPARAM(0));
-        }
-    });
-    true
-}
-
 fn run(settings: &AiSettings, prompt: &str) -> Answer {
     run_with(settings, |key| build_call(settings, key, prompt))
 }
@@ -750,7 +616,7 @@ fn run_with(settings: &AiSettings, make_call: impl FnOnce(&str) -> Option<Call>)
         }
         None => {
             crate::log_warn!("AI request could not be made");
-            Err("No connection to the service or the request timed out".into())
+            Err("No connection to the service".into())
         }
     }
 }
@@ -761,85 +627,6 @@ mod tests {
 
     fn settings(provider: AiProvider) -> AiSettings {
         AiSettings { provider, ..AiSettings::default() }
-    }
-
-    #[test]
-    fn an_empty_answer_that_hit_the_limit_is_told_apart_from_a_plain_empty_one() {
-        let hit = r#"{"choices":[{"finish_reason":"length","message":{"content":""}}]}"#;
-        assert_eq!(parse_reply(AiProvider::OpenAi, 200, hit), Err(CUT_OFF.to_string()));
-        let gemini = r#"{"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[]}}]}"#;
-        assert_eq!(parse_reply(AiProvider::Gemini, 200, gemini), Err(CUT_OFF.to_string()));
-        let claude = r#"{"stop_reason":"max_tokens","content":[]}"#;
-        assert_eq!(parse_reply(AiProvider::Claude, 200, claude), Err(CUT_OFF.to_string()));
-        let plain = r#"{"choices":[{"finish_reason":"stop","message":{"content":""}}]}"#;
-        assert_eq!(parse_reply(AiProvider::OpenAi, 200, plain), Err("The answer was empty".to_string()));
-        let fine = r#"{"choices":[{"finish_reason":"length","message":{"content":"Да"}}]}"#;
-        assert_eq!(parse_reply(AiProvider::OpenAi, 200, fine), Ok("Да".to_string()));
-    }
-
-    #[test]
-    #[ignore = "Sends a safe question to the configured AI service using the saved key"]
-    fn configured_provider_answers_a_voice_question() {
-        let settings = crate::data::settings::Settings::load().ai;
-        configure(&settings);
-        let started = std::time::Instant::now();
-        assert!(ask_agent(
-            HWND::default(),
-            vec![ChatTurn::text(false, "Сколько будет два плюс два? Ответь кратко.")],
-            crate::tools::voicecmd::system_prompt(&[], false, "", ""),
-            1,
-        ));
-        let answer = loop {
-            if let Some((serial, answer)) = take_command_result() {
-                assert_eq!(serial, 1);
-                break answer.expect("configured service must answer");
-            }
-            assert!(started.elapsed().as_secs() < 70, "voice command did not complete");
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        };
-        while busy() && started.elapsed().as_secs() < 70 {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(!busy(), "the AI must release its busy state");
-        assert!(
-            matches!(crate::tools::voicecmd::parse(&answer), crate::tools::voicecmd::Command::Answer(text) if !text.is_empty())
-        );
-        println!(
-            "Configured AI answered a safe voice question in {:.2}s and released its busy state",
-            started.elapsed().as_secs_f32()
-        );
-    }
-
-    #[test]
-    #[ignore = "Transmits the explicitly selected recording to the configured speech service"]
-    fn configured_speech_service_transcribes_a_recording() {
-        let path = std::env::var_os("NI_VOICE_TEST_RECORDING").expect("Select a test WAV with NI_VOICE_TEST_RECORDING");
-        let wav = std::fs::read(path).expect("test recording must load");
-        assert!(wav.starts_with(b"RIFF") && wav.get(8..12) == Some(b"WAVE"));
-        let settings = crate::data::settings::Settings::load().ai;
-        let started = std::time::Instant::now();
-        let transcript = transcribe_now(&settings, &wav).expect("configured speech service must transcribe");
-        assert!(!transcript.trim().is_empty());
-        println!(
-            "Configured speech service recognized {} characters in {:.2}s",
-            transcript.chars().count(),
-            started.elapsed().as_secs_f32()
-        );
-    }
-
-    #[test]
-    fn unavailable_speech_endpoint_explains_what_to_configure() {
-        for status in [404, 405, 501] {
-            assert_eq!(
-                parse_transcript(AiProvider::OpenAi, status, ""),
-                Err("Speech endpoint unavailable; check the separate speech service".into())
-            );
-        }
-        assert_eq!(
-            parse_transcript(AiProvider::OpenAi, 200, r#"{"text":"Island, hello"}"#),
-            Ok("Island, hello".into())
-        );
-        assert_ne!(parse_transcript(AiProvider::OpenAi, 401, ""), parse_transcript(AiProvider::OpenAi, 404, ""));
     }
 
     #[test]
@@ -861,15 +648,6 @@ mod tests {
         let call = build_call(&s, "k1234567", "Hi?").unwrap();
         assert_eq!(call.url, "https://openrouter.ai/api/v1/chat/completions");
         assert!(call.headers.contains(&("Authorization", "Bearer k1234567".to_string())));
-        let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
-        assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
-        assert!(body.get("max_completion_tokens").is_none());
-        s.openai_base = "https://api.openai.com/v1".into();
-        s.openai_model = "gpt-6-luna".into();
-        let call = build_call(&s, "k1234567", "Hi?").unwrap();
-        let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
-        assert_eq!(body["max_completion_tokens"], MAX_OUTPUT_TOKENS);
-        assert!(body.get("max_tokens").is_none());
         let g = build_call(&settings(AiProvider::Gemini), "k1234567", "Hi?").unwrap();
         assert!(g.url.starts_with("https://generativelanguage.googleapis.com/v1beta/models/"));
         assert!(g.url.ends_with(":generateContent") && !g.url.contains("k1234567"));
@@ -922,27 +700,23 @@ mod tests {
 
     #[test]
     fn a_voice_call_is_built_per_provider() {
-        let wav = vec![0, b'\n', b'\r', b'\n'];
+        let wav = vec![1u8, 2, 3, 4];
         assert!(build_voice_call(&settings(AiProvider::Claude), "k1234567", &wav).is_none());
         let mut s = settings(AiProvider::OpenAi);
         s.openai_base = "https://api.groq.com/openai/v1".into();
         let call = build_voice_call(&s, "k1234567", &wav).unwrap();
         assert_eq!(call.url, "https://api.groq.com/openai/v1/audio/transcriptions");
-        let boundary = call.content_type.strip_prefix("multipart/form-data; boundary=").unwrap();
-        let fields = format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-large-v3-turbo\r\n\
-             --{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n\
-             --{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\n\
-             Content-Type: audio/wav\r\n\r\n"
-        );
-        let ending = format!("\r\n--{boundary}--\r\n");
-        assert_eq!(call.body, [fields.as_bytes(), &wav, ending.as_bytes()].concat());
+        assert!(call.content_type.starts_with("multipart/form-data; boundary="));
+        let text = String::from_utf8_lossy(&call.body);
+        assert!(text.contains("whisper-large-v3-turbo") && text.contains("filename=\"speech.wav\""));
+        assert!(call.body.windows(4).any(|w| w == wav.as_slice()));
+        assert!(!text.contains("k1234567"), "the key goes in a header only");
         s.openai_base = "https://api.openai.com/v1".into();
         assert!(String::from_utf8_lossy(&build_voice_call(&s, "k1234567", &wav).unwrap().body).contains("whisper-1"));
         let g = build_voice_call(&settings(AiProvider::Gemini), "k1234567", &wav).unwrap();
         let body: serde_json::Value = serde_json::from_slice(&g.body).unwrap();
         assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["mimeType"], "audio/wav");
-        assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["data"], "AAoNCg==");
+        assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["data"], "AQIDBA==");
     }
 
     fn file_turn(text: &str, files: Vec<Attachment>) -> ChatTurn {
@@ -955,56 +729,6 @@ mod tests {
             kind: FileKind::Image,
             mime: "image/png",
             data: std::sync::Arc::new(vec![7; size]),
-        }
-    }
-
-    #[test]
-    #[ignore = "Sends two requests to the configured AI provider using an explicitly supplied test image"]
-    fn configured_provider_creates_pets_from_text_and_reference() {
-        let path = std::env::var_os("NI_PET_TEST_REFERENCE")
-            .expect("NI_PET_TEST_REFERENCE must name a non-private test image");
-        let image = crate::services::attach::load(std::path::Path::new(&path)).expect("test image must load");
-        let settings = crate::data::settings::Settings::load().ai;
-        assert!(has_key(settings.provider), "No configured API key");
-        let current = crate::ui::pet_design::PetDesign::default();
-        for attachments in [vec![], vec![image]] {
-            let with_image = !attachments.is_empty();
-            let turn = ChatTurn { assistant: false, text: "Создай коричневого медведя с синим шарфом. Если есть изображение, используй медведя справа как образец.".into(), attachments };
-            let answer = run_with(&settings, |key| build_pet_call(&settings, key, &turn, &current))
-                .expect("pet generation request failed");
-            let pet = crate::ui::pet_design::PetDesign::from_reply(&answer).expect("provider returned an invalid pet");
-            assert_eq!(pet.body, crate::ui::pet_design::PetBody::Bear);
-            assert_eq!(pet.accessory, crate::ui::pet_design::PetAccessory::Scarf);
-            println!("Configured provider returned a valid pet; reference image: {with_image}");
-        }
-    }
-
-    #[test]
-    fn pet_requests_keep_the_design_context_and_photo_for_every_provider() {
-        let design = crate::ui::pet_design::PetDesign { name: "Mochi".into(), ..Default::default() };
-        for provider in [AiProvider::Claude, AiProvider::OpenAi, AiProvider::Gemini] {
-            for with_photo in [false, true] {
-                let turn = file_turn("Make the scarf blue", if with_photo { vec![picture(3)] } else { vec![] });
-                let call = build_pet_call(&settings(provider), "test-key", &turn, &design).unwrap();
-                let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
-                let (system, photo) = match provider {
-                    AiProvider::Claude => {
-                        (body["system"].as_str().unwrap(), !body["messages"][0]["content"][0]["source"].is_null())
-                    }
-                    AiProvider::OpenAi => (
-                        body["messages"][0]["content"].as_str().unwrap(),
-                        !body["messages"][1]["content"][0]["image_url"].is_null(),
-                    ),
-                    AiProvider::Gemini => (
-                        body["systemInstruction"]["parts"][0]["text"].as_str().unwrap(),
-                        !body["contents"][0]["parts"][0]["inlineData"].is_null(),
-                    ),
-                };
-                assert!(system.contains("Mochi") && system.contains("Return ONLY one JSON object"));
-                assert_eq!(photo, with_photo, "{provider:?}");
-                assert!(call.body.contains("Make the scarf blue"));
-                assert!(!call.body.contains("test-key"));
-            }
         }
     }
 

@@ -198,15 +198,15 @@ pub fn music_pill(ui: &UiState) -> bool {
         && (ui.cfg.music_eq || ui.cfg.music_title || cover_visible(ui) || lyric_visible(ui))
         && ui.notice.is_none()
         && ui.volume.is_none()
-        && legacy_download(ui).is_none()
+        && ui.downloading.is_none()
 }
 
 pub fn row_pill(ui: &UiState) -> bool {
     music_pill(ui)
-        || ((!ui.live.is_empty() || ui.recording_secs.is_some() || pill_metrics_on(&ui.cfg) || agents_active(ui))
+        || ((ui.recording_secs.is_some() || pill_metrics_on(&ui.cfg) || agents_active(ui))
             && ui.notice.is_none()
             && ui.volume.is_none()
-            && legacy_download(ui).is_none())
+            && ui.downloading.is_none())
 }
 
 pub(in crate::view) fn rec_slot(secs: u32) -> f32 {
@@ -221,36 +221,9 @@ pub(in crate::view) fn rec_time(secs: u32) -> String {
     }
 }
 
-pub(in crate::view) const ROW_TEXT_SIZE: f32 = 13.0;
-pub(in crate::view) const ROW_ICON_SIZE: f32 = 22.0;
+pub(in crate::view) const COVER_SLOT: f32 = 26.0;
 
-pub(in crate::view) fn row_text_size(ui: &UiState) -> f32 {
-    if ui.cfg.pill_unified_layout { ROW_TEXT_SIZE } else { 12.5 }
-}
-pub(in crate::view) fn clock_text_size(ui: &UiState) -> f32 {
-    if ui.cfg.pill_unified_layout { ROW_TEXT_SIZE } else { 15.0 }
-}
-fn cover_size(ui: &UiState) -> f32 {
-    if ui.cfg.pill_unified_layout { ROW_ICON_SIZE } else { COVER_SLOT }
-}
-fn weather_clock_gap(ui: &UiState) -> f32 {
-    if ui.cfg.pill_unified_layout { 8.0 } else { WEATHER_CLOCK_GAP }
-}
-fn weather_text_gap(ui: &UiState) -> f32 {
-    if ui.cfg.pill_unified_layout { 1.5 } else { 3.0 }
-}
-
-pub(in crate::view) const COVER_SLOT: f32 = 24.0;
-
-pub(in crate::view) const PILL_WEATHER_ICON: f32 = 26.0;
-pub(in crate::view) const WEATHER_CLOCK_GAP: f32 = 3.0;
-pub(in crate::view) fn weather_slot_width(ui: &UiState) -> f32 {
-    let label =
-        ui.weather.as_ref().map_or_else(|| "0°".to_owned(), |weather| format!("{}°", weather.temp.round() as i32));
-    PILL_WEATHER_ICON
-        + weather_text_gap(ui)
-        + crate::ui::fonts::width(ui.cfg.interface_font, &label, row_text_size(ui), DWRITE_FONT_WEIGHT_SEMI_BOLD).ceil()
-}
+pub(in crate::view) const WEATHER_SLOT: f32 = 62.0;
 
 pub(in crate::view) const BARS_SLOT: f32 = 63.0;
 
@@ -283,6 +256,8 @@ pub(in crate::view) const AGENT_SLOT: f32 = 78.0;
 
 pub(in crate::view) const METRICS_CHAR_W: f32 = 6.6;
 
+pub(in crate::view) const CLOCK_SLOT: f32 = 54.0;
+
 pub(in crate::view) const SLOT_GAP: f32 = 8.0;
 
 pub(in crate::view) fn battery_slot(ui: &UiState) -> Option<f32> {
@@ -301,7 +276,6 @@ pub struct MusicSlots {
     pub title: Option<(f32, f32)>,
     pub lyric: Option<(f32, f32)>,
     pub rec: Option<(f32, f32)>,
-    pub live: Option<(f32, f32)>,
     pub metrics: Option<(f32, f32)>,
     pub agent: Option<(f32, f32)>,
     pub clock: (f32, f32),
@@ -311,59 +285,40 @@ pub struct MusicSlots {
 
 pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let shift = ui.char_inset + indicators_width(ui, 1.0);
-    let weather = (ui.cfg.pill_weather && ui.weather.is_some()).then_some(weather_slot_width(ui));
+    let weather = (ui.cfg.pill_weather && ui.weather.is_some()).then_some(WEATHER_SLOT);
     let music = music_pill(ui);
-    let cover = (music && cover_visible(ui)).then_some(cover_size(ui) * cover_aspect(ui));
+    let cover = (music && cover_visible(ui)).then_some(COVER_SLOT * cover_aspect(ui));
     let bars = (music && ui.cfg.music_eq).then_some(BARS_SLOT);
-    let title = (music && ui.cfg.music_title).then(|| {
-        (crate::ui::fonts::width(
-            ui.cfg.interface_font,
-            &ui.media.title,
-            row_text_size(ui),
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        ) + 2.0)
-            .clamp(16.0, TITLE_SLOT)
-    });
+    let title = (music && ui.cfg.music_title).then_some(TITLE_SLOT);
     let lyric = (music && lyric_visible(ui)).then_some(ui.lyric.width.max(LYRIC_SLOT));
-    let live = ui.live.first().map(|v| v.width() + if ui.live.len() > 1 { 22.0 } else { 0.0 });
-    let rec =
-        ui.recording_secs.filter(|_| !ui.live.first().is_some_and(|v| v.kind == LiveKind::Recording)).map(rec_slot);
+    let rec = ui.recording_secs.map(rec_slot);
     let agent = agents_active(ui).then_some(AGENT_SLOT);
     let metrics = pill_metrics_on(&ui.cfg).then(|| pill_chars(&ui.cfg.metrics_pill) as f32 * METRICS_CHAR_W + 4.0);
     let battery = battery_slot(ui);
-    let clock_width =
-        crate::ui::fonts::width(ui.cfg.interface_font, "88:88", clock_text_size(ui), DWRITE_FONT_WEIGHT_SEMI_BOLD)
-            .ceil()
-            + 2.0;
-    let widths = [cover, weather, bars, title, lyric, rec, live, agent, metrics, Some(clock_width), battery];
-    let weather_before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
+    let widths = [cover, weather, bars, title, lyric, rec, agent, metrics, Some(CLOCK_SLOT), battery];
     let count = widths.iter().flatten().count() as f32;
-    let content: f32 = widths.iter().flatten().sum::<f32>() + SLOT_GAP * (count - 1.0).max(0.0)
-        - if weather.is_some() { SLOT_GAP - weather_clock_gap(ui) } else { 0.0 };
+    let content: f32 = widths.iter().flatten().sum::<f32>() + SLOT_GAP * (count - 1.0).max(0.0);
     let width = (32.0 + shift + content).max(200.0);
     let total = if pill_w > 0.0 { pill_w / scale } else { width };
     let mut x = 16.0 + shift + (total - 32.0 - shift - content).max(0.0) / 2.0;
-    let mut place = |w: Option<f32>, gap: f32| {
+    let mut place = |w: Option<f32>| {
         w.map(|w| {
             let slot = (x * scale, w * scale);
-            x += w + gap;
+            x += w + SLOT_GAP;
             slot
         })
     };
-    let cover = place(cover, SLOT_GAP);
-    let bars = place(bars, SLOT_GAP);
-    let title = place(title, SLOT_GAP);
-    let lyric = place(lyric, SLOT_GAP);
-    let rec = place(rec, SLOT_GAP);
-    let live = place(live, SLOT_GAP);
-    let agent = place(agent, SLOT_GAP);
-    let metrics = place(metrics, SLOT_GAP);
-    let weather_left = if weather_before { place(weather, weather_clock_gap(ui)) } else { None };
-    let clock_gap = if !weather_before && weather.is_some() { weather_clock_gap(ui) } else { SLOT_GAP };
-    let clock = place(Some(clock_width), clock_gap).unwrap_or((0.0, 0.0));
-    let weather = weather_left.or_else(|| if weather_before { None } else { place(weather, SLOT_GAP) });
-    let battery = place(battery, SLOT_GAP);
-    MusicSlots { cover, weather, bars, title, lyric, rec, live, agent, metrics, clock, battery, width }
+    let cover = place(cover);
+    let weather = place(weather);
+    let bars = place(bars);
+    let title = place(title);
+    let lyric = place(lyric);
+    let rec = place(rec);
+    let agent = place(agent);
+    let metrics = place(metrics);
+    let clock = place(Some(CLOCK_SLOT)).unwrap_or((0.0, 0.0));
+    let battery = place(battery);
+    MusicSlots { cover, weather, bars, title, lyric, rec, agent, metrics, clock, battery, width }
 }
 
 pub(in crate::view) fn downloading_label(name: &str) -> String {
@@ -377,14 +332,14 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     }
     let chars = |s: &str| crate::ui::i18n::tr(s).chars().count() as f32;
     if let Some((_, text)) = &ui.notice {
-        return (ui.char_inset + notice_text_width(ui, text) + 60.0).clamp(base.min(460.0), 460.0);
+        return (ui.char_inset + 40.0 + chars(text) * 7.6 + 20.0).clamp(base, 460.0);
     }
     if ui.volume.is_some() {
         return base;
     }
-    if let Some(name) = legacy_download(ui) {
+    if let Some(name) = &ui.downloading {
         let shift = ui.char_inset + indicators_width(ui, 1.0);
-        return (shift + 40.0 + chars(&downloading_label(name)) * 6.9 + 18.0).clamp(base.min(420.0), 420.0);
+        return (shift + 40.0 + chars(&downloading_label(name)) * 6.9 + 18.0).clamp(base, 420.0);
     }
     if row_pill(ui) {
         return music_slots(ui, 1.0, 0.0).width.max(base);
@@ -392,20 +347,17 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     idle_width(ui).max(base)
 }
 
-pub(in crate::view) fn notice_text_width(ui: &UiState, text: &str) -> f32 {
-    crate::ui::fonts::width(ui.cfg.interface_font, &crate::ui::i18n::tr(text), 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)
-        .ceil()
-}
-
-pub fn compact_reply_fits(ui: &UiState, text: &str, available: f32) -> bool {
-    let text = crate::ui::i18n::tr(text);
-    !text.trim().is_empty()
-        && !text.chars().any(|ch| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
-        && ui.char_inset + notice_text_width(ui, &text) + 60.0 <= available.min(420.0)
-}
+pub(in crate::view) const IDLE_CLOCK_HALF: f32 = 24.0;
 
 pub(in crate::view) fn idle_width(ui: &UiState) -> f32 {
-    music_slots(ui, 1.0, 0.0).width
+    let shift = ui.char_inset + indicators_width(ui, 1.0);
+    let left = if ui.cfg.pill_weather && ui.weather.is_some() { 68.0 + shift } else { 14.0 + shift };
+    let right = match battery().map(|_| ui.cfg.pill_battery) {
+        Some(BatteryStyle::Percent) => 75.0,
+        Some(BatteryStyle::Icon) => 46.0,
+        _ => 14.0,
+    };
+    2.0 * (left.max(right) + IDLE_CLOCK_HALF)
 }
 
 fn paint_lyrics(p: &Painter, slot: Rect, scale: f32, lyric: &LyricUi) -> Result<()> {
@@ -443,36 +395,7 @@ pub fn progress_strip_on(ui: &UiState) -> bool {
     ui.cfg.music_progress && music_pill(ui) && crate::platform::media::progress().is_some()
 }
 
-pub fn pill_progress_fill_on(ui: &UiState) -> bool {
-    ui.cfg.progress_style == crate::data::settings::ProgressStyle::Fill && progress_strip_on(ui)
-}
-
-fn paint_progress_fill(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
-    if ui.composited_progress {
-        return Ok(());
-    }
-    let Some((pos, len)) = crate::platform::media::progress().filter(|_| pill_progress_fill_on(ui)) else {
-        return Ok(());
-    };
-    let base = ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
-    let rect = (pill.0, pill.1, pill.0 + pill.2, pill.1 + pill.3);
-    if ui.cfg.placement != crate::data::settings::Placement::Docked {
-        return p.fill_capsule_progress(rect, pos / len, base);
-    }
-    let radius = (16.0 * scale).min(pill.3.min(pill.2) / 2.0);
-    let mut body = rect;
-    if ui.cfg.dock_edge == crate::data::settings::Edge::Bottom {
-        body.3 += radius;
-    } else {
-        body.1 -= radius;
-    }
-    p.fill_body_progress(rect, body, radius, pos / len, base)
-}
-
 pub(in crate::view) fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
-    if ui.cfg.progress_style == crate::data::settings::ProgressStyle::Fill {
-        return Ok(());
-    }
     let Some((pos, len)) = crate::platform::media::progress().filter(|_| progress_strip_on(ui)) else { return Ok(()) };
     if ui.cfg.progress_style != crate::data::settings::ProgressStyle::Strip {
         return paint_progress_outline(p, pill, scale, ui, (pos / len).clamp(0.0, 1.0));
@@ -563,45 +486,10 @@ fn paint_progress_outline(p: &Painter, pill: Rect, scale: f32, ui: &UiState, fra
     Ok(())
 }
 
-pub fn pill_weather_visible(ui: &UiState) -> bool {
-    ui.cfg.pill_weather
-        && ui.weather.is_some()
-        && ui.notice.is_none()
-        && ui.volume.is_none()
-        && legacy_download(ui).is_none()
-}
-
-pub fn pill_weather_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
-    if !pill_weather_visible(ui) {
-        return None;
-    }
-    let (x, y, w, h) = pill;
-    let (cx, cy, r) = if ui.cfg.vertical() {
-        let (off, _) = vertical_slots(ui, scale, h).weather?;
-        (x + w / 2.0, y + off + 13.0 * scale, 13.0 * scale)
-    } else {
-        let left = x + music_slots(ui, scale, w).weather?.0;
-        (left + 13.0 * scale, y + h / 2.0, 13.0 * scale)
-    };
-    Some((cx - r, cy - r, cx + r, cy + r))
-}
-
-pub fn paint_pill_weather_icon(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
-    if let (Some((left, top, right, bottom)), Some(wx)) = (pill_weather_rect(pill, scale, ui), &ui.weather) {
-        animated_weather_icon(p, (left + right) / 2.0, (top + bottom) / 2.0, (right - left) / 2.0, wx.sky, wx.night)?;
-    }
-    Ok(())
-}
-
 pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     if ui.cfg.vertical() {
-        let (x, y, w, h) = pill;
-        p.rotated((x, y, x + w, y + h), ui.cfg.dock_edge == crate::data::settings::Edge::Left, |p, local| {
-            paint_progress_fill(p, local, scale, ui)
-        })?;
         return paint_collapsed_vertical(p, pill, scale, ui);
     }
-    paint_progress_fill(p, pill, scale, ui)?;
     paint_collapsed_body(p, pill, scale, ui)?;
     paint_progress_strip(p, pill, scale, ui)
 }
@@ -641,7 +529,7 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
             WHITE,
         );
     }
-    if let Some(name) = legacy_download(ui) {
+    if let Some(name) = &ui.downloading {
         let shift = indicators_width(ui, scale) + inset;
         p.glyph('\u{E896}', (x + 10.0 * scale + shift, y, x + 38.0 * scale + shift, y + h), 15.0 * scale, acc(1.0))?;
         let label = downloading_label(name);
@@ -675,14 +563,13 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
             }
         }
     };
-    let weather_at = || -> Result<()> {
+    let weather_at = |cx: f32| -> Result<()> {
         if let (true, Some(wx)) = (ui.cfg.pill_weather, &ui.weather) {
-            paint_pill_weather_icon(p, pill, scale, ui)?;
-            let rect = pill_weather_rect(pill, scale, ui).unwrap();
+            weather_icon(p, cx, y + h / 2.0, 10.5 * scale, wx.sky, wx.night)?;
             p.text(
                 &format!("{}°", wx.temp.round() as i32),
-                (rect.2 + weather_text_gap(ui) * scale, y, rect.0 + weather_slot_width(ui) * scale, y + h),
-                row_text_size(ui) * scale,
+                (cx + 14.0 * scale, y, cx + 48.0 * scale, y + h),
+                12.5 * scale,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_TEXT_ALIGNMENT_LEADING,
                 rgba(1.0, 1.0, 1.0, 0.85),
@@ -690,254 +577,96 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         }
         Ok(())
     };
-    let slots = music_slots(ui, scale, w);
-    if let (Some((off, width)), Some(cover)) = (slots.cover, &ui.media.cover) {
-        let side = (cover_size(ui) * scale).min(h - 10.0 * scale);
-        let top = y + (h - side) / 2.0;
-        let wide = width.min(side * cover_aspect(ui));
-        if !ui.cover_in_flight && !ui.track_in_flight {
+    if row_pill(ui) {
+        let slots = music_slots(ui, scale, w);
+        if let (Some((off, width)), Some(cover)) = (slots.cover, &ui.media.cover) {
+            let side = (COVER_SLOT * scale).min(h - 10.0 * scale);
+            let top = y + (h - side) / 2.0;
+            let wide = width.min(side * cover_aspect(ui));
             p.cover((x + off, top, x + off + wide, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
         }
-    }
-    if slots.weather.is_some() {
-        weather_at()?;
-    }
-    if let Some((off, width)) = slots.title
-        && !ui.track_in_flight
-    {
+        if let Some((off, _)) = slots.weather {
+            weather_at(x + off + 10.0 * scale)?;
+        }
+        if let Some((off, width)) = slots.title {
+            p.text(
+                &ui.media.title,
+                (x + off, y, x + off + width, y + h),
+                12.5 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                WHITE,
+            )?;
+        }
+        if let Some((off, width)) = slots.lyric {
+            paint_lyrics(p, (x + off, y, x + off + width, y + h), scale, &ui.lyric)?;
+        }
+        if let (Some((off, width)), Some(secs)) = (slots.rec, ui.recording_secs) {
+            let cy = y + h / 2.0;
+            let alpha = if secs % 2 == 0 { 1.0 } else { 0.45 };
+            let r = 4.5 * scale;
+            let dot_cx = x + off + r + 1.0 * scale;
+            p.fill_ellipse(dot_cx, cy, r * 1.8, r * 1.8, rgba(1.0, 0.27, 0.27, 0.18 * alpha))?;
+            p.fill_ellipse(dot_cx, cy, r, r, rgba(1.0, 0.27, 0.27, alpha))?;
+            p.text(
+                &rec_time(secs),
+                (dot_cx + r + 6.0 * scale, y, x + off + width, y + h),
+                13.0 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                rgba(1.0, 0.55, 0.55, 1.0),
+            )?;
+        }
+        if let Some((off, width)) = slots.agent {
+            let (label, color) = agent_label(ui);
+            let cy = y + h / 2.0;
+            p.fill_ellipse(x + off + 5.0 * scale, cy, 8.0 * scale, 8.0 * scale, rgba(color.r, color.g, color.b, 0.2))?;
+            p.fill_ellipse(x + off + 5.0 * scale, cy, 4.0 * scale, 4.0 * scale, color)?;
+            p.text(
+                &label,
+                (x + off + 15.0 * scale, y, x + off + width, y + h),
+                12.0 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                color,
+            )?;
+        }
+        if let Some((off, width)) = slots.metrics {
+            p.text(
+                &ui.metrics.pill,
+                (x + off, y, x + off + width, y + h),
+                11.5 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                rgba(1.0, 1.0, 1.0, 0.85),
+            )?;
+        }
         p.text(
-            &ui.media.title,
-            (x + off, y, x + off + width, y + h),
-            row_text_size(ui) * scale,
+            &clock().hh_mm,
+            (x + slots.clock.0, y, x + slots.clock.0 + slots.clock.1, y + h),
+            15.0 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
+            DWRITE_TEXT_ALIGNMENT_CENTER,
             WHITE,
         )?;
-    }
-    if let Some((off, width)) = slots.lyric {
-        paint_lyrics(p, (x + off, y, x + off + width, y + h), scale, &ui.lyric)?;
-    }
-    if let (Some((off, width)), Some(secs)) = (slots.rec, ui.recording_secs) {
-        let cy = y + h / 2.0;
-        let alpha = if secs % 2 == 0 { 1.0 } else { 0.45 };
-        let r = 4.5 * scale;
-        let dot_cx = x + off + r + 1.0 * scale;
-        p.fill_ellipse(dot_cx, cy, r * 1.8, r * 1.8, rgba(1.0, 0.27, 0.27, 0.18 * alpha))?;
-        p.fill_ellipse(dot_cx, cy, r, r, rgba(1.0, 0.27, 0.27, alpha))?;
-        p.text(
-            &rec_time(secs),
-            (dot_cx + r + 6.0 * scale, y, x + off + width, y + h),
-            13.0 * scale,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
-            rgba(1.0, 0.55, 0.55, 1.0),
-        )?;
-    }
-    if let Some((off, width)) = slots.live {
-        paint_live_chip(p, (x + off, y, x + off + width, y + h), scale, ui)?;
-    }
-    if let Some((off, width)) = slots.agent {
-        let (label, color) = agent_label(ui);
-        let cy = y + h / 2.0;
-        p.fill_ellipse(x + off + 5.0 * scale, cy, 8.0 * scale, 8.0 * scale, rgba(color.r, color.g, color.b, 0.2))?;
-        p.fill_ellipse(x + off + 5.0 * scale, cy, 4.0 * scale, 4.0 * scale, color)?;
-        p.text(
-            &label,
-            (x + off + 15.0 * scale, y, x + off + width, y + h),
-            12.0 * scale,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
-            color,
-        )?;
-    }
-    if let Some((off, width)) = slots.metrics {
-        p.text(
-            &ui.metrics.pill,
-            (x + off, y, x + off + width, y + h),
-            11.5 * scale,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_TEXT_ALIGNMENT_LEADING,
-            rgba(1.0, 1.0, 1.0, 0.85),
-        )?;
+        if let Some((off, width)) = slots.battery {
+            paint_pill_battery(x + off, x + off + width)?;
+        }
+        return Ok(());
     }
     p.text(
         &clock().hh_mm,
-        (x + slots.clock.0, y, x + slots.clock.0 + slots.clock.1, y + h),
-        clock_text_size(ui) * scale,
+        (x, y, x + w, y + h),
+        15.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_CENTER,
         WHITE,
     )?;
-    if let Some((off, width)) = slots.battery {
-        paint_pill_battery(x + off, x + off + width)?;
+    weather_at(x + 24.0 * scale + inset + indicators_width(ui, scale))?;
+    match ui.cfg.pill_battery {
+        BatteryStyle::Hidden => {}
+        BatteryStyle::Icon => paint_pill_battery(x + w - 46.0 * scale, x + w - 16.0 * scale)?,
+        BatteryStyle::Percent => paint_pill_battery(x + w - 16.0 * scale - 62.0 * scale, x + w - 16.0 * scale)?,
     }
     Ok(())
-}
-
-pub fn pill_cover_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
-    if ui.notice.is_some() || ui.volume.is_some() || !row_pill(ui) || !cover_visible(ui) {
-        return None;
-    }
-    let (x, y, w, h) = pill;
-    if ui.cfg.vertical() {
-        let (off, _) = vertical_slots(ui, scale, h).cover?;
-        let side = (w - 14.0 * scale).min(30.0 * scale);
-        return Some((x + (w - side) / 2.0, y + off, x + (w + side) / 2.0, y + off + side));
-    }
-    let (off, width) = music_slots(ui, scale, w).cover?;
-    let side = (cover_size(ui) * scale).min(h - 10.0 * scale);
-    let wide = width.min(side * cover_aspect(ui));
-    Some((x + off, y + (h - side) / 2.0, x + off + wide, y + (h + side) / 2.0))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::data::settings::Edge;
-    use crate::services::weather::Weather;
-
-    #[test]
-    fn compact_replies_fit_the_selected_font_without_truncation() {
-        let mut ui = UiState::new();
-        ui.char_inset = 28.0;
-        for font in crate::data::settings::InterfaceFont::ALL {
-            ui.cfg.interface_font = font;
-            let reply = "Музыка на паузе.";
-            assert!(compact_reply_fits(&ui, reply, 420.0));
-            assert!(!compact_reply_fits(&ui, reply, 90.0));
-            for long in [
-                "",
-                "   ",
-                "Первая строка\nВторая строка",
-                "Ответ\u{2028}Продолжение",
-                &"Очень длинный ответ. ".repeat(12),
-            ] {
-                assert!(!compact_reply_fits(&ui, long, 420.0));
-            }
-            ui.notice = Some(('!', reply.into()));
-            let text = notice_text_width(&ui, reply);
-            let width = collapsed_width(&ui, 150.0);
-            assert!(width >= ui.char_inset + 50.0 + text);
-            assert!(width < 420.0);
-        }
-    }
-
-    fn weather_ui() -> UiState {
-        let mut ui = UiState::new();
-        ui.cfg.weather = true;
-        ui.cfg.pill_weather = true;
-        ui.weather = Some(Weather {
-            place: "Test".into(),
-            temp: 12.0,
-            wind: 2.0,
-            humidity: 50.0,
-            sky: Sky::Rain,
-            night: false,
-            hourly: Vec::new(),
-            daily: Vec::new(),
-            city_missing: false,
-        });
-        ui
-    }
-
-    #[test]
-    fn weather_stays_next_to_the_clock_on_the_selected_side_with_and_without_music() {
-        use crate::data::settings::WeatherSide;
-        let mut ui = weather_ui();
-        for side in WeatherSide::ALL {
-            ui.cfg.pill_weather_side = side;
-            for playing in [false, true] {
-                ui.media.playing = playing;
-                ui.media.title = "Track title".into();
-                for scale in [0.75, 1.0, 1.25, 1.5, 2.0] {
-                    let width = collapsed_width(&ui, 200.0) * scale;
-                    let pill = (12.0, 12.0, width, 34.0 * scale);
-                    let icon = pill_weather_rect(pill, scale, &ui).unwrap();
-                    let clock = music_slots(&ui, scale, width).clock;
-                    let (left, right) = (pill.0 + clock.0, pill.0 + clock.0 + clock.1);
-                    if side == WeatherSide::Left {
-                        assert!(
-                            (left - icon.0 - (weather_slot_width(&ui) + weather_clock_gap(&ui)) * scale).abs() < 0.01
-                        );
-                    } else {
-                        assert!((icon.0 - right - weather_clock_gap(&ui) * scale).abs() < 0.01);
-                    }
-                    assert!(icon.0 >= pill.0 && icon.0 + weather_slot_width(&ui) * scale <= pill.0 + width);
-                    assert!(icon.1 >= pill.1 && icon.3 <= pill.1 + pill.3);
-                    assert!((icon.2 - icon.0 - 26.0 * scale).abs() < 0.01);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn music_rows_measure_the_selected_font_without_empty_title_space_or_overlaps() {
-        let mut ui = weather_ui();
-        ui.char_inset = 28.0;
-        ui.media.playing = true;
-        ui.cfg.music_eq = true;
-        ui.cfg.music_title = true;
-        for font in crate::data::settings::InterfaceFont::ALL {
-            ui.cfg.interface_font = font;
-            ui.media.title = "Hi".into();
-            let short = music_slots(&ui, 1.0, 0.0).title.unwrap().1;
-            ui.media.title = "Очень длинное название трека для проверки".into();
-            let long = music_slots(&ui, 1.0, 0.0).title.unwrap().1;
-            assert!(short < long && long == TITLE_SLOT);
-            for scale in [0.75, 1.0, 1.25, 1.5, 2.0] {
-                let width = collapsed_width(&ui, 200.0) * scale;
-                let row = music_slots(&ui, scale, width);
-                let mut slots: Vec<_> = [row.cover, row.bars, row.title, row.weather, Some(row.clock), row.battery]
-                    .into_iter()
-                    .flatten()
-                    .collect();
-                slots.sort_by(|a, b| a.0.total_cmp(&b.0));
-                for pair in slots.windows(2) {
-                    assert!(pair[0].0 + pair[0].1 <= pair[1].0);
-                }
-                assert!(slots.last().is_some_and(|slot| slot.0 + slot.1 <= width - 15.0 * scale));
-            }
-        }
-    }
-
-    #[test]
-    fn weather_animation_regions_fit_both_pill_orientations_at_different_scales() {
-        let mut ui = weather_ui();
-        for scale in [1.0, 1.25, 2.0] {
-            for edge in Edge::ALL {
-                ui.cfg.placement = Placement::Docked;
-                ui.cfg.dock_edge = edge;
-                let (w, h) = if ui.cfg.vertical() { (42.0, 500.0) } else { (500.0, 42.0) };
-                let pill = (17.25, 8.75, w * scale, h * scale);
-                let rect = pill_weather_rect(pill, scale, &ui).unwrap();
-                assert!(rect.0 >= pill.0 && rect.1 >= pill.1);
-                assert!(rect.2 <= pill.0 + pill.2 && rect.3 <= pill.1 + pill.3);
-                let expected = 26.0 * scale;
-                assert!((rect.2 - rect.0 - expected).abs() < 0.001);
-                assert!((rect.3 - rect.1 - expected).abs() < 0.001);
-            }
-        }
-    }
-
-    #[test]
-    fn temporary_overlays_suspend_pill_weather_drawing() {
-        let mut ui = weather_ui();
-        let pill = (0.0, 0.0, 500.0, 500.0);
-        assert!(pill_weather_rect(pill, 1.0, &ui).is_some());
-        ui.notice = Some(('!', "Notice".into()));
-        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
-        ui.notice = None;
-        ui.volume = Some(0.5);
-        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
-        ui.volume = None;
-        ui.downloading = Some("file.zip".into());
-        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
-        ui.downloading = None;
-        assert!(pill_weather_rect(pill, 1.0, &ui).is_some());
-        ui.cfg.pill_weather = false;
-        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
-        ui.cfg.pill_weather = true;
-        ui.weather = None;
-        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
-    }
 }

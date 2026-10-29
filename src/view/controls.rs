@@ -72,13 +72,14 @@ pub(in crate::view) fn paint_controls(p: &Painter, pill: Rect, scale: f32, ui: &
         };
         let on = state == Some(Some(true));
         let armed = ui.armed == Some(i);
-        let hover = ui.feedback.sample(
-            700_000 + i as u64,
-            f32::from(ui.hover_ctl == Some(i) && *ctl != Ctl::Battery),
-            0.0,
-            140,
-        );
-        let bg = if armed { rgba(1.0, 0.35, 0.35, 0.28) } else { rgba(1.0, 1.0, 1.0, 0.08 + 0.05 * hover) };
+        let hover = ui.hover_ctl == Some(i) && *ctl != Ctl::Battery;
+        let bg = if armed {
+            rgba(1.0, 0.35, 0.35, 0.28)
+        } else if hover {
+            rgba(1.0, 1.0, 1.0, 0.13)
+        } else {
+            rgba(1.0, 1.0, 1.0, 0.08)
+        };
         p.fill_round_rect(r, 20.0 * scale, bg)?;
 
         if i < CTL_COLS {
@@ -130,17 +131,8 @@ pub(in crate::view) fn paint_controls(p: &Painter, pill: Rect, scale: f32, ui: &
                     None => "Unavailable",
                 },
             };
-            let devices = if *ctl == Ctl::Bluetooth && on {
-                crate::platform::bt_battery::summary(&crate::platform::bt_battery::latest())
-            } else {
-                None
-            };
-            let status = match devices {
-                Some(levels) => format!("{} · {levels}", crate::ui::i18n::tr(status)),
-                None => status.to_string(),
-            };
             p.text(
-                &status,
+                status,
                 (l + 16.0 * scale, b - 30.0 * scale, rr - 8.0 * scale, b - 10.0 * scale),
                 13.0 * scale,
                 DWRITE_FONT_WEIGHT_NORMAL,
