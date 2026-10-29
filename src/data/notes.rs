@@ -16,6 +16,7 @@ pub struct NoteItem {
     pub parent: Option<i64>,
     pub folder: bool,
     pub name: String,
+    pub remind: bool,
 }
 
 pub fn clean_name(name: &str) -> String {
@@ -74,6 +75,9 @@ pub(super) fn init(conn: &Connection) -> rusqlite::Result<()> {
              val TEXT NOT NULL
          );",
     )?;
+    let _ = conn.execute("ALTER TABLE note_items ADD COLUMN remind_id INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE note_items ADD COLUMN ord INTEGER NOT NULL DEFAULT 0", []);
+    conn.execute("UPDATE note_items SET ord = id WHERE ord = 0", [])?;
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM note_items", [], |r| r.get(0))?;
     if count == 0 {
         let legacy: String = conn
@@ -93,15 +97,36 @@ pub(super) fn init(conn: &Connection) -> rusqlite::Result<()> {
 impl Store {
     pub fn note_items(&self) -> Vec<NoteItem> {
         let Ok(mut stmt) = self.conn.prepare_cached(
-            "SELECT id, parent, folder, name FROM note_items ORDER BY folder DESC, name COLLATE NOCASE, id LIMIT ?1",
+            "SELECT id, parent, folder, name, EXISTS(SELECT 1 FROM reminders r WHERE r.id = note_items.remind_id)
+             FROM note_items ORDER BY ord, id LIMIT ?1",
         ) else {
             return Vec::new();
         };
         stmt.query_map(params![MAX_ITEMS], |r| {
-            Ok(NoteItem { id: r.get(0)?, parent: r.get(1)?, folder: r.get::<_, i64>(2)? != 0, name: r.get(3)? })
+            Ok(NoteItem {
+                id: r.get(0)?,
+                parent: r.get(1)?,
+                folder: r.get::<_, i64>(2)? != 0,
+                name: r.get(3)?,
+                remind: r.get::<_, i64>(4)? != 0,
+            })
         })
         .map(|rows| rows.flatten().collect())
         .unwrap_or_default()
+    }
+
+    pub fn note_remind(&self, id: i64) -> Option<(i64, i64)> {
+        self.conn
+            .query_row(
+                "SELECT r.id, r.due FROM note_items n JOIN reminders r ON r.id = n.remind_id WHERE n.id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok()
+    }
+
+    pub fn note_set_remind(&self, id: i64, reminder: i64) {
+        let _ = self.conn.execute("UPDATE note_items SET remind_id = ?2 WHERE id = ?1", params![id, reminder]);
     }
 
     pub fn note_text(&self, id: i64) -> String {
@@ -137,7 +162,29 @@ impl Store {
                 params![parent, i64::from(folder), name],
             )
             .ok()?;
-        Some(self.conn.last_insert_rowid())
+        let id = self.conn.last_insert_rowid();
+        let _ = self.conn.execute("UPDATE note_items SET ord = id WHERE id = ?1", params![id]);
+        Some(id)
+    }
+
+    pub fn note_place(&self, id: i64, parent: Option<i64>, before: Option<i64>) -> bool {
+        if !self.note_move(id, parent) {
+            return false;
+        }
+        let Ok(mut stmt) = self.conn.prepare("SELECT id FROM note_items WHERE parent IS ?1 ORDER BY ord, id") else {
+            return false;
+        };
+        let mut ids: Vec<i64> =
+            stmt.query_map(params![parent], |r| r.get(0)).map(|r| r.flatten().collect()).unwrap_or_default();
+        drop(stmt);
+        ids.retain(|&i| i != id);
+        let at = before.and_then(|b| ids.iter().position(|&i| i == b)).unwrap_or(ids.len());
+        ids.insert(at, id);
+        let Ok(tx) = self.conn.unchecked_transaction() else { return false };
+        for (n, i) in ids.iter().enumerate() {
+            let _ = tx.execute("UPDATE note_items SET ord = ?2 WHERE id = ?1", params![i, n as i64 + 1]);
+        }
+        tx.commit().is_ok()
     }
 
     pub fn note_rename(&self, id: i64, name: &str) {
@@ -233,10 +280,14 @@ mod tests {
         let items = s.note_items();
         let mut open = HashSet::new();
         let top: Vec<_> = visible_rows(&items, &open).iter().map(|(d, i)| (*d, i.name.clone())).collect();
-        assert_eq!(top, [(0, "Work".to_string()), (0, "Note".to_string())]);
+        assert_eq!(top, [(0, "Note".to_string()), (0, "Work".to_string())]);
         open.extend([folder, sub]);
         let all: Vec<_> = visible_rows(&items, &open).iter().map(|(d, i)| (*d, i.name.as_str())).collect();
-        assert_eq!(all, [(0, "Work"), (1, "Old"), (2, "Deep"), (1, "Plan"), (0, "Note")]);
+        assert_eq!(all, [(0, "Note"), (0, "Work"), (1, "Plan"), (1, "Old"), (2, "Deep")]);
+
+        assert!(s.note_place(sub, Some(folder), Some(sheet)));
+        let again: Vec<_> = visible_rows(&s.note_items(), &open).iter().map(|(_, i)| i.name.clone()).collect();
+        assert_eq!(again, ["Note", "Work", "Old", "Deep", "Plan"]);
 
         s.note_delete(folder);
         assert_eq!(s.note_items().len(), 1);

@@ -417,6 +417,65 @@ impl Painter<'_> {
         Ok(())
     }
 
+    pub fn offscreen(
+        &self,
+        size: (f32, f32),
+        origin: (f32, f32),
+        f: impl FnOnce(&Painter) -> Result<()>,
+    ) -> Result<windows::Win32::Graphics::Direct2D::ID2D1Bitmap> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_F;
+        use windows::Win32::Graphics::Direct2D::D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE;
+        unsafe {
+            let target = self.dc.CreateCompatibleRenderTarget(
+                Some(&D2D_SIZE_F { width: size.0.max(1.0), height: size.1.max(1.0) }),
+                None,
+                None,
+                D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
+            )?;
+            let rt: ID2D1RenderTarget = target.cast()?;
+            rt.BeginDraw();
+            rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            rt.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
+            rt.SetTransform(&Matrix3x2::translation(-origin.0, -origin.1));
+            let painted = f(&Painter { dc: &rt, dwrite: self.dwrite, icons: self.icons });
+            rt.EndDraw(None, None)?;
+            painted?;
+            target.GetBitmap()
+        }
+    }
+
+    pub fn draw_bitmap(
+        &self,
+        bitmap: &windows::Win32::Graphics::Direct2D::ID2D1Bitmap,
+        dest: (f32, f32, f32, f32),
+        opacity: f32,
+    ) {
+        use windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR;
+        unsafe {
+            let size = bitmap.GetSize();
+            self.dc.DrawBitmap(
+                bitmap,
+                Some(&D2D_RECT_F { left: dest.0, top: dest.1, right: dest.2, bottom: dest.3 }),
+                opacity,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                Some(&D2D_RECT_F { left: 0.0, top: 0.0, right: size.width, bottom: size.height }),
+            );
+        }
+    }
+
+    pub fn push_offset(&self, dx: f32, dy: f32) -> Matrix3x2 {
+        let mut old = Matrix3x2::identity();
+        unsafe {
+            self.dc.GetTransform(&mut old);
+            self.dc.SetTransform(&Matrix3x2 { M31: old.M31 + dx, M32: old.M32 + dy, ..old });
+        }
+        old
+    }
+
+    pub fn set_transform(&self, m: &Matrix3x2) {
+        unsafe { self.dc.SetTransform(m) };
+    }
+
     pub fn push_clip(&self, r: (f32, f32, f32, f32)) {
         unsafe {
             self.dc.PushAxisAlignedClip(
@@ -617,6 +676,66 @@ impl Painter<'_> {
             };
             let brush = self.dc.CreateBitmapBrush(&bitmap, None, Some(&brush_props))?;
             self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
+        }
+        Ok(())
+    }
+
+    pub fn cover(
+        &self,
+        rect: (f32, f32, f32, f32),
+        radius: f32,
+        cover: &crate::platform::media::Cover,
+        mode: crate::data::settings::CoverMode,
+    ) -> Result<()> {
+        use crate::data::settings::CoverMode;
+        match mode {
+            CoverMode::Crop => self.image(rect, radius, cover.size, &cover.bgra),
+            CoverMode::Stretch => self.image_wh(rect, rect, radius, cover.full_w, cover.full_h, &cover.full),
+            CoverMode::Fit => self.image_wh(rect, rect, radius, cover.full_w, cover.full_h, &cover.full),
+        }
+    }
+
+    pub fn image_wh(
+        &self,
+        dest: (f32, f32, f32, f32),
+        clip: (f32, f32, f32, f32),
+        radius: f32,
+        w: u32,
+        h: u32,
+        bgra: &[u8],
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::{
+            D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
+        };
+        use windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_PROPERTIES, D2D1_BRUSH_PROPERTIES};
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+        if w == 0 || h == 0 || bgra.len() < (w * h * 4) as usize {
+            return Ok(());
+        }
+        unsafe {
+            let props = D2D1_BITMAP_PROPERTIES {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0,
+                dpiY: 96.0,
+            };
+            let bitmap =
+                self.dc.CreateBitmap(D2D_SIZE_U { width: w, height: h }, Some(bgra.as_ptr().cast()), w * 4, &props)?;
+            let brush_props = D2D1_BRUSH_PROPERTIES {
+                opacity: 1.0,
+                transform: Matrix3x2 {
+                    M11: (dest.2 - dest.0) / w as f32,
+                    M12: 0.0,
+                    M21: 0.0,
+                    M22: (dest.3 - dest.1) / h as f32,
+                    M31: dest.0,
+                    M32: dest.1,
+                },
+            };
+            let brush = self.dc.CreateBitmapBrush(&bitmap, None, Some(&brush_props))?;
+            self.dc.FillRoundedRectangle(&rounded(clip, radius), &brush);
         }
         Ok(())
     }

@@ -5,8 +5,10 @@ pub(in crate::island) const CLOSE_BASE_MS: f32 = 400.0;
 pub(in crate::island) const AUTOHIDE_DELAY_MS: u32 = 1500;
 
 impl App {
-    pub(in crate::island) fn ease(&self) -> Result<windows::UI::Composition::CubicBezierEasingFunction> {
-        self.compositor.CreateCubicBezierEasingFunction(Vector2 { X: 0.34, Y: 1.45 }, Vector2 { X: 0.64, Y: 1.0 })
+    pub(in crate::island) fn ease(&self) -> Result<windows::UI::Composition::CompositionEasingFunction> {
+        let (x1, y1, x2, y2) =
+            crate::ui::anim::bezier_points(self.settings.anim_curve).unwrap_or((0.33, 0.33, 0.67, 0.67));
+        self.compositor.CreateCubicBezierEasingFunction(Vector2 { X: x1, Y: y1 }, Vector2 { X: x2, Y: y2 })?.cast()
     }
 
     pub(in crate::island) fn spring(&self, target: Vector2, ms: u64) -> Result<CompositionAnimation> {
@@ -90,6 +92,7 @@ impl App {
         self.ui.armed = None;
         self.ui.home.dev_menu = None;
         self.end_edit(true);
+        self.kill_timer(Timer::Collapse);
         self.state = State::Collapsing;
         self.update_eq();
         let _ = self.animate_to(false, false);

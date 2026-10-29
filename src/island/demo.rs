@@ -124,7 +124,7 @@ pub(in crate::island) fn apply(hwnd: HWND) {
                 a.open_settings_window();
                 a.ui.sw.group = group.parse().unwrap_or(0);
                 if let Ok(q) = std::env::var("NI_DEBUG_SWIN_Q") {
-                    a.ui.sw.search = q;
+                    a.set_search(&q);
                 }
                 a.render_settings_win();
             }

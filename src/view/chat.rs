@@ -157,7 +157,7 @@ fn chip_remove(chip: Rect, scale: f32) -> Rect {
     (chip.2 - 24.0 * scale, chip.1, chip.2, chip.3)
 }
 
-fn row_delete(row: Rect, scale: f32) -> Rect {
+pub(in crate::view) fn row_delete(row: Rect, scale: f32) -> Rect {
     (row.2 - 38.0 * scale, row.1 + 6.0 * scale, row.2 - 6.0 * scale, row.3 - 6.0 * scale)
 }
 

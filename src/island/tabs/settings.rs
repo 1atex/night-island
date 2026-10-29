@@ -1,22 +1,6 @@
 use crate::island::*;
 
 impl App {
-    pub(in crate::island) fn click_theme(&mut self, x: i32, y: i32) {
-        let pill = self.pill_rect(true);
-        if let Some(hit) = view::hit_theme(pill, self.scale, x as f32, y as f32) {
-            match hit {
-                view::ThemeHit::Preset(i) => crate::ui::theme::apply_preset(&mut self.settings, i),
-                view::ThemeHit::Panel(i) => crate::ui::theme::set_panel_swatch(&mut self.settings, i),
-                view::ThemeHit::Accent(i) => crate::ui::theme::set_accent_swatch(&mut self.settings, i),
-            }
-            self.apply_theme();
-            self.ui.cfg = self.settings.clone();
-            self.settings.save();
-            return self.repaint_expanded();
-        }
-        self.click_settings(x, y);
-    }
-
     pub(in crate::island) fn click_settings(&mut self, x: i32, y: i32) {
         let pill = self.pill_rect(true);
         let Some((id, hit)) = view::hit_setting(pill, self.scale, x as f32, y as f32, self.ui.tab) else {
@@ -24,7 +8,16 @@ impl App {
         };
         match hit {
             view::SetHit::Option(n) => {
-                if matches!(id, view::Sid::Character | view::Sid::Edge | view::Sid::PillBattery) {
+                if matches!(
+                    id,
+                    view::Sid::Character
+                        | view::Sid::Edge
+                        | view::Sid::PillBattery
+                        | view::Sid::CoverMode
+                        | view::Sid::TabAnimKind
+                        | view::Sid::AnimCurve
+                        | view::Sid::TextLayout
+                ) {
                     view::cycle_set(id, &mut self.settings, n == 1);
                 } else {
                     view::segment_set(id, &mut self.settings, n);
@@ -40,7 +33,7 @@ impl App {
                 self.pointer.slider = Some(id);
                 self.drag_slider(x);
             }
-            view::SetHit::Button => {}
+            view::SetHit::Button | view::SetHit::Label | view::SetHit::Select => {}
         }
     }
 
@@ -62,6 +55,21 @@ impl App {
     }
 
     pub(in crate::island) fn setting_changed(&mut self, id: view::Sid, apply: bool) {
+        self.ui.cfg = self.settings.clone();
+        crate::island::geometry::SNAP_FIT.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.apply_setting(id, apply);
+        if self.state == State::Collapsed {
+            self.update_eq();
+            self.repaint_collapsed();
+        }
+        crate::island::geometry::SNAP_FIT.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.set_timer(Timer::Settle, 700);
+        if self.pointer.slider.is_none() {
+            self.settings.save();
+        }
+    }
+
+    fn apply_setting(&mut self, id: view::Sid, apply: bool) {
         use view::Sid::*;
         if apply {
             match id {
@@ -123,18 +131,14 @@ impl App {
                         lockkeys::stop();
                     }
                 }
-                MusicEq | MusicTitle | MusicCover | MusicLyrics | PillWeather | PillBattery | SpikeColor | Spikes => {
+                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | PillWeather | PillBattery
+                | SpikeColor | Spikes => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }
                 _ => {}
             }
         }
-        self.ui.cfg = self.settings.clone();
         self.repaint_expanded();
-        self.set_timer(Timer::Settle, 700);
-        if self.pointer.slider.is_none() {
-            self.settings.save();
-        }
     }
 }

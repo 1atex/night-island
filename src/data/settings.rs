@@ -48,10 +48,11 @@ impl Edge {
         }
     }
 
+    pub const ALL: [Edge; 4] = [Edge::Top, Edge::Right, Edge::Bottom, Edge::Left];
+
     pub fn step(self, forward: bool) -> Self {
-        const ALL: [Edge; 4] = [Edge::Top, Edge::Right, Edge::Bottom, Edge::Left];
-        let i = ALL.iter().position(|e| *e == self).unwrap_or(0);
-        ALL[if forward { (i + 1) % 4 } else { (i + 3) % 4 }]
+        let i = Self::ALL.iter().position(|e| *e == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 4 } else { (i + 3) % 4 }]
     }
 }
 
@@ -89,10 +90,121 @@ impl BatteryStyle {
         }
     }
 
+    pub const ALL: [BatteryStyle; 3] = [BatteryStyle::Hidden, BatteryStyle::Icon, BatteryStyle::Percent];
+
     pub fn step(self, forward: bool) -> Self {
-        const ALL: [BatteryStyle; 3] = [BatteryStyle::Hidden, BatteryStyle::Icon, BatteryStyle::Percent];
-        let i = ALL.iter().position(|v| *v == self).unwrap_or(0);
-        ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TabAnim {
+    None,
+    Fade,
+    #[default]
+    Slide,
+    Zoom,
+    Rise,
+}
+
+impl TabAnim {
+    pub fn name(self) -> &'static str {
+        match self {
+            TabAnim::None => "None",
+            TabAnim::Fade => "Fade",
+            TabAnim::Slide => "Slide",
+            TabAnim::Zoom => "Zoom",
+            TabAnim::Rise => "Rise",
+        }
+    }
+
+    pub const ALL: [TabAnim; 5] = [TabAnim::None, TabAnim::Fade, TabAnim::Slide, TabAnim::Zoom, TabAnim::Rise];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 5 } else { (i + 4) % 5 }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AnimCurve {
+    #[default]
+    Spring,
+    Smooth,
+    Out,
+    Linear,
+}
+
+impl AnimCurve {
+    pub fn name(self) -> &'static str {
+        match self {
+            AnimCurve::Spring => "Spring",
+            AnimCurve::Smooth => "Smooth",
+            AnimCurve::Out => "Ease out",
+            AnimCurve::Linear => "Linear",
+        }
+    }
+
+    pub const ALL: [AnimCurve; 4] = [AnimCurve::Spring, AnimCurve::Smooth, AnimCurve::Out, AnimCurve::Linear];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 4 } else { (i + 3) % 4 }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TextLayout {
+    #[default]
+    Categories,
+    List,
+    Palette,
+}
+
+impl TextLayout {
+    pub fn name(self) -> &'static str {
+        match self {
+            TextLayout::Categories => "Groups",
+            TextLayout::List => "List",
+            TextLayout::Palette => "Chips and catalogue",
+        }
+    }
+
+    pub const ALL: [TextLayout; 3] = [TextLayout::Categories, TextLayout::List, TextLayout::Palette];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CoverMode {
+    #[default]
+    Crop,
+    Stretch,
+    Fit,
+}
+
+impl CoverMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            CoverMode::Crop => "Crop to square",
+            CoverMode::Stretch => "Stretch",
+            CoverMode::Fit => "Keep proportions",
+        }
+    }
+
+    pub const ALL: [CoverMode; 3] = [CoverMode::Crop, CoverMode::Stretch, CoverMode::Fit];
+
+    pub fn step(self, forward: bool) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
     }
 }
 
@@ -132,6 +244,8 @@ pub struct Settings {
     pub vpn_pill: bool,
     pub voice_paste: bool,
     pub music_lyrics: bool,
+    pub cover_mode: CoverMode,
+    pub text_layout: TextLayout,
     pub dev_tools: bool,
     pub shared_lyrics: bool,
     pub update_check: bool,
@@ -162,6 +276,14 @@ pub struct Settings {
     pub close_delay_ms: u32,
     pub open_speed: f32,
     pub close_speed: f32,
+    pub tab_anim: TabAnim,
+    pub tab_order: Vec<String>,
+    pub tab_drag: bool,
+    pub last_tab: String,
+    pub remember_tab: bool,
+    pub ai_sub: String,
+    pub tab_anim_speed: f32,
+    pub anim_curve: AnimCurve,
     pub keys: BTreeMap<String, Combo>,
     pub hide_pill_secs: u32,
     pub ghost_mode: bool,
@@ -208,12 +330,14 @@ impl Default for Settings {
             metrics_pill: Vec::new(),
             metrics_secs: 2,
             music_lyrics: false,
+            cover_mode: CoverMode::Crop,
+            text_layout: TextLayout::Categories,
             dev_tools: false,
             shared_lyrics: false,
             update_check: true,
             update_beta: false,
             ai: AiSettings::default(),
-            hidden_tabs: vec!["AGY".to_string(), "Activity".to_string()],
+            hidden_tabs: vec!["Activity".to_string()],
             notify: NotifySettings::default(),
             spike_color: true,
             record_format: RecordFormat::Mp4,
@@ -237,6 +361,14 @@ impl Default for Settings {
             open_delay_ms: 220,
             close_delay_ms: 400,
             open_speed: 1.0,
+            tab_anim: TabAnim::Slide,
+            tab_order: Vec::new(),
+            tab_drag: false,
+            last_tab: String::new(),
+            remember_tab: true,
+            ai_sub: "Chat".into(),
+            tab_anim_speed: 1.0,
+            anim_curve: AnimCurve::Spring,
             close_speed: 1.0,
             keys: BTreeMap::new(),
             hide_pill_secs: 7,
@@ -288,10 +420,11 @@ impl AiProvider {
         }
     }
 
+    pub const ALL: [AiProvider; 3] = [AiProvider::Claude, AiProvider::OpenAi, AiProvider::Gemini];
+
     pub fn step(self, forward: bool) -> Self {
-        const ALL: [AiProvider; 3] = [AiProvider::Claude, AiProvider::OpenAi, AiProvider::Gemini];
-        let at = ALL.iter().position(|p| *p == self).unwrap_or(0);
-        ALL[(at + if forward { 1 } else { ALL.len() - 1 }) % ALL.len()]
+        let at = Self::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Self::ALL[(at + if forward { 1 } else { Self::ALL.len() - 1 }) % Self::ALL.len()]
     }
 
     pub fn default_model(self) -> &'static str {
@@ -453,23 +586,8 @@ impl NotifySettings {
     }
 }
 
-pub const HIDEABLE_TABS: [&str; 15] = [
-    "System",
-    "Clipboard",
-    "Shelf",
-    "Text",
-    "Note",
-    "Reminders",
-    "Weather",
-    "Record",
-    "AGY",
-    "Chat",
-    "Privacy",
-    "Activity",
-    "Steam",
-    "Controls",
-    "Theme",
-];
+pub const HIDEABLE_TABS: [&str; 11] =
+    ["System", "Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
 
 impl Settings {
     pub fn tab_hidden(&self, name: &str) -> bool {
@@ -554,6 +672,11 @@ impl Settings {
     pub fn sanitize(&mut self) {
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
+        let (chat, agy) = (self.tab_hidden("Chat"), self.tab_hidden("AGY"));
+        self.hidden_tabs.retain(|t| t != "Chat" && t != "AGY");
+        if chat && agy && !self.tab_hidden("AI") {
+            self.hidden_tabs.push("AI".into());
+        }
         let mut seen: Vec<String> = Vec::new();
         for t in &self.hidden_tabs {
             if HIDEABLE_TABS.contains(&t.as_str()) && !seen.contains(t) {
@@ -590,6 +713,21 @@ impl Settings {
         self.close_delay_ms = self.close_delay_ms.clamp(0, 3000);
         self.open_speed = clamp_f(self.open_speed, 0.4, 2.5, d.open_speed);
         self.close_speed = clamp_f(self.close_speed, 0.4, 2.5, d.close_speed);
+        {
+            let mut seen: Vec<String> = Vec::new();
+            self.tab_order.retain(|n| {
+                let ok =
+                    n != "Home" && n != "Settings" && crate::view::TABS.iter().any(|t| t.2 == n) && !seen.contains(n);
+                if ok {
+                    seen.push(n.clone());
+                }
+                ok
+            });
+        }
+        if self.ai_sub != "Chat" && self.ai_sub != "AGY" {
+            self.ai_sub = "Chat".into();
+        }
+        self.tab_anim_speed = clamp_f(self.tab_anim_speed, 0.4, 2.5, d.tab_anim_speed);
         self.hide_pill_secs = self.hide_pill_secs.clamp(5, 10);
         self.ghost_opacity = clamp_f(self.ghost_opacity, 0.05, 1.0, d.ghost_opacity);
         self.metrics_secs = self.metrics_secs.clamp(1, 10);
@@ -664,13 +802,33 @@ mod tests {
 
     #[test]
     fn hidden_tabs_are_validated_and_toggle() {
-        let mut s: Settings = serde_json::from_str(r#"{"hidden_tabs":["AGY","AGY","Home","evil","Note"]}"#).unwrap();
+        let mut s: Settings =
+            serde_json::from_str(r#"{"hidden_tabs":["Weather","Weather","Home","evil","Text"]}"#).unwrap();
         s.sanitize();
-        assert_eq!(s.hidden_tabs, ["AGY", "Note"]);
-        assert!(Settings::default().tab_hidden("AGY"), "AGY starts hidden");
-        s.set_tab_hidden("AGY", false);
+        assert_eq!(s.hidden_tabs, ["Weather", "Text"]);
+        assert!(Settings::default().tab_hidden("Activity"), "Activity starts hidden");
+        s.set_tab_hidden("Weather", false);
         s.set_tab_hidden("Home", true);
-        assert_eq!(s.hidden_tabs, ["Note"]);
+        assert_eq!(s.hidden_tabs, ["Text"]);
+    }
+
+    #[test]
+    fn chat_and_agy_became_the_ai_tab() {
+        let mut s: Settings = serde_json::from_str(r#"{"hidden_tabs":["AGY","Text"]}"#).unwrap();
+        s.sanitize();
+        assert_eq!(s.hidden_tabs, ["Text"]);
+        let mut s: Settings = serde_json::from_str(r#"{"hidden_tabs":["AGY","Chat"],"ai_sub":"junk"}"#).unwrap();
+        s.sanitize();
+        assert_eq!(s.hidden_tabs, ["AI"]);
+        assert_eq!(s.ai_sub, "Chat");
+    }
+
+    #[test]
+    fn the_tab_order_drops_unknown_and_fixed_tabs() {
+        let mut s: Settings =
+            serde_json::from_str(r#"{"tab_order":["Text","Home","Text","nope","Settings","Weather"]}"#).unwrap();
+        s.sanitize();
+        assert_eq!(s.tab_order, ["Text", "Weather"]);
     }
 
     #[test]

@@ -6,15 +6,41 @@ impl App {
             return self.repaint_expanded();
         }
         let pill = self.pill_rect(true);
-        let scroll = self.ui.text.chip_scroll;
-        match view::hit_text(pill, self.scale, x as f32, y as f32, self.settings.dev_tools, scroll) {
+        match view::hit_text(pill, self.scale, x as f32, y as f32, &self.ui.cfg, &self.ui.text) {
             Some(view::TextHit::Chip(i)) => {
                 if let Some((op, _)) = texttools::ops(self.settings.dev_tools).get(i) {
                     self.run_text_op(*op);
                 }
+                self.ui.text.palette_open = false;
+                self.ui.text.chip_scroll = 0;
             }
+            Some(view::TextHit::Cat(k)) => {
+                self.ui.text.cat = k;
+                self.repaint_expanded();
+            }
+            Some(view::TextHit::Palette) => {
+                self.ui.text.palette_open = true;
+                self.ui.text.chip_scroll = 0;
+                self.end_edit(true);
+                self.repaint_expanded();
+            }
+            Some(view::TextHit::PaletteClose) => {
+                self.ui.text.palette_open = false;
+                self.ui.text.chip_scroll = 0;
+                self.repaint_expanded();
+            }
+            None if view::catalogue_open(&self.ui.cfg, &self.ui.text) => {}
             Some(view::TextHit::Action(i)) => self.run_text_action(i),
-            None => self.click_note(x, y),
+            None => {
+                self.ui.notes.drag_from = None;
+                let (fx, fy) = (x as f32, y as f32);
+                let f = view::text_frame(pill, self.scale).0;
+                if fx >= f.0 && fx < f.2 && fy >= f.1 && fy < f.3 {
+                    self.click_in_field(fx, fy);
+                } else {
+                    self.end_edit(true);
+                }
+            }
         }
     }
 

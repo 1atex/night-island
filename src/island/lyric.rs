@@ -13,6 +13,13 @@ impl App {
         let allowed = self.settings.lyrics_app_allowed(&m.source);
         let wanted = self.settings.music_lyrics && allowed && m.playing && !m.title.is_empty();
         if !wanted {
+            if m.playing && !m.title.is_empty() && self.ui.lyric.key.is_none() {
+                crate::log_info!(
+                    "lyrics skipped: setting={} player={:?} allowed={allowed}",
+                    self.settings.music_lyrics,
+                    m.source
+                );
+            }
             self.kill_timer(Timer::Lyric);
             if !self.settings.music_lyrics || !allowed || m.title.is_empty() {
                 self.ui.lyric = view::LyricUi::default();
@@ -22,9 +29,13 @@ impl App {
         let key = (m.title.clone(), m.artist.clone());
         if self.ui.lyric.key.as_ref() != Some(&key) {
             self.ui.lyric = view::LyricUi { key: Some(key.clone()), ..Default::default() };
+            crate::log_info!("now playing: title={:?} artist={:?} player={:?}", key.0, key.1, self.ui.media.source);
             match lyrics::cached(&key.0, &key.1) {
-                Some(Some(lines)) => self.set_lyric_lines(lines),
-                Some(None) => {}
+                Some(Some(lines)) => {
+                    crate::log_info!("lyrics: memory cache hit ({} lines)", lines.len());
+                    self.set_lyric_lines(lines)
+                }
+                Some(None) => crate::log_info!("lyrics: known miss in the memory cache"),
                 None => {
                     let secs = media::progress().map(|(_, len)| len.round() as u32).filter(|s| *s > 0);
                     lyrics::request(self.hwnd, &key.0, &key.1, secs, self.settings.shared_lyrics);
@@ -56,7 +67,11 @@ impl App {
         {
             return;
         }
-        let Some(Some(lines)) = lyrics::cached(&title, &artist) else { return };
+        let Some(Some(lines)) = lyrics::cached(&title, &artist) else {
+            crate::log_info!("lyrics: lookup finished, nothing to show for this track");
+            return;
+        };
+        crate::log_info!("lyrics: showing {} lines", lines.len());
         self.set_lyric_lines(lines);
         self.update_eq();
         self.repaint_collapsed();

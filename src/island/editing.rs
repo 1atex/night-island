@@ -11,12 +11,11 @@ impl App {
             view::agy_input(pill, self.scale, self.ui.agy.input_h.get())
         } else if self.ui.tab == view::Tab::Chat {
             view::agy_input(pill, self.scale, self.ui.chat.input_h.get())
-        } else if self.remind_active() {
-            view::remind_frame(pill, self.scale)
         } else if self.rename_active() {
-            view::rename_frame(pill, self.scale, &self.ui).unwrap_or_else(|| view::note_frame(pill, self.scale))
+            view::rename_frame(pill, self.scale, &self.ui)
+                .unwrap_or_else(|| view::note_frame_for(pill, self.scale, self.ui.notes.remind.is_some()))
         } else {
-            view::note_frame(pill, self.scale)
+            view::note_frame_for(pill, self.scale, self.ui.notes.remind.is_some())
         }
     }
 
@@ -25,7 +24,6 @@ impl App {
             view::Tab::Text => &self.ui.text.input,
             view::Tab::Agy => &self.ui.agy.input,
             view::Tab::Chat => &self.ui.chat.input,
-            view::Tab::Remind => &self.ui.remind.input,
             view::Tab::Note if self.ui.notes.renaming.is_some() => &self.ui.notes.name_input,
             _ => &self.ui.note,
         }
@@ -36,7 +34,6 @@ impl App {
             view::Tab::Text => &mut self.ui.text.input,
             view::Tab::Agy => &mut self.ui.agy.input,
             view::Tab::Chat => &mut self.ui.chat.input,
-            view::Tab::Remind => &mut self.ui.remind.input,
             view::Tab::Note if self.ui.notes.renaming.is_some() => &mut self.ui.notes.name_input,
             _ => &mut self.ui.note,
         }
@@ -82,6 +79,19 @@ impl App {
         }
         self.prev_foreground = HWND::default();
         self.repaint_expanded();
+        self.arm_collapse_if_idle(self.settings.close_delay_ms.max(1));
+    }
+
+    pub(in crate::island) fn arm_collapse_if_idle(&mut self, delay_ms: u32) {
+        if self.state == State::Expanded
+            && !self.pointer.tracking
+            && self.ui.remind.alert.is_none()
+            && !self.ui.pinned
+            && !self.popup_open
+            && self.pointer.moving.is_none()
+        {
+            self.set_timer(Timer::Collapse, delay_ms);
+        }
     }
 
     pub(in crate::island) fn ensure_caret_visible(&mut self) {
@@ -126,7 +136,6 @@ impl App {
                 return self.note_changed();
             }
             0x0D if self.ui.cmd.open
-                || self.remind_active()
                 || self.rename_active()
                 || self.clip_search()
                 || self.steam_search()
@@ -162,6 +171,7 @@ impl App {
         let mut buf = [0u8; 4];
         self.edit_mut().insert(ch.encode_utf8(&mut buf));
         self.note_changed();
+        self.arm_collapse_if_idle(self.settings.close_delay_ms.max(3000));
     }
 
     pub(in crate::island) fn on_keydown(&mut self, vk: u16) {
@@ -189,9 +199,6 @@ impl App {
                 }
                 _ => {}
             }
-        }
-        if self.remind_active() && vk == VK_RETURN.0 {
-            return self.add_reminder();
         }
         if self.rename_active() && (vk == VK_RETURN.0 || vk == VK_ESCAPE.0) {
             self.finish_rename(vk == VK_RETURN.0);

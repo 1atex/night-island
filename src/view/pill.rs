@@ -110,10 +110,18 @@ pub fn hit_mic_dot(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bo
     })
 }
 
+pub(in crate::view) fn mic_look(ui: &UiState) -> (char, windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F) {
+    if ui.mic_muted == Some(true) {
+        ('\u{F781}', rgba(1.0, 0.3, 0.3, 1.0))
+    } else {
+        ('\u{E720}', rgba(1.0, 0.62, 0.2, 1.0))
+    }
+}
+
 pub(in crate::view) fn paint_indicators(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let (mic, cam) = indicators(pill, scale, ui);
     if let Some(r) = mic {
-        let color = if ui.mic_muted == Some(true) { rgba(1.0, 0.3, 0.3, 1.0) } else { rgba(1.0, 0.62, 0.2, 1.0) };
+        let (glyph, color) = mic_look(ui);
         if ui.hover_head == Some(HeadHit::Mic) {
             let grow = 2.5 * scale;
             p.fill_round_rect(
@@ -122,7 +130,9 @@ pub(in crate::view) fn paint_indicators(p: &Painter, pill: Rect, scale: f32, ui:
                 rgba(1.0, 1.0, 1.0, 0.18),
             )?;
         }
-        p.fill_round_rect(r, 3.5 * scale, color)?;
+        let (cx, cy) = ((r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0);
+        let half = 6.0 * scale;
+        p.glyph(glyph, (cx - half, cy - half, cx + half, cy + half), 11.0 * scale, color)?;
     }
     if let Some(r) = cam {
         p.fill_round_rect(r, 3.5 * scale, rgba(0.3, 0.85, 0.45, 1.0))?;
@@ -146,6 +156,15 @@ pub struct LyricUi {
 
 pub fn lyric_visible(ui: &UiState) -> bool {
     ui.cfg.music_lyrics && ui.lyric.lines.is_some()
+}
+
+pub fn cover_aspect(ui: &UiState) -> f32 {
+    match (&ui.media.cover, ui.cfg.cover_mode) {
+        (Some(c), crate::data::settings::CoverMode::Fit) => {
+            (c.full_w.max(1) as f32 / c.full_h.max(1) as f32).clamp(0.5, 1.8)
+        }
+        _ => 1.0,
+    }
 }
 
 pub fn cover_visible(ui: &UiState) -> bool {
@@ -247,7 +266,7 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let shift = ui.char_inset + indicators_width(ui, 1.0);
     let weather = (ui.cfg.pill_weather && ui.weather.is_some()).then_some(WEATHER_SLOT);
     let music = music_pill(ui);
-    let cover = (music && cover_visible(ui)).then_some(COVER_SLOT);
+    let cover = (music && cover_visible(ui)).then_some(COVER_SLOT * cover_aspect(ui));
     let bars = (music && ui.cfg.music_eq).then_some(BARS_SLOT);
     let title = (music && ui.cfg.music_title).then_some(TITLE_SLOT);
     let lyric = (music && lyric_visible(ui)).then_some(ui.lyric.width.max(LYRIC_SLOT));
@@ -434,9 +453,10 @@ pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Res
     if row_pill(ui) {
         let slots = music_slots(ui, scale, w);
         if let (Some((off, width)), Some(cover)) = (slots.cover, &ui.media.cover) {
-            let side = width.min(h - 10.0 * scale);
+            let side = (COVER_SLOT * scale).min(h - 10.0 * scale);
             let top = y + (h - side) / 2.0;
-            p.image((x + off, top, x + off + side, top + side), 6.0 * scale, cover.size, &cover.bgra)?;
+            let wide = width.min(side * cover_aspect(ui));
+            p.cover((x + off, top, x + off + wide, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
         }
         if let Some((off, _)) = slots.weather {
             weather_at(x + off + 10.0 * scale)?;

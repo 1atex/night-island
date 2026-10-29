@@ -33,15 +33,17 @@ mod pill;
 mod privacy;
 mod record;
 mod remind;
+mod reorder;
 mod settings;
 mod settings_window;
-mod shelf;
 mod steam;
 mod text;
+mod tips;
 mod weather;
 mod widgets;
 
-use self::shelf::*;
+pub use self::reorder::Reorder;
+pub use self::tips::content_tip;
 pub use self::{
     activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
     integrations::*, metrics::*, note::*, pill::*, privacy::*, record::*, remind::*, settings::*, settings_window::*,
@@ -54,42 +56,59 @@ pub type Rect = (f32, f32, f32, f32);
 pub enum Tab {
     Home,
     Clipboard,
-    Shelf,
     Text,
     Note,
-    Remind,
     Weather,
     Record,
     Agy,
     Chat,
+    Ai,
     Privacy,
     Activity,
     Steam,
     System,
     Controls,
-    Theme,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 17] = [
+pub const TABS: [(Tab, char, &str); 15] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
-    (Tab::Shelf, '\u{E838}', "Shelf"),
     (Tab::Text, '\u{E8E9}', "Text"),
     (Tab::Note, '\u{E70B}', "Note"),
-    (Tab::Remind, '\u{E916}', "Reminders"),
     (Tab::Weather, '\u{F800}', "Weather"),
     (Tab::Record, '\u{E7C8}', "Record"),
     (Tab::Agy, '\u{E943}', "AGY"),
     (Tab::Chat, '\u{E8F2}', "Chat"),
+    (Tab::Ai, '\u{E99A}', "AI"),
     (Tab::Privacy, '\u{EA18}', "Privacy"),
     (Tab::Activity, '\u{E823}', "Activity"),
     (Tab::Steam, '\u{E7FC}', "Steam"),
     (Tab::System, '\u{E9D9}', "System"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
-    (Tab::Theme, '\u{E790}', "Theme"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
+
+pub type SubTabs = [(Tab, char, &'static str); 2];
+pub const SUBTABS: [(Tab, SubTabs); 1] = [(Tab::Ai, [(Tab::Chat, '\u{E8F2}', "Chat"), (Tab::Agy, '\u{E943}', "AGY")])];
+
+pub const SUB_H: f32 = 36.0;
+
+pub fn body_rect(pill: Rect, scale: f32, tab: Tab) -> Rect {
+    if bar_tab(tab) != tab { (pill.0, pill.1 + SUB_H * scale, pill.2, pill.3 - SUB_H * scale) } else { pill }
+}
+
+pub fn bar_tab(tab: Tab) -> Tab {
+    SUBTABS.iter().find(|(_, subs)| subs.iter().any(|s| s.0 == tab)).map_or(tab, |g| g.0)
+}
+
+pub fn tab_from_name(name: &str) -> Option<Tab> {
+    TABS.iter().find(|t| t.2 == name).map(|t| t.0)
+}
+
+pub fn tab_name(tab: Tab) -> &'static str {
+    TABS.iter().find(|t| t.0 == tab).map_or("Home", |t| t.2)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ClipHit {
@@ -98,11 +117,27 @@ pub enum ClipHit {
     Delete(usize),
 }
 
+#[derive(Clone, Copy)]
+pub struct TabChange {
+    pub from: Tab,
+    pub start: std::time::Instant,
+    pub ms: u32,
+    pub dir: f32,
+}
+
+pub struct TabDrag {
+    pub reorder: Reorder,
+    pub items: Vec<usize>,
+}
+
 pub struct UiState {
     pub tab: Tab,
+    pub tab_drag: Option<TabDrag>,
+    pub tab_press: Option<(usize, i32, i32)>,
+    pub tab_change: Option<TabChange>,
     pub hover_tab: Option<usize>,
+    pub hover_sub: Option<Tab>,
     pub clip: ClipUi,
-    pub shelf_scroll: usize,
     pub note: TextEdit,
     pub remind: RemindUi,
     pub cfg: Settings,
@@ -166,7 +201,7 @@ impl UiState {
             city: CityUi::default(),
             home: HomeUi::default(),
             hover_tab: None,
-            shelf_scroll: 0,
+            hover_sub: None,
             note: TextEdit::default(),
             cfg: Settings::default(),
             editing: false,
@@ -178,6 +213,9 @@ impl UiState {
             sw: SwUi::default(),
             privacy: Privacy::default(),
             mic_muted: None,
+            tab_change: None,
+            tab_drag: None,
+            tab_press: None,
             vpn: None,
             vpn_busy: false,
             notice: None,

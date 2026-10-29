@@ -37,7 +37,12 @@ impl App {
             }),
             Some(view::HomeHit::Player) => media::next_player(),
             Some(view::HomeHit::Action(i)) if self.ui.home.edit => self.toggle_home_action(i),
-            Some(view::HomeHit::Action(i)) => self.home_action(i),
+            Some(view::HomeHit::Action(i)) => {
+                match self.settings.home_actions.iter().position(|&a| usize::from(a) == i) {
+                    Some(slot) => self.ui.home.tile_press = Some((slot, x, y)),
+                    None => self.home_action(i),
+                }
+            }
             Some(view::HomeHit::Edit) => {
                 self.ui.home.edit = !self.ui.home.edit;
                 self.ui.home.edit_scroll = 0;
@@ -45,8 +50,21 @@ impl App {
                 self.sync_metrics();
                 self.repaint_expanded();
             }
-            Some(view::HomeHit::Dock(i)) => self.open_dock_item(i),
+            Some(view::HomeHit::Dock(i)) => self.ui.home.dock_press = Some((i, x, y)),
+            Some(view::HomeHit::DockUnpin(i)) => {
+                if let (Some(item), Some(store)) = (self.ui.home.dock.get(i), &self.store) {
+                    store.dock_remove(item.id);
+                }
+                self.ui.home.hover_act = None;
+                self.reload_dock();
+                self.repaint_expanded();
+            }
             Some(view::HomeHit::DockAdd) => self.want_dock_dialog = true,
+            Some(view::HomeHit::DockMore) => {
+                self.ui.home.dock_open = !self.ui.home.dock_open;
+                self.ui.home.hover_act = None;
+                self.repaint_expanded();
+            }
             Some(view::HomeHit::DiscordOverlay) => self.toggle_overlay(),
             Some(view::HomeHit::DiscordMute) => discord::set_mute(!self.ui.discord.self_mute),
             Some(view::HomeHit::DiscordDeaf) => discord::set_deaf(!self.ui.discord.self_deaf),
@@ -103,7 +121,7 @@ impl App {
             view::Info::Metric(_) => Some(view::Tab::System),
             view::Info::ScreenTime => Some(view::Tab::Activity),
             view::Info::Weather => Some(view::Tab::Weather),
-            view::Info::Reminder => Some(view::Tab::Remind),
+            view::Info::Reminder => Some(view::Tab::Note),
             view::Info::Steam => Some(view::Tab::Steam),
             view::Info::Vpn => return self.toggle_vpn(),
             view::Info::Battery | view::Info::Agents | view::Info::Clock => None,
@@ -260,6 +278,151 @@ impl App {
         self.repaint_expanded();
         if !self.cursor_inside() {
             self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1));
+        }
+    }
+
+    fn dock_slots(&self) -> Vec<view::Rect> {
+        view::dock_layout(self.pill_rect(true), self.scale, &self.ui).slots
+    }
+
+    pub(in crate::island) fn step_reorder(&mut self) -> bool {
+        let slots = self.dock_slots();
+        let Some(r) = self.ui.home.reorder.as_mut() else { return false };
+        let cursor = r.cursor;
+        r.step(&slots, cursor)
+    }
+
+    pub(in crate::island) fn take_drag(&mut self, x: i32, y: i32, left_down: bool) -> Option<std::path::PathBuf> {
+        if !left_down || self.ui.tab != view::Tab::Home || self.state != State::Expanded {
+            return None;
+        }
+        let (fx, fy) = (x as f32, y as f32);
+        if let Some(from) = self.ui.home.reorder.as_ref().map(|r| r.from) {
+            let (px, py, pw, ph) = self.pill_rect(true);
+            let margin = 6.0 * self.scale;
+            let inside = fx >= px - margin && fx < px + pw + margin && fy >= py - margin && fy < py + ph + margin;
+            if inside {
+                if let Some(r) = self.ui.home.reorder.as_mut() {
+                    r.cursor = (fx, fy);
+                }
+                self.step_reorder();
+                self.set_timer(Timer::UiAnim, 16);
+                self.repaint_expanded();
+                return None;
+            }
+            self.ui.home.reorder = None;
+            self.ui.home.dock_press = None;
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+            self.repaint_expanded();
+            let path = std::path::PathBuf::from(self.ui.home.dock.get(from)?.path.clone());
+            return path.exists().then_some(path);
+        }
+        let (index, x0, y0) = self.ui.home.dock_press?;
+        const THRESHOLD: i32 = 6;
+        if (x - x0).abs() < THRESHOLD && (y - y0).abs() < THRESHOLD {
+            return None;
+        }
+        let slots = self.dock_slots();
+        if index >= slots.len() {
+            self.ui.home.dock_press = None;
+            return None;
+        }
+        self.ui.home.reorder = Some(view::Reorder::new(&slots, index, (fx, fy)));
+        unsafe {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
+        }
+        self.set_timer(Timer::UiAnim, 16);
+        self.repaint_expanded();
+        None
+    }
+
+    pub(in crate::island) fn finish_dock_press(&mut self) {
+        let press = self.ui.home.dock_press.take();
+        if let Some(r) = self.ui.home.reorder.take() {
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+            if r.to != r.from
+                && let (Some(item), Some(store)) = (self.ui.home.dock.get(r.from), &self.store)
+            {
+                store.dock_move(item.id, r.to);
+                self.reload_dock();
+            }
+            return self.repaint_expanded();
+        }
+        if let Some((i, ..)) = press
+            && self.state == State::Expanded
+            && self.ui.tab == view::Tab::Home
+        {
+            self.open_dock_item(i);
+        }
+    }
+
+    fn tile_slots(&self) -> Vec<view::Rect> {
+        let pill = self.pill_rect(true);
+        (0..self.settings.home_actions.len().min(view::MAX_HOME_TILES))
+            .map(|i| view::action_tile(pill, self.scale, i))
+            .collect()
+    }
+
+    pub(in crate::island) fn step_tile_reorder(&mut self) -> bool {
+        let slots = self.tile_slots();
+        let Some(r) = self.ui.home.tile_reorder.as_mut() else { return false };
+        let cursor = r.cursor;
+        r.step(&slots, cursor)
+    }
+
+    pub(in crate::island) fn drag_tiles(&mut self, x: i32, y: i32) {
+        if self.state != State::Expanded || self.ui.tab != view::Tab::Home {
+            return;
+        }
+        let cursor = (x as f32, y as f32);
+        if let Some(r) = self.ui.home.tile_reorder.as_mut() {
+            r.cursor = cursor;
+            self.step_tile_reorder();
+            self.set_timer(Timer::UiAnim, 16);
+            return self.repaint_expanded();
+        }
+        let Some((slot, x0, y0)) = self.ui.home.tile_press else { return };
+        if (x - x0).abs() < 6 && (y - y0).abs() < 6 {
+            return;
+        }
+        let slots = self.tile_slots();
+        if slot >= slots.len() {
+            self.ui.home.tile_press = None;
+            return;
+        }
+        self.ui.home.tile_reorder = Some(view::Reorder::new(&slots, slot, cursor));
+        unsafe {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
+        }
+        self.set_timer(Timer::UiAnim, 16);
+        self.repaint_expanded();
+    }
+
+    pub(in crate::island) fn finish_tile_press(&mut self) {
+        let press = self.ui.home.tile_press.take();
+        if let Some(r) = self.ui.home.tile_reorder.take() {
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+            if r.to != r.from && r.from < self.settings.home_actions.len() {
+                let id = self.settings.home_actions.remove(r.from);
+                let at = r.to.min(self.settings.home_actions.len());
+                self.settings.home_actions.insert(at, id);
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+            }
+            return self.repaint_expanded();
+        }
+        if let Some((slot, ..)) = press
+            && self.state == State::Expanded
+            && self.ui.tab == view::Tab::Home
+            && let Some(&id) = self.settings.home_actions.get(slot)
+        {
+            self.home_action(usize::from(id));
         }
     }
 }

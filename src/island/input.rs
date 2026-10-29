@@ -31,9 +31,9 @@ impl App {
                 && fx >= pill.0
                 && fx < pill.0 + pill.2;
             if in_header
-                && view::hit_tab(pill, self.scale, fx, fy, &self.ui).is_none()
-                && view::hit_head(pill, self.scale, &self.ui, fx, fy).is_none()
-                && !view::hit_vpn_btn(pill, self.scale, &self.ui, fx, fy)
+                && view::hit_tab(self.pill_full(), self.scale, fx, fy, &self.ui).is_none()
+                && view::hit_head(self.pill_full(), self.scale, &self.ui, fx, fy).is_none()
+                && !view::hit_vpn_btn(self.pill_full(), self.scale, &self.ui, fx, fy)
             {
                 let mut pt = windows::Win32::Foundation::POINT::default();
                 unsafe {
@@ -185,28 +185,23 @@ impl App {
             }
             return;
         }
-        let hover_tab = view::hit_tab(pill, self.scale, fx, fy, &self.ui);
+        let hover_tab = view::hit_tab(self.pill_full(), self.scale, fx, fy, &self.ui);
         let hover_clip = match self.ui.tab {
             view::Tab::Clipboard => {
                 let visible = self.clipboard.clips.len().saturating_sub(self.ui.clip.scroll);
                 view::hit_clip(pill, self.scale, fx, fy, visible)
             }
-            view::Tab::Shelf => {
-                let visible = self.shelf.len().saturating_sub(self.ui.shelf_scroll);
-                view::hit_clip(pill, self.scale, fx, fy, visible)
-            }
             _ => None,
         };
         let hover_ctl = if self.ui.tab == view::Tab::Controls { view::hit_ctl(pill, self.scale, fx, fy) } else { None };
-        let hover_note =
-            if self.ui.tab == view::Tab::Note { view::hit_note_tree(pill, self.scale, fx, fy, &self.ui) } else { None };
-        let hover_rem = if self.ui.tab == view::Tab::Remind {
-            view::hit_remind(pill, self.scale, fx, fy, self.ui.remind.list.len(), self.ui.remind.scroll)
+        let hover_note = if self.ui.tab == view::Tab::Note {
+            view::hit_note_tree(pill, self.scale, fx, fy, &self.ui)
+                .or_else(|| view::hit_note_panel(pill, self.scale, fx, fy, &self.ui))
         } else {
             None
         };
         let hover_text = if self.ui.tab == view::Tab::Text {
-            view::hit_text(pill, self.scale, fx, fy, self.settings.dev_tools, self.ui.text.chip_scroll)
+            view::hit_text(pill, self.scale, fx, fy, &self.ui.cfg, &self.ui.text)
         } else {
             None
         };
@@ -280,12 +275,6 @@ impl App {
                 Some(i) => Some(910 + i),
                 None => view::hit_city(pill, self.scale, fx, fy, self.ui.weather.is_some()).then_some(900),
             }
-        } else if self.ui.tab == view::Tab::Theme {
-            view::hit_theme(pill, self.scale, fx, fy).map(|h| match h {
-                view::ThemeHit::Preset(i) => 800 + i,
-                view::ThemeHit::Panel(i) => 820 + i,
-                view::ThemeHit::Accent(i) => 840 + i,
-            })
         } else if self.ui.tab == view::Tab::Home {
             match view::hit_home(pill, self.scale, fx, fy, &self.ui) {
                 Some(view::HomeHit::Action(i)) => Some(i),
@@ -297,7 +286,8 @@ impl App {
                 Some(view::HomeHit::DiscordMute) => Some(541),
                 Some(view::HomeHit::DiscordOverlay) => Some(542),
                 Some(view::HomeHit::Dock(i)) => Some(600 + i),
-                Some(view::HomeHit::DockAdd) => Some(700),
+                Some(view::HomeHit::DockUnpin(i)) => Some(800 + i),
+                Some(view::HomeHit::DockAdd | view::HomeHit::DockMore) => Some(700),
                 Some(view::HomeHit::VolumeIcon) => Some(530),
                 Some(view::HomeHit::Edit) => Some(550),
                 Some(view::HomeHit::Player) => Some(560),
@@ -306,8 +296,11 @@ impl App {
         } else {
             None
         };
-        let hover_head = view::hit_head(pill, self.scale, &self.ui, fx, fy);
-        let tip = self.tip_at(pill, hover_tab, hover_head);
+        let hover_head = view::hit_head(self.pill_full(), self.scale, &self.ui, fx, fy);
+        let tip = self.tip_at(pill, hover_tab, hover_head).or_else(|| {
+            let (text, r) = view::content_tip(pill, self.scale, &self.ui, self.clipboard.clips.len(), fx, fy)?;
+            Some((text, ((r.0 + r.2) / 2.0, r.3 + 4.0 * self.scale)))
+        });
         self.set_tip(tip);
         if hover_act != self.ui.home.hover_act || hover_head != self.ui.hover_head {
             self.ui.home.hover_act = hover_act;
@@ -323,19 +316,20 @@ impl App {
             || hover_clip.is_some()
             || hover_ctl.is_some()
             || hover_note.is_some()
-            || hover_rem.is_some()
             || hover_text.is_some();
+        let hover_sub = view::hit_subtab(self.pill_full(), self.scale, fx, fy, &self.ui);
+        self.ui.hand |= hover_sub.is_some();
         if hover_tab != self.ui.hover_tab
+            || hover_sub != self.ui.hover_sub
             || hover_clip != self.ui.clip.hover
             || hover_ctl != self.ui.hover_ctl
             || hover_text != self.ui.text.hover
-            || hover_rem != self.ui.remind.hover
             || hover_note != self.ui.notes.hover
         {
-            self.ui.remind.hover = hover_rem;
             self.ui.notes.hover = hover_note;
             self.ui.text.hover = hover_text;
             self.ui.hover_tab = hover_tab;
+            self.ui.hover_sub = hover_sub;
             self.ui.clip.hover = hover_clip;
             self.ui.hover_ctl = hover_ctl;
             self.repaint_expanded();
@@ -344,26 +338,37 @@ impl App {
 
     fn tip_at(
         &self,
-        pill: view::Rect,
+        _pill: view::Rect,
         tab: Option<usize>,
         head: Option<view::HeadHit>,
     ) -> Option<(String, (f32, f32))> {
         let s = self.scale;
         let below = |r: view::Rect| ((r.0 + r.2) / 2.0, r.3 + 4.0 * s);
-        if let Some(i) = tab.filter(|&i| view::TABS[i].0 != self.ui.tab) {
-            let rect = view::tab_rects(pill, s, &self.ui)[i];
+        if let Some(i) = tab.filter(|&i| view::TABS[i].0 != view::bar_tab(self.ui.tab)) {
+            let rect = view::tab_rects(self.pill_full(), s, &self.ui)[i];
             return Some((view::TABS[i].2.to_string(), below(rect)));
         }
         let (text, rect) = match head? {
-            view::HeadHit::Pin => (if self.ui.pinned { "Let it close" } else { "Keep open" }, view::pin_rect(pill, s)),
-            view::HeadHit::Lock => {
-                (if self.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" }, view::lock_rect(pill, s))
+            view::HeadHit::Pin => {
+                (if self.ui.pinned { "Let it close" } else { "Keep open" }, view::pin_rect(self.pill_full(), s))
             }
+            view::HeadHit::Lock => (
+                if self.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" },
+                view::lock_rect(self.pill_full(), s),
+            ),
+            view::HeadHit::TabDrag => (
+                if self.settings.tab_drag { "Stop moving tabs" } else { "Move tabs by dragging" },
+                view::tab_drag_rect(self.pill_full(), s),
+            ),
             view::HeadHit::Mic => {
                 let muted = self.ui.mic_muted == Some(true);
-                (if muted { "Unmute microphone" } else { "Mute microphone" }, view::privacy_dots(pill, s, &self.ui).0?)
+                (
+                    if muted { "Unmute microphone" } else { "Mute microphone" },
+                    view::privacy_dots(self.pill_full(), s, &self.ui).0?,
+                )
             }
-            view::HeadHit::Cam => ("Camera in use", view::privacy_dots(pill, s, &self.ui).1?),
+            view::HeadHit::Cam => ("Camera in use", view::privacy_dots(self.pill_full(), s, &self.ui).1?),
+            view::HeadHit::TabSettings => ("Settings of this tab", view::tab_settings_rect(self.pill_full(), s)),
         };
         Some((text.to_string(), below(rect)))
     }
@@ -372,7 +377,7 @@ impl App {
         if tip.as_ref().map(|t| &t.0) == self.ui.tip.as_ref().map(|t| &t.0) {
             return;
         }
-        crate::ui::tip::hide(self.hwnd);
+        crate::ui::tip::hide();
         self.kill_timer(Timer::Tip);
         if tip.is_some() {
             self.set_timer(Timer::Tip, 450);
@@ -386,7 +391,7 @@ impl App {
         unsafe {
             let _ = windows::Win32::Graphics::Gdi::ClientToScreen(self.hwnd, &mut pt);
         }
-        crate::ui::tip::show(self.hwnd, &crate::ui::i18n::tr(text), (pt.x, pt.y));
+        crate::ui::tip::show(&self.gpu, &crate::ui::i18n::tr(text), (pt.x, pt.y), self.scale);
     }
 
     pub(in crate::island) fn click_at(&mut self, x: i32, y: i32) {
@@ -403,8 +408,7 @@ impl App {
         if self.ui.cmd.open {
             return self.click_cmd(x, y);
         }
-        let pill = self.pill_rect(true);
-        match view::hit_head(pill, self.scale, &self.ui, x as f32, y as f32) {
+        match view::hit_head(self.pill_full(), self.scale, &self.ui, x as f32, y as f32) {
             Some(view::HeadHit::Pin) => {
                 self.ui.pinned = !self.ui.pinned;
                 if self.ui.pinned {
@@ -421,42 +425,67 @@ impl App {
                 self.repaint_expanded();
                 return;
             }
+            Some(view::HeadHit::TabDrag) => {
+                self.settings.tab_drag = !self.settings.tab_drag;
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.repaint_expanded();
+                return;
+            }
             Some(view::HeadHit::Mic) => return self.toggle_mic(),
             Some(view::HeadHit::Cam) => return,
+            Some(view::HeadHit::TabSettings) => {
+                if let Some(group) = view::tab_settings_group(self.ui.tab) {
+                    self.open_settings_at(group);
+                }
+                return;
+            }
             None => {}
         }
-        if view::hit_vpn_btn(pill, self.scale, &self.ui, x as f32, y as f32) {
+        if view::hit_vpn_btn(self.pill_full(), self.scale, &self.ui, x as f32, y as f32) {
             return self.toggle_vpn();
         }
-        if let Some(i) = view::hit_tab(pill, self.scale, x as f32, y as f32, &self.ui) {
-            if view::TABS[i].0 == view::Tab::Settings {
-                return self.open_settings_window();
-            }
-            if self.ui.tab != view::TABS[i].0 {
+        if let Some(sub) = view::hit_subtab(self.pill_full(), self.scale, x as f32, y as f32, &self.ui) {
+            if self.ui.tab != sub {
                 self.ui.clip.hover = None;
                 self.ui.hover_ctl = None;
                 self.disarm();
-                self.select_tab(view::TABS[i].0);
+                self.select_tab(sub);
+            }
+            return;
+        }
+        if let Some(i) = view::hit_tab(self.pill_full(), self.scale, x as f32, y as f32, &self.ui) {
+            if view::TABS[i].0 == view::Tab::Settings {
+                return self.open_settings_window();
+            }
+            if self.settings.tab_drag {
+                self.ui.tab_press = Some((i, x, y));
+                return;
+            }
+            if view::bar_tab(self.ui.tab) != view::TABS[i].0 {
+                self.ui.clip.hover = None;
+                self.ui.hover_ctl = None;
+                self.disarm();
+                let target = self.landing_tab(view::TABS[i].0);
+                self.select_tab(target);
             }
             return;
         }
         match self.ui.tab {
             view::Tab::Clipboard => self.click_clip(x, y),
             view::Tab::Controls => self.click_ctl(x, y),
-            view::Tab::Shelf => self.click_shelf(x, y),
             view::Tab::Note => self.click_note(x, y),
-            view::Tab::Remind => self.click_remind(x, y),
             view::Tab::Text => self.click_text(x, y),
             view::Tab::Record => self.click_record(x, y),
             view::Tab::Home => self.click_home(x, y),
             view::Tab::Weather => self.click_weather(x, y),
+            view::Tab::Ai => {}
             view::Tab::Agy => self.click_agy(x, y),
             view::Tab::Chat => self.click_chat(x, y),
             view::Tab::Privacy => self.click_privacy(x, y),
             view::Tab::Activity => self.click_activity(x, y),
             view::Tab::Steam => self.click_steam(x, y),
             view::Tab::System => {}
-            view::Tab::Theme => self.click_theme(x, y),
             view::Tab::Settings => {}
         }
     }
@@ -516,14 +545,11 @@ impl App {
         if self.ui.tab == view::Tab::Note && self.cursor_over_tree() {
             return self.scroll_tree(delta);
         }
-        if self.ui.tab == view::Tab::Remind {
-            return self.wheel_remind(delta);
-        }
         if self.ui.tab == view::Tab::Text
             && let Some((x, y)) = self.cursor_client()
-            && view::over_text_side(self.pill_rect(true), self.scale, x, y)
+            && view::over_text_side(self.pill_rect(true), self.scale, x, y, &self.ui.text)
         {
-            let max = view::chip_scroll_max(self.pill_rect(true), self.scale, self.settings.dev_tools);
+            let max = view::chip_scroll_max(self.pill_rect(true), self.scale, &self.ui.cfg, &self.ui.text);
             let scroll = &mut self.ui.text.chip_scroll;
             let next = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(max) };
             if next != *scroll {
@@ -547,7 +573,6 @@ impl App {
         }
         let (len, scroll) = match self.ui.tab {
             view::Tab::Clipboard => (self.clipboard.clips.len(), &mut self.ui.clip.scroll),
-            view::Tab::Shelf => (self.shelf.len(), &mut self.ui.shelf_scroll),
             view::Tab::Agy => (self.ui.agy.chats.len(), &mut self.ui.agy.scroll),
             view::Tab::Privacy => (self.ui.privacy_log.rows.len(), &mut self.ui.privacy_log.scroll),
             _ => return,
@@ -618,7 +643,6 @@ impl App {
             | self.ui.clip.hover.take().is_some()
             | self.ui.hover_ctl.take().is_some()
             | self.ui.text.hover.take().is_some()
-            | self.ui.remind.hover.take().is_some()
             | self.ui.notes.hover.take().is_some()
             | self.ui.home.hover_act.take().is_some()
             | self.ui.hover_head.take().is_some();
@@ -633,11 +657,13 @@ impl App {
         self.kill_timer(Timer::Expand);
         match self.state {
             State::Expanded
-                if self.ui.editing
-                    || self.ui.remind.alert.is_some()
+                if self.ui.remind.alert.is_some()
                     || self.ui.pinned
                     || self.popup_open
                     || self.pointer.moving.is_some() => {}
+            State::Expanded if self.ui.editing => {
+                self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1500))
+            }
             State::Expanded => self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1)),
             State::Collapsed => self.schedule_autohide(),
             _ => {}

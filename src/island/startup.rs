@@ -230,7 +230,6 @@ impl App {
             tint,
             ui: view::UiState::new(),
             store: Store::open(),
-            shelf: Vec::new(),
             popup_open: false,
             overlay: None,
             want_dock_dialog: false,
@@ -311,8 +310,8 @@ impl App {
         agents::watch(hwnd);
         app.init_steam();
         steam::watch(hwnd);
-        app.reload_shelf();
         app.reload_dock();
+        app.restore_tab();
         app.reload_reminders();
         app.init_notes();
         app.update_offsets();

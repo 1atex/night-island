@@ -61,6 +61,49 @@ pub const OPS_DEV: [(Op, &str); 15] = [
     (Op::Uuid, "UUID"),
 ];
 
+pub fn desc(op: Op) -> &'static str {
+    match op {
+        Op::Layout => "Fix text typed in the wrong layout",
+        Op::Upper => "Make everything UPPERCASE",
+        Op::Lower => "Make everything lowercase",
+        Op::Title => "Capitalise Each Word",
+        Op::Translit => "Cyrillic to Latin and back",
+        Op::SortLines => "Sort the lines A to Z",
+        Op::UniqueLines => "Remove repeated lines",
+        Op::CleanSpaces => "Trim and collapse extra spaces",
+        Op::Count => "Characters, words, lines, bytes",
+        Op::Qr => "Show the text as a QR code",
+        Op::Snake => "Words to snake_case",
+        Op::Camel => "Words to camelCase",
+        Op::Kebab => "Words to kebab-case",
+        Op::JsonPretty => "Format JSON with indents",
+        Op::JsonMinify => "Squeeze JSON into one line",
+        Op::Base64Encode => "Encode the text as Base64",
+        Op::Base64Decode => "Decode Base64 back to text",
+        Op::UrlEncode => "Percent-encode for a URL",
+        Op::UrlDecode => "Decode a percent-encoded URL",
+        Op::Jwt => "Read a JWT's header and payload",
+        Op::Timestamp => "Unix time and date (now if empty)",
+        Op::HexEncode => "Text as hexadecimal bytes",
+        Op::HexDecode => "Hexadecimal bytes back to text",
+        Op::Sha256 => "SHA-256 hash of the text",
+        Op::Uuid => "Insert a new random UUID",
+    }
+}
+
+pub const CATEGORIES: [&str; 6] = ["Case", "Lines", "Convert", "Encode", "Dev tools", "Info"];
+
+pub fn category(op: Op) -> usize {
+    match op {
+        Op::Upper | Op::Lower | Op::Title | Op::Snake | Op::Camel | Op::Kebab => 0,
+        Op::SortLines | Op::UniqueLines | Op::CleanSpaces => 1,
+        Op::Layout | Op::Translit => 2,
+        Op::Base64Encode | Op::Base64Decode | Op::UrlEncode | Op::UrlDecode | Op::HexEncode | Op::HexDecode => 3,
+        Op::JsonPretty | Op::JsonMinify | Op::Jwt | Op::Timestamp | Op::Sha256 | Op::Uuid => 4,
+        Op::Count | Op::Qr => 5,
+    }
+}
+
 pub fn ops(developer: bool) -> Vec<(Op, &'static str)> {
     let mut all = OPS_BASIC.to_vec();
     if developer {
@@ -633,6 +676,9 @@ mod tests {
         assert_eq!(ops(false).len(), OPS_BASIC.len());
         assert_eq!(ops(true).len(), OPS_BASIC.len() + OPS_DEV.len());
         assert!(OPS_BASIC.len() + OPS_DEV.len() <= 25, "the chips must fit five rows");
+        for (op, _) in ops(true) {
+            assert!(!desc(op).is_empty() && category(op) < CATEGORIES.len());
+        }
         assert!(works_on_empty(Op::Uuid) && works_on_empty(Op::Timestamp) && !works_on_empty(Op::Upper));
     }
 

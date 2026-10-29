@@ -53,7 +53,8 @@ impl App {
         let s = self.scale;
         let (win_w, _) = self.window_size(self.win);
         let pill_left = (win_w as f32 - self.cw * s) / 2.0;
-        let x0 = pill_left + view::music_slots(&self.ui, s, self.cw * s).bars.map_or(0.0, |b| b.0);
+        let Some(bars) = view::music_slots(&self.ui, s, self.cw * s).bars else { return };
+        let x0 = pill_left + bars.0;
         let y = self.top_margin() * s + (COLLAPSED.1 - SPEC_H) * s / 2.0;
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetSize(Vector2 { X: SPEC_W * s, Y: SPEC_H * s });
@@ -127,11 +128,17 @@ impl App {
     }
 
     pub(in crate::island) fn update_spectrum(&mut self, show: bool) {
+        let bars_visible = show && self.settings.music_eq;
         if show == self.music.spectrum_running {
+            for (i, bar) in self.music.spectrum.iter().enumerate() {
+                let _ = bar.SetIsVisible(bars_visible && i % 2 == 0);
+            }
+            if bars_visible {
+                self.place_spectrum();
+            }
             return;
         }
         self.music.spectrum_running = show;
-        let bars_visible = show && self.settings.music_eq;
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetIsVisible(bars_visible && i % 2 == 0);
             let _ = bar.SetScale(Vector3 { X: 1.0, Y: 0.14, Z: 1.0 });

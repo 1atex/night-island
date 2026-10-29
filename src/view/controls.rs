@@ -27,7 +27,7 @@ pub const CTLS: [(Ctl, char, &str); 9] = [
 ];
 
 pub fn needs_confirm(c: Ctl) -> bool {
-    matches!(c, Ctl::Sleep | Ctl::Restart | Ctl::PowerOff)
+    matches!(c, Ctl::Lock | Ctl::Sleep | Ctl::Restart | Ctl::PowerOff)
 }
 
 pub(in crate::view) const CTL_COLS: usize = 5;
