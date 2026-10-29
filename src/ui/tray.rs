@@ -14,7 +14,6 @@ pub const ID_TOGGLE: usize = 1;
 pub const ID_SETTINGS: usize = 2;
 pub const ID_RESET_POS: usize = 3;
 pub const ID_EXIT: usize = 4;
-pub const ID_REBUILD: usize = 5;
 
 const ICON_ID: u32 = 1;
 const APP_ICON: usize = 1;
@@ -29,13 +28,20 @@ fn data(hwnd: HWND) -> NOTIFYICONDATAW {
     nid
 }
 
-pub fn app_icon(cx: i32, cy: i32) -> HICON {
+fn app_icon() -> HICON {
     unsafe {
         let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
-        LoadImageW(Some(module.into()), PCWSTR(APP_ICON as *const u16), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR)
-            .map(|h| HICON(h.0))
-            .or_else(|_| LoadIconW(None, IDI_APPLICATION))
-            .unwrap_or_default()
+        LoadImageW(
+            Some(module.into()),
+            PCWSTR(APP_ICON as *const u16),
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+            LR_DEFAULTCOLOR,
+        )
+        .map(|h| HICON(h.0))
+        .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+        .unwrap_or_default()
     }
 }
 
@@ -44,7 +50,7 @@ pub fn add(hwnd: HWND) {
         let mut nid = data(hwnd);
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         nid.uCallbackMessage = WM_TRAY;
-        nid.hIcon = app_icon(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+        nid.hIcon = app_icon();
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
     }
 }
@@ -69,47 +75,14 @@ pub fn click(lparam: LPARAM) -> Click {
     }
 }
 
-fn dev_repo() -> Option<std::path::PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let target = exe.parent()?.parent()?;
-    if target.file_name()? != "target" {
-        return None;
-    }
-    let root = target.parent()?;
-    root.join("Cargo.toml").is_file().then(|| root.to_path_buf())
-}
-
-pub fn rebuild_and_restart() {
-    use std::os::windows::process::CommandExt;
-    let Some(root) = dev_repo() else { return };
-    let Some(name) = std::env::current_exe().ok().and_then(|e| e.file_name().map(|n| n.to_owned())) else { return };
-    let quote = |p: &std::path::Path| p.to_string_lossy().replace('\'', "''");
-    let new_exe = root.join("target").join("release").join(name);
-    let script = format!(
-        "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; Set-Location '{root}'; cargo build --release; \
-         if ($LASTEXITCODE -eq 0) {{ Start-Process '{exe}' }} else {{ Read-Host 'Build failed, Enter to close' }}",
-        pid = std::process::id(),
-        root = quote(&root),
-        exe = quote(&new_exe),
-    );
-    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-    let _ = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &script])
-        .creation_flags(CREATE_NEW_CONSOLE)
-        .spawn();
-}
-
 pub fn menu(scale: f32, with_gpu: crate::ui::menu::WithGpu) -> Option<usize> {
-    let mut entries = vec![
+    let entries = vec![
         Entry::item(ID_TOGGLE, "Open / close island").glyph('\u{E8A7}'),
         Entry::item(ID_SETTINGS, "Settings").glyph('\u{E713}'),
         Entry::item(ID_RESET_POS, "Reset position").glyph('\u{E72C}'),
         Entry::divider(),
+        Entry::item(ID_EXIT, "Exit").glyph('\u{E7E8}').danger(),
     ];
-    if dev_repo().is_some() {
-        entries.push(Entry::item(ID_REBUILD, "Rebuild and restart").glyph('\u{E777}'));
-    }
-    entries.push(Entry::item(ID_EXIT, "Exit").glyph('\u{E7E8}').danger());
     let mut pt = POINT::default();
     unsafe {
         let _ = GetCursorPos(&mut pt);

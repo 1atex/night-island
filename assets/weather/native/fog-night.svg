@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-
-
-<defs id="element-2"><linearGradient id="wx-fog-night-moon" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#EAE7FC" id="element-4"/><stop offset="1" stop-color="#BCB4E7" id="element-5"/></linearGradient></defs>
-<g opacity=".7" id="element-7"><g id="element-8"><path d="M14.060 5.580A4.5 4.5 0 1 0 14.150 12.240A3.8249999999999997 3.8249999999999997 0 0 1 14.060 5.580Z" fill="url(#wx-fog-night-moon)" stroke="#AAA2D6" stroke-width=".55" stroke-linejoin="round" id="element-9"/></g></g><path d="M4 13.5H20" stroke="#A5BBD0" stroke-width=".95" stroke-linecap="round" id="element-10"/><path d="M2.5 17H18" stroke="#A5BBD0" stroke-width=".95" stroke-linecap="round" id="element-11"/><path d="M6 20.5H21.2" stroke="#A5BBD0" stroke-width=".95" stroke-linecap="round" id="element-12"/>
-</svg>

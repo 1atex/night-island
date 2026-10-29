@@ -215,20 +215,9 @@ impl App {
 
     pub(in crate::island) fn start_progress_timer(&self) {
         let home = self.state == State::Expanded && self.ui.tab == view::Tab::Home && self.ui.media.playing;
-        let pill = self.progress_pill_visible() && view::progress_strip_on(&self.ui);
-        if home || pill {
-            let interval = if pill && view::pill_progress_fill_on(&self.ui) { self.frame_ms() } else { 1000 };
-            self.set_timer(Timer::Progress, interval);
-        } else {
-            self.kill_timer(Timer::Progress);
+        if home || (self.state == State::Collapsed && view::progress_strip_on(&self.ui)) {
+            self.set_timer(Timer::Progress, 1000);
         }
-    }
-
-    pub(in crate::island) fn progress_pill_visible(&self) -> bool {
-        self.state == State::Collapsed
-            && !self.gaming
-            && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
-            && unsafe { IsWindowVisible(self.hwnd).as_bool() }
     }
 
     pub(in crate::island) fn reload_dock(&mut self) {
