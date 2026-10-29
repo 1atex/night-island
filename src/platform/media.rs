@@ -111,7 +111,7 @@ struct Report {
 struct Tracker {
     track: (String, String),
     raw: Option<(f32, i64)>,
-    pending: Option<(f32, Instant)>,
+    pending: Option<((f32, i64), f32, Instant)>,
 }
 
 static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
@@ -137,20 +137,23 @@ fn update_timeline(track: &(String, String), r: Report) {
     t.raw = Some(r.raw);
     let was_playing = line.as_ref().is_some_and(|l| l.3);
     if !news {
+        if let Some((raw, pos, at)) = t.pending.take()
+            && raw == r.raw
+            && r.playing
+        {
+            return accept(&mut line, pos + at.elapsed().as_secs_f32());
+        }
         if was_playing != r.playing {
             accept(&mut line, estimate);
         }
         return;
     }
-    let far = (r.pos - estimate).abs() > 4.0;
-    if !far || !r.playing {
+    let reset = r.playing && r.pos < 1.5 && estimate > 15.0;
+    if !reset {
         t.pending = None;
         return accept(&mut line, r.pos);
     }
-    match t.pending.take() {
-        Some((was, at)) if (r.pos - (was + at.elapsed().as_secs_f32())).abs() < 3.0 => accept(&mut line, r.pos),
-        _ => t.pending = Some((r.pos, now)),
-    }
+    t.pending = Some((r.raw, r.pos, now));
 }
 
 fn fetch(manager: &Manager) -> Media {
