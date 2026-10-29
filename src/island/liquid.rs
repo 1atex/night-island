@@ -91,7 +91,7 @@ impl App {
         if self.ring_active() {
             self.paint_ring();
         }
-        if self.settings.music_eq && TICKS.replace(TICKS.get().wrapping_add(1)) % 20 == 0 {
+        if self.settings.music_eq && TICKS.replace(TICKS.get().wrapping_add(1)).is_multiple_of(20) {
             self.place_spectrum();
         } else if self.spikes_active() {
             self.paint_spikes();
