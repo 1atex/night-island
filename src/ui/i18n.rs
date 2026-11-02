@@ -98,7 +98,9 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Open / close island" => "Открыть / закрыть остров",
         "Reset position" => "Сбросить положение",
         "Exit" => "Выход",
-        "Acrylic blur" => "Размытие фона",
+        "Not set" => "Не задано",
+        "Rebuild and restart" => "Пересобрать и перезапустить",
+        "Panel blur" => "Размытие панели",
         "Hide in screenshots" => "Скрыть на снимках",
         "Hide island in my captures" => "Прятать при записи и снимке",
         "Game mode" => "Игровой режим",
@@ -509,7 +511,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Ghost visibility" => "Видимость призрака",
         "Ghost ignores the mouse" => "Призрак не реагирует на мышь",
         "Ghost only while held" => "Призрак, пока клавиши зажаты",
-        "Press the new keys…" => "Нажмите новые клавиши…",
+        "Press the new keys (Esc clears)…" => "Нажмите новые клавиши (Esc — убрать)…",
         "Click a key, then press the new combination with Ctrl, Alt, Shift or Win." => {
             "Нажмите на клавишу, затем новое сочетание с Ctrl, Alt, Shift или Win."
         }
