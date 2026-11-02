@@ -10,9 +10,9 @@ pub const BOX_H: f32 = 30.0;
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Character {
-    #[default]
     None,
     Pixel,
+    #[default]
     Spark,
     Eyes,
     Cat,

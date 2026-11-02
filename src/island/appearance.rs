@@ -129,7 +129,7 @@ impl App {
     pub(in crate::island) fn weather_animating(&self) -> bool {
         let shown = match self.state {
             State::Expanded => self.ui.tab == view::Tab::Weather,
-            State::Collapsed => view::pill_weather_visible(&self.ui),
+            State::Collapsed => view::pill_weather_visible(&self.ui) && !view::pill_progress_fill_on(&self.ui),
             _ => false,
         };
         shown

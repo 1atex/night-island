@@ -395,7 +395,22 @@ pub fn progress_strip_on(ui: &UiState) -> bool {
     ui.cfg.music_progress && music_pill(ui) && crate::platform::media::progress().is_some()
 }
 
+pub fn pill_progress_fill_on(ui: &UiState) -> bool {
+    ui.cfg.progress_style == crate::data::settings::ProgressStyle::Fill && progress_strip_on(ui)
+}
+
+fn paint_progress_fill(p: &Painter, pill: Rect, ui: &UiState) -> Result<()> {
+    let Some((pos, len)) = crate::platform::media::progress().filter(|_| pill_progress_fill_on(ui)) else {
+        return Ok(());
+    };
+    let base = ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
+    p.fill_capsule_progress((pill.0, pill.1, pill.0 + pill.2, pill.1 + pill.3), pos / len, base)
+}
+
 pub(in crate::view) fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    if ui.cfg.progress_style == crate::data::settings::ProgressStyle::Fill {
+        return Ok(());
+    }
     let Some((pos, len)) = crate::platform::media::progress().filter(|_| progress_strip_on(ui)) else { return Ok(()) };
     if ui.cfg.progress_style != crate::data::settings::ProgressStyle::Strip {
         return paint_progress_outline(p, pill, scale, ui, (pos / len).clamp(0.0, 1.0));
@@ -522,8 +537,13 @@ pub fn paint_pill_weather_icon(p: &Painter, pill: Rect, scale: f32, ui: &UiState
 
 pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     if ui.cfg.vertical() {
+        let (x, y, w, h) = pill;
+        p.rotated((x, y, x + w, y + h), ui.cfg.dock_edge == crate::data::settings::Edge::Left, |p, local| {
+            paint_progress_fill(p, local, ui)
+        })?;
         return paint_collapsed_vertical(p, pill, scale, ui);
     }
+    paint_progress_fill(p, pill, ui)?;
     paint_collapsed_body(p, pill, scale, ui)?;
     paint_progress_strip(p, pill, scale, ui)
 }

@@ -1018,6 +1018,41 @@ impl Painter<'_> {
         Ok(())
     }
 
+    pub fn fill_capsule_progress(&self, rect: (f32, f32, f32, f32), fraction: f32, base: (u8, u8, u8)) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+        };
+        let (left, top, right, bottom) = rect;
+        let fraction = fraction.clamp(0.0, 1.0);
+        if fraction <= 0.0 || right <= left || bottom <= top {
+            return Ok(());
+        }
+        let stops: [D2D1_GRADIENT_STOP; 5] = std::array::from_fn(|i| {
+            let position = i as f32 / 4.0;
+            let (r, g, b) = crate::platform::media::gradient(base, position);
+            D2D1_GRADIENT_STOP {
+                position,
+                color: rgba(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 0.24),
+            }
+        });
+        unsafe {
+            let collection = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+            let brush = self.dc.CreateLinearGradientBrush(
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: windows_numerics::Vector2 { X: left, Y: top },
+                    endPoint: windows_numerics::Vector2 { X: right, Y: top },
+                },
+                None,
+                &collection,
+            )?;
+            self.push_clip((left, top, left + (right - left) * fraction, bottom));
+            self.dc.FillRoundedRectangle(&rounded(rect, (bottom - top).min(right - left) / 2.0), &brush);
+            self.pop_clip();
+        }
+        Ok(())
+    }
+
     pub fn image(&self, rect: (f32, f32, f32, f32), radius: f32, side: u32, bgra: &[u8]) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::{
             D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,

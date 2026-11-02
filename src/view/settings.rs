@@ -482,7 +482,7 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
         Sid::EqStyle => c.eq_style = EqStyle::ALL[k.min(4)],
         Sid::EqGradient => c.eq_gradient = EqGradient::ALL[k.min(2)],
         Sid::BumpTint => c.bump_tint = BumpTint::ALL[k.min(2)],
-        Sid::ProgressStyle => c.progress_style = ProgressStyle::ALL[k.min(2)],
+        Sid::ProgressStyle => c.progress_style = ProgressStyle::ALL[k.min(ProgressStyle::ALL.len() - 1)],
         Sid::TabAnimKind => c.tab_anim = TabAnim::ALL[k.min(4)],
         Sid::AnimCurve => c.anim_curve = AnimCurve::ALL[k.min(3)],
         Sid::TextLayout => c.text_layout = TextLayout::ALL[k.min(2)],

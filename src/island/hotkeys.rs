@@ -128,6 +128,7 @@ impl App {
         self.kill_timer(Timer::Expand);
         self.kill_timer(Timer::Liquid);
         self.kill_timer(Timer::Weather);
+        self.kill_timer(Timer::Progress);
         self.stop_idle();
         self.set_bump_visible(false);
         self.update_eq();
@@ -227,5 +228,6 @@ impl App {
         }
         self.pointer.tracking = false;
         self.update_weather_timer();
+        self.start_progress_timer();
     }
 }

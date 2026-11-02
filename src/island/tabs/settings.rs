@@ -145,8 +145,8 @@ impl App {
                     self.liquid_tick();
                 }
                 EqStrength | EqGradient => self.refresh_eq_shape(),
-                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
-                | PillBattery | SpikeColor => {
+                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | ProgressStyle
+                | PillWeather | PillBattery | SpikeColor => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }

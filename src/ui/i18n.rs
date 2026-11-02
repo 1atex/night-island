@@ -379,6 +379,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Strip along the bottom" => "Полоска снизу",
         "Outline from the left side" => "Контур от левой стороны",
         "Outline, the bottom fills" => "Контур, заполняется низ",
+        "Fill the island" => "Заливка острова",
         "30 FPS" => "30 кадров/с",
         "60 FPS" => "60 кадров/с",
         "Monitor refresh rate" => "Частота монитора",

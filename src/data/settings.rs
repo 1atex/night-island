@@ -333,10 +333,11 @@ impl BumpTint {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ProgressStyle {
-    #[default]
     Strip,
     OutlineFromLeft,
     OutlineBottom,
+    #[default]
+    Fill,
 }
 
 impl ProgressStyle {
@@ -345,15 +346,17 @@ impl ProgressStyle {
             ProgressStyle::Strip => "Strip along the bottom",
             ProgressStyle::OutlineFromLeft => "Outline from the left side",
             ProgressStyle::OutlineBottom => "Outline, the bottom fills",
+            ProgressStyle::Fill => "Fill the island",
         }
     }
 
-    pub const ALL: [ProgressStyle; 3] =
-        [ProgressStyle::Strip, ProgressStyle::OutlineFromLeft, ProgressStyle::OutlineBottom];
+    pub const ALL: [ProgressStyle; 4] =
+        [ProgressStyle::Strip, ProgressStyle::OutlineFromLeft, ProgressStyle::OutlineBottom, ProgressStyle::Fill];
 
     pub fn step(self, forward: bool) -> Self {
         let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
-        Self::ALL[if forward { (i + 1) % 3 } else { (i + 2) % 3 }]
+        let count = Self::ALL.len();
+        Self::ALL[if forward { (i + 1) % count } else { (i + count - 1) % count }]
     }
 }
 
@@ -495,7 +498,7 @@ impl Default for Settings {
             eq_gradient: EqGradient::Horizontal,
             eq_when_open: true,
             bump_tint: BumpTint::Equalizer,
-            progress_style: ProgressStyle::OutlineBottom,
+            progress_style: ProgressStyle::Fill,
             text_layout: TextLayout::Categories,
             dev_tools: false,
             shared_lyrics: true,
@@ -509,7 +512,7 @@ impl Default for Settings {
             record_fps: 60,
             record_system_audio: true,
             record_mic: true,
-            character: Character::None,
+            character: Character::Spark,
             edge_spikes: true,
             style: Style::Liquid,
             capture_hidden: false,
@@ -1083,6 +1086,27 @@ mod tests {
         assert!(s.auto_hide);
         assert_eq!(s.style, Style::Liquid);
         assert!(serde_json::from_str::<Settings>("not json").is_err());
+    }
+
+    #[test]
+    fn new_profiles_use_spark_and_fill_without_overriding_saved_choices() {
+        let fresh: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(fresh.character, Character::Spark);
+        assert_eq!(fresh.progress_style, ProgressStyle::Fill);
+        let saved: Settings = serde_json::from_str(r#"{"character":"none","progress_style":"outlinebottom"}"#).unwrap();
+        assert_eq!(saved.character, Character::None);
+        assert_eq!(saved.progress_style, ProgressStyle::OutlineBottom);
+    }
+
+    #[test]
+    fn progress_modes_remain_selectable_and_round_trip() {
+        for (i, mode) in ProgressStyle::ALL.iter().copied().enumerate() {
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(serde_json::from_str::<ProgressStyle>(&json).unwrap(), mode);
+            assert_eq!(mode.step(true), ProgressStyle::ALL[(i + 1) % ProgressStyle::ALL.len()]);
+            assert_eq!(mode.step(false).step(true), mode);
+        }
+        assert_eq!(ProgressStyle::Strip.step(false), ProgressStyle::Fill);
     }
 }
 
