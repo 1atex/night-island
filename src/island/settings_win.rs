@@ -70,6 +70,13 @@ impl App {
                 crate::log_error!("could not create the settings window");
                 return;
             };
+            for (kind, cx, cy) in [
+                (ICON_SMALL, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)),
+                (ICON_BIG, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)),
+            ] {
+                let icon = crate::ui::tray::app_icon(cx, cy);
+                SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
+            }
             let round: i32 = 2;
             let rounded = DwmSetWindowAttribute(
                 hwnd,
@@ -169,7 +176,7 @@ impl App {
             return self.sw_drag(x);
         }
         if left_down && self.ui.sw.field == Some(view::Field::Search) && self.ui.sw.search_press {
-            self.sw_click_field(view::Field::Search, x, true);
+            self.sw_click_field(view::Field::Search, x, true, true);
             return self.render_settings_win();
         }
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
@@ -229,7 +236,7 @@ impl App {
         if let Some(view::SwHit::Field(field)) = hit {
             self.sw_focus(Some(field));
             let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
-            self.sw_click_field(field, x, shift);
+            self.sw_click_field(field, x, shift, false);
             if field == view::Field::Search {
                 self.ui.sw.search_press = true;
                 unsafe {
@@ -306,7 +313,7 @@ impl App {
         })
     }
 
-    fn sw_click_field(&mut self, field: view::Field, x: i32, extend: bool) {
+    fn sw_click_field(&mut self, field: view::Field, x: i32, extend: bool, dragging: bool) {
         let Some((_, inner)) = view::sw_field_rects(self.sw_size(), self.dpi_scale, &self.ui, field) else { return };
         let shown = {
             let text = view::field_edit(&self.ui, field).text();
@@ -321,7 +328,7 @@ impl App {
             return;
         };
         if let Some(n) = self.sw_edit_mut() {
-            let fx = if (x as f32) < inner.0 { 1.0e6 } else { x as f32 - inner.0 };
+            let fx = if (x as f32) < inner.0 && !dragging { 1.0e6 } else { x as f32 - inner.0 };
             n.click(&layout, fx, 4.0, extend);
         }
     }
@@ -447,26 +454,25 @@ impl App {
 
     fn capture_key(&mut self, hotkey: Hotkey, vk: u16) {
         use crate::data::keys::{ALT, CTRL, Combo, SHIFT, WIN, valid_vk};
-        let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetKeyState(k.0 as i32) < 0 };
+        let down = |k: u16| unsafe { GetKeyState(i32::from(k)) < 0 || GetAsyncKeyState(i32::from(k)) < 0 };
         let vk32 = u32::from(vk);
         if matches!(vk32, 0x10..=0x12 | 0x5B | 0x5C | 0xA0..=0xA5) {
             return;
         }
         let mut mods = 0;
-        for (bit, key) in [(CTRL, VK_CONTROL), (ALT, VK_MENU), (SHIFT, VK_SHIFT)] {
-            if down(key) {
+        for (bit, keys) in [(CTRL, [0x11, 0xA2, 0xA3]), (ALT, [0x12, 0xA4, 0xA5]), (SHIFT, [0x10, 0xA0, 0xA1])] {
+            if keys.into_iter().any(down) {
                 mods |= bit;
             }
         }
-        if unsafe { GetKeyState(0x5B) < 0 || GetKeyState(0x5C) < 0 } {
+        if down(0x5B) || down(0x5C) {
             mods |= WIN;
         }
-        if down(VK_MENU) {
+        if mods & ALT != 0 {
             self.ui.sw.quiet_sys = true;
         }
         if vk32 == u32::from(VK_ESCAPE.0) {
-            self.end_rebind();
-            return self.render_settings_win();
+            return self.set_hotkey(hotkey, Combo::NONE);
         }
         let combo = if mods == 0 && vk32 == u32::from(VK_DELETE.0) {
             hotkey.default_combo()
