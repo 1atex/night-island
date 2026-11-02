@@ -47,8 +47,7 @@ const ANIMATIONS: [(Sid, &str, Kind); 6] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 5] = [
-    (Sid::Acrylic, "Acrylic blur", Kind::Toggle),
+const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
@@ -465,12 +464,13 @@ fn theme_items(_ui: &UiState) -> Vec<Item> {
         row(1),
         row(2),
         row(3),
-        Item::Section("Pill"),
         row(4),
+        Item::Section("Pill"),
         row(5),
-        Item::Section("Accent"),
         row(6),
+        Item::Section("Accent"),
         row(7),
+        row(8),
     ]
 }
 
@@ -521,7 +521,10 @@ fn paint_theme_block(p: &Painter, row: Rect, scale: f32, ui: &UiState, hovered: 
     let (l, t, r) = col;
     let (panel, accent) = crate::ui::theme::colors(&ui.cfg);
     let preview = (l, t, r, t + 58.0 * scale);
-    p.fill_round_rect(preview, 29.0 * scale, rgba(panel.0, panel.1, panel.2, 1.0))?;
+    let alpha = ui.cfg.tint_open;
+    p.fill_round_rect(preview, 29.0 * scale, rgba(0.85, 0.85, 0.85, 1.0))?;
+    p.fill_round_rect((l, t, (l + r) / 2.0, t + 58.0 * scale), 29.0 * scale, rgba(0.35, 0.35, 0.35, 1.0))?;
+    p.fill_round_rect(preview, 29.0 * scale, rgba(panel.0, panel.1, panel.2, alpha))?;
     p.stroke_round_rect(preview, 29.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.12))?;
     p.fill_ellipse(
         l + 28.0 * scale,
@@ -640,7 +643,11 @@ fn key_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![Item::Heading("Keys")];
     for h in Hotkey::ALL {
         let capturing = ui.sw.capturing == Some(h);
-        let text = if capturing { "Press the new keys…".to_string() } else { ui.cfg.combo(h).text() };
+        let text = if capturing {
+            "Press the new keys (Esc clears)…".to_string()
+        } else {
+            crate::ui::i18n::tr(&ui.cfg.combo(h).text()).into_owned()
+        };
         out.push(Item::Pair(Act::Rebind(h), h.label().into(), text, capturing));
     }
     out.push(Item::Note("Click a key, then press the new combination with Ctrl, Alt, Shift or Win."));
