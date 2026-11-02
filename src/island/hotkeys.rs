@@ -127,6 +127,7 @@ impl App {
     fn hide_window(&mut self) {
         self.kill_timer(Timer::Expand);
         self.kill_timer(Timer::Liquid);
+        self.kill_timer(Timer::Weather);
         self.stop_idle();
         self.set_bump_visible(false);
         self.update_eq();
@@ -225,5 +226,6 @@ impl App {
             self.kill_timer(Timer::Collapse);
         }
         self.pointer.tracking = false;
+        self.update_weather_timer();
     }
 }

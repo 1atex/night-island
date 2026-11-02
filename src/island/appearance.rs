@@ -53,6 +53,7 @@ impl App {
         let _ = self.collapsed.paint(&self.gpu, |p| {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
+        self.update_weather_timer();
     }
 
     pub(in crate::island) fn apply_pill_opacity(&mut self) {
@@ -114,6 +115,10 @@ impl App {
         let _ = self.expanded.paint(&self.gpu, |p| {
             let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
+        self.update_weather_timer();
+    }
+
+    pub(in crate::island) fn update_weather_timer(&self) {
         if self.weather_animating() {
             self.set_timer(Timer::Weather, self.frame_ms());
         } else {
@@ -122,13 +127,34 @@ impl App {
     }
 
     pub(in crate::island) fn weather_animating(&self) -> bool {
-        self.state == State::Expanded
-            && self.ui.tab == view::Tab::Weather
+        let shown = match self.state {
+            State::Expanded => self.ui.tab == view::Tab::Weather,
+            State::Collapsed => view::pill_weather_visible(&self.ui),
+            _ => false,
+        };
+        shown
             && self.settings.weather
             && self.ui.weather.is_some()
             && !self.gaming
+            && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
             && crate::ui::weather_icons::animations_enabled()
             && unsafe { IsWindowVisible(self.hwnd).as_bool() }
+    }
+
+    pub(in crate::island) fn weather_tick(&self) {
+        if !self.weather_animating() {
+            return;
+        }
+        if self.state == State::Expanded {
+            return self.repaint_expanded();
+        }
+        let pill = self.pill_rect(false);
+        if let Some(rect) = view::pill_weather_rect(pill, self.scale, &self.ui) {
+            let _ = self
+                .collapsed
+                .paint_region(&self.gpu, rect, |p| view::paint_pill_weather_icon(p, pill, self.scale, &self.ui));
+        }
+        self.update_weather_timer();
     }
 
     pub(in crate::island) fn set_blur(&self, open: bool) {

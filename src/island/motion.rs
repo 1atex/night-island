@@ -79,9 +79,7 @@ impl App {
         self.sync_metrics();
         self.set_timer(Timer::Settle, self.open_ms() as u32 + 80);
         let _ = self.animate_to(true, false);
-        if self.weather_animating() {
-            self.set_timer(Timer::Weather, self.frame_ms());
-        }
+        self.update_weather_timer();
         if matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.select_tab(self.ui.tab);
         }
@@ -97,6 +95,7 @@ impl App {
         self.end_edit(true);
         self.kill_timer(Timer::Collapse);
         self.state = State::Collapsing;
+        self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, false);
         self.set_timer(Timer::Shrink, self.close_ms() as u32 + 60);
@@ -174,6 +173,7 @@ impl App {
             return;
         }
         self.state = State::Hiding;
+        self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, true);
         self.set_timer(Timer::HideDone, self.close_ms() as u32 + 60);
@@ -201,6 +201,7 @@ impl App {
         let _ = self.animate_to(false, false);
         self.start_liquid();
         self.update_eq();
+        self.update_weather_timer();
     }
 
     pub(in crate::island) fn peek(&mut self) {

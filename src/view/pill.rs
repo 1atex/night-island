@@ -486,6 +486,40 @@ fn paint_progress_outline(p: &Painter, pill: Rect, scale: f32, ui: &UiState, fra
     Ok(())
 }
 
+pub fn pill_weather_visible(ui: &UiState) -> bool {
+    ui.cfg.pill_weather
+        && ui.weather.is_some()
+        && ui.notice.is_none()
+        && ui.volume.is_none()
+        && ui.downloading.is_none()
+}
+
+pub fn pill_weather_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
+    if !pill_weather_visible(ui) {
+        return None;
+    }
+    let (x, y, w, h) = pill;
+    let (cx, cy, r) = if ui.cfg.vertical() {
+        let (off, _) = vertical_slots(ui, scale, h).weather?;
+        (x + w / 2.0, y + off + 10.0 * scale, 10.0 * scale)
+    } else {
+        let cx = if row_pill(ui) {
+            x + music_slots(ui, scale, w).weather?.0 + 10.0 * scale
+        } else {
+            x + (24.0 + ui.char_inset) * scale + indicators_width(ui, scale)
+        };
+        (cx, y + h / 2.0, 10.5 * scale)
+    };
+    Some((cx - r, cy - r, cx + r, cy + r))
+}
+
+pub fn paint_pill_weather_icon(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    if let (Some((left, top, right, bottom)), Some(wx)) = (pill_weather_rect(pill, scale, ui), &ui.weather) {
+        animated_weather_icon(p, (left + right) / 2.0, (top + bottom) / 2.0, (right - left) / 2.0, wx.sky, wx.night)?;
+    }
+    Ok(())
+}
+
 pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     if ui.cfg.vertical() {
         return paint_collapsed_vertical(p, pill, scale, ui);
@@ -565,7 +599,7 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
     };
     let weather_at = |cx: f32| -> Result<()> {
         if let (true, Some(wx)) = (ui.cfg.pill_weather, &ui.weather) {
-            weather_icon(p, cx, y + h / 2.0, 10.5 * scale, wx.sky, wx.night)?;
+            paint_pill_weather_icon(p, pill, scale, ui)?;
             p.text(
                 &format!("{}°", wx.temp.round() as i32),
                 (cx + 14.0 * scale, y, cx + 48.0 * scale, y + h),
@@ -669,4 +703,70 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         BatteryStyle::Percent => paint_pill_battery(x + w - 16.0 * scale - 62.0 * scale, x + w - 16.0 * scale)?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::settings::Edge;
+    use crate::services::weather::Weather;
+
+    fn weather_ui() -> UiState {
+        let mut ui = UiState::new();
+        ui.cfg.weather = true;
+        ui.cfg.pill_weather = true;
+        ui.weather = Some(Weather {
+            place: "Test".into(),
+            temp: 12.0,
+            wind: 2.0,
+            humidity: 50.0,
+            sky: Sky::Rain,
+            night: false,
+            hourly: Vec::new(),
+            daily: Vec::new(),
+            city_missing: false,
+        });
+        ui
+    }
+
+    #[test]
+    fn weather_animation_regions_fit_both_pill_orientations_at_different_scales() {
+        let mut ui = weather_ui();
+        for scale in [1.0, 1.25, 2.0] {
+            for edge in Edge::ALL {
+                ui.cfg.placement = Placement::Docked;
+                ui.cfg.dock_edge = edge;
+                let (w, h) = if ui.cfg.vertical() { (42.0, 500.0) } else { (500.0, 42.0) };
+                let pill = (17.25, 8.75, w * scale, h * scale);
+                let rect = pill_weather_rect(pill, scale, &ui).unwrap();
+                assert!(rect.0 >= pill.0 && rect.1 >= pill.1);
+                assert!(rect.2 <= pill.0 + pill.2 && rect.3 <= pill.1 + pill.3);
+                let expected = if ui.cfg.vertical() { 20.0 } else { 21.0 } * scale;
+                assert!((rect.2 - rect.0 - expected).abs() < 0.001);
+                assert!((rect.3 - rect.1 - expected).abs() < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn temporary_overlays_suspend_pill_weather_drawing() {
+        let mut ui = weather_ui();
+        let pill = (0.0, 0.0, 500.0, 500.0);
+        assert!(pill_weather_rect(pill, 1.0, &ui).is_some());
+        ui.notice = Some(('!', "Notice".into()));
+        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
+        ui.notice = None;
+        ui.volume = Some(0.5);
+        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
+        ui.volume = None;
+        ui.downloading = Some("file.zip".into());
+        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
+        ui.downloading = None;
+        assert!(pill_weather_rect(pill, 1.0, &ui).is_some());
+        ui.cfg.pill_weather = false;
+        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
+        ui.cfg.pill_weather = true;
+        ui.weather = None;
+        assert!(pill_weather_rect(pill, 1.0, &ui).is_none());
+    }
 }

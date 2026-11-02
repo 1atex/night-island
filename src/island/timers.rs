@@ -194,11 +194,7 @@ impl App {
             Timer::LockKey => self.report_lockkeys(),
             Timer::SwCaret => self.sw_caret_tick(),
             Timer::SwAnim => self.sw_anim_tick(),
-            Timer::Weather => {
-                if self.weather_animating() {
-                    self.repaint_expanded();
-                }
-            }
+            Timer::Weather => self.weather_tick(),
             Timer::PillBack => self.restore_pill(),
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),

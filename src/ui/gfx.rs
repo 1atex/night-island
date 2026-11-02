@@ -2,7 +2,7 @@ use windows::Foundation::Size;
 use windows::Graphics::DirectX::{DirectXAlphaMode, DirectXPixelFormat};
 use windows::Graphics::SizeInt32;
 use windows::UI::Composition::{CompositionDrawingSurface, CompositionGraphicsDevice, Compositor, SpriteVisual};
-use windows::Win32::Foundation::{HMODULE, POINT};
+use windows::Win32::Foundation::{HMODULE, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_BEZIER_SEGMENT, D2D1_COLOR_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_BEGIN_HOLLOW,
     D2D1_FIGURE_END_CLOSED, D2D1_FILL_MODE_WINDING,
@@ -28,6 +28,9 @@ use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::System::WinRT::Composition::{ICompositionDrawingSurfaceInterop, ICompositorInterop};
 use windows::core::{BOOL, Interface, PCWSTR, Result, w};
 use windows_numerics::Matrix3x2;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EdgeShape {
@@ -205,6 +208,44 @@ impl Layer {
             let target: ID2D1RenderTarget = dc.cast()?;
             f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons(), weather: &gpu.weather });
             interop.EndDraw()
+        }
+    }
+
+    pub fn paint_region(
+        &self,
+        gpu: &Gpu,
+        rect: (f32, f32, f32, f32),
+        f: impl FnOnce(&Painter) -> Result<()>,
+    ) -> Result<()> {
+        let rect = RECT {
+            left: (rect.0.floor() as i32).max(0),
+            top: (rect.1.floor() as i32).max(0),
+            right: (rect.2.ceil() as i32).min(self.size.0),
+            bottom: (rect.3.ceil() as i32).min(self.size.1),
+        };
+        if rect.right <= rect.left || rect.bottom <= rect.top {
+            return Ok(());
+        }
+        unsafe {
+            let interop: ICompositionDrawingSurfaceInterop = self.surface.cast()?;
+            let mut offset = POINT::default();
+            let dc: ID2D1DeviceContext = interop.BeginDraw(Some(&rect), &mut offset)?;
+            dc.SetTransform(&Matrix3x2::translation((offset.x - rect.left) as f32, (offset.y - rect.top) as f32));
+            let clip = D2D_RECT_F {
+                left: rect.left as f32,
+                top: rect.top as f32,
+                right: rect.right as f32,
+                bottom: rect.bottom as f32,
+            };
+            dc.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED);
+            dc.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
+            let target = dc.cast::<ID2D1RenderTarget>();
+            let painted = target.and_then(|target| {
+                f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons(), weather: &gpu.weather })
+            });
+            dc.PopAxisAlignedClip();
+            let ended = interop.EndDraw();
+            painted.and(ended)
         }
     }
 }

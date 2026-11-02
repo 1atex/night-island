@@ -10,6 +10,17 @@ pub fn weather_icon(p: &Painter, cx: f32, cy: f32, r: f32, sky: Sky, night: bool
     paint_weather_icon(p, cx, cy, r, sky, night, false)
 }
 
+pub(in crate::view) fn animated_weather_icon(
+    p: &Painter,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    sky: Sky,
+    night: bool,
+) -> Result<()> {
+    paint_weather_icon(p, cx, cy, r, sky, night, true)
+}
+
 fn icon_name(sky: Sky, night: bool) -> &'static str {
     match sky {
         Sky::Clear if night => "clear-night",
@@ -220,7 +231,7 @@ pub(in crate::view) fn paint_weather(p: &Painter, pill: Rect, scale: f32, ui: &U
 
     let now = (left, top, split - 6.0 * scale, top + 150.0 * scale);
     p.fill_round_rect(now, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
-    paint_weather_icon(p, now.0 + 56.0 * scale, now.1 + 62.0 * scale, 40.0 * scale, wx.sky, wx.night, true)?;
+    animated_weather_icon(p, now.0 + 56.0 * scale, now.1 + 62.0 * scale, 40.0 * scale, wx.sky, wx.night)?;
     p.text(
         &format!("{}°", wx.temp.round() as i32),
         (now.0 + 108.0 * scale, now.1 + 14.0 * scale, now.2 - 8.0 * scale, now.1 + 88.0 * scale),

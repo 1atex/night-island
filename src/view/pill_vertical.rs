@@ -178,7 +178,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
     }
     if let (Some(s), Some(wx)) = (slots.weather, &ui.weather) {
         let r = slot(s);
-        weather_icon(p, cx, r.1 + 10.0 * scale, 10.0 * scale, wx.sky, wx.night)?;
+        paint_pill_weather_icon(p, pill, scale, ui)?;
         p.text(
             &format!("{}°", wx.temp.round() as i32),
             (r.0, r.1 + 22.0 * scale, r.2, r.3),
