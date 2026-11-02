@@ -249,6 +249,7 @@ impl App {
             pending_high_surrogate: None,
             gaming: false,
             pill_hidden: false,
+            ghost_stage: 0,
             metrics_on: None,
             steam_game: None,
             ghosted: false,
