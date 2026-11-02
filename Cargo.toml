@@ -4,6 +4,7 @@ version = "0.3.0"
 edition = "2024"
 description = "Night Island: a lightweight Dynamic Island for Windows"
 publish = false
+license = "MIT"
 
 [dependencies]
 base64 = "0.23.1"
