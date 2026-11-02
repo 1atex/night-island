@@ -114,6 +114,21 @@ impl App {
         let _ = self.expanded.paint(&self.gpu, |p| {
             let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
+        if self.weather_animating() {
+            self.set_timer(Timer::Weather, self.frame_ms());
+        } else {
+            self.kill_timer(Timer::Weather);
+        }
+    }
+
+    pub(in crate::island) fn weather_animating(&self) -> bool {
+        self.state == State::Expanded
+            && self.ui.tab == view::Tab::Weather
+            && self.settings.weather
+            && self.ui.weather.is_some()
+            && !self.gaming
+            && crate::ui::weather_icons::animations_enabled()
+            && unsafe { IsWindowVisible(self.hwnd).as_bool() }
     }
 
     pub(in crate::island) fn set_blur(&self, open: bool) {

@@ -55,10 +55,11 @@ pub(in crate::island) enum Timer {
     SteamPoll = 33,
     Tip = 34,
     SwAnim = 35,
+    Weather = 36,
 }
 
 impl Timer {
-    const ALL: [Timer; 35] = [
+    const ALL: [Timer; 36] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -94,6 +95,7 @@ impl Timer {
         Timer::SteamPoll,
         Timer::Tip,
         Timer::SwAnim,
+        Timer::Weather,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -163,7 +165,7 @@ impl App {
         let started = Instant::now();
         let frame = matches!(
             Timer::from_id(id),
-            Some(Timer::Spectrum | Timer::Liquid | Timer::UiAnim | Timer::Lyric | Timer::Char)
+            Some(Timer::Spectrum | Timer::Liquid | Timer::UiAnim | Timer::Lyric | Timer::Char | Timer::Weather)
         );
         self.on_timer_inner(id);
         if frame {
@@ -192,6 +194,11 @@ impl App {
             Timer::LockKey => self.report_lockkeys(),
             Timer::SwCaret => self.sw_caret_tick(),
             Timer::SwAnim => self.sw_anim_tick(),
+            Timer::Weather => {
+                if self.weather_animating() {
+                    self.repaint_expanded();
+                }
+            }
             Timer::PillBack => self.restore_pill(),
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),

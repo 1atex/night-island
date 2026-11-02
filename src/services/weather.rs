@@ -21,34 +21,71 @@ const USER_AGENT: &str = "NightIsland/0.1 (desktop widget)";
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sky {
     Clear,
+    Fair,
     Partly,
     Cloudy,
+    Overcast,
     Fog,
+    Drizzle,
     Rain,
+    HeavyRain,
+    RainShowers,
+    HeavyRainShowers,
     Sleet,
+    SleetShowers,
     Snow,
-    Thunder,
+    HeavySnow,
+    SnowShowers,
+    HeavySnowShowers,
+    ThunderRain,
+    ThunderSleet,
+    ThunderSnow,
+    ThunderRainShowers,
+    ThunderSleetShowers,
+    ThunderSnowShowers,
 }
 
 impl Sky {
     pub fn from_symbol(code: &str) -> (Sky, bool) {
         let night = code.ends_with("_night");
-        let sky = if code.contains("thunder") {
-            Sky::Thunder
-        } else if code.contains("sleet") {
-            Sky::Sleet
-        } else if code.contains("snow") {
-            Sky::Snow
-        } else if code.contains("rain") {
-            Sky::Rain
-        } else if code.contains("fog") {
-            Sky::Fog
-        } else if code.starts_with("partlycloudy") {
-            Sky::Partly
-        } else if code.starts_with("clearsky") || code.starts_with("fair") {
-            Sky::Clear
+        let condition = code.rsplit_once('_').map_or(code, |(condition, _)| condition);
+        let showers = condition.contains("showers");
+        let thunder = condition.contains("thunder");
+        let sky = if condition.contains("sleet") {
+            match (thunder, showers) {
+                (true, true) => Sky::ThunderSleetShowers,
+                (true, false) => Sky::ThunderSleet,
+                (false, true) => Sky::SleetShowers,
+                (false, false) => Sky::Sleet,
+            }
+        } else if condition.contains("snow") {
+            match (thunder, showers) {
+                (true, true) => Sky::ThunderSnowShowers,
+                (true, false) => Sky::ThunderSnow,
+                (false, true) if condition.starts_with("heavy") => Sky::HeavySnowShowers,
+                (false, true) => Sky::SnowShowers,
+                (false, false) if condition.starts_with("heavy") => Sky::HeavySnow,
+                (false, false) => Sky::Snow,
+            }
+        } else if condition.contains("rain") {
+            match (thunder, showers) {
+                (true, true) => Sky::ThunderRainShowers,
+                (true, false) => Sky::ThunderRain,
+                (false, true) if condition.starts_with("heavy") => Sky::HeavyRainShowers,
+                (false, true) => Sky::RainShowers,
+                (false, false) if condition.starts_with("heavy") => Sky::HeavyRain,
+                (false, false) if condition.starts_with("light") => Sky::Drizzle,
+                (false, false) => Sky::Rain,
+            }
         } else {
-            Sky::Cloudy
+            match condition {
+                "clearsky" => Sky::Clear,
+                "fair" => Sky::Fair,
+                "partlycloudy" => Sky::Partly,
+                "cloudy" => Sky::Overcast,
+                "fog" => Sky::Fog,
+                _ => Sky::Cloudy,
+            }
         };
         (sky, night)
     }
@@ -56,13 +93,25 @@ impl Sky {
     pub fn name(self) -> &'static str {
         match self {
             Sky::Clear => "Clear sky",
+            Sky::Fair => "Mostly clear",
             Sky::Partly => "Partly cloudy",
             Sky::Cloudy => "Cloudy",
+            Sky::Overcast => "Overcast",
             Sky::Fog => "Fog",
             Sky::Rain => "Rain",
+            Sky::Drizzle => "Light rain",
+            Sky::HeavyRain => "Heavy rain",
+            Sky::RainShowers => "Rain showers",
+            Sky::HeavyRainShowers => "Heavy rain showers",
             Sky::Sleet => "Sleet",
+            Sky::SleetShowers => "Sleet showers",
             Sky::Snow => "Snow",
-            Sky::Thunder => "Thunderstorm",
+            Sky::HeavySnow => "Heavy snow",
+            Sky::SnowShowers => "Snow showers",
+            Sky::HeavySnowShowers => "Heavy snow showers",
+            Sky::ThunderRain | Sky::ThunderRainShowers => "Thunderstorm with rain",
+            Sky::ThunderSleet | Sky::ThunderSleetShowers => "Thunderstorm with sleet",
+            Sky::ThunderSnow | Sky::ThunderSnowShowers => "Thunderstorm with snow",
         }
     }
 }
@@ -397,10 +446,43 @@ mod tests {
     fn symbols_map_to_skies() {
         assert_eq!(Sky::from_symbol("clearsky_night"), (Sky::Clear, true));
         assert_eq!(Sky::from_symbol("partlycloudy_day"), (Sky::Partly, false));
-        assert_eq!(Sky::from_symbol("lightrainshowersandthunder_day").0, Sky::Thunder);
+        assert_eq!(Sky::from_symbol("lightrainshowersandthunder_day").0, Sky::ThunderRainShowers);
         assert_eq!(Sky::from_symbol("heavysleet").0, Sky::Sleet);
         assert_eq!(Sky::from_symbol("fog").0, Sky::Fog);
         assert_eq!(Sky::from_symbol("who_knows").0, Sky::Cloudy);
+    }
+
+    #[test]
+    fn symbols_preserve_intensity_precipitation_and_daylight() {
+        let cases = [
+            ("clearsky", Sky::Clear),
+            ("fair", Sky::Fair),
+            ("partlycloudy", Sky::Partly),
+            ("cloudy", Sky::Overcast),
+            ("fog", Sky::Fog),
+            ("lightrain", Sky::Drizzle),
+            ("rain", Sky::Rain),
+            ("heavyrain", Sky::HeavyRain),
+            ("lightrainshowers", Sky::RainShowers),
+            ("heavyrainshowers", Sky::HeavyRainShowers),
+            ("lightsnow", Sky::Snow),
+            ("heavysnow", Sky::HeavySnow),
+            ("lightsnowshowers", Sky::SnowShowers),
+            ("heavysnowshowers", Sky::HeavySnowShowers),
+            ("heavysleet", Sky::Sleet),
+            ("lightsleetshowers", Sky::SleetShowers),
+            ("rainandthunder", Sky::ThunderRain),
+            ("snowandthunder", Sky::ThunderSnow),
+            ("sleetandthunder", Sky::ThunderSleet),
+            ("lightrainshowersandthunder", Sky::ThunderRainShowers),
+            ("lightssnowshowersandthunder", Sky::ThunderSnowShowers),
+            ("lightssleetshowersandthunder", Sky::ThunderSleetShowers),
+        ];
+        for (code, expected) in cases {
+            for (suffix, night) in [("", false), ("_day", false), ("_night", true), ("_polartwilight", false)] {
+                assert_eq!(Sky::from_symbol(&format!("{code}{suffix}")), (expected, night), "{code}{suffix}");
+            }
+        }
     }
 
     #[test]

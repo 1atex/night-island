@@ -86,6 +86,7 @@ pub struct Gpu {
     factory: ID2D1Factory,
     dwrite: IDWriteFactory,
     icons: PCWSTR,
+    weather: std::cell::RefCell<crate::ui::weather_icons::WeatherIcons>,
 }
 
 impl Gpu {
@@ -109,7 +110,7 @@ impl Gpu {
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let icons = pick_icon_font(&dwrite);
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            Ok(Self { gfx, factory, dwrite, icons })
+            Ok(Self { gfx, factory, dwrite, icons, weather: std::cell::RefCell::default() })
         }
     }
 
@@ -168,7 +169,7 @@ impl Gpu {
             dc_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             dc_target.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             let target: ID2D1RenderTarget = dc_target.cast()?;
-            f(&Painter { dc: &target, dwrite: self.dwrite(), icons: self.icons() });
+            f(&Painter { dc: &target, dwrite: self.dwrite(), icons: self.icons(), weather: &self.weather });
             dc_target.EndDraw(None, None)
         }
     }
@@ -202,7 +203,7 @@ impl Layer {
             dc.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             dc.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             let target: ID2D1RenderTarget = dc.cast()?;
-            f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons() });
+            f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons(), weather: &gpu.weather });
             interop.EndDraw()
         }
     }
@@ -212,9 +213,14 @@ pub struct Painter<'a> {
     dc: &'a ID2D1RenderTarget,
     dwrite: &'a IDWriteFactory,
     icons: PCWSTR,
+    weather: &'a std::cell::RefCell<crate::ui::weather_icons::WeatherIcons>,
 }
 
 impl Painter<'_> {
+    pub fn weather_svg(&self, name: &'static str, rect: (f32, f32, f32, f32), animated: bool) -> Result<()> {
+        self.weather.borrow_mut().draw(self.dc, name, rect, animated)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn text(
         &self,
@@ -513,7 +519,7 @@ impl Painter<'_> {
             rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             rt.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             rt.SetTransform(&Matrix3x2::translation(-origin.0, -origin.1));
-            let painted = f(&Painter { dc: &rt, dwrite: self.dwrite, icons: self.icons });
+            let painted = f(&Painter { dc: &rt, dwrite: self.dwrite, icons: self.icons, weather: self.weather });
             rt.EndDraw(None, None)?;
             painted?;
             target.GetBitmap()

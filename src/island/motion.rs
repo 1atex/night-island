@@ -79,6 +79,9 @@ impl App {
         self.sync_metrics();
         self.set_timer(Timer::Settle, self.open_ms() as u32 + 80);
         let _ = self.animate_to(true, false);
+        if self.weather_animating() {
+            self.set_timer(Timer::Weather, self.frame_ms());
+        }
         if matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.select_tab(self.ui.tab);
         }
