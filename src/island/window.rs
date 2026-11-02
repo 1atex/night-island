@@ -338,6 +338,12 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                     Some(tray::ID_EXIT) => unsafe {
                         let _ = DestroyWindow(hwnd);
                     },
+                    Some(tray::ID_REBUILD) => {
+                        tray::rebuild_and_restart();
+                        unsafe {
+                            let _ = DestroyWindow(hwnd);
+                        }
+                    }
                     Some(id) => with_app(|a| a.apply_menu_choice(id)),
                     None => {}
                 },
