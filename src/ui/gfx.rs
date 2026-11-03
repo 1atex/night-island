@@ -93,6 +93,16 @@ pub struct Gpu {
 }
 
 impl Gpu {
+    pub fn popup(&self) -> Self {
+        Self {
+            gfx: self.gfx.clone(),
+            factory: self.factory.clone(),
+            dwrite: self.dwrite.clone(),
+            icons: self.icons,
+            weather: std::cell::RefCell::default(),
+        }
+    }
+
     pub fn new(compositor: &Compositor) -> Result<Self> {
         unsafe {
             let mut d3d: Option<ID3D11Device> = None;

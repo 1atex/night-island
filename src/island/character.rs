@@ -101,7 +101,12 @@ impl App {
         }
         let detached = self.settings.character_detached && self.settings.character != Character::None;
         if detached && self.pet.desktop.is_none() {
-            match crate::ui::companion::CompanionWindow::new(self.hwnd, self.settings.character_pos, self.scale) {
+            match crate::ui::companion::CompanionWindow::new(
+                self.hwnd,
+                self.settings.character_pos,
+                self.scale,
+                &self.gpu,
+            ) {
                 Ok(window) => {
                     self.settings.character_pos = Some(window.position());
                     self.pet.desktop = Some(window);
@@ -315,7 +320,7 @@ impl App {
                 self.pet.char_key = None;
             }
             let available = self.ui.media.playing || !self.ui.media.title.is_empty() || self.ui.media.players > 0;
-            if let Err(error) = desktop.update_controls(&self.gpu, available, self.ui.media.playing, self.scale) {
+            if let Err(error) = desktop.update_controls(available, &self.ui.media, media::progress(), self.scale) {
                 crate::log_warn!("could not draw companion music controls: {error}");
             }
         }

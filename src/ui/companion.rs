@@ -175,14 +175,14 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
     }
 }
 
-pub(super) struct Surface {
-    pub(super) mem: HDC,
+struct Surface {
+    mem: HDC,
     dib: HBITMAP,
-    pub(super) side: i32,
+    side: i32,
 }
 
 impl Surface {
-    pub(super) fn new(side: i32) -> Result<Self> {
+    fn new(side: i32) -> Result<Self> {
         unsafe {
             let screen = GetDC(None);
             let mem = CreateCompatibleDC(Some(screen));
@@ -234,7 +234,7 @@ pub struct CompanionWindow {
 }
 
 impl CompanionWindow {
-    pub fn new(parent: HWND, position: Option<[i32; 2]>, scale: f32) -> Result<Self> {
+    pub fn new(parent: HWND, position: Option<[i32; 2]>, scale: f32, gpu: &Gpu) -> Result<Self> {
         static CLASS: Once = Once::new();
         unsafe {
             CLASS.call_once(|| {
@@ -275,7 +275,7 @@ impl CompanionWindow {
                 }
             };
             let mut window = Self { hwnd, _state: state, surface, controls: None, hover_until: None };
-            let controls = Controls::new(parent, hwnd, scale)?;
+            let controls = Controls::new(parent, hwnd, scale, gpu)?;
             window._state.controls = controls.hwnd();
             window.controls = Some(controls);
             Ok(window)
@@ -323,20 +323,26 @@ impl CompanionWindow {
         changed
     }
 
-    pub fn update_controls(&mut self, gpu: &Gpu, available: bool, playing: bool, scale: f32) -> Result<()> {
+    pub fn update_controls(
+        &mut self,
+        available: bool,
+        media: &crate::platform::media::Media,
+        progress: Option<(f32, f32)>,
+        scale: f32,
+    ) -> Result<()> {
         let mut point = POINT::default();
         if unsafe { GetCursorPos(&mut point) }.is_err() {
             return Ok(());
         }
-        self.update_controls_at(gpu, point, available, playing, scale)
+        self.update_controls_at(point, available, media, progress, scale)
     }
 
     fn update_controls_at(
         &mut self,
-        gpu: &Gpu,
         point: POINT,
         available: bool,
-        playing: bool,
+        media: &crate::platform::media::Media,
+        progress: Option<(f32, f32)>,
         scale: f32,
     ) -> Result<()> {
         if !available || self.dragging() {
@@ -375,7 +381,7 @@ impl CompanionWindow {
                 self.hover_until = Some(now + Duration::from_millis(300));
             }
             if self.hover_until.is_some_and(|until| now < until) {
-                controls.show(gpu, panel, point, playing, scale)?;
+                controls.show(panel, point, media, progress, scale)?;
             } else {
                 controls.hide();
             }
@@ -558,7 +564,7 @@ mod tests {
                 None,
             )?
         };
-        let mut spark = CompanionWindow::new(parent, Some([320, 320]), 1.0)?;
+        let mut spark = CompanionWindow::new(parent, Some([320, 320]), 1.0, &gpu)?;
         let pose = Pose {
             t: 0.0,
             reaction: characters::Reaction::Idle,
@@ -617,8 +623,14 @@ mod tests {
                 }
             }
         }
+        let media = crate::platform::media::Media {
+            title: "Midnight City".into(),
+            artist: "M83".into(),
+            playing: true,
+            ..Default::default()
+        };
         let (cx, cy) = spark.center();
-        spark.update_controls_at(&gpu, POINT { x: cx as i32, y: cy as i32 }, true, true, 1.0)?;
+        spark.update_controls_at(POINT { x: cx as i32, y: cy as i32 }, true, &media, Some((84.0, 244.0)), 1.0)?;
         let controls = spark.controls.as_ref().unwrap();
         let panel = controls.hwnd();
         assert!(unsafe { IsWindowVisible(panel) }.as_bool());
@@ -633,9 +645,15 @@ mod tests {
             GetWindowRect(panel, &mut panel_rect)?;
         }
         assert_eq!((character_rect.right - character_rect.left, character_rect.bottom - character_rect.top), (88, 88));
-        spark.update_controls_at(&gpu, POINT { x: panel_rect.left + 26, y: panel_rect.top + 22 }, true, false, 1.0)?;
+        spark.update_controls_at(
+            POINT { x: panel_rect.left + 148, y: panel_rect.top + 98 },
+            true,
+            &media,
+            Some((84.0, 244.0)),
+            1.0,
+        )?;
         assert!(unsafe { IsWindowVisible(panel) }.as_bool());
-        spark.update_controls_at(&gpu, POINT::default(), false, false, 1.0)?;
+        spark.update_controls_at(POINT::default(), false, &media, None, 1.0)?;
         assert!(!unsafe { IsWindowVisible(panel) }.as_bool());
         for work in
             [RECT { left: 0, top: 0, right: 500, bottom: 500 }, RECT { left: -1920, top: 0, right: 0, bottom: 1040 }]
@@ -650,9 +668,9 @@ mod tests {
         if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
             let dir = std::path::PathBuf::from(dir);
             save_preview(&dir.join("characters.png"), 528, 264, &sheet);
-            spark.update_controls_at(&gpu, POINT { x: cx as i32, y: cy as i32 }, true, true, 1.0)?;
+            spark.update_controls_at(POINT { x: cx as i32, y: cy as i32 }, true, &media, Some((84.0, 244.0)), 1.0)?;
             let controls = spark.controls.as_ref().unwrap();
-            save_preview(&dir.join("companion-controls.png"), 132, 44, &pixels(controls.surface())[..132 * 44 * 4]);
+            save_preview(&dir.join("companion-controls.png"), 300, 140, &controls.preview());
             let surface = Surface::new(640)?;
             let ui = crate::view::UiState::new();
             gpu.paint_dc(surface.mem, (640, 640), |p| {

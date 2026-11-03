@@ -10,34 +10,16 @@ pub(in crate::island) struct CompanionChat {
 }
 
 impl CompanionChat {
-    pub(in crate::island) fn hwnd(&self) -> HWND {
-        self.window.hwnd()
+    pub(in crate::island) fn repaint(&mut self) {
+        self.window.repaint();
     }
 
     pub(in crate::island) fn set_capture_hidden(&self, hidden: bool) {
         self.window.set_capture_hidden(hidden);
     }
 
-    fn refresh(&self) {
-        let mut text = if self.turns.is_empty() {
-            crate::ui::i18n::tr("Ask me anything. This chat stays beside your character.").into_owned()
-        } else {
-            self.turns
-                .iter()
-                .map(|turn| {
-                    format!("{}\n{}", crate::ui::i18n::tr(if turn.assistant { "AI" } else { "You" }), turn.text)
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        };
-        if let Some(error) = &self.error {
-            text.push_str(&format!("\n\n{error}"));
-        }
-        self.window.update(
-            &text,
-            if self.pending { "Thinking…" } else { "Enter to send · Shift+Enter for a new line" },
-            self.pending,
-        );
+    fn refresh(&mut self, provider: &str) {
+        self.window.update(&self.turns, self.error.as_deref(), self.pending, provider);
     }
 }
 
@@ -47,7 +29,7 @@ impl App {
         let anchor = desktop.center();
         self.end_edit(true);
         if self.pet.chat.is_none() {
-            match MiniChatWindow::new(self.hwnd, self.dpi_scale) {
+            match MiniChatWindow::new(self.hwnd, self.dpi_scale, &self.gpu) {
                 Ok(window) => {
                     self.pet.chat = Some(CompanionChat { window, turns: Vec::new(), pending: false, error: None })
                 }
@@ -57,10 +39,14 @@ impl App {
                 }
             }
         }
-        if let Some(chat) = &self.pet.chat {
+        if let Some(chat) = &mut self.pet.chat {
             chat.window.set_capture_hidden(self.settings.capture_hidden);
-            chat.refresh();
-            chat.window.show(anchor, self.settings.character.name());
+            chat.refresh(&format!(
+                "{} · {}",
+                self.settings.ai.provider.name(),
+                self.settings.ai.model(self.settings.ai.provider)
+            ));
+            chat.window.show(anchor, self.settings.character);
         }
     }
 
@@ -81,7 +67,11 @@ impl App {
         }
         if !ai::has_key(self.settings.ai.provider) {
             chat.error = Some(crate::ui::i18n::tr("Connect your AI provider in AI settings.").into_owned());
-            chat.refresh();
+            chat.refresh(&format!(
+                "{} · {}",
+                self.settings.ai.provider.name(),
+                self.settings.ai.model(self.settings.ai.provider)
+            ));
             return;
         }
         chat.turns.push(ChatTurn::text(false, text));
@@ -93,7 +83,11 @@ impl App {
             chat.turns.pop();
             chat.error = Some(crate::ui::i18n::tr("Another request is running, try again in a moment").into_owned());
         }
-        chat.refresh();
+        chat.refresh(&format!(
+            "{} · {}",
+            self.settings.ai.provider.name(),
+            self.settings.ai.model(self.settings.ai.provider)
+        ));
     }
 
     pub(in crate::island) fn finish_companion_chat(&mut self, answer: std::result::Result<String, String>) {
@@ -115,6 +109,10 @@ impl App {
         }
         let overflow = chat.turns.len().saturating_sub(100);
         chat.turns.drain(..overflow);
-        chat.refresh();
+        chat.refresh(&format!(
+            "{} · {}",
+            self.settings.ai.provider.name(),
+            self.settings.ai.model(self.settings.ai.provider)
+        ));
     }
 }

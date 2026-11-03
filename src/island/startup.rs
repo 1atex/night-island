@@ -118,10 +118,6 @@ pub fn run() -> Result<()> {
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let chat = with_app_value(|a| a.pet.chat.as_ref().map(|chat| chat.hwnd())).flatten();
-            if chat.is_some_and(|hwnd| IsDialogMessageW(hwnd, &msg).as_bool()) {
-                continue;
-            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

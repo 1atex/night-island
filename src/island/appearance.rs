@@ -79,6 +79,9 @@ impl App {
         self.paint_bump_with(0.0, 0.0);
         self.apply_accent();
         self.repaint();
+        if let Some(chat) = &mut self.pet.chat {
+            chat.repaint();
+        }
     }
 
     pub(in crate::island) fn apply_accent(&self) {

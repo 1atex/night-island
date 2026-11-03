@@ -108,6 +108,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "System sound" => "Звук системы",
         "No character" => "Без персонажа",
         "More" => "Ещё",
+        "Your companion is here" => "Ваш персонаж рядом",
         "More tabs and actions" => "Другие вкладки и действия",
         "AI settings" => "Настройки ИИ",
         "You" => "Вы",

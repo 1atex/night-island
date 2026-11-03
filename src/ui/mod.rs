@@ -10,6 +10,7 @@ pub mod md;
 pub mod menu;
 pub mod mini_chat;
 pub mod overlay;
+pub mod popup;
 pub mod theme;
 pub mod tip;
 pub mod tray;
