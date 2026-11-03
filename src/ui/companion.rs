@@ -22,8 +22,8 @@ const SIDE: f32 = 88.0;
 pub fn dock_hit(pill: (f32, f32, f32, f32), point: (f32, f32), scale: f32) -> bool {
     let (x, y, w, h) = pill;
     let radius = (w.min(h) / 2.0).min(24.0 * scale);
-    let cx = point.0.clamp(x + radius, x + w - radius);
-    let cy = point.1.clamp(y + radius, y + h - radius);
+    let cx = point.0.clamp((x + radius).min(x + w - radius), x + w - radius);
+    let cy = point.1.clamp((y + radius).min(y + h - radius), y + h - radius);
     (point.0 - cx).powi(2) + (point.1 - cy).powi(2) <= (radius + 6.0 * scale).powi(2)
 }
 
@@ -508,6 +508,15 @@ impl Drop for CompanionWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docking_never_panics_on_rounding_of_the_clamp_bounds() {
+        for i in 0..5000 {
+            let x = i as f32 * 0.0731;
+            let w = 40.0 + (i % 7) as f32 * 0.37;
+            dock_hit((x, 5.0, w, w * 3.0), (x, 0.0), 1.0);
+        }
+    }
 
     #[test]
     fn a_newly_released_pet_must_leave_the_island_before_it_can_dock() {

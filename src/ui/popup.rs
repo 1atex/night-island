@@ -13,8 +13,8 @@ pub fn hit_panel(point: (f32, f32), size: (f32, f32), scale: f32) -> bool {
         return false;
     }
     let radius = (28.0 * scale).min((size.0 - 2.0 * margin) / 2.0).min((size.1 - 2.0 * margin) / 2.0);
-    let cx = point.0.clamp(margin + radius, size.0 - margin - radius);
-    let cy = point.1.clamp(margin + radius, size.1 - margin - radius);
+    let cx = point.0.clamp((margin + radius).min(size.0 - margin - radius), size.0 - margin - radius);
+    let cy = point.1.clamp((margin + radius).min(size.1 - margin - radius), size.1 - margin - radius);
     (point.0 - cx).powi(2) + (point.1 - cy).powi(2) <= radius * radius
 }
 
