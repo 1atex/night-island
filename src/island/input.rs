@@ -614,21 +614,27 @@ impl App {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed
                 && view::hit_mic_dot(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32);
+            let over_spark = self.can_release_spark(x, y);
             self.ui.hand = self.state == State::Collapsed
                 && self.on_pill(x, y)
-                && (over_mic || self.recording.is_some() || self.notice_link.is_some());
+                && (over_mic || over_spark || self.recording.is_some() || self.notice_link.is_some());
             let hover = over_mic.then_some(view::HeadHit::Mic);
             if self.state == State::Collapsed && hover != self.ui.hover_head {
                 self.ui.hover_head = hover;
                 self.repaint_collapsed();
             }
-            let tip = hover.and_then(|_| {
-                let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
-                let text = if self.ui.mic_muted == Some(true) { "Unmute microphone" } else { "Mute microphone" };
-                Some((text.to_string(), ((dot.0 + dot.2) / 2.0, dot.3 + 10.0 * self.scale)))
-            });
+            let tip = if over_spark {
+                let (w, h) = self.char_size();
+                Some(("Right-click to release Spark".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
+            } else {
+                hover.and_then(|_| {
+                    let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
+                    let text = if self.ui.mic_muted == Some(true) { "Unmute microphone" } else { "Mute microphone" };
+                    Some((text.to_string(), ((dot.0 + dot.2) / 2.0, dot.3 + 10.0 * self.scale)))
+                })
+            };
             self.set_tip(tip);
-            if !over_mic && (hidden || self.on_pill(x, y)) {
+            if !over_mic && !over_spark && (hidden || self.on_pill(x, y)) {
                 self.set_timer(Timer::Expand, self.settings.open_delay_ms.max(1));
             } else {
                 self.kill_timer(Timer::Expand);

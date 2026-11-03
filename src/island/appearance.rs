@@ -177,6 +177,9 @@ impl App {
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, affinity);
         }
+        if let Some(desktop) = &self.pet.desktop {
+            desktop.set_capture_hidden(self.settings.capture_hidden);
+        }
     }
 
     pub(in crate::island) fn apply_style(&mut self) {

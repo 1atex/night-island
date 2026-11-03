@@ -7,6 +7,7 @@ pub mod markup;
 pub mod md;
 pub mod menu;
 pub mod overlay;
+pub mod spark;
 pub mod theme;
 pub mod tip;
 pub mod tray;

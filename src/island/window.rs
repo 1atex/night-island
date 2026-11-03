@@ -104,6 +104,27 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_RBUTTONUP => {
             let (x, y) = point_from(lparam);
+            if with_app_value(|a| a.can_release_spark(x, y)) == Some(true) {
+                with_app(|a| a.popup_open = true);
+                let mut point = windows::Win32::Foundation::POINT::default();
+                unsafe {
+                    let _ = GetCursorPos(&mut point);
+                }
+                let choice = crate::ui::menu::show(
+                    vec![crate::ui::menu::Entry::item(1, &crate::ui::i18n::tr("Release Spark"))],
+                    (point.x, point.y),
+                    false,
+                    app_scale(),
+                    &|f| with_app(|a| f(&a.gpu)),
+                );
+                with_app(|a| {
+                    a.popup_open = false;
+                    if choice == Some(1) {
+                        a.set_spark_detached(true);
+                    }
+                });
+                return LRESULT(0);
+            }
             let mut target = None;
             with_app(|a| target = a.dock_target_at(x, y));
             if let Some((index, path)) = target {
@@ -329,6 +350,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_SHOW => {
             with_app(|a| a.peek());
+            LRESULT(0)
+        }
+        crate::ui::spark::WM_SPARK => {
+            with_app(|a| a.on_spark(wparam.0, lparam.0));
             LRESULT(0)
         }
         tray::WM_TRAY => {

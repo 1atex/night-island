@@ -78,6 +78,7 @@ pub enum Sid {
     SpikeColor,
     Spikes,
     Character,
+    SparkDetached,
     RecFormat,
     RecFps,
     RecSystem,
@@ -291,6 +292,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::GhostMode => c.ghost_mode,
         Sid::GhostThrough => c.ghost_click_through,
         Sid::GhostHold => c.ghost_hold,
+        Sid::SparkDetached => c.spark_detached,
         Sid::Spikes => c.edge_spikes,
         Sid::PillWeather => c.pill_weather,
         Sid::MusicEq => c.music_eq,
@@ -349,6 +351,12 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::GhostMode => c.ghost_mode = on,
         Sid::GhostThrough => c.ghost_click_through = on,
         Sid::GhostHold => c.ghost_hold = on,
+        Sid::SparkDetached => {
+            c.spark_detached = on;
+            if on {
+                c.character = crate::ui::characters::Character::Spark;
+            }
+        }
         Sid::Spikes => c.edge_spikes = on,
         Sid::PillWeather => c.pill_weather = on,
         Sid::MusicEq => c.music_eq = on,

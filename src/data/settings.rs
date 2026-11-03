@@ -419,6 +419,8 @@ pub struct Settings {
     pub record_system_audio: bool,
     pub record_mic: bool,
     pub character: Character,
+    pub spark_detached: bool,
+    pub spark_pos: Option<[i32; 2]>,
     pub edge_spikes: bool,
     pub style: Style,
     pub capture_hidden: bool,
@@ -513,6 +515,8 @@ impl Default for Settings {
             record_system_audio: true,
             record_mic: true,
             character: Character::Spark,
+            spark_detached: false,
+            spark_pos: None,
             edge_spikes: true,
             style: Style::Liquid,
             capture_hidden: false,
@@ -886,6 +890,10 @@ impl Settings {
             self.weather_city.chars().filter(|c| !c.is_control()).take(60).collect::<String>().trim().to_string();
         self.dock_offset = clamp_f(self.dock_offset, 0.0, 1.0, 0.5);
         self.float_pos = self.float_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
+        self.spark_pos = self.spark_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
+        if self.character != Character::Spark {
+            self.spark_detached = false;
+        }
         self.overlay_pos = self.overlay_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
         self.panel_hue = clamp_f(self.panel_hue, 0.0, 360.0, d.panel_hue);
         self.panel_sat = clamp_f(self.panel_sat, 0.0, 1.0, d.panel_sat);
@@ -1107,6 +1115,19 @@ mod tests {
             assert_eq!(mode.step(false).step(true), mode);
         }
         assert_eq!(ProgressStyle::Strip.step(false), ProgressStyle::Fill);
+    }
+
+    #[test]
+    fn desktop_spark_position_and_mode_survive_settings_round_trips() {
+        let mut settings: Settings =
+            serde_json::from_str(r#"{"character":"spark","spark_detached":true,"spark_pos":[-200,400]}"#).unwrap();
+        settings.sanitize();
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(restored.spark_detached);
+        assert_eq!(restored.spark_pos, Some([-200, 400]));
+        settings.character = Character::None;
+        settings.sanitize();
+        assert!(!settings.spark_detached);
     }
 }
 

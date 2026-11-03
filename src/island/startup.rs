@@ -279,6 +279,7 @@ impl App {
             },
             pet: Pet {
                 char_layer,
+                desktop: None,
                 born: Instant::now(),
                 next_blink: Instant::now() + Duration::from_secs(3),
                 blink_until: Instant::now(),
@@ -303,7 +304,7 @@ impl App {
         app.paint_ears();
         app.apply_character();
         app.ui.cfg = app.settings.clone();
-        app.ui.char_inset = if app.settings.character == Character::None { 0.0 } else { CHAR_INSET };
+        app.ui.char_inset = if app.attached_character_on() { CHAR_INSET } else { 0.0 };
         app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
         if app.settings.hang() != Hang::Down {
             app.apply_layout();

@@ -4,6 +4,7 @@ pub(in crate::island) const CHAR_INSET: f32 = 30.0;
 
 pub(in crate::island) struct Pet {
     pub(in crate::island) char_layer: Layer,
+    pub(in crate::island) desktop: Option<crate::ui::spark::SparkWindow>,
     pub(in crate::island) born: Instant,
     pub(in crate::island) next_blink: Instant,
     pub(in crate::island) blink_until: Instant,
@@ -13,33 +14,63 @@ pub(in crate::island) struct Pet {
 }
 
 impl App {
+    pub(in crate::island) fn attached_character_on(&self) -> bool {
+        self.settings.character != Character::None && self.pet.desktop.is_none()
+    }
+
     pub(in crate::island) fn char_size(&self) -> (f32, f32) {
         (characters::BOX_W * self.scale, characters::BOX_H * self.scale)
     }
 
-    pub(in crate::island) fn place_char(&self) {
+    fn char_origin(&self) -> (f32, f32) {
         let s = self.scale;
         let (win_w, _) = self.window_size(self.win);
-        let (x, y) = if self.settings.vertical() {
+        if self.settings.vertical() {
             ((win_w as f32 - characters::BOX_W * s) / 2.0, self.win_pad().1 * s + 6.0 * s)
         } else {
             (
                 (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s,
                 self.win_pad().1 * s + (COLLAPSED.1 - characters::BOX_H) * s / 2.0,
             )
-        };
+        }
+    }
+
+    pub(in crate::island) fn place_char(&self) {
+        let (x, y) = self.char_origin();
         let _ = self.pet.char_layer.sprite.SetOffset(Vector3 { X: x, Y: y, Z: 0.0 });
     }
 
     pub(in crate::island) fn apply_character(&mut self) {
-        let on = self.settings.character != Character::None;
+        if self.settings.character != Character::Spark {
+            self.settings.spark_detached = false;
+            self.ui.cfg.spark_detached = false;
+        }
+        let detached = self.settings.spark_detached && self.settings.character == Character::Spark;
+        if detached && self.pet.desktop.is_none() {
+            match crate::ui::spark::SparkWindow::new(self.hwnd, self.settings.spark_pos, self.scale) {
+                Ok(window) => {
+                    self.settings.spark_pos = Some(window.position());
+                    self.pet.desktop = Some(window);
+                }
+                Err(error) => crate::log_warn!("could not release Spark: {error}"),
+            }
+        } else if !detached && let Some(window) = self.pet.desktop.take() {
+            self.settings.spark_pos = Some(window.position());
+            drop(window);
+            self.restore_pill();
+            self.reveal();
+        }
+        let on = self.attached_character_on();
         self.ui.char_inset = if on { CHAR_INSET } else { 0.0 };
-        let _ = self.pet.char_layer.sprite.SetIsVisible(on);
+        let _ = self.pet.char_layer.sprite.SetIsVisible(on && self.state != State::Expanded);
+        if let Some(desktop) = &self.pet.desktop {
+            desktop.set_capture_hidden(self.settings.capture_hidden);
+        }
         self.pet.char_key = None;
         self.place_char();
         self.place_spectrum();
         self.repaint_collapsed();
-        if on {
+        if on || self.pet.desktop.is_some() {
             self.set_timer(Timer::Char, 1);
         } else {
             self.kill_timer(Timer::Char);
@@ -47,8 +78,62 @@ impl App {
     }
 
     pub(in crate::island) fn start_char(&self) {
-        if self.settings.character != Character::None && self.state == State::Collapsed {
+        if !self.gaming
+            && self.settings.character != Character::None
+            && (self.state == State::Collapsed || self.pet.desktop.is_some())
+        {
             self.set_timer(Timer::Char, 60);
+        }
+    }
+
+    pub(in crate::island) fn can_release_spark(&self, x: i32, y: i32) -> bool {
+        if self.state != State::Collapsed || self.settings.character != Character::Spark || self.pet.desktop.is_some() {
+            return false;
+        }
+        let (left, top) = self.char_origin();
+        let (w, h) = self.char_size();
+        let dx = (x as f32 - left - w / 2.0) / (w * 0.32);
+        let dy = (y as f32 - top - h / 2.0) / (h * 0.43);
+        dx * dx + dy * dy <= 1.0
+    }
+
+    pub(in crate::island) fn set_spark_detached(&mut self, detached: bool) {
+        self.settings.spark_detached = detached;
+        if detached {
+            self.settings.character = Character::Spark;
+        } else {
+            self.restore_pill();
+            self.reveal();
+        }
+        self.apply_character();
+        self.ui.cfg = self.settings.clone();
+        self.settings.save();
+    }
+
+    pub(in crate::island) fn on_spark(&mut self, id: usize, source: isize) {
+        if self.pet.desktop.as_ref().is_none_or(|window| window.hwnd().0 as isize != source) {
+            return;
+        }
+        match crate::ui::spark::Action::from_id(id) {
+            Some(crate::ui::spark::Action::Chat) => {
+                self.restore_pill();
+                self.reveal();
+                self.open_tab(view::Tab::Chat);
+                self.ui.pinned = true;
+                self.kill_timer(Timer::Collapse);
+                self.repaint_expanded();
+            }
+            Some(crate::ui::spark::Action::ToggleIsland) => self.toggle_island_from_spark(),
+            Some(crate::ui::spark::Action::Moved) => {
+                if let Some(window) = &self.pet.desktop {
+                    window.keep_on_screen();
+                    self.settings.spark_pos = Some(window.position());
+                    self.ui.cfg = self.settings.clone();
+                    self.settings.save();
+                }
+            }
+            Some(crate::ui::spark::Action::Dock) => self.set_spark_detached(false),
+            None => {}
         }
     }
 
@@ -75,7 +160,14 @@ impl App {
 
     pub(in crate::island) fn char_tick(&mut self) {
         let character = self.settings.character;
-        if character == Character::None || self.state != State::Collapsed {
+        if self.gaming {
+            if let Some(desktop) = &self.pet.desktop {
+                desktop.hide();
+            }
+            return;
+        }
+        let detached = self.pet.desktop.is_some();
+        if character == Character::None || (!detached && self.state != State::Collapsed) {
             return;
         }
         let now = Instant::now();
@@ -104,7 +196,9 @@ impl App {
             if GetCursorPos(&mut pt).is_ok() && GetWindowRect(self.hwnd, &mut rc).is_ok() {
                 let s = self.scale;
                 let (win_w, _) = self.window_size(self.win);
-                let (cx, cy) = if self.settings.vertical() {
+                let (cx, cy) = if let Some(desktop) = &self.pet.desktop {
+                    desktop.center()
+                } else if self.settings.vertical() {
                     (rc.left as f32 + win_w as f32 / 2.0, rc.top as f32 + self.win_pad().1 * s + 6.0 * s + ch / 2.0)
                 } else {
                     (
@@ -135,15 +229,26 @@ impl App {
             (look.0 * 3.0).round() as i8,
             (look.1 * 2.0).round() as i8,
             blink,
-            if pose.lively() { (t * 30.0) as i32 } else { 0 },
+            if pose.lively() {
+                (t * 30.0) as i32
+            } else if detached {
+                (t * 12.0) as i32
+            } else {
+                0
+            },
         );
         if self.pet.char_key != Some(key) {
             self.pet.char_key = Some(key);
-            let w = cw;
-            let _ = self.pet.char_layer.paint(&self.gpu, |p| {
-                let _ = characters::draw(p, character, w, &pose);
-            });
+            if let Some(desktop) = &mut self.pet.desktop {
+                if let Err(error) = desktop.render(&self.gpu, &pose, self.scale) {
+                    crate::log_warn!("could not draw desktop Spark: {error}");
+                }
+            } else {
+                let _ = self.pet.char_layer.paint(&self.gpu, |p| {
+                    let _ = characters::draw(p, character, cw, &pose);
+                });
+            }
         }
-        self.set_timer(Timer::Char, if pose.lively() { 33 } else { 80 });
+        self.set_timer(Timer::Char, if pose.lively() { self.frame_ms() } else { 80 });
     }
 }

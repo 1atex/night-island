@@ -107,6 +107,12 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Frame rate" => "Частота кадров",
         "System sound" => "Звук системы",
         "No character" => "Без персонажа",
+        "Let Spark roam the desktop" => "Выпустить Spark на рабочий стол",
+        "Release Spark" => "Выпустить Spark",
+        "Right-click to release Spark" => "ПКМ — выпустить Spark",
+        "Spark: click for AI chat, right-click to hide/show the island. Drag to move." => {
+            "Spark: ЛКМ — AI-чат, ПКМ — скрыть/показать остров. Перетаскивание — перемещение."
+        }
         "Capture failed" => "Не удалось сделать снимок",
         "Copied" => "Скопировано",
         "Looking for a QR code…" => "Ищу QR-код…",

@@ -22,7 +22,7 @@ impl App {
         let ms = if expanded { self.open_ms() } else { self.close_ms() };
         let _ = self.collapsed.sprite.SetIsVisible(true);
         let _ = self.expanded.sprite.SetIsVisible(true);
-        if self.settings.character != Character::None {
+        if self.attached_character_on() {
             let _ = self.pet.char_layer.sprite.SetIsVisible(true);
         }
         let (offset, size, radius) = self.pill(self.win, expanded, hidden);
@@ -137,7 +137,7 @@ impl App {
                 let _ = bar.SetIsVisible(false);
             }
         } else {
-            let _ = self.pet.char_layer.sprite.SetIsVisible(self.settings.character != Character::None);
+            let _ = self.pet.char_layer.sprite.SetIsVisible(self.attached_character_on());
         }
         let open_tint = if self.settings.acrylic { self.settings.tint_open } else { TINT_OPEN_NO_BLUR };
         let tint_want = if expanded { open_tint } else { self.settings.pill_opacity };
