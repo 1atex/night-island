@@ -1,14 +1,29 @@
 use std::borrow::Cow;
+#[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(not(test))]
 static RU: AtomicBool = AtomicBool::new(true);
 
+#[cfg(test)]
+thread_local! {
+    static RU: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
 pub fn set_ru(on: bool) {
+    #[cfg(not(test))]
     RU.store(on, Ordering::Relaxed);
+    #[cfg(test)]
+    RU.set(on);
 }
 
 pub fn is_ru() -> bool {
-    RU.load(Ordering::Relaxed)
+    #[cfg(not(test))]
+    {
+        RU.load(Ordering::Relaxed)
+    }
+    #[cfg(test)]
+    RU.get()
 }
 
 fn phrase(s: &str) -> Option<&'static str> {
