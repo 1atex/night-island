@@ -112,6 +112,7 @@ fn pixels(bitmap: &ID2D1Bitmap1, staging: &ID2D1Bitmap1) -> Result<Vec<u8>> {
 }
 
 #[test]
+#[ignore = "Needs a real Direct3D 11 / Direct2D device, which wine does not provide"]
 fn every_native_icon_renders_and_updates_in_direct2d() -> Result<()> {
     let dc = context()?;
     let target = bitmap(&dc, false)?;
@@ -150,6 +151,7 @@ fn every_native_icon_renders_and_updates_in_direct2d() -> Result<()> {
 }
 
 #[test]
+#[ignore = "Needs a real Direct3D 11 / Direct2D device, which wine does not provide"]
 fn icons_render_during_offscreen_tab_transitions() -> Result<()> {
     use windows::Win32::Graphics::Direct2D::D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE;
     let dc = context()?;
