@@ -116,6 +116,7 @@ impl App {
             return;
         }
         self.gaming = on;
+        self.sync_mixer();
         if on {
             unregister_hotkeys(self.hwnd);
             if let Some(desktop) = &mut self.pet.desktop {
@@ -133,6 +134,7 @@ impl App {
     }
 
     fn hide_window(&mut self) {
+        self.hide_notification_card();
         self.cancel_pill_motion();
         self.kill_timer(Timer::Expand);
         self.kill_timer(Timer::Liquid);

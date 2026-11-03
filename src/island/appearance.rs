@@ -58,6 +58,7 @@ impl App {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
         self.update_weather_timer();
+        self.maybe_show_notification();
     }
 
     pub(in crate::island) fn apply_pill_opacity(&mut self) {
@@ -83,6 +84,7 @@ impl App {
         self.paint_liquid_body(0.0);
         self.apply_accent();
         self.repaint();
+        self.update_notification_card();
         if let Some(chat) = &mut self.pet.chat {
             chat.repaint();
         }
@@ -141,6 +143,7 @@ impl App {
         };
         shown
             && self.pill_motion.intro.is_none()
+            && !self.notification_card_visible()
             && self.settings.weather
             && self.ui.weather.is_some()
             && !self.gaming
@@ -191,6 +194,7 @@ impl App {
         if let Some(chat) = &self.pet.chat {
             chat.set_capture_hidden(self.settings.capture_hidden);
         }
+        self.update_notification_card();
     }
 
     pub(in crate::island) fn apply_style(&mut self) {

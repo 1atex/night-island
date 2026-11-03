@@ -533,6 +533,7 @@ impl App {
     pub(in crate::island) fn update_eq(&mut self) {
         let visible = self.state == State::Collapsed
             && self.pill_motion.intro.is_none()
+            && !self.notification_card_visible()
             && !self.gaming
             && (!self.pill_hidden || self.ghosted)
             && self.ui.media.playing
@@ -724,7 +725,7 @@ impl App {
 
     pub(in crate::island) fn start_liquid(&self) {
         self.start_char();
-        if self.liquid_on() && self.state == State::Collapsed {
+        if self.liquid_on() && self.state == State::Collapsed && !self.notification_card_visible() {
             self.set_timer(Timer::Liquid, 60);
         }
     }
@@ -776,7 +777,7 @@ impl App {
     }
 
     pub(in crate::island) fn liquid_tick(&mut self) {
-        if !self.liquid_on() || self.state != State::Collapsed {
+        if !self.liquid_on() || self.state != State::Collapsed || self.notification_card_visible() {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
             self.stop_idle();

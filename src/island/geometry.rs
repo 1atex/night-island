@@ -297,7 +297,10 @@ impl App {
         if self.state != State::Collapsed {
             return;
         }
-        let animate = !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed) && !self.pill_hidden && !self.gaming;
+        let animate = !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed)
+            && !self.pill_hidden
+            && !self.gaming
+            && !self.notification_card_visible();
         let normal = view::collapsed_width(&self.ui, COLLAPSED.0);
         let want = if self.pill_motion.intro.is_some() { self.pill_motion.intro_width } else { normal };
         if (want - self.cw).abs() < 0.5 {
@@ -498,6 +501,7 @@ impl App {
     }
 
     pub(in crate::island) fn apply_layout(&mut self) {
+        self.hide_notification_card();
         self.cancel_pill_motion();
         self.ui.cfg = self.settings.clone();
         if self.state != State::Expanded {

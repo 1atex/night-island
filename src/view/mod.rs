@@ -29,8 +29,10 @@ mod frame;
 mod home;
 mod integrations;
 mod metrics;
+mod mixer;
 mod music_intro;
 mod note;
+mod notifications;
 mod pill;
 mod pill_vertical;
 mod privacy;
@@ -49,8 +51,9 @@ pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
 pub use self::{
     activity::*, agy::*, chat::*, clipboard::*, command::*, companion_popup::*, controls::*, discord::*, frame::*,
-    home::*, integrations::*, metrics::*, music_intro::*, note::*, pill::*, pill_vertical::*, privacy::*, record::*,
-    remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*, widgets::*,
+    home::*, integrations::*, metrics::*, mixer::*, music_intro::*, note::*, notifications::*, pill::*,
+    pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
+    widgets::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);
@@ -70,10 +73,12 @@ pub enum Tab {
     Activity,
     Steam,
     Controls,
+    Mixer,
+    Notifications,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 14] = [
+pub const TABS: [(Tab, char, &str); 16] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Text, '\u{E8E9}', "Text"),
@@ -87,6 +92,8 @@ pub const TABS: [(Tab, char, &str); 14] = [
     (Tab::Activity, '\u{E823}', "Activity"),
     (Tab::Steam, '\u{E7FC}', "Steam"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
+    (Tab::Mixer, '\u{E9E9}', "App mixer"),
+    (Tab::Notifications, '\u{E7F4}', "Notifications"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
 
@@ -146,6 +153,8 @@ pub struct UiState {
     pub editing: bool,
     pub caret_on: bool,
     pub media: Media,
+    pub mixer: MixerUi,
+    pub notifications: NotificationsUi,
     pub lyric: LyricUi,
     pub update: crate::services::update::Status,
     pub notes: NotesUi,
@@ -201,6 +210,8 @@ impl UiState {
             clip: ClipUi::default(),
             city: CityUi::default(),
             home: HomeUi::default(),
+            mixer: MixerUi::default(),
+            notifications: NotificationsUi::default(),
             hover_tab: None,
             hover_sub: None,
             note: TextEdit::default(),

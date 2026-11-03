@@ -77,7 +77,9 @@ const PILL: [(Sid, &str, Kind); 19] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 16] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 18] = [
+    (Sid::SystemNotifications, "Windows notifications from the island", Kind::Toggle),
+    (Sid::WindowsNotificationsSettings, "Windows notification settings", Kind::Button),
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
     (Sid::NotifyCapture, "Screenshots, text and QR", Kind::Toggle),
@@ -112,7 +114,7 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 11] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 13] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
     (Sid::TabNote, "Note", Kind::Toggle),
@@ -124,6 +126,8 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 11] = [
     (Sid::TabSteam, "Steam", Kind::Toggle),
     (Sid::TabSystem, "System", Kind::Toggle),
     (Sid::TabControls, "Controls", Kind::Toggle),
+    (Sid::TabMixer, "App mixer", Kind::Toggle),
+    (Sid::TabNotifications, "Notifications", Kind::Toggle),
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =

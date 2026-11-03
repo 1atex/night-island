@@ -10,6 +10,7 @@ mod controls;
 mod home;
 mod integrations;
 mod metrics;
+mod mixer;
 mod note;
 mod privacy;
 mod record;
@@ -25,6 +26,7 @@ pub(in crate::island) use self::clipboard::ClipboardState;
 
 impl App {
     pub(in crate::island) fn select_tab(&mut self, tab: view::Tab) {
+        self.finish_mixer();
         if tab != self.ui.tab || !matches!(tab, view::Tab::Note | view::Tab::Text) {
             self.end_edit(true);
         }
@@ -61,6 +63,7 @@ impl App {
             self.reload_uses();
         }
         self.sync_metrics();
+        self.sync_mixer();
         if tab == view::Tab::Steam {
             self.reload_steam();
         }

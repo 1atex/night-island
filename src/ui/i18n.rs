@@ -28,6 +28,43 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Windows notifications" => "Уведомления Windows",
+        "Windows notifications from the island" => "Уведомления Windows из острова",
+        "Windows notification settings" => "Настройки уведомлений Windows",
+        "Show Windows notifications from the island" => "Показывать уведомления Windows из острова",
+        "Allow notification access to connect the island" => "Разреши острову доступ к уведомлениям",
+        "Notification access is disabled in Windows privacy settings" => {
+            "Доступ к уведомлениям отключён в настройках конфиденциальности Windows"
+        }
+        "Turn on Do not disturb in Windows to hide the standard banners" => {
+            "Включи «Не беспокоить» в Windows, чтобы скрыть стандартные баннеры"
+        }
+        "Connected. New notifications will appear from the island" => {
+            "Подключено. Новые уведомления будут появляться из острова"
+        }
+        "Windows notifications are unavailable. Try connecting again" => {
+            "Уведомления Windows недоступны. Попробуй подключиться ещё раз"
+        }
+        "Allow access" => "Дать доступ",
+        "Disable" => "Отключить",
+        "Try again" => "Повторить",
+        "Windows settings" => "Параметры Windows",
+        "Show example" => "Показать пример",
+        "Notification history" => "Центр уведомлений",
+        "New notifications will be listed here" => "Здесь появятся уведомления Windows",
+        "Notifications from the island" => "Уведомления из острова",
+        "Your Windows notifications will appear here. Hover to keep reading." => {
+            "Здесь будут появляться уведомления Windows. Наведи курсор, чтобы спокойно прочитать."
+        }
+        "App mixer" => "Микшер приложений",
+        "New notification" => "Новое уведомление",
+        "Separate volume for each app" => "Отдельная громкость для каждого приложения",
+        "System sounds" => "Системные звуки",
+        "Looking for audio apps…" => "Ищем приложения со звуком…",
+        "Audio mixer is unavailable" => "Не удалось открыть микшер. Проверь устройство вывода звука.",
+        "Play music, a video or a game to see its volume here" => {
+            "Запусти музыку, видео или игру — приложение появится здесь."
+        }
         "Home" => "Главная",
         "Clipboard" => "Буфер",
         "Shelf" => "Полка",

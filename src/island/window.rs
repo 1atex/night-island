@@ -176,6 +176,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                     a.drag_read(x, y);
                     a.drag_slider(x);
                     a.drag_volume(x);
+                    a.drag_mixer(x);
                     a.drag_seek(x);
                     a.drag_island();
                     a.drag_tabs(x, y);
@@ -211,12 +212,18 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.finish_note_drag();
                 a.mouse_up();
                 a.finish_seek();
+                a.finish_mixer();
                 a.finish_slider();
             });
             LRESULT(0)
         }
         WM_CAPTURECHANGED => {
-            with_app(|a| a.pointer.character_press = None);
+            with_app(|a| {
+                a.pointer.character_press = None;
+                if a.ui.mixer.dragging.take().is_some() {
+                    a.sync_mixer();
+                }
+            });
             LRESULT(0)
         }
         dnd::WM_DND_ENTER => {
@@ -457,6 +464,24 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         lyrics::WM_LYRICS => {
             with_app(|a| a.on_lyrics());
+            LRESULT(0)
+        }
+        crate::platform::notifications::WM_NOTIFICATIONS | crate::platform::notifications::WM_NOTIFICATION_ACCESS => {
+            with_app(|app| app.on_system_notifications());
+            LRESULT(0)
+        }
+        crate::ui::notification_card::WM_NOTIFICATION_CARD => {
+            with_app(|app| app.on_notification_card(wparam.0, lparam.0));
+            LRESULT(0)
+        }
+        WM_WTSSESSION_CHANGE => {
+            if wparam.0 == 7 || wparam.0 == 8 {
+                with_app(|app| app.notification_session(wparam.0 == 7));
+            }
+            LRESULT(0)
+        }
+        crate::platform::audio_mixer::WM_MIXER => {
+            with_app(|a| a.on_mixer());
             LRESULT(0)
         }
         media::WM_MEDIA => {

@@ -129,7 +129,8 @@ impl App {
     }
 
     pub(in crate::island) fn maybe_start_music_intro(&mut self) {
-        let visible = self.state == State::Collapsed
+        let visible = !self.notification_card_visible()
+            && self.state == State::Collapsed
             && !self.pill_hidden
             && !self.gaming
             && !self.character_interacting()
@@ -335,6 +336,7 @@ impl App {
             self.place_music_intro();
         }
         self.start_liquid();
+        self.maybe_show_notification();
     }
 
     pub(in crate::island) fn cancel_pill_motion(&mut self) {
