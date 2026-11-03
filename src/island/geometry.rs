@@ -347,6 +347,9 @@ impl App {
     }
 
     pub(in crate::island) fn set_geometry_now(&self, win: Win, expanded: bool, hidden: bool) -> Result<()> {
+        if expanded || hidden || !self.liquid_on() {
+            self.restore_liquid_body();
+        }
         let (offset, size, radius) = self.pill(win, expanded, hidden);
         self.geometry.SetOffset(offset)?;
         self.geometry.SetSize(size)?;

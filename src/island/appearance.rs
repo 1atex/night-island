@@ -196,6 +196,7 @@ impl App {
             self.liquid_tick();
         }
         self.apply_layout();
+        self.refresh_eq_shape();
     }
 
     pub(in crate::island) fn apply_menu_choice(&mut self, id: usize) {

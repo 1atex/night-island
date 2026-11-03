@@ -4,6 +4,84 @@ pub(in crate::island) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(in crate::island) const WM_MOUSELEAVE: u32 = 0x02A3;
 pub(in crate::island) const WM_SHOW: u32 = WM_APP + 2;
 
+fn customize_header_menu(point: windows::Win32::Foundation::POINT) {
+    use crate::data::settings::{DEFAULT_HEADER_TABS, HEADER_TAB_LIMIT, HIDEABLE_TABS};
+    use crate::ui::i18n::tr;
+    use crate::ui::menu::{self, Entry};
+    loop {
+        let mut entries = Vec::new();
+        with_app(|a| {
+            for (i, name) in HIDEABLE_TABS.iter().enumerate() {
+                if *name == "Steam" && !steam::client_installed() {
+                    continue;
+                }
+                let pinned = a.settings.header_tabs.iter().any(|tab| tab == name) && !a.settings.tab_hidden(name);
+                let location = if a.settings.tab_hidden(name) {
+                    "Hidden"
+                } else if pinned {
+                    "On the header"
+                } else {
+                    "In More"
+                };
+                entries.push(Entry::item(i + 1, &format!("{} · {}", tr(name), tr(location))).glyph(if pinned {
+                    '\u{E73E}'
+                } else {
+                    '\u{E739}'
+                }));
+            }
+            entries.push(Entry::divider());
+            entries.push(Entry::item(200, &tr("Restore default header")));
+        });
+        let Some(choice) = menu::show(entries, (point.x, point.y), false, app_scale(), &|f| with_app(|a| f(&a.gpu)))
+        else {
+            break;
+        };
+        if choice == 200 {
+            with_app(|a| {
+                a.settings.header_tabs = DEFAULT_HEADER_TABS.map(String::from).to_vec();
+                for name in DEFAULT_HEADER_TABS {
+                    a.settings.set_tab_hidden(name, false);
+                }
+            });
+        } else if let Some(name) = choice.checked_sub(1).and_then(|i| HIDEABLE_TABS.get(i)).copied() {
+            let mut pinned = false;
+            let mut full = false;
+            let mut replacements = Vec::new();
+            with_app(|a| {
+                pinned = a.settings.header_tabs.iter().any(|tab| tab == name) && !a.settings.tab_hidden(name);
+                full = !pinned
+                    && !a.settings.header_tabs.iter().any(|tab| tab == name)
+                    && a.settings.header_tabs.len() >= HEADER_TAB_LIMIT;
+                replacements = a.settings.header_tabs.clone();
+            });
+            let replacement = if full {
+                let entries = replacements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, old)| Entry::item(i + 1, &format!("{} {}", tr("Replace:"), tr(old))))
+                    .collect();
+                let Some(id) =
+                    menu::show(entries, (point.x, point.y), false, app_scale(), &|f| with_app(|a| f(&a.gpu)))
+                else {
+                    continue;
+                };
+                replacements.get(id - 1).cloned()
+            } else {
+                None
+            };
+            with_app(|a| {
+                a.settings.set_header_tab(name, !pinned, replacement.as_deref());
+            });
+        }
+        with_app(|a| {
+            a.ui.cfg = a.settings.clone();
+            a.settings.save();
+            a.render_settings_win();
+            a.repaint_expanded();
+        });
+    }
+}
+
 fn show_header_menu(hwnd: HWND) {
     use crate::ui::menu::Entry;
     let mut entries = Vec::new();
@@ -20,6 +98,7 @@ fn show_header_menu(hwnd: HWND) {
         if !entries.is_empty() {
             entries.push(Entry::divider());
         }
+        entries.push(Entry::item(103, &crate::ui::i18n::tr("Customize header…")).glyph('\u{E713}'));
         if view::tab_settings_group(a.ui.tab).is_some() {
             entries.push(Entry::item(100, &crate::ui::i18n::tr("Settings of this tab")));
         }
@@ -41,6 +120,9 @@ fn show_header_menu(hwnd: HWND) {
     let choice = crate::ui::menu::show(entries, (point.x, point.y), false, app_scale(), &|f| {
         with_app(|a| f(&a.gpu));
     });
+    if choice == Some(103) {
+        customize_header_menu(point);
+    }
     with_app(|a| {
         a.popup_open = false;
         a.pointer.tracking = false;
@@ -49,6 +131,7 @@ fn show_header_menu(hwnd: HWND) {
                 let tab = a.landing_tab(view::TABS[id - 1].0);
                 a.select_tab(tab);
             }
+            Some(103) => {}
             Some(100) => {
                 if let Some(group) = view::tab_settings_group(a.ui.tab) {
                     a.open_settings_at(group);

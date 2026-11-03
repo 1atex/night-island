@@ -442,6 +442,7 @@ pub struct Settings {
     pub close_speed: f32,
     pub tab_anim: TabAnim,
     pub tab_order: Vec<String>,
+    pub header_tabs: Vec<String>,
     pub tab_drag: bool,
     pub last_tab: String,
     pub remember_tab: bool,
@@ -537,6 +538,7 @@ impl Default for Settings {
             open_speed: 1.0,
             tab_anim: TabAnim::Zoom,
             tab_order: Vec::new(),
+            header_tabs: DEFAULT_HEADER_TABS.map(String::from).to_vec(),
             tab_drag: false,
             last_tab: String::new(),
             remember_tab: true,
@@ -760,6 +762,9 @@ impl NotifySettings {
     }
 }
 
+pub const HEADER_TAB_LIMIT: usize = 5;
+pub const DEFAULT_HEADER_TABS: [&str; HEADER_TAB_LIMIT] = ["Clipboard", "Text", "Note", "Weather", "Record"];
+
 pub const HIDEABLE_TABS: [&str; 10] =
     ["Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
 
@@ -782,6 +787,25 @@ impl Settings {
 
     pub fn ring_wanted(&self) -> bool {
         self.edge_spikes && self.eq_style.around()
+    }
+
+    pub fn set_header_tab(&mut self, name: &str, pinned: bool, replace: Option<&str>) -> bool {
+        if !HIDEABLE_TABS.contains(&name) {
+            return false;
+        }
+        if !pinned {
+            self.header_tabs.retain(|item| item != name);
+        } else if !self.header_tabs.iter().any(|item| item == name) {
+            if self.header_tabs.len() < HEADER_TAB_LIMIT {
+                self.header_tabs.push(name.to_string());
+            } else if let Some(index) = replace.and_then(|old| self.header_tabs.iter().position(|item| item == old)) {
+                self.header_tabs[index] = name.to_string();
+            } else {
+                return false;
+            }
+        }
+        self.set_tab_hidden(name, false);
+        true
     }
 
     pub fn tab_hidden(&self, name: &str) -> bool {
@@ -923,6 +947,16 @@ impl Settings {
                 ok
             });
         }
+        {
+            let mut seen = Vec::new();
+            self.header_tabs.retain(|name| {
+                if seen.len() >= HEADER_TAB_LIMIT || !HIDEABLE_TABS.contains(&name.as_str()) || seen.contains(name) {
+                    return false;
+                }
+                seen.push(name.clone());
+                true
+            });
+        }
         if self.ai_sub != "Chat" && self.ai_sub != "AGY" {
             self.ai_sub = "Chat".into();
         }
@@ -974,6 +1008,25 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn header_tabs_move_both_ways_and_require_an_explicit_replacement_when_full() {
+        let mut settings = Settings::default();
+        assert!(!settings.set_header_tab("AI", true, None));
+        assert!(settings.set_header_tab("AI", true, Some("Record")));
+        assert!(settings.header_tabs.iter().any(|name| name == "AI"));
+        assert!(!settings.header_tabs.iter().any(|name| name == "Record"));
+        assert!(settings.set_header_tab("AI", false, None));
+        assert!(!settings.tab_hidden("AI"));
+        settings.set_tab_hidden("Privacy", true);
+        assert!(settings.set_header_tab("Privacy", true, None));
+        assert!(!settings.tab_hidden("Privacy"));
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.header_tabs, settings.header_tabs);
+        let mut invalid: Settings = serde_json::from_str(r#"{"header_tabs":["Home","AI","AI","evil","Settings","Weather","Record","Privacy","Activity","Controls"]}"#).unwrap();
+        invalid.sanitize();
+        assert_eq!(invalid.header_tabs, ["AI", "Weather", "Record", "Privacy", "Activity"]);
+    }
 
     #[test]
     fn notices_keep_their_old_defaults_and_read_partial_files() {

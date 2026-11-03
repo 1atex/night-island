@@ -19,6 +19,7 @@ impl App {
     }
 
     pub(in crate::island) fn animate_to(&self, expanded: bool, hidden: bool) -> Result<()> {
+        self.restore_liquid_body();
         let ms = if expanded { self.open_ms() } else { self.close_ms() };
         let _ = self.collapsed.sprite.SetIsVisible(true);
         let _ = self.expanded.sprite.SetIsVisible(true);
@@ -67,6 +68,7 @@ impl App {
             State::Hiding => self.kill_timer(Timer::HideDone),
             _ => {}
         }
+        self.stop_idle();
         self.kill_timer(Timer::Autohide);
         self.set_blur(true);
         if self.win != Win::Big {

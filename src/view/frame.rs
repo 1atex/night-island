@@ -26,9 +26,11 @@ pub fn tab_order(cfg: &Settings) -> Vec<usize> {
 }
 
 pub fn movable_tabs(ui: &UiState) -> Vec<usize> {
-    tab_order(&ui.cfg)
-        .into_iter()
-        .filter(|&i| !matches!(TABS[i].0, Tab::Home | Tab::Settings) && tab_in_bar(&ui.cfg, TABS[i].0, TABS[i].2))
+    ui.cfg
+        .header_tabs
+        .iter()
+        .filter_map(|name| TABS.iter().position(|tab| tab.2 == name))
+        .filter(|&i| tab_in_bar(&ui.cfg, TABS[i].0, TABS[i].2))
         .collect()
 }
 
@@ -42,10 +44,8 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let right = vpn_btn_rect(pill, scale, ui).map_or(more.0, |r| r.0);
     let dots = [mic_on(ui), ui.privacy.cam].iter().filter(|on| **on).count() as f32 * DOT_STEP * scale;
     let room = (right - dots - 12.0 * scale - left).max(icon_w);
-    let available: Vec<_> = tab_order(&ui.cfg)
-        .into_iter()
-        .filter(|&i| TABS[i].0 != Tab::Settings && tab_in_bar(&ui.cfg, TABS[i].0, TABS[i].2))
-        .collect();
+    let home = TABS.iter().position(|tab| tab.0 == Tab::Home).unwrap();
+    let available: Vec<_> = std::iter::once(home).chain(movable_tabs(ui)).collect();
     let active_index = available.iter().copied().find(|&i| TABS[i].0 == active);
     let width = |i: usize| {
         if Some(i) == active_index {
@@ -64,9 +64,6 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
         }
     }
     for &i in &available {
-        if selected.len() >= 6 {
-            break;
-        }
         if !selected.contains(&i) && used + gap + width(i) <= room {
             selected.push(i);
             used += gap + width(i);
@@ -286,8 +283,13 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         rgba(1.0, 1.0, 1.0, if ui.pinned { 1.0 } else { 0.62 }),
     )?;
     let more = more_rect(pill, scale);
-    if ui.hover_head == Some(HeadHit::More) {
-        p.fill_round_rect(more, (more.3 - more.1) / 2.0, rgba(1.0, 1.0, 1.0, 0.09))?;
+    let overflow_active = overflow_tabs(pill, scale, ui).iter().any(|&i| TABS[i].0 == bar_tab(ui.tab));
+    if overflow_active || ui.hover_head == Some(HeadHit::More) {
+        p.fill_round_rect(
+            more,
+            (more.3 - more.1) / 2.0,
+            if overflow_active { acc(0.2) } else { rgba(1.0, 1.0, 1.0, 0.09) },
+        )?;
     }
     p.text(
         "More",
@@ -414,6 +416,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn removing_an_active_header_tab_moves_it_to_more_without_hiding_the_feature() {
+        let mut ui = UiState::new();
+        ui.tab = Tab::Weather;
+        assert!(ui.cfg.set_header_tab("Weather", false, None));
+        let pill = (0.0, 0.0, 620.0, 400.0);
+        let index = TABS.iter().position(|tab| tab.0 == Tab::Weather).unwrap();
+        assert!(overflow_tabs(pill, 1.0, &ui).contains(&index));
+        assert_eq!(tab_rects(pill, 1.0, &ui)[index], (0.0, 0.0, 0.0, 0.0));
+        assert!(ui.cfg.set_header_tab("Weather", true, None));
+        assert!(!overflow_tabs(pill, 1.0, &ui).contains(&index));
+        assert!(tab_rects(pill, 1.0, &ui)[index].2 > 0.0);
+    }
+
+    #[test]
     fn compact_header_keeps_active_tabs_and_tools_separate() {
         let mut ui = UiState::new();
         ui.privacy.mic = true;
@@ -428,6 +444,8 @@ mod tests {
                         continue;
                     }
                     ui.tab = tab;
+                    ui.cfg.header_tabs = crate::data::settings::DEFAULT_HEADER_TABS.map(String::from).to_vec();
+                    ui.cfg.set_header_tab(name, true, Some("Record"));
                     let rects = tab_rects(pill, scale, &ui);
                     assert!(rects[i].2 > rects[i].0, "active {name} disappeared at {width}/{scale}");
                     let overflow = overflow_tabs(pill, scale, &ui);

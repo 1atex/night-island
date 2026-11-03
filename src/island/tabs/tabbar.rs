@@ -63,6 +63,10 @@ impl App {
                         !matches!(view::TABS[*i].0, view::Tab::Home | view::Tab::Settings) && !items.contains(i)
                     })
                     .collect();
+                let visible: Vec<String> = items.iter().map(|&i| view::TABS[i].2.to_string()).collect();
+                let overflow: Vec<String> =
+                    self.settings.header_tabs.iter().filter(|name| !visible.contains(name)).cloned().collect();
+                self.settings.header_tabs = visible.into_iter().chain(overflow).collect();
                 self.settings.tab_order =
                     items.into_iter().chain(hidden).map(|i| view::TABS[i].2.to_string()).collect();
                 self.ui.cfg = self.settings.clone();

@@ -206,7 +206,10 @@ impl App {
         }
 
         let geometry = compositor.CreateRoundedRectangleGeometry()?;
-        visual.SetClip(&compositor.CreateGeometricClipWithGeometry(&geometry)?)?;
+        let round_clip = compositor.CreateGeometricClipWithGeometry(&geometry)?;
+        visual.SetClip(&round_clip)?;
+        let body_shape = compositor.CreatePathGeometry()?;
+        let body_clip = compositor.CreateGeometricClipWithGeometry(&body_shape)?;
         let root = compositor.CreateContainerVisual()?;
         root.SetRelativeSizeAdjustment(full)?;
         let root_children = root.Children()?;
@@ -264,13 +267,16 @@ impl App {
                 bump_fill,
                 bump_blur,
                 bump_shape,
+                round_clip,
+                body_clip,
+                body_shape,
+                body_active: std::cell::Cell::new(false),
                 bump_amp: 0.0,
                 bump_cx: 0.0,
                 bump_vel: 0.0,
                 bump_cx_vel: 0.0,
                 last_tick: Instant::now(),
                 idle_running: false,
-                idle_key: None,
             },
             music: MusicBars {
                 spectrum,

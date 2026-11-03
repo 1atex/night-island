@@ -29,8 +29,10 @@ use windows::Win32::System::WinRT::Composition::{ICompositionDrawingSurfaceInter
 use windows::core::{BOOL, Interface, PCWSTR, Result, w};
 use windows_numerics::Matrix3x2;
 
+mod liquid;
 #[cfg(test)]
 mod tests;
+pub use liquid::LiquidBody;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EdgeShape {
@@ -507,26 +509,23 @@ impl Painter<'_> {
                     use windows::Win32::Graphics::Direct2D::{
                         D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
                     };
-                    let (start, end) = match palette.tone {
-                        Tone::Horizontal => (pt(span.0, 0.0), pt(span.1, 0.0)),
-                        _ => (pt(cx, seam), pt(cx, seam + amp.max(1.0))),
-                    };
-                    if palette.tone == Tone::Single {
-                        let brush = self.dc.CreateSolidColorBrush(&tip, None)?;
-                        self.dc.FillGeometry(&geometry, &brush, None);
+                    let color = if palette.tone == Tone::Horizontal {
+                        palette.at(((cx - span.0) / (span.1 - span.0).max(1.0)).clamp(0.0, 1.0), 1.0)
                     } else {
-                        let stops: Vec<D2D1_GRADIENT_STOP> = (0..=8)
-                            .map(|k| D2D1_GRADIENT_STOP {
-                                position: k as f32 / 8.0,
-                                color: palette.at(k as f32 / 8.0, 1.0),
-                            })
-                            .collect();
-                        let along =
-                            self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
-                        let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: start, endPoint: end };
-                        let brush = self.dc.CreateLinearGradientBrush(&props, None, &along)?;
-                        self.dc.FillGeometry(&geometry, &brush, None);
-                    }
+                        tip
+                    };
+                    let stops = [
+                        D2D1_GRADIENT_STOP { position: 0.0, color: rgba(color.r, color.g, color.b, 0.0) },
+                        D2D1_GRADIENT_STOP { position: 0.6, color: rgba(color.r, color.g, color.b, 0.06) },
+                        D2D1_GRADIENT_STOP { position: 1.0, color: rgba(color.r, color.g, color.b, 0.22) },
+                    ];
+                    let along = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                    let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                        startPoint: pt(cx, seam),
+                        endPoint: pt(cx, seam + amp.max(1.0)),
+                    };
+                    let brush = self.dc.CreateLinearGradientBrush(&props, None, &along)?;
+                    self.dc.FillGeometry(&geometry, &brush, None);
                 }
             }
             Ok(geometry)

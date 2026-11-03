@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use windows::UI::Color;
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{
-    AnimationIterationBehavior, CompositionAnimation, CompositionColorBrush, CompositionPathGeometry,
-    CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual,
+    AnimationIterationBehavior, CompositionAnimation, CompositionColorBrush, CompositionGeometricClip,
+    CompositionPathGeometry, CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual,
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
