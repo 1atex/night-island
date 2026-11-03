@@ -130,6 +130,15 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn reset_liquid_pull(&mut self) {
+        self.stop_idle();
+        self.liquid.bump_amp = 0.0;
+        self.liquid.bump_vel = 0.0;
+        self.liquid.pull_ready = false;
+        self.restore_liquid_body();
+        self.clip_eq_to_body();
+    }
+
     fn liquid_body_path(&self, depth: f32, center: f32) -> Result<windows::UI::Composition::CompositionPath> {
         let (at, size, radius) = self.pill(self.win, false, false);
         let shape = self.gpu.liquid_body(&crate::ui::gfx::LiquidBody {
@@ -680,6 +689,9 @@ impl App {
                 return Default::default();
             }
         }
+        if self.can_release_character(cursor.x - window.left, cursor.y - window.top) {
+            return Default::default();
+        }
         let (at, size, radius) = self.pill(self.win, false, false);
         let blocked = if self.docked() {
             Some(match self.settings.hang() {
@@ -769,6 +781,11 @@ impl App {
             self.set_bump_visible(false);
             return;
         }
+        if self.character_interacting() {
+            self.reset_liquid_pull();
+            self.set_timer(Timer::Liquid, 60);
+            return;
+        }
         let now = Instant::now();
         let dt = now.duration_since(self.liquid.last_tick).as_secs_f32().clamp(0.001, 0.05);
         self.liquid.last_tick = now;
@@ -800,15 +817,8 @@ impl App {
                 self.liquid.pull_ready = true;
             } else {
                 let a = 1.0 - (-dt * 16.0).exp();
-                self.liquid.pull.point.0 += (target.point.0 - self.liquid.pull.point.0) * a;
-                self.liquid.pull.point.1 += (target.point.1 - self.liquid.pull.point.1) * a;
-                let normal = (
-                    self.liquid.pull.normal.0 + (target.normal.0 - self.liquid.pull.normal.0) * a,
-                    self.liquid.pull.normal.1 + (target.normal.1 - self.liquid.pull.normal.1) * a,
-                );
-                let length = normal.0.hypot(normal.1).max(0.001);
-                self.liquid.pull.normal = (normal.0 / length, normal.1 / length);
-                self.liquid.pull.spread = target.spread;
+                let (at, size, radius) = self.pill(self.win, false, false);
+                self.liquid.pull = self.liquid.pull.follow(target, (at.X, at.Y, size.X, size.Y), radius.X, a);
             }
         }
         if target.depth == 0.0 && self.liquid.bump_amp < 0.3 && self.liquid.bump_vel.abs() < 1.0 {

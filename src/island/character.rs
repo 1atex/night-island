@@ -28,9 +28,10 @@ impl App {
         self.pointer.character_press = None;
         self.pointer.press = None;
         self.kill_timer(Timer::Expand);
+        let island = self.pill_screen(false);
         self.set_character_detached(true);
         if let Some(desktop) = &mut self.pet.desktop {
-            desktop.begin_drag(point);
+            desktop.begin_drag(point, island);
         } else {
             unsafe {
                 let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
@@ -47,6 +48,9 @@ impl App {
             return false;
         }
         let Some(desktop) = &self.pet.desktop else { return false };
+        if !desktop.can_dock() {
+            return false;
+        }
         let mut rect = windows::Win32::Foundation::RECT::default();
         unsafe {
             if !IsWindowVisible(self.hwnd).as_bool() || GetWindowRect(self.hwnd, &mut rect).is_err() {
@@ -70,6 +74,10 @@ impl App {
 
     pub(in crate::island) fn attached_character_on(&self) -> bool {
         self.settings.character != Character::None && self.pet.desktop.is_none()
+    }
+
+    pub(in crate::island) fn character_interacting(&self) -> bool {
+        self.pointer.character_press.is_some() || self.pet.desktop.as_ref().is_some_and(|desktop| desktop.grabbed())
     }
 
     pub(in crate::island) fn char_size(&self) -> (f32, f32) {
@@ -139,6 +147,7 @@ impl App {
         } else {
             self.kill_timer(Timer::Char);
         }
+        self.start_liquid();
     }
 
     pub(in crate::island) fn start_char(&self) {
@@ -156,8 +165,8 @@ impl App {
         }
         let (left, top) = self.char_origin();
         let (w, h) = self.char_size();
-        let dx = (x as f32 - left - w / 2.0) / (w * 0.32);
-        let dy = (y as f32 - top - h / 2.0) / (h * 0.43);
+        let dx = (x as f32 - left - w / 2.0) / (w * 0.46);
+        let dy = (y as f32 - top - h / 2.0) / (h * 0.5);
         dx * dx + dy * dy <= 1.0
     }
 
