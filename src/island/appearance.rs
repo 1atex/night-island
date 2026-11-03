@@ -76,7 +76,7 @@ impl App {
             let _ = self.tint.SetBrush(&brush);
         }
         self.paint_ears();
-        self.paint_bump_with(0.0, 0.0);
+        self.paint_liquid_body(0.0);
         self.apply_accent();
         self.repaint();
         if let Some(chat) = &mut self.pet.chat {
@@ -171,7 +171,7 @@ impl App {
         let _ = self.liquid.bump_blur.SetIsVisible(self.settings.pill_blur);
         if self.settings.pill_blur && !open && !self.spikes_active() {
             let amp = if self.liquid.idle_running { IDLE_AMP * self.scale } else { self.liquid.bump_amp };
-            self.paint_bump_with(amp, self.liquid.bump_cx);
+            self.paint_liquid_body(amp);
         }
     }
 

@@ -588,7 +588,8 @@ impl App {
         let (left, top) = ((win_w as f32 - w) / 2.0, self.win_pad().1 * s);
         let tol = 3.0 * s;
         let (fx, fy) = (x as f32, y as f32);
-        fx >= left - tol && fx < left + w + tol && fy >= top - tol - 40.0 && fy < top + h + tol
+        let above = if self.liquid_on() { tol } else { tol + 40.0 };
+        fx >= left - tol && fx < left + w + tol && fy >= top - above && fy < top + h + tol
     }
 
     pub(in crate::island) fn on_mouse_move(&mut self, x: i32, y: i32) {

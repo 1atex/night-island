@@ -56,9 +56,10 @@ const APPEARANCE: [(Sid, &str, Kind); 5] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 18] = [
+const PILL: [(Sid, &str, Kind); 19] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
+    (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
@@ -166,7 +167,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (3, "Music"), (11, "Edges")],
+        sections: &[(0, "Pill"), (4, "Music"), (12, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',

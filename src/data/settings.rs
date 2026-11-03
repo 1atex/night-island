@@ -384,6 +384,7 @@ pub struct Settings {
     pub dock_offset: f32,
     pub float_pos: Option<[i32; 2]>,
     pub pill_weather: bool,
+    pub pill_weather_side: WeatherSide,
     pub pill_battery: BatteryStyle,
     pub music_eq: bool,
     pub music_title: bool,
@@ -483,6 +484,7 @@ impl Default for Settings {
             dock_offset: 0.5,
             float_pos: None,
             pill_weather: true,
+            pill_weather_side: WeatherSide::Left,
             pill_battery: BatteryStyle::Percent,
             music_eq: true,
             music_title: true,
@@ -762,6 +764,27 @@ impl NotifySettings {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WeatherSide {
+    #[default]
+    Left,
+    Right,
+}
+
+impl WeatherSide {
+    pub const ALL: [Self; 2] = [Self::Left, Self::Right];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Left => "Left of the clock",
+            Self::Right => "Right of the clock",
+        }
+    }
+    pub fn step(self, _forward: bool) -> Self {
+        if self == Self::Left { Self::Right } else { Self::Left }
+    }
+}
+
 pub const HEADER_TAB_LIMIT: usize = 5;
 pub const DEFAULT_HEADER_TABS: [&str; HEADER_TAB_LIMIT] = ["Clipboard", "Text", "Note", "Weather", "Record"];
 
@@ -1008,6 +1031,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weather_side_defaults_to_left_and_survives_settings_round_trips() {
+        let legacy: Settings = serde_json::from_str(r#"{"pill_weather":true}"#).unwrap();
+        assert_eq!(legacy.pill_weather_side, WeatherSide::Left);
+        for side in WeatherSide::ALL {
+            let settings = Settings { pill_weather_side: side, ..Settings::default() };
+            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(restored.pill_weather_side, side);
+        }
+    }
 
     #[test]
     fn header_tabs_move_both_ways_and_require_an_explicit_replacement_when_full() {

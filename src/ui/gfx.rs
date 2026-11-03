@@ -32,7 +32,7 @@ use windows_numerics::Matrix3x2;
 mod liquid;
 #[cfg(test)]
 mod tests;
-pub use liquid::LiquidBody;
+pub use liquid::{ElasticBody, ElasticPull, LiquidBody, cursor_pull};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EdgeShape {
@@ -70,12 +70,6 @@ impl Palette {
         let (r, g, b) = crate::platform::media::gradient(self.base, t.clamp(0.0, 1.0));
         D2D1_COLOR_F { r: f32::from(r) / 255.0, g: f32::from(g) / 255.0, b: f32::from(b) / 255.0, a: alpha }
     }
-}
-
-#[derive(Clone, Copy)]
-pub enum BumpFill {
-    Solid(D2D1_COLOR_F),
-    Tone { palette: Palette, tip: D2D1_COLOR_F, span: (f32, f32) },
 }
 
 pub type D2D1Colour = D2D1_COLOR_F;
@@ -467,69 +461,6 @@ impl Painter<'_> {
             DWRITE_TEXT_ALIGNMENT_CENTER,
             color,
         )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn fill_bump(
-        &self,
-        _width: f32,
-        seam: f32,
-        cx: f32,
-        half: f32,
-        amp: f32,
-        fill: BumpFill,
-    ) -> Result<ID2D1PathGeometry> {
-        unsafe {
-            let factory: ID2D1Factory = self.dc.GetFactory()?;
-            let geometry = factory.CreatePathGeometry()?;
-            let sink = geometry.Open()?;
-            let pt = |x: f32, y: f32| windows_numerics::Vector2 { X: x, Y: y };
-            let (x0, x1) = (cx - half, cx + half);
-            sink.BeginFigure(pt(x0, seam - 1.0), D2D1_FIGURE_BEGIN_FILLED);
-            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                point1: pt(x0 + half * 0.55, seam - 1.0),
-                point2: pt(cx - half * 0.28, seam + amp),
-                point3: pt(cx, seam + amp),
-            });
-            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                point1: pt(cx + half * 0.28, seam + amp),
-                point2: pt(x1 - half * 0.55, seam - 1.0),
-                point3: pt(x1, seam - 1.0),
-            });
-            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-            sink.Close()?;
-
-            match fill {
-                BumpFill::Solid(color) => {
-                    let brush = self.dc.CreateSolidColorBrush(&color, None)?;
-                    self.dc.FillGeometry(&geometry, &brush, None);
-                }
-                BumpFill::Tone { palette, tip, span } => {
-                    use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
-                    use windows::Win32::Graphics::Direct2D::{
-                        D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-                    };
-                    let color = if palette.tone == Tone::Horizontal {
-                        palette.at(((cx - span.0) / (span.1 - span.0).max(1.0)).clamp(0.0, 1.0), 1.0)
-                    } else {
-                        tip
-                    };
-                    let stops = [
-                        D2D1_GRADIENT_STOP { position: 0.0, color: rgba(color.r, color.g, color.b, 0.0) },
-                        D2D1_GRADIENT_STOP { position: 0.6, color: rgba(color.r, color.g, color.b, 0.06) },
-                        D2D1_GRADIENT_STOP { position: 1.0, color: rgba(color.r, color.g, color.b, 0.22) },
-                    ];
-                    let along = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
-                    let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                        startPoint: pt(cx, seam),
-                        endPoint: pt(cx, seam + amp.max(1.0)),
-                    };
-                    let brush = self.dc.CreateLinearGradientBrush(&props, None, &along)?;
-                    self.dc.FillGeometry(&geometry, &brush, None);
-                }
-            }
-            Ok(geometry)
-        }
     }
 
     pub fn dwrite(&self) -> &IDWriteFactory {

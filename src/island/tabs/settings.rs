@@ -146,7 +146,7 @@ impl App {
                 }
                 EqStrength | EqGradient => self.refresh_eq_shape(),
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | ProgressStyle
-                | PillWeather | PillBattery | SpikeColor => {
+                | PillWeather | PillWeatherSide | PillBattery | SpikeColor => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }

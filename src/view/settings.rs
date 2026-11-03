@@ -24,6 +24,7 @@ pub enum Sid {
     LiquidSoftness,
     Tint,
     PillWeather,
+    PillWeatherSide,
     PillBattery,
     MusicEq,
     MusicTitle,
@@ -416,6 +417,7 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
         Sid::Character => c.character = c.character.step(forward),
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
+        Sid::PillWeatherSide => c.pill_weather_side = c.pill_weather_side.step(forward),
         Sid::CoverMode => c.cover_mode = c.cover_mode.step(forward),
         Sid::FrameRate => c.frame_rate = c.frame_rate.step(forward),
         Sid::EqStyle => c.eq_style = c.eq_style.step(forward),
@@ -439,6 +441,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
         Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
+        Sid::PillWeatherSide => c.pill_weather_side.name(),
         Sid::CoverMode => c.cover_mode.name(),
         Sid::FrameRate => c.frame_rate.name(),
         Sid::EqStyle => c.eq_style.name(),
@@ -461,6 +464,7 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
         Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
         Sid::AiProvider => all(&AiProvider::ALL, c.ai.provider, |v| v.name()),
         Sid::PillBattery => all(&BatteryStyle::ALL, c.pill_battery, |v| v.name()),
+        Sid::PillWeatherSide => all(&WeatherSide::ALL, c.pill_weather_side, |v| v.name()),
         Sid::Edge => all(&Edge::ALL, c.dock_edge, |v| v.name()),
         Sid::CoverMode => all(&CoverMode::ALL, c.cover_mode, |v| v.name()),
         Sid::FrameRate => all(&FrameRate::ALL, c.frame_rate, |v| v.name()),
@@ -481,6 +485,7 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
         Sid::Character => c.character = crate::ui::characters::Character::ALL[k.min(6)],
         Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
         Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],
+        Sid::PillWeatherSide => c.pill_weather_side = WeatherSide::ALL[k.min(1)],
         Sid::Edge => {
             c.dock_edge = Edge::ALL[k.min(3)];
             c.dock_offset = 0.5;

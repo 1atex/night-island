@@ -163,6 +163,10 @@ impl App {
         let ring =
             gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, &window_room(&settings)))?;
         ring.sprite.SetIsVisible(false)?;
+        let highlight = gpu.layer(&compositor, collapsed.size())?;
+        highlight.sprite.SetIsVisible(false)?;
+        let eq_shape = compositor.CreatePathGeometry()?;
+        let eq_clip = compositor.CreateGeometricClipWithGeometry(&eq_shape)?;
         let bump = gpu.layer(&compositor, bump_size(scale, (COLLAPSED.0, COLLAPSED.1)))?;
         bump.sprite.SetIsVisible(false)?;
         bump.sprite.SetCenterPoint(Vector3 { X: bump.size().0 as f32 / 2.0, Y: 0.0, Z: 0.0 })?;
@@ -184,6 +188,7 @@ impl App {
         let children = visual.Children()?;
         children.InsertAtTop(&backdrop)?;
         children.InsertAtTop(&tint)?;
+        children.InsertAtTop(&highlight.sprite)?;
         children.InsertAtTop(&expanded.sprite)?;
         children.InsertAtTop(&collapsed.sprite)?;
         children.InsertAtTop(&char_layer.sprite)?;
@@ -263,6 +268,12 @@ impl App {
             expanded,
             liquid: Liquid {
                 ring,
+                highlight,
+                eq_shape,
+                eq_clip,
+                eq_key: std::cell::Cell::new(None),
+                pull: Default::default(),
+                pull_ready: false,
                 bump,
                 bump_fill,
                 bump_blur,
@@ -272,9 +283,7 @@ impl App {
                 body_shape,
                 body_active: std::cell::Cell::new(false),
                 bump_amp: 0.0,
-                bump_cx: 0.0,
                 bump_vel: 0.0,
-                bump_cx_vel: 0.0,
                 last_tick: Instant::now(),
                 idle_running: false,
             },

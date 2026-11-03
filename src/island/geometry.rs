@@ -23,6 +23,7 @@ pub(in crate::island) enum OpenEq {
 #[derive(Clone, Copy)]
 pub(in crate::island) struct Room {
     pub bottom: f32,
+    pub liquid: bool,
     pub ring: bool,
     pub open: OpenEq,
     pub vertical: bool,
@@ -33,6 +34,11 @@ pub(in crate::island) fn small_pads(room: &Room, docked: bool) -> (f32, f32, f32
     let base_top = if docked { 0.0 } else { TOP_MARGIN };
     let ring = if room.ring { RING_ROOM } else { 0.0 };
     let inward = room.bottom;
+    if room.liquid {
+        let top = if docked && room.hang == Hang::Down { 0.0 } else { base_top.max(BUMP_ROOM) };
+        let bottom = if docked && room.hang == Hang::Up { ring } else { BUMP_ROOM.max(ring) };
+        return (BUMP_ROOM.max(PAD).max(ring), top, bottom);
+    }
     match room.hang {
         Hang::Down => (PAD.max(ring), base_top.max(ring), inward),
         Hang::Up => (PAD.max(ring), base_top.max(inward).max(ring), ring),
@@ -52,6 +58,7 @@ pub(in crate::island) fn window_room(settings: &Settings) -> Room {
     };
     Room {
         bottom: bump_room_for(settings),
+        liquid: settings.style == Style::Liquid,
         ring: settings.ring_wanted(),
         open,
         vertical: settings.vertical(),
@@ -408,6 +415,9 @@ impl App {
         self.resize_ring();
         let _ = self.expanded.resize(window_size(self.scale, Win::Big, docked, self.cw, &window_room(&self.settings)));
         let _ = self.liquid.bump.resize(bump_size(self.scale, self.collapsed()));
+        let _ = self.liquid.highlight.resize(small);
+        self.liquid.pull_ready = false;
+        self.liquid.eq_key.set(None);
         let _ = self
             .pet
             .char_layer
