@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+
+
+<defs id="element-2"><linearGradient id="wx-clear-night-moon" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#EAE7FC" id="element-4"/><stop offset="1" stop-color="#BCB4E7" id="element-5"/></linearGradient></defs>
+<g id="element-7"><path d="M14.580 6.940A6 6 0 1 0 14.700 15.820A5.1 5.1 0 0 1 14.580 6.940Z" fill="url(#wx-clear-night-moon)" stroke="#AAA2D6" stroke-width=".55" stroke-linejoin="round" id="element-8"/></g><g transform="translate(19.2 5)" id="element-9"><path d="M0 -0.85V0.85M-0.85 0H0.85" stroke="#C0B7EC" stroke-width=".6" stroke-linecap="round" id="element-10"/></g><g transform="translate(20 13.4)" id="element-11"><path d="M0 -0.55V0.55M-0.55 0H0.55" stroke="#C0B7EC" stroke-width=".6" stroke-linecap="round" id="element-12"/></g><g transform="translate(13.4 3)" id="element-13"><path d="M0 -0.4V0.4M-0.4 0H0.4" stroke="#C0B7EC" stroke-width=".6" stroke-linecap="round" id="element-14"/></g>
+</svg>

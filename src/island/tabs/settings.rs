@@ -112,7 +112,7 @@ impl App {
                     crate::ui::i18n::set_ru(self.settings.language == crate::data::settings::Language::Ru);
                     self.repaint_collapsed();
                 }
-                Character => self.apply_character(),
+                Character | CharacterDetached => self.apply_character(),
                 UpdateCheck | UpdateBeta => {
                     update::configure(self.settings.update_check, self.settings.update_beta);
                 }
@@ -141,8 +141,8 @@ impl App {
                     self.liquid_tick();
                 }
                 EqStrength | EqGradient => self.refresh_eq_shape(),
-                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
-                | PillBattery | SpikeColor => {
+                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | ProgressStyle
+                | PillWeather | PillWeatherSide | PillBattery | SpikeColor => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }

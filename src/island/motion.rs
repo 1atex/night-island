@@ -19,10 +19,11 @@ impl App {
     }
 
     pub(in crate::island) fn animate_to(&self, expanded: bool, hidden: bool) -> Result<()> {
+        self.restore_liquid_body();
         let ms = if expanded { self.open_ms() } else { self.close_ms() };
         let _ = self.collapsed.sprite.SetIsVisible(true);
         let _ = self.expanded.sprite.SetIsVisible(true);
-        if self.settings.character != Character::None {
+        if self.attached_character_on() {
             let _ = self.pet.char_layer.sprite.SetIsVisible(true);
         }
         let (offset, size, radius) = self.pill(self.win, expanded, hidden);
@@ -66,6 +67,7 @@ impl App {
             State::Hiding => self.kill_timer(Timer::HideDone),
             _ => {}
         }
+        self.stop_idle();
         self.kill_timer(Timer::Autohide);
         self.set_blur(true);
         if self.win != Win::Big {
@@ -78,6 +80,7 @@ impl App {
         self.sync_metrics();
         self.set_timer(Timer::Settle, self.open_ms() as u32 + 80);
         let _ = self.animate_to(true, false);
+        self.update_weather_timer();
         if matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.select_tab(self.ui.tab);
         }
@@ -93,6 +96,7 @@ impl App {
         self.end_edit(true);
         self.kill_timer(Timer::Collapse);
         self.state = State::Collapsing;
+        self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, false);
         self.set_timer(Timer::Shrink, self.close_ms() as u32 + 60);
@@ -134,7 +138,7 @@ impl App {
                 let _ = bar.SetIsVisible(false);
             }
         } else {
-            let _ = self.pet.char_layer.sprite.SetIsVisible(self.settings.character != Character::None);
+            let _ = self.pet.char_layer.sprite.SetIsVisible(self.attached_character_on());
         }
         let tint_want = if expanded { self.settings.tint_open } else { self.settings.pill_opacity };
         let layers = [
@@ -169,6 +173,7 @@ impl App {
             return;
         }
         self.state = State::Hiding;
+        self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, true);
         self.set_timer(Timer::HideDone, self.close_ms() as u32 + 60);
@@ -196,6 +201,7 @@ impl App {
         let _ = self.animate_to(false, false);
         self.start_liquid();
         self.update_eq();
+        self.update_weather_timer();
     }
 
     pub(in crate::island) fn peek(&mut self) {
