@@ -4,9 +4,6 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Foundation::{Size, TypedEventHandler};
-use windows::Graphics::Imaging::{
-    BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode,
-};
 use windows::UI::Notifications::Management::{UserNotificationListener, UserNotificationListenerAccessStatus};
 use windows::UI::Notifications::{
     KnownNotificationBindings, NotificationKinds, ToastNotificationManager, ToastNotificationMode, UserNotification,
@@ -39,12 +36,18 @@ pub struct Record {
     pub title: String,
     pub body: String,
     pub icon: Option<Arc<super::apps::Icon>>,
+    pub avatar: Option<Arc<super::apps::Icon>>,
 }
 
 impl PartialEq for Record {
     fn eq(&self, other: &Self) -> bool {
         (self.id, self.created, &self.app_id, &self.app, &self.title, &self.body)
             == (other.id, other.created, &other.app_id, &other.app, &other.title, &other.body)
+            && match (&self.avatar, &other.avatar) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b) || (a.side == b.side && a.bgra == b.bgra),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 
@@ -119,7 +122,7 @@ pub fn now_ticks() -> i64 {
     ((elapsed.as_secs() + 11_644_473_600) * 10_000_000 + u64::from(elapsed.subsec_nanos() / 100)) as i64
 }
 
-fn text(value: &str, limit: usize) -> String {
+pub(super) fn text(value: &str, limit: usize) -> String {
     value
         .chars()
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
@@ -132,28 +135,13 @@ fn text(value: &str, limit: usize) -> String {
 fn app_icon(info: &windows::ApplicationModel::AppInfo) -> Option<Arc<super::apps::Icon>> {
     let stream =
         info.DisplayInfo().ok()?.GetLogo(Size { Width: 40.0, Height: 40.0 }).ok()?.OpenReadAsync().ok()?.join().ok()?;
-    let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;
-    let transform = BitmapTransform::new().ok()?;
-    transform.SetScaledWidth(40).ok()?;
-    transform.SetScaledHeight(40).ok()?;
-    let provider = decoder
-        .GetPixelDataTransformedAsync(
-            BitmapPixelFormat::Bgra8,
-            BitmapAlphaMode::Premultiplied,
-            &transform,
-            ExifOrientationMode::IgnoreExifOrientation,
-            ColorManagementMode::DoNotColorManage,
-        )
-        .ok()?
-        .join()
-        .ok()?;
-    let data = provider.DetachPixelData().ok()?;
-    (data.len() == 40 * 40 * 4).then(|| Arc::new(super::apps::Icon { side: 40, bgra: data.to_vec() }))
+    super::notification_images::decode(&stream, 40)
 }
 
 fn read_record(
     notification: &UserNotification,
     icons: &mut HashMap<String, Option<Arc<super::apps::Icon>>>,
+    avatars: &mut super::notification_images::AvatarCache,
 ) -> Result<Record> {
     let id = notification.Id()?;
     let created = notification.CreationTime()?.UniversalTime;
@@ -187,15 +175,10 @@ fn read_record(
         .take(8)
         .collect();
     let icon = icons.entry(app_id.clone()).or_insert_with(|| info.as_ref().and_then(app_icon)).clone();
-    Ok(Record {
-        id,
-        created,
-        app_id,
-        app,
-        title: lines.first().map(|line| text(line, 180)).unwrap_or_else(|| "New notification".into()),
-        body: text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 1200),
-        icon,
-    })
+    let title = lines.first().map(|line| text(line, 180)).unwrap_or_else(|| "New notification".into());
+    let body = text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 1200);
+    let avatar = avatars.resolve(&app_id, &title, &body);
+    Ok(Record { id, created, app_id, app, title, body, icon, avatar })
 }
 
 fn merge(state: &mut Snapshot, status: Status, records: Vec<Record>, added: Vec<Record>) -> bool {
@@ -269,6 +252,7 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
     let mut started = now_ticks();
     let mut cache: HashMap<u32, Record> = HashMap::new();
     let mut icons = HashMap::new();
+    let mut avatars = super::notification_images::AvatarCache::default();
     loop {
         let command = if enabled {
             rx.recv_timeout(if events.is_some() { Duration::from_secs(20) } else { Duration::from_millis(900) })
@@ -283,6 +267,7 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
                 cache.clear();
                 if !enabled {
                     icons.clear();
+                    avatars = Default::default();
                     publish(target, Status::Disabled, Vec::new(), Vec::new());
                 }
             }
@@ -305,6 +290,7 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
         if !matches!(status, Status::Ready | Status::NeedsQuietMode) {
             cache.clear();
             icons.clear();
+            avatars = Default::default();
             started = now_ticks();
             publish(target, status, Vec::new(), Vec::new());
             continue;
@@ -315,14 +301,18 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
             continue;
         };
         let mut next = HashMap::new();
+        avatars.begin_snapshot();
         let mut added = Vec::new();
         for notification in list.into_iter().take(1024) {
             let (Ok(id), Ok(created)) = (notification.Id(), notification.CreationTime()) else { continue };
             let old = cache.get(&id);
-            let record = if let Some(record) = old.filter(|record| record.created == created.UniversalTime) {
+            let record = if let Some(record) = old.filter(|record| {
+                record.created == created.UniversalTime
+                    && (record.avatar.is_some() || now_ticks() - record.created > 50_000_000)
+            }) {
                 Some(record.clone())
             } else {
-                read_record(&notification, &mut icons).ok()
+                read_record(&notification, &mut icons, &mut avatars).ok()
             };
             if let Some(record) = record {
                 if should_present(old, record.created, started, status) {
@@ -353,6 +343,57 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "Reads Telegram toast image availability without logging notification contents"]
+    fn telegram_image_access_probe() -> Result<()> {
+        unsafe {
+            RoInitialize(RO_INIT_MULTITHREADED)?;
+        }
+        let result = (|| -> Result<()> {
+            let listener = UserNotificationListener::Current()?;
+            assert!(listener.GetAccessStatus()? == UserNotificationListenerAccessStatus::Allowed);
+            let notifications = listener.GetNotificationsAsync(NotificationKinds::Toast)?.join()?;
+            let app_id = notifications
+                .into_iter()
+                .filter_map(|notification| notification.AppInfo().ok())
+                .filter_map(|info| info.AppUserModelId().ok())
+                .find(|id| id.to_string().to_lowercase().contains("telegram"));
+            if let Some(app_id) = app_id {
+                match ToastNotificationManager::History()?.GetHistoryWithId(&app_id) {
+                    Ok(toasts) => {
+                        let images = toasts
+                            .into_iter()
+                            .filter_map(|toast| toast.Content().ok())
+                            .filter_map(|xml| xml.GetElementsByTagName(&windows::core::HSTRING::from("image")).ok())
+                            .filter(|nodes| nodes.Length().unwrap_or(0) > 0)
+                            .count();
+                        println!("Telegram toast history readable; notifications with images: {images}");
+                    }
+                    Err(error) => println!("Telegram toast history unavailable: {:?}", error.code()),
+                }
+                let mut icons = HashMap::new();
+                let mut avatars = super::super::notification_images::AvatarCache::default();
+                let notifications = listener.GetNotificationsAsync(NotificationKinds::Toast)?.join()?;
+                let decoded = notifications
+                    .into_iter()
+                    .filter(|notification| {
+                        notification.AppInfo().and_then(|info| info.AppUserModelId()).is_ok_and(|id| id == app_id)
+                    })
+                    .filter_map(|notification| read_record(&notification, &mut icons, &mut avatars).ok())
+                    .filter(|record| record.avatar.is_some())
+                    .count();
+                println!("Telegram notifications with matched, decoded avatars: {decoded}");
+            } else {
+                println!("No Telegram notification is currently in Windows notification center");
+            }
+            Ok(())
+        })();
+        unsafe {
+            RoUninitialize();
+        }
+        result
+    }
+
     fn record(id: u32, created: i64) -> Record {
         Record {
             id,
@@ -362,6 +403,7 @@ mod tests {
             title: "Title".into(),
             body: "Body".into(),
             icon: None,
+            avatar: None,
         }
     }
 

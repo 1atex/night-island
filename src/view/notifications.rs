@@ -1,11 +1,17 @@
 use crate::platform::notifications::{Record, Snapshot, Status};
 use crate::view::*;
 
-#[derive(Default)]
 pub struct NotificationsUi {
     pub state: Snapshot,
     pub scroll: usize,
     pub hover: Option<NotificationsHit>,
+    pub setup: bool,
+}
+
+impl Default for NotificationsUi {
+    fn default() -> Self {
+        Self { state: Snapshot::default(), scroll: 0, hover: None, setup: true }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -13,6 +19,8 @@ pub enum NotificationsHit {
     Connect,
     WindowsSettings,
     Example,
+    Setup,
+    History,
 }
 
 pub const NOTIFICATION_SIZE: (f32, f32) = (420.0, 158.0);
@@ -33,14 +41,50 @@ pub fn notifications_rows(pill: Rect, scale: f32) -> usize {
 }
 
 pub fn hit_notifications(pill: Rect, scale: f32, x: f32, y: f32) -> Option<NotificationsHit> {
+    for (rect, hit) in
+        notification_sections(pill, scale).into_iter().zip([NotificationsHit::Setup, NotificationsHit::History])
+    {
+        if inside(rect, x, y) {
+            return Some(hit);
+        }
+    }
     notification_buttons(pill, scale)
         .iter()
         .position(|rect| inside(*rect, x, y))
         .map(|i| [NotificationsHit::Connect, NotificationsHit::WindowsSettings, NotificationsHit::Example][i])
 }
 
+fn notification_sections(pill: Rect, scale: f32) -> [Rect; 2] {
+    let left = pill.0 + SIDE_PAD * scale;
+    [
+        (left, pill.1 + 187.0 * scale, left + 126.0 * scale, pill.1 + 213.0 * scale),
+        (left + 134.0 * scale, pill.1 + 187.0 * scale, left + 260.0 * scale, pill.1 + 213.0 * scale),
+    ]
+}
+
 pub fn notification_close(rect: Rect, scale: f32) -> Rect {
     (rect.0 + rect.2 - 42.0 * scale, rect.1 + 10.0 * scale, rect.0 + rect.2 - 12.0 * scale, rect.1 + 40.0 * scale)
+}
+
+fn paint_notification_avatar(p: &Painter, rect: Rect, scale: f32, record: &Record) -> Result<()> {
+    if let Some(avatar) = &record.avatar {
+        p.image(rect, (rect.2 - rect.0) / 2.0, avatar.side, &avatar.bgra)?;
+        if let Some(icon) = &record.icon {
+            let badge = (rect.2 - 12.0 * scale, rect.3 - 12.0 * scale, rect.2 + 2.0 * scale, rect.3 + 2.0 * scale);
+            p.fill_round_rect(
+                (badge.0 - scale, badge.1 - scale, badge.2 + scale, badge.3 + scale),
+                5.0 * scale,
+                rgba(0.0, 0.0, 0.0, 1.0),
+            )?;
+            p.image(badge, 4.0 * scale, icon.side, &icon.bgra)?;
+        }
+    } else if let Some(icon) = &record.icon {
+        p.image(rect, 9.0 * scale, icon.side, &icon.bgra)?;
+    } else {
+        p.fill_round_rect(rect, 9.0 * scale, acc(0.18))?;
+        p.glyph('\u{E7F4}', rect, 17.0 * scale, acc(1.0))?;
+    }
+    Ok(())
 }
 
 pub fn paint_notification_card(
@@ -52,16 +96,12 @@ pub fn paint_notification_card(
     hover_close: bool,
 ) -> Result<()> {
     let (x, y, w, h) = rect;
-    let icon = (x + 18.0 * scale, y + 16.0 * scale, x + 50.0 * scale, y + 48.0 * scale);
-    if let Some(icon_data) = &record.icon {
-        p.image(icon, 9.0 * scale, icon_data.side, &icon_data.bgra)?;
-    } else {
-        p.fill_round_rect(icon, 9.0 * scale, acc(0.18))?;
-        p.glyph('\u{E7F4}', icon, 17.0 * scale, acc(1.0))?;
-    }
+    let size = if record.avatar.is_some() { 40.0 } else { 32.0 } * scale;
+    let icon = (x + 18.0 * scale, y + 14.0 * scale, x + 18.0 * scale + size, y + 14.0 * scale + size);
+    paint_notification_avatar(p, icon, scale, record)?;
     p.text(
         &record.app,
-        (x + 62.0 * scale, y + 14.0 * scale, x + w - 104.0 * scale, y + 38.0 * scale),
+        (icon.2 + 12.0 * scale, y + 14.0 * scale, x + w - 104.0 * scale, y + 38.0 * scale),
         12.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -100,7 +140,7 @@ pub fn notification_status(status: Status) -> &'static str {
         Status::NeedsAccess => "Allow notification access to connect the island",
         Status::Denied => "Notification access is disabled in Windows privacy settings",
         Status::NeedsQuietMode => "Turn on Do not disturb in Windows to hide the standard banners",
-        Status::Ready => "Connected. New notifications will appear from the island",
+        Status::Ready => "Connected. The island receives Windows system notifications",
         Status::Unavailable => "Windows notifications are unavailable. Try connecting again",
     }
 }
@@ -149,14 +189,52 @@ pub fn paint_notifications(p: &Painter, pill: Rect, scale: f32, ui: &Notificatio
         };
         p.text(label, rect, 12.0 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
     }
-    p.text(
-        "Notification history",
-        (left, y + 188.0 * scale, right, y + 210.0 * scale),
-        12.0 * scale,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_TEXT_ALIGNMENT_LEADING,
-        rgba(1.0, 1.0, 1.0, 0.45),
-    )?;
+    for (i, rect) in notification_sections(pill, scale).into_iter().enumerate() {
+        let selected = ui.setup == (i == 0);
+        if selected {
+            p.fill_round_rect(rect, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.1))?;
+        }
+        p.text(
+            if i == 0 { "Setup guide" } else { "Notification history" },
+            rect,
+            11.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_CENTER,
+            rgba(1.0, 1.0, 1.0, if selected { 1.0 } else { 0.55 }),
+        )?;
+    }
+    if ui.setup {
+        let steps = [
+            ("1. Connect notification access", "Press Connect and allow access when Windows asks."),
+            (
+                "2. Keep notifications, hide duplicate banners",
+                "Windows settings → your app: banners off, notification center on. Do not disturb alone can have exceptions.",
+            ),
+            (
+                "3. Telegram needs Windows notifications",
+                "Telegram → Settings → Notifications and Sounds → Use Windows notifications. Custom Telegram popups cannot reach the island.",
+            ),
+        ];
+        for (i, (title, body)) in steps.into_iter().enumerate() {
+            let top = y + (221.0 + i as f32 * 49.0) * scale;
+            p.text(
+                title,
+                (left + 4.0 * scale, top, right - 4.0 * scale, top + 18.0 * scale),
+                12.0 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                WHITE,
+            )?;
+            p.text_wrapped_trimmed(
+                &crate::ui::i18n::tr(body),
+                (left + 4.0 * scale, top + 19.0 * scale, right - 4.0 * scale, top + 50.0 * scale),
+                11.5 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                rgba(1.0, 1.0, 1.0, 0.65),
+            )?;
+        }
+        return Ok(());
+    }
     if ui.state.records.is_empty() {
         return p.text(
             "New notifications will be listed here",
@@ -170,9 +248,15 @@ pub fn paint_notifications(p: &Painter, pill: Rect, scale: f32, ui: &Notificatio
     for (row, record) in ui.state.records.iter().skip(ui.scroll).take(notifications_rows(pill, scale)).enumerate() {
         let top = y + (216.0 + row as f32 * 62.0) * scale;
         p.fill_round_rect((left, top, right, top + 56.0 * scale), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.045))?;
+        paint_notification_avatar(
+            p,
+            (left + 10.0 * scale, top + 12.0 * scale, left + 42.0 * scale, top + 44.0 * scale),
+            scale,
+            record,
+        )?;
         p.text(
             &format!("{} · {}", record.app, record.title),
-            (left + 12.0 * scale, top + 4.0 * scale, right - 12.0 * scale, top + 27.0 * scale),
+            (left + 54.0 * scale, top + 4.0 * scale, right - 12.0 * scale, top + 27.0 * scale),
             12.5 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -180,7 +264,7 @@ pub fn paint_notifications(p: &Painter, pill: Rect, scale: f32, ui: &Notificatio
         )?;
         p.text(
             &record.body.replace('\n', " "),
-            (left + 12.0 * scale, top + 27.0 * scale, right - 12.0 * scale, top + 49.0 * scale),
+            (left + 54.0 * scale, top + 27.0 * scale, right - 12.0 * scale, top + 49.0 * scale),
             12.0 * scale,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_TEXT_ALIGNMENT_LEADING,

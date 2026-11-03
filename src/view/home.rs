@@ -4,6 +4,8 @@ use crate::view::*;
 
 pub struct HomeUi {
     pub vol: f32,
+    pub mixer_open: bool,
+    pub mixer_motion: Option<(f32, std::time::Instant)>,
     pub device: String,
     pub dev_menu: Option<(Vec<crate::platform::volume::Device>, usize)>,
     pub dock: Vec<ShelfItem>,
@@ -25,6 +27,8 @@ impl Default for HomeUi {
     fn default() -> Self {
         Self {
             vol: 0.5,
+            mixer_open: false,
+            mixer_motion: None,
             device: Default::default(),
             dev_menu: Default::default(),
             dock: Default::default(),
@@ -554,6 +558,7 @@ pub(in crate::view) fn media_btn(pill: Rect, scale: f32, i: usize, wide: bool) -
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum HomeHit {
+    Mixer(MixerHit),
     Media(usize),
     Action(usize),
     Volume,
@@ -573,6 +578,9 @@ pub enum HomeHit {
 }
 
 pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<HomeHit> {
+    if ui.home.mixer_open && inside(media_card(pill, scale, home_wide(ui)), px, py) {
+        return hit_home_mixer(pill, scale, ui, px, py).map(HomeHit::Mixer);
+    }
     let (has_media, spotify, strip) = (!ui.media.title.is_empty(), spotify_active(ui), discord_strip(ui));
     let wide = home_wide(ui);
     if let Some(hit) = hit_dock(pill, scale, px, py, ui) {
@@ -836,8 +844,12 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         '\u{E767}'
     };
     let icon_box = (row.0 + 6.0 * scale, row.1 + 6.0 * scale, row.0 + 40.0 * scale, row.3 - 6.0 * scale);
-    if ui.home.hover_act == Some(530) {
-        p.fill_round_rect(icon_box, 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.14))?;
+    if ui.home.hover_act == Some(530) || ui.home.mixer_open {
+        p.fill_round_rect(
+            icon_box,
+            12.0 * scale,
+            if ui.home.mixer_open { acc(0.25) } else { rgba(1.0, 1.0, 1.0, 0.14) },
+        )?;
     }
     p.glyph(icon, icon_box, 15.0 * scale, if ui.home.vol_track { tint } else { rgba(1.0, 1.0, 1.0, 0.8) })?;
     let (tl, tr, cy) = volume_track(pill, scale, wide);
@@ -975,6 +987,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     if discord_strip(ui) {
         paint_discord_strip(p, pill, scale, ui)?;
     }
+    paint_home_mixer(p, pill, scale, ui)?;
     paint_menu(p, pill, scale, ui)
 }
 

@@ -175,6 +175,11 @@ impl App {
     }
 
     pub(in crate::island) fn on_keydown(&mut self, vk: u16) {
+        if vk == VK_ESCAPE.0 && self.ui.home.mixer_open {
+            self.close_home_mixer();
+            self.repaint_expanded();
+            return;
+        }
         if !self.ui.editing {
             if vk == VK_ESCAPE.0 {
                 self.collapse();

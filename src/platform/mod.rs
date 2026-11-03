@@ -10,6 +10,7 @@ pub mod downloads;
 pub mod lockkeys;
 pub mod media;
 pub mod metrics;
+mod notification_images;
 pub mod notifications;
 pub mod privacy;
 pub mod recognize;

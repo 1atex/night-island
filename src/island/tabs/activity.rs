@@ -209,6 +209,13 @@ impl App {
             return;
         }
         let mut again = false;
+        if let Some((_, start)) = self.ui.home.mixer_motion {
+            if start.elapsed().as_millis() >= 220 {
+                self.ui.home.mixer_motion = None;
+            } else {
+                again = true;
+            }
+        }
         if let Some(change) = self.ui.tab_change {
             if change.start.elapsed().as_millis() as u32 >= change.ms {
                 self.ui.tab_change = None;

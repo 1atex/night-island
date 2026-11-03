@@ -28,6 +28,24 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Close the app mixer" => "Закрыть микшер приложений",
+        "App mixer: adjust each application's volume" => "Микшер: громкость каждого приложения",
+        "Setup guide" => "Как настроить",
+        "Connected. The island receives Windows system notifications" => {
+            "Подключено. Остров получает системные уведомления Windows"
+        }
+        "1. Connect notification access" => "1. Подключи уведомления",
+        "Press Connect and allow access when Windows asks." => {
+            "Нажми «Подключить» и разреши доступ, если Windows его запросит."
+        }
+        "2. Keep notifications, hide duplicate banners" => "2. Убери дубликаты справа снизу",
+        "Windows settings → your app: banners off, notification center on. Do not disturb alone can have exceptions." => {
+            "Включи «Не беспокоить». В параметрах нужного приложения: баннеры выкл., центр уведомлений вкл."
+        }
+        "3. Telegram needs Windows notifications" => "3. Включи системные уведомления в Telegram",
+        "Telegram → Settings → Notifications and Sounds → Use Windows notifications. Custom Telegram popups cannot reach the island." => {
+            "Telegram → Настройки → Уведомления и звуки: включи «Системное окно Windows» или «Использовать уведомления Windows»."
+        }
         "Windows notifications" => "Уведомления Windows",
         "Windows notifications from the island" => "Уведомления Windows из острова",
         "Windows notification settings" => "Настройки уведомлений Windows",

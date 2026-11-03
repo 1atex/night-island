@@ -96,6 +96,7 @@ impl App {
         self.ui.cmd.open = false;
         self.ui.armed = None;
         self.ui.home.dev_menu = None;
+        self.close_home_mixer();
         self.end_edit(true);
         self.kill_timer(Timer::Collapse);
         self.state = State::Collapsing;

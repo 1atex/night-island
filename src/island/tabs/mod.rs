@@ -27,6 +27,7 @@ pub(in crate::island) use self::clipboard::ClipboardState;
 impl App {
     pub(in crate::island) fn select_tab(&mut self, tab: view::Tab) {
         self.finish_mixer();
+        self.close_home_mixer();
         if tab != self.ui.tab || !matches!(tab, view::Tab::Note | view::Tab::Text) {
             self.end_edit(true);
         }

@@ -16,6 +16,151 @@ pub enum MixerHit {
     Refresh,
 }
 
+pub fn home_mixer_progress(ui: &UiState) -> f32 {
+    let target = if ui.home.mixer_open { 1.0 } else { 0.0 };
+    ui.home.mixer_motion.map_or(target, |(from, start)| {
+        let progress = crate::ui::anim::ease(ui.cfg.anim_curve, start.elapsed().as_secs_f32() / 0.22);
+        from + (target - from) * progress
+    })
+}
+
+fn home_row(pill: Rect, scale: f32, ui: &UiState, row: usize) -> Rect {
+    let card = media_card(pill, scale, home_wide(ui));
+    let top = card.1 + (28.0 + row as f32 * 40.0) * scale;
+    (card.0 + 10.0 * scale, top, card.2 - 10.0 * scale, top + 38.0 * scale)
+}
+
+fn home_track(pill: Rect, scale: f32, ui: &UiState, row: usize) -> Rect {
+    let row = home_row(pill, scale, ui, row);
+    (row.0 + 36.0 * scale, row.1 + 18.0 * scale, row.2 - 36.0 * scale, row.1 + 38.0 * scale)
+}
+
+pub fn home_mixer_level_at(pill: Rect, scale: f32, ui: &UiState, x: f32) -> f32 {
+    let track = home_track(pill, scale, ui, 0);
+    ((x - track.0) / (track.2 - track.0).max(1.0)).clamp(0.0, 1.0)
+}
+
+pub fn hit_home_mixer(pill: Rect, scale: f32, ui: &UiState, x: f32, y: f32) -> Option<MixerHit> {
+    if !ui.home.mixer_open {
+        return None;
+    }
+    let card = media_card(pill, scale, home_wide(ui));
+    if inside((card.2 - 36.0 * scale, card.1 + 2.0 * scale, card.2 - 8.0 * scale, card.1 + 28.0 * scale), x, y) {
+        return Some(MixerHit::Refresh);
+    }
+    for row in 0..3.min(ui.mixer.state.apps.len().saturating_sub(ui.mixer.scroll)) {
+        let r = home_row(pill, scale, ui, row);
+        if inside((r.2 - 30.0 * scale, r.1 + 7.0 * scale, r.2, r.3), x, y) {
+            return Some(MixerHit::Mute(row + ui.mixer.scroll));
+        }
+        if inside(home_track(pill, scale, ui, row), x, y) {
+            return Some(MixerHit::Volume(row + ui.mixer.scroll));
+        }
+    }
+    None
+}
+
+pub fn paint_home_mixer(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    let progress = home_mixer_progress(ui);
+    if progress <= 0.001 {
+        return Ok(());
+    }
+    let card = media_card(pill, scale, home_wide(ui));
+    p.push_clip((card.0, card.3 - (card.3 - card.1) * progress, card.2, card.3));
+    let result = (|| {
+        let (r, g, b) = crate::ui::theme::panel();
+        p.fill_round_rect(card, 20.0 * scale, rgba(r, g, b, 1.0))?;
+        p.fill_round_rect(card, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.09))?;
+        p.text(
+            "App mixer",
+            (card.0 + 14.0 * scale, card.1 + 2.0 * scale, card.2 - 40.0 * scale, card.1 + 28.0 * scale),
+            12.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
+        p.glyph(
+            '\u{E72C}',
+            (card.2 - 36.0 * scale, card.1 + 2.0 * scale, card.2 - 8.0 * scale, card.1 + 28.0 * scale),
+            12.0 * scale,
+            rgba(1.0, 1.0, 1.0, 0.6),
+        )?;
+        if ui.mixer.state.apps.is_empty() {
+            let label = if !ui.mixer.state.ready {
+                "Looking for audio apps…"
+            } else if ui.mixer.state.error.is_some() {
+                "Audio mixer is unavailable"
+            } else {
+                "Play music, a video or a game to see its volume here"
+            };
+            return p.text_wrapped(
+                label,
+                (card.0 + 18.0 * scale, card.1 + 40.0 * scale, card.2 - 18.0 * scale, card.3 - 14.0 * scale),
+                12.0 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                rgba(1.0, 1.0, 1.0, 0.65),
+            );
+        }
+        for (row, app) in ui.mixer.state.apps.iter().skip(ui.mixer.scroll).take(3).enumerate() {
+            let r = home_row(pill, scale, ui, row);
+            let icon = (r.0, r.1 + 6.0 * scale, r.0 + 26.0 * scale, r.1 + 32.0 * scale);
+            if let Some(image) = &app.icon {
+                p.image(icon, 7.0 * scale, image.side, &image.bgra)?;
+            } else {
+                p.glyph('\u{E8D6}', icon, 15.0 * scale, acc(1.0))?;
+            }
+            p.text(
+                &app.name,
+                (r.0 + 36.0 * scale, r.1, r.2 - 66.0 * scale, r.1 + 20.0 * scale),
+                11.5 * scale,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                WHITE,
+            )?;
+            p.text(
+                &format!("{}%", (app.level * 100.0).round() as u32),
+                (r.2 - 64.0 * scale, r.1, r.2 - 36.0 * scale, r.1 + 20.0 * scale),
+                10.0 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_TRAILING,
+                rgba(1.0, 1.0, 1.0, 0.6),
+            )?;
+            let track = home_track(pill, scale, ui, row);
+            let y = (track.1 + track.3) / 2.0;
+            let end = track.0 + (track.2 - track.0) * app.level.clamp(0.0, 1.0);
+            let color = if app.muted { rgba(1.0, 1.0, 1.0, 0.3) } else { acc(1.0) };
+            p.fill_round_rect(
+                (track.0, y - 1.5 * scale, track.2, y + 1.5 * scale),
+                1.5 * scale,
+                rgba(1.0, 1.0, 1.0, 0.18),
+            )?;
+            p.fill_round_rect((track.0, y - 1.5 * scale, end, y + 1.5 * scale), 1.5 * scale, color)?;
+            p.fill_ellipse(end, y, 4.0 * scale, 4.0 * scale, WHITE)?;
+            p.glyph(
+                if app.muted { '\u{E74F}' } else { '\u{E767}' },
+                (r.2 - 30.0 * scale, r.1 + 7.0 * scale, r.2, r.3),
+                13.0 * scale,
+                color,
+            )?;
+        }
+        if ui.mixer.state.apps.len() > 3 {
+            let height = 115.0 * scale;
+            let thumb = height * 3.0 / ui.mixer.state.apps.len() as f32;
+            let top = card.1
+                + 30.0 * scale
+                + (height - thumb) * ui.mixer.scroll as f32 / (ui.mixer.state.apps.len() - 3) as f32;
+            p.fill_round_rect(
+                (card.2 - 5.0 * scale, top, card.2 - 3.0 * scale, top + thumb),
+                scale,
+                rgba(1.0, 1.0, 1.0, 0.3),
+            )?;
+        }
+        Ok(())
+    })();
+    p.pop_clip();
+    result
+}
+
 pub fn mixer_list(pill: Rect, scale: f32) -> Rect {
     (
         pill.0 + SIDE_PAD * scale,
@@ -208,6 +353,42 @@ mod tests {
                     == Some(MixerHit::Mute(4))
             );
             assert!(hit_mixer(pill, scale, &ui, pill.0, pill.1).is_none());
+        }
+    }
+
+    #[test]
+    fn home_mixer_does_not_click_through_to_music_and_scrolling_keeps_application_indices() {
+        for scale in [0.75, 1.0, 1.5, 2.0] {
+            let mut ui = UiState::new();
+            ui.home.mixer_open = true;
+            ui.mixer.scroll = 2;
+            ui.mixer.state.apps = (0..8)
+                .map(|i| AppVolume {
+                    key: i.to_string(),
+                    name: i.to_string(),
+                    level: 0.5,
+                    muted: false,
+                    active: false,
+                    icon: None,
+                })
+                .collect();
+            let pill = (15.0, 26.0, 640.0 * scale, 384.0 * scale);
+            for row in 0..3 {
+                let track = home_track(pill, scale, &ui, row);
+                let point = ((track.0 + track.2) / 2.0, (track.1 + track.3) / 2.0);
+                assert!(
+                    hit_home(pill, scale, point.0, point.1, &ui) == Some(HomeHit::Mixer(MixerHit::Volume(row + 2)))
+                );
+                assert!((home_mixer_level_at(pill, scale, &ui, point.0) - 0.5).abs() < 0.001);
+            }
+            let card = media_card(pill, scale, home_wide(&ui));
+            assert!(hit_home(pill, scale, card.0 + scale, card.1 + 70.0 * scale, &ui).is_none());
+            let row = volume_row(pill, scale, home_wide(&ui));
+            assert!(
+                hit_home(pill, scale, row.0 + 15.0 * scale, row.1 + 20.0 * scale, &ui) == Some(HomeHit::VolumeIcon)
+            );
+            assert!(home_mixer_level_at(pill, scale, &ui, -10000.0) == 0.0);
+            assert!(home_mixer_level_at(pill, scale, &ui, 10000.0) == 1.0);
         }
     }
 }

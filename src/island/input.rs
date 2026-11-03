@@ -207,8 +207,8 @@ impl App {
             }
             return;
         }
-        if self.ui.tab == view::Tab::Mixer {
-            let hover = view::hit_mixer(pill, self.scale, &self.ui.mixer, fx, fy);
+        if self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open) {
+            let hover = self.mixer_hit(fx, fy);
             if self.ui.mixer.hover != hover {
                 self.ui.mixer.hover = hover;
                 self.repaint_expanded();
@@ -354,7 +354,8 @@ impl App {
             || hover_ctl.is_some()
             || hover_note.is_some()
             || hover_text.is_some()
-            || (self.ui.tab == view::Tab::Mixer && self.ui.mixer.hover.is_some())
+            || ((self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open))
+                && self.ui.mixer.hover.is_some())
             || (self.ui.tab == view::Tab::Notifications && self.ui.notifications.hover.is_some());
         let hover_sub = view::hit_subtab(self.pill_full(), self.scale, fx, fy, &self.ui);
         self.ui.hand |= hover_sub.is_some();
@@ -565,15 +566,13 @@ impl App {
             };
             return self.repaint_expanded();
         }
-        if self.ui.tab == view::Tab::Mixer {
+        if self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open) {
             if self.ui.mixer.dragging.is_none() {
-                let max = self
-                    .ui
-                    .mixer
-                    .state
-                    .apps
-                    .len()
-                    .saturating_sub(view::mixer_visible_rows(self.pill_rect(true), self.scale));
+                let max = self.ui.mixer.state.apps.len().saturating_sub(if self.ui.tab == view::Tab::Home {
+                    3
+                } else {
+                    view::mixer_visible_rows(self.pill_rect(true), self.scale)
+                });
                 self.ui.mixer.scroll = if delta > 0 {
                     self.ui.mixer.scroll.saturating_sub(1)
                 } else {

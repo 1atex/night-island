@@ -125,6 +125,14 @@ impl App {
                 self.repaint_expanded();
             }
             Some(view::NotificationsHit::WindowsSettings) => cmd::shell_open("ms-settings:notifications", None),
+            Some(view::NotificationsHit::Setup) => {
+                self.ui.notifications.setup = true;
+                self.repaint_expanded();
+            }
+            Some(view::NotificationsHit::History) => {
+                self.ui.notifications.setup = false;
+                self.repaint_expanded();
+            }
             Some(view::NotificationsHit::Example) => {
                 self.system_notices.queue.push_front(Record {
                     id: u32::MAX,
@@ -135,6 +143,7 @@ impl App {
                     body: crate::ui::i18n::tr("Your Windows notifications will appear here. Hover to keep reading.")
                         .into_owned(),
                     icon: None,
+                    avatar: None,
                 });
                 self.collapse();
             }
@@ -249,6 +258,7 @@ impl App {
             value if value == notification_card::Action::Dismiss as usize => self.dismiss_notification_card(),
             value if value == notification_card::Action::History as usize => {
                 self.hide_notification_card();
+                self.ui.notifications.setup = false;
                 self.open_tab(view::Tab::Notifications);
             }
             _ => self.update_notification_card(),
@@ -343,6 +353,7 @@ mod tests {
             title: "Александр".into(),
             body: "Привет! Встречаемся сегодня в 19:30? Я уже забронировал столик у окна.".into(),
             icon: None,
+            avatar: None,
         }
     }
 
@@ -369,14 +380,32 @@ mod tests {
         .collect();
         surface.paint(&app.gpu, |p| {
             p.fill_rect((0.0, 0.0, 1320.0, 600.0), rgba(0.025, 0.035, 0.065, 1.0))?;
-            app.ui.tab = view::Tab::Mixer;
+            app.ui.tab = view::Tab::Home;
+            app.ui.home.mixer_open = true;
+            app.ui.home.device = "Динамики".into();
             p.fill_round_rect((10.0, 10.0, 650.0, 394.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
             view::paint_expanded(p, (10.0, 10.0, 640.0, 384.0), 1.0, &app.ui, &[])?;
             app.ui.tab = view::Tab::Notifications;
             p.fill_round_rect((670.0, 10.0, 1310.0, 394.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
             view::paint_expanded(p, (670.0, 10.0, 640.0, 384.0), 1.0, &app.ui, &[])?;
             p.fill_round_rect((450.0, 420.0, 870.0, 578.0), 26.0, rgba(0.0, 0.0, 0.0, 1.0))?;
-            view::paint_notification_card(p, (450.0, 420.0, 420.0, 158.0), 1.0, &record(1), 2, false)
+            let mut notification = record(1);
+            let bgra = (0..96 * 96)
+                .flat_map(|i| {
+                    let x = (i % 96) as f32 - 48.0;
+                    let y = (i / 96) as f32;
+                    if x * x + (y - 35.0).powi(2) < 16.0 * 16.0
+                        || (x / 31.0).powi(2) + ((y - 92.0) / 36.0).powi(2) < 1.0
+                    {
+                        [235, 220, 200, 255]
+                    } else {
+                        [160, 94, 55, 255]
+                    }
+                })
+                .collect();
+            notification.avatar = Some(std::sync::Arc::new(apps::Icon { side: 96, bgra }));
+            notification.icon = Some(std::sync::Arc::new(apps::Icon { side: 1, bgra: vec![220, 150, 30, 255] }));
+            view::paint_notification_card(p, (450.0, 420.0, 420.0, 158.0), 1.0, &notification, 2, false)
         })?;
         let rgba: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
         let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 600);

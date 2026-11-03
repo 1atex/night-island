@@ -2,6 +2,7 @@ use crate::island::*;
 
 impl App {
     pub(in crate::island) fn open_dev_menu(&mut self) {
+        self.close_home_mixer();
         let items = volume::devices();
         self.ui.home.dev_menu = (!items.is_empty()).then_some((items, 0));
         self.repaint_expanded();
@@ -30,6 +31,7 @@ impl App {
         }
         let pill = self.pill_rect(true);
         match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
+            Some(view::HomeHit::Mixer(_)) => self.click_mixer(x, y),
             Some(view::HomeHit::Media(i)) => media::control(match i {
                 0 => media::Control::Previous,
                 1 => media::Control::PlayPause,
@@ -44,6 +46,7 @@ impl App {
                 }
             }
             Some(view::HomeHit::Edit) => {
+                self.close_home_mixer();
                 self.ui.home.edit = !self.ui.home.edit;
                 self.ui.home.edit_scroll = 0;
                 self.ui.home.hover_act = None;
@@ -74,14 +77,16 @@ impl App {
                 self.repaint_expanded();
             }
             Some(view::HomeHit::VolumeIcon) => {
-                if self.ui.home.vol_track {
-                    self.ui.home.vol_track = false;
-                } else if let Some(v) =
-                    volume::app_volume(&self.ui.media.source).filter(|_| !self.ui.media.source.is_empty())
-                {
-                    self.ui.home.app_vol = v;
-                    self.ui.home.vol_track = true;
-                }
+                self.finish_mixer();
+                let from = view::home_mixer_progress(&self.ui);
+                self.ui.home.mixer_open = !self.ui.home.mixer_open;
+                self.ui.home.mixer_motion = Some((from, Instant::now()));
+                self.ui.home.vol_track = false;
+                self.ui.home.edit = false;
+                self.ui.home.dev_menu = None;
+                self.ui.home.dock_open = false;
+                self.sync_mixer();
+                self.set_timer(Timer::UiAnim, self.frame_ms());
                 self.repaint_expanded();
             }
             Some(view::HomeHit::Volume) => {
