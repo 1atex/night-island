@@ -118,18 +118,25 @@ impl App {
         self.gaming = on;
         if on {
             unregister_hotkeys(self.hwnd);
+            if let Some(desktop) = &mut self.pet.desktop {
+                desktop.hide();
+            }
+            self.kill_timer(Timer::Char);
             self.hide_window();
         } else {
             register_hotkeys(self.hwnd, &self.settings);
             if !self.pill_hidden || self.ghosted {
                 self.show_window();
             }
+            self.start_char();
         }
     }
 
     fn hide_window(&mut self) {
         self.kill_timer(Timer::Expand);
         self.kill_timer(Timer::Liquid);
+        self.kill_timer(Timer::Weather);
+        self.kill_timer(Timer::Progress);
         self.stop_idle();
         self.set_bump_visible(false);
         self.update_eq();
@@ -145,6 +152,28 @@ impl App {
         self.update_eq();
         self.start_liquid();
         self.repaint_collapsed();
+        self.start_char();
+    }
+
+    pub(in crate::island) fn toggle_island_from_character(&mut self) {
+        if self.pill_hidden || matches!(self.state, State::Hidden | State::Hiding) {
+            self.restore_pill();
+            self.reveal();
+            return;
+        }
+        if self.state == State::Expanded {
+            self.collapse();
+            if self.state == State::Expanded {
+                return;
+            }
+        }
+        self.kill_timer(Timer::PillBack);
+        self.kill_timer(Timer::GhostHold);
+        self.pill_hidden = true;
+        self.ghosted = false;
+        let _ = self.root.StopAnimation(h!("Opacity"));
+        let _ = self.root.SetOpacity(1.0);
+        self.hide_window();
     }
 
     pub(in crate::island) fn hide_pill_for_a_while(&mut self) {
@@ -253,5 +282,7 @@ impl App {
             self.kill_timer(Timer::Collapse);
         }
         self.pointer.tracking = false;
+        self.update_weather_timer();
+        self.start_progress_timer();
     }
 }
