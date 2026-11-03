@@ -62,11 +62,24 @@ struct Drag {
     moved: bool,
 }
 
+struct UndockGuard {
+    island: (f32, f32, f32, f32),
+    scale: f32,
+    left: bool,
+}
+
+impl UndockGuard {
+    fn observe(&mut self, center: (f32, f32)) {
+        self.left |= !dock_hit(self.island, center, self.scale);
+    }
+}
+
 struct State {
     parent: HWND,
     drag: Option<Drag>,
     controls: HWND,
     docking: bool,
+    undock_guard: Option<UndockGuard>,
 }
 
 fn notify(hwnd: HWND, state: &State, action: Action) {
@@ -118,6 +131,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 let mut down = POINT::default();
                 let mut rect = RECT::default();
                 if GetCursorPos(&mut down).is_ok() && GetWindowRect(hwnd, &mut rect).is_ok() {
+                    (*ptr).undock_guard = None;
                     (*ptr).drag = Some(Drag { down, origin: POINT { x: rect.left, y: rect.top }, moved: false });
                     SetCapture(hwnd);
                 }
@@ -131,6 +145,16 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                         drag.moved |= dx.abs().max(dy.abs()) >= 6;
                         (*ptr).drag = Some(drag);
                         if drag.moved {
+                            if let Some(guard) = &mut (*ptr).undock_guard {
+                                let mut rect = RECT::default();
+                                if GetWindowRect(hwnd, &mut rect).is_ok() {
+                                    let half = (rect.right - rect.left) as f32 / 2.0;
+                                    guard.observe((
+                                        drag.origin.x as f32 + dx as f32 + half,
+                                        drag.origin.y as f32 + dy as f32 + half,
+                                    ));
+                                }
+                            }
                             let _ = ShowWindow((*ptr).controls, SW_HIDE);
                             let _ = SetWindowPos(
                                 hwnd,
@@ -251,7 +275,8 @@ impl CompanionWindow {
             let mut rect = RECT::default();
             let _ = GetWindowRect(parent, &mut rect);
             let position = on_screen(position.unwrap_or([rect.right + 12, rect.top]), side);
-            let mut state = Box::new(State { parent, drag: None, controls: HWND::default(), docking: false });
+            let mut state =
+                Box::new(State { parent, drag: None, controls: HWND::default(), docking: false, undock_guard: None });
             let hwnd = CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
                 w!("NightIsland.Companion"),
@@ -299,10 +324,13 @@ impl CompanionWindow {
         (x as f32 + self.surface.side as f32 / 2.0, y as f32 + self.surface.side as f32 / 2.0)
     }
 
-    pub fn begin_drag(&mut self, cursor: POINT) {
+    pub fn begin_drag(&mut self, cursor: POINT, island: (f32, f32, f32, f32)) {
         let side = self.surface.side;
         let origin = POINT { x: cursor.x - side / 2, y: cursor.y - side / 2 };
         self._state.drag = Some(Drag { down: cursor, origin, moved: true });
+        let mut guard = UndockGuard { island, scale: side as f32 / SIDE, left: false };
+        guard.observe((cursor.x as f32, cursor.y as f32));
+        self._state.undock_guard = Some(guard);
         self.hover_until = None;
         if let Some(controls) = &mut self.controls {
             controls.hide();
@@ -315,6 +343,14 @@ impl CompanionWindow {
 
     pub fn dragging(&self) -> bool {
         self._state.drag.is_some_and(|drag| drag.moved)
+    }
+
+    pub fn grabbed(&self) -> bool {
+        self._state.drag.is_some()
+    }
+
+    pub fn can_dock(&self) -> bool {
+        self._state.undock_guard.as_ref().is_none_or(|guard| guard.left)
     }
 
     pub fn set_docking(&mut self, docking: bool) -> bool {
@@ -472,6 +508,22 @@ impl Drop for CompanionWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_newly_released_pet_must_leave_the_island_before_it_can_dock() {
+        for scale in [0.75, 1.0, 2.0] {
+            let island = (100.0 * scale, 50.0 * scale, 200.0 * scale, 34.0 * scale);
+            let mut guard = UndockGuard { island, scale, left: false };
+            for center in [(120.0, 67.0), (160.0, 67.0), (250.0, 67.0)] {
+                guard.observe((center.0 * scale, center.1 * scale));
+                assert!(!guard.left);
+            }
+            guard.observe((200.0 * scale, 100.0 * scale));
+            assert!(guard.left);
+            guard.observe((120.0 * scale, 67.0 * scale));
+            assert!(guard.left);
+        }
+    }
 
     #[test]
     fn docking_uses_the_visible_rounded_island_instead_of_its_window_padding() {
@@ -695,13 +747,19 @@ mod tests {
         spark._state.drag = Some(Drag { down: POINT::default(), origin: POINT::default(), moved: true });
         proc(spark.hwnd(), WM_LBUTTONUP, WPARAM(0), LPARAM(0));
         next(Action::Dropped);
-        spark.begin_drag(POINT { x: 420, y: 380 });
+        spark.begin_drag(POINT { x: 420, y: 380 }, (400.0, 363.0, 200.0, 34.0));
         assert!(spark.dragging());
+        assert!(spark.grabbed());
+        assert!(!spark.can_dock());
         assert_eq!(spark.center(), (420.0, 380.0));
         assert_eq!(unsafe { GetCapture() }, spark.hwnd());
         proc(spark.hwnd(), WM_LBUTTONUP, WPARAM(0), LPARAM(0));
         next(Action::Dropped);
         assert!(!spark.dragging());
+        assert!(!spark.grabbed());
+        assert!(!spark.can_dock());
+        spark._state.undock_guard.as_mut().unwrap().observe((420.0, 450.0));
+        assert!(spark.can_dock());
         proc(spark.hwnd(), WM_CLOSE, WPARAM(0), LPARAM(0));
         next(Action::Dock);
         spark.hide();

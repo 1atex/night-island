@@ -26,6 +26,7 @@ impl App {
             }
             self.kill_timer(Timer::Expand);
             self.kill_timer(Timer::Autohide);
+            self.reset_liquid_pull();
             self.set_tip(None);
             return;
         }
@@ -593,7 +594,7 @@ impl App {
     }
 
     pub(in crate::island) fn on_mouse_move(&mut self, x: i32, y: i32) {
-        if self.pointer.character_press.is_some() {
+        if self.character_interacting() {
             self.kill_timer(Timer::Expand);
             return;
         }
