@@ -77,11 +77,7 @@ impl App {
                 Style => self.apply_style(),
                 Tint => {
                     if self.state == State::Expanded {
-                        let _ = self.tint.SetOpacity(if self.settings.acrylic {
-                            self.settings.tint_open
-                        } else {
-                            TINT_OPEN_NO_BLUR
-                        });
+                        let _ = self.tint.SetOpacity(self.settings.tint_open);
                     }
                 }
                 ActivityTrack => self.start_activity(),

@@ -32,8 +32,7 @@ impl App {
         self.geometry.StartAnimation(h!("CornerRadius"), &self.spring(radius, ms)?)?;
 
         let fade = self.compositor.CreateScalarKeyFrameAnimation()?;
-        let open_opacity = if self.settings.acrylic { self.settings.tint_open } else { TINT_OPEN_NO_BLUR };
-        fade.InsertKeyFrame(1.0, if expanded { open_opacity } else { self.settings.pill_opacity })?;
+        fade.InsertKeyFrame(1.0, if expanded { self.settings.tint_open } else { self.settings.pill_opacity })?;
         fade.SetDuration(Duration::from_millis(ms * 7 / 10).into())?;
         self.tint.StartAnimation(h!("Opacity"), &fade)?;
 
@@ -141,8 +140,7 @@ impl App {
         } else {
             let _ = self.pet.char_layer.sprite.SetIsVisible(self.attached_character_on());
         }
-        let open_tint = if self.settings.acrylic { self.settings.tint_open } else { TINT_OPEN_NO_BLUR };
-        let tint_want = if expanded { open_tint } else { self.settings.pill_opacity };
+        let tint_want = if expanded { self.settings.tint_open } else { self.settings.pill_opacity };
         let layers = [
             ("collapsed", &self.collapsed.sprite, if expanded { 0.0 } else { 1.0 }),
             ("expanded", &self.expanded.sprite, if expanded { 1.0 } else { 0.0 }),

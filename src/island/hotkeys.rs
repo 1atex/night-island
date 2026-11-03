@@ -16,7 +16,10 @@ pub(in crate::island) fn register_hotkeys(hwnd: HWND, settings: &Settings) -> Ve
         .into_iter()
         .filter(|h| {
             let c = settings.combo(*h);
-            unsafe { RegisterHotKey(Some(hwnd), *h as i32, HOT_KEY_MODIFIERS(c.mods) | MOD_NOREPEAT, c.vk).is_err() }
+            !c.is_none()
+                && unsafe {
+                    RegisterHotKey(Some(hwnd), *h as i32, HOT_KEY_MODIFIERS(c.mods) | MOD_NOREPEAT, c.vk).is_err()
+                }
         })
         .collect()
 }
@@ -187,6 +190,7 @@ impl App {
             }
         }
         self.pill_hidden = true;
+        self.ghost_stage = 0;
         if self.settings.ghost_mode {
             self.ghosted = true;
             self.apply_ghost(true);
@@ -214,6 +218,30 @@ impl App {
         }
         if !self.gaming {
             self.show_window();
+        }
+    }
+
+    pub(in crate::island) fn pill_back_tick(&mut self) {
+        if !self.ghosted || self.ghost_stage == 2 {
+            return self.restore_pill();
+        }
+        let (x, y, w, h) = self.pill_screen(false);
+        let mut pt = windows::Win32::Foundation::POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut pt);
+        }
+        let over = (x..=x + w).contains(&(pt.x as f32)) && (y..=y + h).contains(&(pt.y as f32));
+        match (self.ghost_stage, over) {
+            (0, false) => self.restore_pill(),
+            (0, true) => {
+                self.ghost_stage = 1;
+                self.set_timer(Timer::PillBack, GHOST_POLL_MS);
+            }
+            (_, true) => self.set_timer(Timer::PillBack, GHOST_POLL_MS),
+            (_, false) => {
+                self.ghost_stage = 2;
+                self.set_timer(Timer::PillBack, self.settings.hide_pill_secs * 1000);
+            }
         }
     }
 

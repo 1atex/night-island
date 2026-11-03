@@ -138,11 +138,12 @@ pub(in crate::view) const RECORD_ROWS: [(Sid, &str, Kind); 4] = [
     (Sid::RecMic, "Microphone", Kind::Toggle),
 ];
 
-pub(in crate::view) const THEME_ROWS: [(Sid, &str, Kind); 8] = [
+pub(in crate::view) const THEME_ROWS: [(Sid, &str, Kind); 9] = [
     (Sid::PanelHue, "Panel hue", Kind::Slider),
     (Sid::PanelSat, "Panel saturation", Kind::Slider),
     (Sid::PanelVal, "Panel brightness", Kind::Slider),
     (Sid::Tint, "Panel opacity", Kind::Slider),
+    (Sid::Acrylic, "Panel blur", Kind::Toggle),
     (Sid::PillOpacity, "Pill opacity", Kind::Slider),
     (Sid::PillBlur, "Pill blur", Kind::Toggle),
     (Sid::AccentHue, "Accent hue", Kind::Slider),

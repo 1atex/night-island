@@ -203,7 +203,7 @@ impl App {
             Timer::SwCaret => self.sw_caret_tick(),
             Timer::SwAnim => self.sw_anim_tick(),
             Timer::Weather => self.weather_tick(),
-            Timer::PillBack => self.restore_pill(),
+            Timer::PillBack => self.pill_back_tick(),
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),
             Timer::Settle => self.settle_layers(),
