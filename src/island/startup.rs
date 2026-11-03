@@ -163,6 +163,10 @@ impl App {
         let ring =
             gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, &window_room(&settings)))?;
         ring.sprite.SetIsVisible(false)?;
+        let highlight = gpu.layer(&compositor, collapsed.size())?;
+        highlight.sprite.SetIsVisible(false)?;
+        let eq_shape = compositor.CreatePathGeometry()?;
+        let eq_clip = compositor.CreateGeometricClipWithGeometry(&eq_shape)?;
         let bump = gpu.layer(&compositor, bump_size(scale, (COLLAPSED.0, COLLAPSED.1)))?;
         bump.sprite.SetIsVisible(false)?;
         bump.sprite.SetCenterPoint(Vector3 { X: bump.size().0 as f32 / 2.0, Y: 0.0, Z: 0.0 })?;
@@ -184,6 +188,7 @@ impl App {
         let children = visual.Children()?;
         children.InsertAtTop(&backdrop)?;
         children.InsertAtTop(&tint)?;
+        children.InsertAtTop(&highlight.sprite)?;
         children.InsertAtTop(&expanded.sprite)?;
         children.InsertAtTop(&collapsed.sprite)?;
         children.InsertAtTop(&char_layer.sprite)?;
@@ -206,7 +211,10 @@ impl App {
         }
 
         let geometry = compositor.CreateRoundedRectangleGeometry()?;
-        visual.SetClip(&compositor.CreateGeometricClipWithGeometry(&geometry)?)?;
+        let round_clip = compositor.CreateGeometricClipWithGeometry(&geometry)?;
+        visual.SetClip(&round_clip)?;
+        let body_shape = compositor.CreatePathGeometry()?;
+        let body_clip = compositor.CreateGeometricClipWithGeometry(&body_shape)?;
         let root = compositor.CreateContainerVisual()?;
         root.SetRelativeSizeAdjustment(full)?;
         let root_children = root.Children()?;
@@ -240,6 +248,7 @@ impl App {
             overlay: None,
             want_dock_dialog: false,
             want_chat_dialog: false,
+            want_header_menu: false,
             pending_power: None,
             reminders: Vec::new(),
             recording: None,
@@ -260,17 +269,24 @@ impl App {
             expanded,
             liquid: Liquid {
                 ring,
+                highlight,
+                eq_shape,
+                eq_clip,
+                eq_key: std::cell::Cell::new(None),
+                pull: Default::default(),
+                pull_ready: false,
                 bump,
                 bump_fill,
                 bump_blur,
                 bump_shape,
+                round_clip,
+                body_clip,
+                body_shape,
+                body_active: std::cell::Cell::new(false),
                 bump_amp: 0.0,
-                bump_cx: 0.0,
                 bump_vel: 0.0,
-                bump_cx_vel: 0.0,
                 last_tick: Instant::now(),
                 idle_running: false,
-                idle_key: None,
             },
             music: MusicBars {
                 spectrum,
@@ -280,6 +296,10 @@ impl App {
             },
             pet: Pet {
                 char_layer,
+                desktop: None,
+                chat: None,
+                beat: 0.0,
+                beat_at: Instant::now(),
                 born: Instant::now(),
                 next_blink: Instant::now() + Duration::from_secs(3),
                 blink_until: Instant::now(),
@@ -290,6 +310,7 @@ impl App {
             pointer: Pointer {
                 tracking: false,
                 press: None,
+                character_press: None,
                 moving: None,
                 drag_from: None,
                 selecting: false,
@@ -304,7 +325,7 @@ impl App {
         app.paint_ears();
         app.apply_character();
         app.ui.cfg = app.settings.clone();
-        app.ui.char_inset = if app.settings.character == Character::None { 0.0 } else { CHAR_INSET };
+        app.ui.char_inset = if app.attached_character_on() { CHAR_INSET } else { 0.0 };
         app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
         if app.settings.hang() != Hang::Down {
             app.apply_layout();

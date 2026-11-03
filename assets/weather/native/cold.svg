@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+
+
+<defs id="element-2"/>
+<path d="M10 5a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0Z" fill="#EFF6FB" stroke="#9EBBD1" stroke-width=".7" stroke-linejoin="round" id="element-4"/><path d="M12 7v10.3" stroke="#80BCE0" stroke-width="1.6" stroke-linecap="round" id="element-5"/><circle cx="12" cy="18" r="2.25" fill="#80BCE0" id="element-6"/><g transform="translate(19.1 6.2)" id="element-7"><g id="element-8"><path d="M0 -2V2M-1.732 -1.000l3.464 2.000M-1.732 1.000l3.464 -2.000" stroke="#7DBCE2" stroke-width=".43" stroke-linecap="round" id="element-9"/></g></g><g transform="translate(5 10)" id="element-10"><path d="M0 -0.8V0.8M-0.8 0H0.8" stroke="#98CBE6" stroke-width=".6" stroke-linecap="round" id="element-11"/></g>
+</svg>
