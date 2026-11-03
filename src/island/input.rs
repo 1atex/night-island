@@ -4,6 +4,7 @@ use crate::island::*;
 pub(in crate::island) struct Pointer {
     pub(in crate::island) tracking: bool,
     pub(in crate::island) press: Option<((i32, i32), (i32, i32))>,
+    pub(in crate::island) character_press: Option<(i32, i32)>,
     pub(in crate::island) moving: Option<((i32, i32), (i32, i32))>,
     pub(in crate::island) drag_from: Option<(usize, i32, i32)>,
     pub(in crate::island) selecting: bool,
@@ -15,6 +16,19 @@ pub(in crate::island) struct Pointer {
 
 impl App {
     pub(in crate::island) fn mouse_down(&mut self, x: i32, y: i32) {
+        if self.can_release_character(x, y) {
+            let mut point = windows::Win32::Foundation::POINT::default();
+            unsafe {
+                if GetCursorPos(&mut point).is_ok() {
+                    self.pointer.character_press = Some((point.x, point.y));
+                    windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
+                }
+            }
+            self.kill_timer(Timer::Expand);
+            self.kill_timer(Timer::Autohide);
+            self.set_tip(None);
+            return;
+        }
         if self.state == State::Collapsed && self.ui.notice.is_none() && self.on_pill(x, y) {
             let mut pt = windows::Win32::Foundation::POINT::default();
             unsafe {
@@ -85,6 +99,13 @@ impl App {
     }
 
     pub(in crate::island) fn mouse_up(&mut self) {
+        if self.pointer.character_press.take().is_some() {
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+            self.set_character_detached(true);
+            return;
+        }
         let press = self.pointer.press.take();
         if self.pointer.moving.take().is_none() {
             if let Some((_, (x, y))) = press {
@@ -571,6 +592,10 @@ impl App {
     }
 
     pub(in crate::island) fn on_mouse_move(&mut self, x: i32, y: i32) {
+        if self.pointer.character_press.is_some() {
+            self.kill_timer(Timer::Expand);
+            return;
+        }
         unsafe {
             if !self.pointer.tracking {
                 self.pointer.tracking = true;
@@ -600,7 +625,7 @@ impl App {
             }
             let tip = if over_spark {
                 let (w, h) = self.char_size();
-                Some(("Right-click to release the character".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
+                Some(("Click or drag to release the character".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
             } else {
                 hover.and_then(|_| {
                     let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
@@ -635,6 +660,10 @@ impl App {
             self.repaint_expanded();
         }
         self.kill_timer(Timer::Expand);
+        if self.pointer.character_press.is_some() || self.pet.desktop.as_ref().is_some_and(|desktop| desktop.dragging())
+        {
+            return;
+        }
         match self.state {
             State::Expanded
                 if self.ui.remind.alert.is_some()

@@ -118,9 +118,9 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Connect your AI provider in AI settings." => "Подключите нейросеть в настройках ИИ.",
         "Let the character roam the desktop" => "Выпустить персонажа на рабочий стол",
         "Release character" => "Выпустить персонажа",
-        "Right-click to release the character" => "ПКМ — выпустить персонажа",
+        "Click or drag to release the character" => "Нажмите или потяните, чтобы выпустить персонажа",
         "Click for mini AI chat, right-click to hide/show the island. Drag to move." => {
-            "ЛКМ — мини-чат с ИИ, ПКМ — скрыть/показать остров. Перетаскивание — перемещение."
+            "ЛКМ — мини-чат с ИИ, ПКМ — скрыть/показать остров. Наведение — музыка. Перенесите на остров для возврата."
         }
         "Capture failed" => "Не удалось сделать снимок",
         "Copied" => "Скопировано",

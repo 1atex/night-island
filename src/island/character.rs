@@ -17,6 +17,57 @@ pub(in crate::island) struct Pet {
 }
 
 impl App {
+    pub(in crate::island) fn drag_character(&mut self) {
+        let Some((x, y)) = self.pointer.character_press else { return };
+        let mut point = windows::Win32::Foundation::POINT::default();
+        if unsafe { GetCursorPos(&mut point) }.is_err()
+            || (point.x - x).abs().max((point.y - y).abs()) < (8.0 * self.scale).round() as i32
+        {
+            return;
+        }
+        self.pointer.character_press = None;
+        self.pointer.press = None;
+        self.kill_timer(Timer::Expand);
+        self.set_character_detached(true);
+        if let Some(desktop) = &mut self.pet.desktop {
+            desktop.begin_drag(point);
+        } else {
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+        }
+        self.char_tick();
+    }
+
+    fn companion_over_island(&self) -> bool {
+        if self.gaming
+            || (self.pill_hidden && !self.ghosted)
+            || !matches!(self.state, State::Collapsed | State::Expanded)
+        {
+            return false;
+        }
+        let Some(desktop) = &self.pet.desktop else { return false };
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        unsafe {
+            if !IsWindowVisible(self.hwnd).as_bool() || GetWindowRect(self.hwnd, &mut rect).is_err() {
+                return false;
+            }
+        }
+        let (width, _) = self.window_size(self.win);
+        let pill = if self.state == State::Expanded {
+            self.pill_full()
+        } else {
+            let (w, h) = self.collapsed();
+            ((width as f32 - w * self.scale) / 2.0, self.win_pad().1 * self.scale, w * self.scale, h * self.scale)
+        };
+        let (cx, cy) = desktop.center();
+        crate::ui::companion::dock_hit(
+            (rect.left as f32 + pill.0, rect.top as f32 + pill.1, pill.2, pill.3),
+            (cx, cy),
+            self.scale,
+        )
+    }
+
     pub(in crate::island) fn attached_character_on(&self) -> bool {
         self.settings.character != Character::None && self.pet.desktop.is_none()
     }
@@ -55,7 +106,11 @@ impl App {
                     self.settings.character_pos = Some(window.position());
                     self.pet.desktop = Some(window);
                 }
-                Err(error) => crate::log_warn!("could not release character: {error}"),
+                Err(error) => {
+                    self.settings.character_detached = false;
+                    self.ui.cfg.character_detached = false;
+                    crate::log_warn!("could not release character: {error}");
+                }
             }
         } else if !detached && let Some(window) = self.pet.desktop.take() {
             self.settings.character_pos = Some(window.position());
@@ -123,15 +178,36 @@ impl App {
                 self.open_companion_chat();
             }
             Some(crate::ui::companion::Action::ToggleIsland) => self.toggle_island_from_character(),
-            Some(crate::ui::companion::Action::Moved) => {
+            Some(action @ (crate::ui::companion::Action::Moved | crate::ui::companion::Action::Dropped)) => {
+                if action == crate::ui::companion::Action::Dropped && self.companion_over_island() {
+                    self.set_character_detached(false);
+                    self.react(Reaction::Done, 650);
+                    return;
+                }
                 if let Some(window) = &self.pet.desktop {
                     window.keep_on_screen();
                     self.settings.character_pos = Some(window.position());
                     self.ui.cfg = self.settings.clone();
                     self.settings.save();
                 }
+                self.schedule_autohide();
+                if action == crate::ui::companion::Action::Dropped && self.state == State::Expanded && !self.ui.pinned {
+                    self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1));
+                }
             }
             Some(crate::ui::companion::Action::Dock) => self.set_character_detached(false),
+            Some(crate::ui::companion::Action::Previous) => {
+                media::control(media::Control::Previous);
+                self.react(Reaction::Music, 600);
+            }
+            Some(crate::ui::companion::Action::PlayPause) => {
+                media::control(media::Control::PlayPause);
+                self.react(Reaction::Done, 500);
+            }
+            Some(crate::ui::companion::Action::Next) => {
+                media::control(media::Control::Next);
+                self.react(Reaction::Music, 600);
+            }
             None => {}
         }
     }
@@ -160,12 +236,17 @@ impl App {
     pub(in crate::island) fn char_tick(&mut self) {
         let character = self.settings.character;
         if self.gaming {
-            if let Some(desktop) = &self.pet.desktop {
+            if let Some(desktop) = &mut self.pet.desktop {
                 desktop.hide();
             }
             return;
         }
         let detached = self.pet.desktop.is_some();
+        if self.pet.desktop.as_ref().is_some_and(|desktop| desktop.dragging()) {
+            self.kill_timer(Timer::Expand);
+            self.kill_timer(Timer::Collapse);
+            self.kill_timer(Timer::Autohide);
+        }
         if character == Character::None || (!detached && self.state != State::Collapsed) {
             return;
         }
@@ -226,6 +307,18 @@ impl App {
                 (f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0)
             });
         let pose = characters::Pose { t, reaction, look, blink, accent, beat };
+
+        let docking =
+            self.pet.desktop.as_ref().is_some_and(|desktop| desktop.dragging()) && self.companion_over_island();
+        if let Some(desktop) = &mut self.pet.desktop {
+            if desktop.set_docking(docking) {
+                self.pet.char_key = None;
+            }
+            let available = self.ui.media.playing || !self.ui.media.title.is_empty() || self.ui.media.players > 0;
+            if let Err(error) = desktop.update_controls(&self.gpu, available, self.ui.media.playing, self.scale) {
+                crate::log_warn!("could not draw companion music controls: {error}");
+            }
+        }
 
         let key = (
             reaction,

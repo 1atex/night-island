@@ -1,4 +1,5 @@
 use std::sync::Once;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -7,15 +8,24 @@ use windows::Win32::Graphics::Gdi::{
     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ReleaseDC, SelectObject,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Error, Result, w};
 
+use super::companion_controls::Controls;
 use crate::ui::characters::{self, Character, Pose};
-use crate::ui::gfx::Gpu;
+use crate::ui::gfx::{Gpu, rgba};
 
 pub const WM_COMPANION: u32 = WM_APP + 45;
 const SIDE: f32 = 88.0;
+
+pub fn dock_hit(pill: (f32, f32, f32, f32), point: (f32, f32), scale: f32) -> bool {
+    let (x, y, w, h) = pill;
+    let radius = (w.min(h) / 2.0).min(24.0 * scale);
+    let cx = point.0.clamp(x + radius, x + w - radius);
+    let cy = point.1.clamp(y + radius, y + h - radius);
+    (point.0 - cx).powi(2) + (point.1 - cy).powi(2) <= (radius + 6.0 * scale).powi(2)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -23,6 +33,10 @@ pub enum Action {
     ToggleIsland = 2,
     Moved = 3,
     Dock = 4,
+    Previous = 5,
+    PlayPause = 6,
+    Next = 7,
+    Dropped = 8,
 }
 
 impl Action {
@@ -32,6 +46,10 @@ impl Action {
             2 => Some(Self::ToggleIsland),
             3 => Some(Self::Moved),
             4 => Some(Self::Dock),
+            5 => Some(Self::Previous),
+            6 => Some(Self::PlayPause),
+            7 => Some(Self::Next),
+            8 => Some(Self::Dropped),
             _ => None,
         }
     }
@@ -47,6 +65,8 @@ struct Drag {
 struct State {
     parent: HWND,
     drag: Option<Drag>,
+    controls: HWND,
+    docking: bool,
 }
 
 fn notify(hwnd: HWND, state: &State, action: Action) {
@@ -111,6 +131,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                         drag.moved |= dx.abs().max(dy.abs()) >= 6;
                         (*ptr).drag = Some(drag);
                         if drag.moved {
+                            let _ = ShowWindow((*ptr).controls, SW_HIDE);
                             let _ = SetWindowPos(
                                 hwnd,
                                 None,
@@ -129,7 +150,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 let drag = (*ptr).drag.take();
                 let _ = ReleaseCapture();
                 if let Some(drag) = drag {
-                    notify(hwnd, &*ptr, if drag.moved { Action::Moved } else { Action::Chat });
+                    notify(hwnd, &*ptr, if drag.moved { Action::Dropped } else { Action::Chat });
                 }
                 LRESULT(0)
             }
@@ -154,14 +175,14 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
     }
 }
 
-struct Surface {
-    mem: HDC,
+pub(super) struct Surface {
+    pub(super) mem: HDC,
     dib: HBITMAP,
-    side: i32,
+    pub(super) side: i32,
 }
 
 impl Surface {
-    fn new(side: i32) -> Result<Self> {
+    pub(super) fn new(side: i32) -> Result<Self> {
         unsafe {
             let screen = GetDC(None);
             let mem = CreateCompatibleDC(Some(screen));
@@ -208,6 +229,8 @@ pub struct CompanionWindow {
     hwnd: HWND,
     _state: Box<State>,
     surface: Surface,
+    controls: Option<Controls>,
+    hover_until: Option<Instant>,
 }
 
 impl CompanionWindow {
@@ -228,7 +251,7 @@ impl CompanionWindow {
             let mut rect = RECT::default();
             let _ = GetWindowRect(parent, &mut rect);
             let position = on_screen(position.unwrap_or([rect.right + 12, rect.top]), side);
-            let mut state = Box::new(State { parent, drag: None });
+            let mut state = Box::new(State { parent, drag: None, controls: HWND::default(), docking: false });
             let hwnd = CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
                 w!("NightIsland.Companion"),
@@ -251,7 +274,11 @@ impl CompanionWindow {
                     return Err(error);
                 }
             };
-            Ok(Self { hwnd, _state: state, surface })
+            let mut window = Self { hwnd, _state: state, surface, controls: None, hover_until: None };
+            let controls = Controls::new(parent, hwnd, scale)?;
+            window._state.controls = controls.hwnd();
+            window.controls = Some(controls);
+            Ok(window)
         }
     }
 
@@ -272,6 +299,90 @@ impl CompanionWindow {
         (x as f32 + self.surface.side as f32 / 2.0, y as f32 + self.surface.side as f32 / 2.0)
     }
 
+    pub fn begin_drag(&mut self, cursor: POINT) {
+        let side = self.surface.side;
+        let origin = POINT { x: cursor.x - side / 2, y: cursor.y - side / 2 };
+        self._state.drag = Some(Drag { down: cursor, origin, moved: true });
+        self.hover_until = None;
+        if let Some(controls) = &mut self.controls {
+            controls.hide();
+        }
+        unsafe {
+            let _ = SetWindowPos(self.hwnd, None, origin.x, origin.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+            SetCapture(self.hwnd);
+        }
+    }
+
+    pub fn dragging(&self) -> bool {
+        self._state.drag.is_some_and(|drag| drag.moved)
+    }
+
+    pub fn set_docking(&mut self, docking: bool) -> bool {
+        let changed = self._state.docking != docking;
+        self._state.docking = docking;
+        changed
+    }
+
+    pub fn update_controls(&mut self, gpu: &Gpu, available: bool, playing: bool, scale: f32) -> Result<()> {
+        let mut point = POINT::default();
+        if unsafe { GetCursorPos(&mut point) }.is_err() {
+            return Ok(());
+        }
+        self.update_controls_at(gpu, point, available, playing, scale)
+    }
+
+    fn update_controls_at(
+        &mut self,
+        gpu: &Gpu,
+        point: POINT,
+        available: bool,
+        playing: bool,
+        scale: f32,
+    ) -> Result<()> {
+        if !available || self.dragging() {
+            self.hover_until = None;
+            if let Some(controls) = &mut self.controls {
+                controls.hide();
+            }
+            return Ok(());
+        }
+        let Some(controls) = &mut self.controls else {
+            return Ok(());
+        };
+        unsafe {
+            let mut rect = RECT::default();
+            GetWindowRect(self.hwnd, &mut rect)?;
+            let monitor = MonitorFromPoint(POINT { x: rect.left, y: rect.top }, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+                return Ok(());
+            }
+            let panel = controls.rect_at(rect, info.rcWork, scale);
+            let center = POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
+            let radius = self.surface.side as f32 * 0.38;
+            let over_character =
+                ((point.x - center.x) as f32).powi(2) + ((point.y - center.y) as f32).powi(2) <= radius * radius;
+            let bridge = RECT {
+                left: rect.left.min(panel.left),
+                top: rect.top.min(panel.top),
+                right: rect.right.max(panel.right),
+                bottom: rect.bottom.max(panel.bottom),
+            };
+            let inside_bridge =
+                point.x >= bridge.left && point.x < bridge.right && point.y >= bridge.top && point.y < bridge.bottom;
+            let now = Instant::now();
+            if over_character || (self.hover_until.is_some_and(|until| now < until) && inside_bridge) {
+                self.hover_until = Some(now + Duration::from_millis(300));
+            }
+            if self.hover_until.is_some_and(|until| now < until) {
+                controls.show(gpu, panel, point, playing, scale)?;
+            } else {
+                controls.hide();
+            }
+        }
+        Ok(())
+    }
+
     pub fn keep_on_screen(&self) {
         let pos = on_screen(self.position(), self.surface.side);
         unsafe {
@@ -279,13 +390,23 @@ impl CompanionWindow {
         }
     }
 
-    pub fn hide(&self) {
+    pub fn hide(&mut self) {
+        self._state.drag = None;
         unsafe {
+            if GetCapture() == self.hwnd {
+                let _ = ReleaseCapture();
+            }
             let _ = ShowWindow(self.hwnd, SW_HIDE);
+            if let Some(controls) = &mut self.controls {
+                controls.hide();
+            }
         }
     }
 
     pub fn set_capture_hidden(&self, hidden: bool) {
+        if let Some(controls) = &self.controls {
+            controls.set_capture_hidden(hidden);
+        }
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
         }
@@ -299,6 +420,12 @@ impl CompanionWindow {
         }
         let mut drawn = Ok(());
         gpu.paint_dc(self.surface.mem, (side, side), |p| {
+            if self._state.docking {
+                let inset = side as f32 * 0.12;
+                let rect = (inset, inset, side as f32 - inset, side as f32 - inset);
+                let _ = p.fill_round_rect(rect, side as f32 / 2.0, rgba(0.4, 0.9, 0.7, 0.15));
+                let _ = p.stroke_round_rect(rect, side as f32 / 2.0, 1.5 * scale, rgba(0.4, 0.95, 0.75, 0.85));
+            }
             let old = p.push_offset(side as f32 * 0.05, side as f32 * 0.1625);
             drawn = characters::draw(p, character, side as f32 * 0.9, pose);
             p.set_transform(&old);
@@ -339,6 +466,18 @@ impl Drop for CompanionWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docking_uses_the_visible_rounded_island_instead_of_its_window_padding() {
+        let pill = (100.0, 50.0, 300.0, 40.0);
+        assert!(dock_hit(pill, (250.0, 70.0), 1.0));
+        assert!(dock_hit(pill, (101.0, 70.0), 1.0));
+        assert!(!dock_hit(pill, (100.0, 50.0), 1.0));
+        assert!(!dock_hit(pill, (250.0, 120.0), 1.0));
+        assert!(dock_hit((-1400.0, 50.0, 300.0, 40.0), (-1250.0, 70.0), 1.0));
+        assert!(dock_hit((200.0, 100.0, 600.0, 80.0), (500.0, 180.0), 2.0));
+        assert!(dock_hit((50.0, 100.0, 28.0, 300.0), (64.0, 250.0), 1.0));
+    }
 
     fn pixels(surface: &Surface) -> Vec<u8> {
         use windows::Win32::Graphics::Gdi::{BITMAP, GetObjectW};
@@ -478,9 +617,42 @@ mod tests {
                 }
             }
         }
+        let (cx, cy) = spark.center();
+        spark.update_controls_at(&gpu, POINT { x: cx as i32, y: cy as i32 }, true, true, 1.0)?;
+        let controls = spark.controls.as_ref().unwrap();
+        let panel = controls.hwnd();
+        assert!(unsafe { IsWindowVisible(panel) }.as_bool());
+        assert_eq!(unsafe { GetWindow(panel, GW_OWNER) }?, spark.hwnd());
+        controls.verify_actions(parent);
+        let mut character_rect = RECT::default();
+        unsafe {
+            GetWindowRect(spark.hwnd(), &mut character_rect)?;
+        }
+        let mut panel_rect = RECT::default();
+        unsafe {
+            GetWindowRect(panel, &mut panel_rect)?;
+        }
+        assert_eq!((character_rect.right - character_rect.left, character_rect.bottom - character_rect.top), (88, 88));
+        spark.update_controls_at(&gpu, POINT { x: panel_rect.left + 26, y: panel_rect.top + 22 }, true, false, 1.0)?;
+        assert!(unsafe { IsWindowVisible(panel) }.as_bool());
+        spark.update_controls_at(&gpu, POINT::default(), false, false, 1.0)?;
+        assert!(!unsafe { IsWindowVisible(panel) }.as_bool());
+        for work in
+            [RECT { left: 0, top: 0, right: 500, bottom: 500 }, RECT { left: -1920, top: 0, right: 0, bottom: 1040 }]
+        {
+            let near_bottom =
+                RECT { left: work.left, top: work.bottom - 88, right: work.left + 88, bottom: work.bottom };
+            let r = spark.controls.as_ref().unwrap().rect_at(near_bottom, work, 1.0);
+            assert!(r.left >= work.left && r.right <= work.right);
+            assert!(r.top >= work.top && r.bottom <= work.bottom);
+            assert!(r.bottom <= near_bottom.top + 4);
+        }
         if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
             let dir = std::path::PathBuf::from(dir);
             save_preview(&dir.join("characters.png"), 528, 264, &sheet);
+            spark.update_controls_at(&gpu, POINT { x: cx as i32, y: cy as i32 }, true, true, 1.0)?;
+            let controls = spark.controls.as_ref().unwrap();
+            save_preview(&dir.join("companion-controls.png"), 132, 44, &pixels(controls.surface())[..132 * 44 * 4]);
             let surface = Surface::new(640)?;
             let ui = crate::view::UiState::new();
             gpu.paint_dc(surface.mem, (640, 640), |p| {
@@ -504,7 +676,14 @@ mod tests {
         next(Action::Chat);
         spark._state.drag = Some(Drag { down: POINT::default(), origin: POINT::default(), moved: true });
         proc(spark.hwnd(), WM_LBUTTONUP, WPARAM(0), LPARAM(0));
-        next(Action::Moved);
+        next(Action::Dropped);
+        spark.begin_drag(POINT { x: 420, y: 380 });
+        assert!(spark.dragging());
+        assert_eq!(spark.center(), (420.0, 380.0));
+        assert_eq!(unsafe { GetCapture() }, spark.hwnd());
+        proc(spark.hwnd(), WM_LBUTTONUP, WPARAM(0), LPARAM(0));
+        next(Action::Dropped);
+        assert!(!spark.dragging());
         proc(spark.hwnd(), WM_CLOSE, WPARAM(0), LPARAM(0));
         next(Action::Dock);
         spark.hide();

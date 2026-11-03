@@ -88,6 +88,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.on_mouse_move(x, y);
                 a.hover_at(x, y);
                 if left_down {
+                    a.drag_character();
                     a.drag_select(x, y);
                     a.drag_read(x, y);
                     a.drag_slider(x);
@@ -129,6 +130,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.finish_seek();
                 a.finish_slider();
             });
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            with_app(|a| a.pointer.character_press = None);
             LRESULT(0)
         }
         dnd::WM_DND_ENTER => {

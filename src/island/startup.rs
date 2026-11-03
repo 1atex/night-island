@@ -298,6 +298,7 @@ impl App {
             pointer: Pointer {
                 tracking: false,
                 press: None,
+                character_press: None,
                 moving: None,
                 drag_from: None,
                 selecting: false,

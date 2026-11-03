@@ -115,7 +115,7 @@ impl App {
         self.gaming = on;
         if on {
             unregister_hotkeys(self.hwnd);
-            if let Some(desktop) = &self.pet.desktop {
+            if let Some(desktop) = &mut self.pet.desktop {
                 desktop.hide();
             }
             self.kill_timer(Timer::Char);
