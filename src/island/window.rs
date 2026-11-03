@@ -4,6 +4,158 @@ pub(in crate::island) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(in crate::island) const WM_MOUSELEAVE: u32 = 0x02A3;
 pub(in crate::island) const WM_SHOW: u32 = WM_APP + 2;
 
+fn customize_header_menu(point: windows::Win32::Foundation::POINT) {
+    use crate::data::settings::{DEFAULT_HEADER_TABS, HEADER_TAB_LIMIT, HIDEABLE_TABS};
+    use crate::ui::i18n::tr;
+    use crate::ui::menu::{self, Entry};
+    loop {
+        let mut entries = Vec::new();
+        with_app(|a| {
+            for (i, name) in HIDEABLE_TABS.iter().enumerate() {
+                if *name == "Steam" && !steam::client_installed() {
+                    continue;
+                }
+                let pinned = a.settings.header_tabs.iter().any(|tab| tab == name) && !a.settings.tab_hidden(name);
+                let location = if a.settings.tab_hidden(name) {
+                    "Hidden"
+                } else if pinned {
+                    "On the header"
+                } else {
+                    "In More"
+                };
+                entries.push(Entry::item(i + 1, &format!("{} · {}", tr(name), tr(location))).glyph(if pinned {
+                    '\u{E73E}'
+                } else {
+                    '\u{E739}'
+                }));
+            }
+            entries.push(Entry::divider());
+            entries.push(Entry::item(200, &tr("Restore default header")));
+        });
+        let Some(choice) = menu::show(entries, (point.x, point.y), false, app_scale(), &|f| with_app(|a| f(&a.gpu)))
+        else {
+            break;
+        };
+        if choice == 200 {
+            with_app(|a| {
+                a.settings.header_tabs = DEFAULT_HEADER_TABS.map(String::from).to_vec();
+                for name in DEFAULT_HEADER_TABS {
+                    a.settings.set_tab_hidden(name, false);
+                }
+            });
+        } else if let Some(name) = choice.checked_sub(1).and_then(|i| HIDEABLE_TABS.get(i)).copied() {
+            let mut pinned = false;
+            let mut full = false;
+            let mut replacements = Vec::new();
+            with_app(|a| {
+                pinned = a.settings.header_tabs.iter().any(|tab| tab == name) && !a.settings.tab_hidden(name);
+                full = !pinned
+                    && !a.settings.header_tabs.iter().any(|tab| tab == name)
+                    && a.settings.header_tabs.len() >= HEADER_TAB_LIMIT;
+                replacements = a.settings.header_tabs.clone();
+            });
+            let replacement = if full {
+                let entries = replacements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, old)| Entry::item(i + 1, &format!("{} {}", tr("Replace:"), tr(old))))
+                    .collect();
+                let Some(id) =
+                    menu::show(entries, (point.x, point.y), false, app_scale(), &|f| with_app(|a| f(&a.gpu)))
+                else {
+                    continue;
+                };
+                replacements.get(id - 1).cloned()
+            } else {
+                None
+            };
+            with_app(|a| {
+                a.settings.set_header_tab(name, !pinned, replacement.as_deref());
+            });
+        }
+        with_app(|a| {
+            a.ui.cfg = a.settings.clone();
+            a.settings.save();
+            a.render_settings_win();
+            a.repaint_expanded();
+        });
+    }
+}
+
+fn show_header_menu(hwnd: HWND) {
+    use crate::ui::menu::Entry;
+    let mut entries = Vec::new();
+    let mut point = windows::Win32::Foundation::POINT::default();
+    with_app(|a| {
+        a.popup_open = true;
+        a.kill_timer(Timer::Collapse);
+        a.set_tip(None);
+        let pill = a.pill_full();
+        for i in view::overflow_tabs(pill, a.scale, &a.ui) {
+            let (_, glyph, name) = view::TABS[i];
+            entries.push(Entry::item(i + 1, &crate::ui::i18n::tr(name)).glyph(glyph));
+        }
+        if !entries.is_empty() {
+            entries.push(Entry::divider());
+        }
+        entries.push(Entry::item(103, &crate::ui::i18n::tr("Customize header…")).glyph('\u{E713}'));
+        if view::tab_settings_group(a.ui.tab).is_some() {
+            entries.push(Entry::item(100, &crate::ui::i18n::tr("Settings of this tab")));
+        }
+        entries.push(Entry::item(
+            101,
+            &crate::ui::i18n::tr(if a.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" }),
+        ));
+        entries.push(Entry::item(
+            102,
+            &crate::ui::i18n::tr(if a.settings.tab_drag { "Stop moving tabs" } else { "Move tabs by dragging" }),
+        ));
+        let r = view::more_rect(pill, a.scale);
+        point.x = r.0 as i32;
+        point.y = (r.3 + 6.0 * a.scale) as i32;
+    });
+    unsafe {
+        let _ = windows::Win32::Graphics::Gdi::ClientToScreen(hwnd, &mut point);
+    }
+    let choice = crate::ui::menu::show(entries, (point.x, point.y), false, app_scale(), &|f| {
+        with_app(|a| f(&a.gpu));
+    });
+    if choice == Some(103) {
+        customize_header_menu(point);
+    }
+    with_app(|a| {
+        a.popup_open = false;
+        a.pointer.tracking = false;
+        match choice {
+            Some(id) if id > 0 && id <= view::TABS.len() => {
+                let tab = a.landing_tab(view::TABS[id - 1].0);
+                a.select_tab(tab);
+            }
+            Some(103) => {}
+            Some(100) => {
+                if let Some(group) = view::tab_settings_group(a.ui.tab) {
+                    a.open_settings_at(group);
+                }
+            }
+            Some(id @ (101 | 102)) => {
+                if id == 101 {
+                    a.settings.lock_drag = !a.settings.lock_drag;
+                } else {
+                    a.settings.tab_drag = !a.settings.tab_drag;
+                }
+                a.ui.cfg = a.settings.clone();
+                a.settings.save();
+                a.render_settings_win();
+            }
+            _ => {}
+        }
+        a.repaint_expanded();
+        if !a.cursor_inside() && !a.ui.pinned {
+            a.set_timer(Timer::Collapse, a.settings.close_delay_ms.max(1));
+        }
+    });
+}
+
 pub(in crate::island) fn point_from(lparam: LPARAM) -> (i32, i32) {
     (lparam.0 as i16 as i32, (lparam.0 >> 16) as i16 as i32)
 }
@@ -19,6 +171,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.on_mouse_move(x, y);
                 a.hover_at(x, y);
                 if left_down {
+                    a.drag_character();
                     a.drag_select(x, y);
                     a.drag_read(x, y);
                     a.drag_slider(x);
@@ -62,6 +215,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             });
             LRESULT(0)
         }
+        WM_CAPTURECHANGED => {
+            with_app(|a| a.pointer.character_press = None);
+            LRESULT(0)
+        }
         dnd::WM_DND_ENTER => {
             with_app(|a| a.on_dnd_enter());
             LRESULT(0)
@@ -91,6 +248,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 let picked = pick_file(hwnd);
                 with_app(|a| a.finish_chat_dialog(picked));
             }
+            let mut header_menu = false;
+            with_app(|a| header_menu = std::mem::take(&mut a.want_header_menu));
+            if header_menu {
+                show_header_menu(hwnd);
+            }
             LRESULT(0)
         }
         WM_MBUTTONUP => {
@@ -104,6 +266,27 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_RBUTTONUP => {
             let (x, y) = point_from(lparam);
+            if with_app_value(|a| a.can_release_character(x, y)) == Some(true) {
+                with_app(|a| a.popup_open = true);
+                let mut point = windows::Win32::Foundation::POINT::default();
+                unsafe {
+                    let _ = GetCursorPos(&mut point);
+                }
+                let choice = crate::ui::menu::show(
+                    vec![crate::ui::menu::Entry::item(1, &crate::ui::i18n::tr("Release character"))],
+                    (point.x, point.y),
+                    false,
+                    app_scale(),
+                    &|f| with_app(|a| f(&a.gpu)),
+                );
+                with_app(|a| {
+                    a.popup_open = false;
+                    if choice == Some(1) {
+                        a.set_character_detached(true);
+                    }
+                });
+                return LRESULT(0);
+            }
             let mut target = None;
             with_app(|a| target = a.dock_target_at(x, y));
             if let Some((index, path)) = target {
@@ -240,6 +423,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_transcribed());
             LRESULT(0)
         }
+        crate::ui::mini_chat::WM_MINI_CHAT => {
+            with_app(|a| a.on_mini_chat(wparam.0, lparam.0));
+            LRESULT(0)
+        }
         ai::WM_CHAT => {
             with_app(|a| a.on_chat());
             LRESULT(0)
@@ -329,6 +516,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_SHOW => {
             with_app(|a| a.peek());
+            LRESULT(0)
+        }
+        crate::ui::companion::WM_COMPANION => {
+            with_app(|a| a.on_companion(wparam.0, lparam.0));
             LRESULT(0)
         }
         tray::WM_TRAY => {

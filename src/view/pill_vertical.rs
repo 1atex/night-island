@@ -10,7 +10,7 @@ const V_GAP: f32 = 9.0;
 const V_MIN: f32 = 140.0;
 
 const V_COVER: f32 = 30.0;
-const V_WEATHER: f32 = 40.0;
+const V_WEATHER: f32 = 46.0;
 const V_REC: f32 = 36.0;
 const V_AGENT: f32 = 78.0;
 const V_CLOCK: f32 = 38.0;
@@ -58,12 +58,15 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
         let length = (top + weather.unwrap_or(0.0) + V_CLOCK + battery.unwrap_or(0.0) + 2.0 * V_GAP + V_PAD).max(V_MIN);
         let total = if pill_len > 0.0 { pill_len / scale } else { length };
         let at = |y: f32, h: f32| (y * scale, h * scale);
-        let free_top = top + weather.map_or(0.0, |h| h + V_GAP);
         let free_bottom = total - V_PAD - battery.map_or(0.0, |h| h + V_GAP);
-        let clock_y = ((total - V_CLOCK) / 2.0).clamp(free_top, (free_bottom - V_CLOCK).max(free_top));
+        let group_h = V_CLOCK + weather.map_or(0.0, |h| h + V_GAP);
+        let start = top + ((free_bottom - top - group_h) / 2.0).max(0.0);
+        let before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
+        let clock_y = start + if before { weather.map_or(0.0, |h| h + V_GAP) } else { 0.0 };
+        let weather_y = if before { start } else { clock_y + V_CLOCK + V_GAP };
         return VSlots {
             cover: None,
-            weather: weather.map(|h| at(top, h)),
+            weather: weather.map(|h| at(weather_y, h)),
             bars: None,
             title: None,
             rec: None,
@@ -94,13 +97,15 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
         })
     };
     let cover = place(cover);
-    let weather = place(weather);
     let bars = place(bars);
     let title = place(title);
     let rec = place(rec);
     let agent = place(agent);
     let metrics = place(metrics);
+    let before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
+    let weather_left = if before { place(weather) } else { None };
     let clock = place(Some(V_CLOCK)).unwrap_or((0.0, 0.0));
+    let weather = weather_left.or_else(|| if before { None } else { place(weather) });
     let battery = place(battery);
     VSlots { cover, weather, bars, title, rec, agent, metrics, clock, battery, length }
 }
@@ -178,10 +183,10 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
     }
     if let (Some(s), Some(wx)) = (slots.weather, &ui.weather) {
         let r = slot(s);
-        weather_icon(p, cx, r.1 + 10.0 * scale, 10.0 * scale, wx.sky, wx.night)?;
+        paint_pill_weather_icon(p, pill, scale, ui)?;
         p.text(
             &format!("{}°", wx.temp.round() as i32),
-            (r.0, r.1 + 22.0 * scale, r.2, r.3),
+            (r.0, r.1 + 26.0 * scale, r.2, r.3),
             12.5 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_CENTER,

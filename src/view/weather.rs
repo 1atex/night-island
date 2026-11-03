@@ -7,24 +7,59 @@ pub struct CityUi {
 }
 
 pub fn weather_icon(p: &Painter, cx: f32, cy: f32, r: f32, sky: Sky, night: bool) -> Result<()> {
-    macro_rules! icon {
-        ($name:literal, $b:expr) => {
-            (&include_bytes!(concat!("../../assets/weather/src/", $name, ".svg"))[..], $b)
-        };
+    paint_weather_icon(p, cx, cy, r, sky, night, false)
+}
+
+pub(in crate::view) fn animated_weather_icon(
+    p: &Painter,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    sky: Sky,
+    night: bool,
+) -> Result<()> {
+    paint_weather_icon(p, cx, cy, r, sky, night, true)
+}
+
+fn icon_name(sky: Sky, night: bool) -> &'static str {
+    match sky {
+        Sky::Clear if night => "clear-night",
+        Sky::Clear => "clear-day",
+        Sky::Fair | Sky::Partly if night => "partly-cloudy-night",
+        Sky::Fair | Sky::Partly => "partly-cloudy-day",
+        Sky::Cloudy => "cloudy",
+        Sky::Overcast => "overcast",
+        Sky::Fog => "fog",
+        Sky::Drizzle => "drizzle",
+        Sky::Rain => "rain",
+        Sky::HeavyRain => "heavy-rain",
+        Sky::RainShowers if night => "showers-night",
+        Sky::RainShowers => "showers-day",
+        Sky::HeavyRainShowers if night => "heavy-showers-night",
+        Sky::HeavyRainShowers => "heavy-showers-day",
+        Sky::Sleet => "sleet",
+        Sky::SleetShowers if night => "sleet-showers-night",
+        Sky::SleetShowers => "sleet-showers-day",
+        Sky::Snow => "snow",
+        Sky::HeavySnow => "heavy-snow",
+        Sky::SnowShowers if night => "snow-showers-night",
+        Sky::SnowShowers => "snow-showers-day",
+        Sky::HeavySnowShowers if night => "heavy-snow-showers-night",
+        Sky::HeavySnowShowers => "heavy-snow-showers-day",
+        Sky::ThunderRain => "thunderstorm-rain",
+        Sky::ThunderSleet => "thunderstorm-sleet",
+        Sky::ThunderSnow => "thunderstorm-snow",
+        Sky::ThunderRainShowers if night => "thunderstorms-night",
+        Sky::ThunderRainShowers => "thunderstorms-day",
+        Sky::ThunderSleetShowers if night => "thunderstorms-sleet-night",
+        Sky::ThunderSleetShowers => "thunderstorms-sleet-day",
+        Sky::ThunderSnowShowers if night => "thunderstorms-snow-night",
+        Sky::ThunderSnowShowers => "thunderstorms-snow-day",
     }
-    let (data, bounds): (&[u8], [f32; 4]) = match sky {
-        Sky::Clear if night => icon!("clear-night", [15.6, 15.2, 48.8, 48.8]),
-        Sky::Clear => icon!("clear-day", [8.0, 8.0, 56.0, 56.0]),
-        Sky::Partly if night => icon!("partly-cloudy-night", [9.4, 13.2, 53.8, 45.8]),
-        Sky::Partly => icon!("partly-cloudy-day", [6.4, 11.5, 53.8, 45.8]),
-        Sky::Cloudy => icon!("overcast", [10.3, 18.2, 59.5, 45.8]),
-        Sky::Fog => icon!("fog", [10.3, 18.2, 53.8, 59.5]),
-        Sky::Rain => icon!("rain", [10.3, 18.2, 53.8, 49.0]),
-        Sky::Sleet => icon!("sleet", [10.3, 18.2, 53.8, 48.0]),
-        Sky::Snow => icon!("snow", [10.3, 18.2, 53.8, 48.0]),
-        Sky::Thunder => icon!("thunderstorms-rain", [10.3, 18.2, 53.8, 59.0]),
-    };
-    p.svg(data, bounds, (cx - 1.25 * r, cy - r, cx + 1.25 * r, cy + r))
+}
+
+fn paint_weather_icon(p: &Painter, cx: f32, cy: f32, r: f32, sky: Sky, night: bool, animated: bool) -> Result<()> {
+    p.weather_svg(icon_name(sky, night), (cx - r, cy - r, cx + r, cy + r), animated)
 }
 
 pub(in crate::view) const WEEKDAYS_EN: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -196,7 +231,7 @@ pub(in crate::view) fn paint_weather(p: &Painter, pill: Rect, scale: f32, ui: &U
 
     let now = (left, top, split - 6.0 * scale, top + 150.0 * scale);
     p.fill_round_rect(now, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
-    weather_icon(p, now.0 + 56.0 * scale, now.1 + 62.0 * scale, 40.0 * scale, wx.sky, wx.night)?;
+    animated_weather_icon(p, now.0 + 56.0 * scale, now.1 + 62.0 * scale, 40.0 * scale, wx.sky, wx.night)?;
     p.text(
         &format!("{}°", wx.temp.round() as i32),
         (now.0 + 108.0 * scale, now.1 + 14.0 * scale, now.2 - 8.0 * scale, now.1 + 88.0 * scale),
@@ -299,4 +334,57 @@ pub(in crate::view) fn paint_weather(p: &Painter, pill: Rect, scale: f32, ui: &U
         weather_icon(p, r.2 - 24.0 * scale, (r.1 + r.3) / 2.0, 12.0 * scale, d.sky, false)?;
     }
     paint_city_matches(p, pill, scale, ui)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_forecast_condition_has_day_and_night_assets() {
+        let animations: serde_json::Value =
+            serde_json::from_str(include_str!("../../assets/weather/animation.json")).unwrap();
+        for sky in [
+            Sky::Clear,
+            Sky::Fair,
+            Sky::Partly,
+            Sky::Cloudy,
+            Sky::Overcast,
+            Sky::Fog,
+            Sky::Drizzle,
+            Sky::Rain,
+            Sky::HeavyRain,
+            Sky::RainShowers,
+            Sky::HeavyRainShowers,
+            Sky::Sleet,
+            Sky::SleetShowers,
+            Sky::Snow,
+            Sky::HeavySnow,
+            Sky::SnowShowers,
+            Sky::HeavySnowShowers,
+            Sky::ThunderRain,
+            Sky::ThunderSleet,
+            Sky::ThunderSnow,
+            Sky::ThunderRainShowers,
+            Sky::ThunderSleetShowers,
+            Sky::ThunderSnowShowers,
+        ] {
+            for night in [false, true] {
+                let name = icon_name(sky, night);
+                assert!(animations.get(name).is_some(), "missing asset for {sky:?}, night={night}: {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn storms_and_showers_keep_their_precipitation_type() {
+        assert_eq!(icon_name(Sky::ThunderSnow, false), "thunderstorm-snow");
+        assert_eq!(icon_name(Sky::ThunderSleet, false), "thunderstorm-sleet");
+        assert_eq!(icon_name(Sky::ThunderSnowShowers, true), "thunderstorms-snow-night");
+        assert_eq!(icon_name(Sky::ThunderSleetShowers, true), "thunderstorms-sleet-night");
+        assert_eq!(icon_name(Sky::HeavyRainShowers, true), "heavy-showers-night");
+        assert_eq!(icon_name(Sky::HeavySnowShowers, false), "heavy-snow-showers-day");
+        assert_ne!(icon_name(Sky::Cloudy, false), icon_name(Sky::Overcast, false));
+        assert_ne!(icon_name(Sky::Clear, false), icon_name(Sky::Fair, false));
+    }
 }
