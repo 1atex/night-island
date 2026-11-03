@@ -86,6 +86,7 @@ mod pill;
 mod pill_motion;
 mod settings_win;
 mod startup;
+mod system_notifications;
 mod tabs;
 mod timers;
 mod voice;
@@ -148,6 +149,7 @@ struct App {
     prev_foreground: HWND,
     cw: f32,
     pill_motion: pill_motion::PillMotion,
+    system_notices: system_notifications::SystemNotices,
     pending_high_surrogate: Option<u16>,
     music: MusicBars,
     gaming: bool,

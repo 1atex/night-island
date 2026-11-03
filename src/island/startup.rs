@@ -91,6 +91,11 @@ pub fn run() -> Result<()> {
         app.schedule_autohide();
         app.start_liquid();
         APP.with(|cell| *cell.borrow_mut() = Some(app));
+        let _ = windows::Win32::System::RemoteDesktop::WTSRegisterSessionNotification(
+            hwnd,
+            windows::Win32::System::RemoteDesktop::NOTIFY_FOR_THIS_SESSION,
+        );
+        with_app(|app| app.configure_system_notifications());
 
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         let failed = with_app_value(|a| register_hotkeys(hwnd, &a.settings)).unwrap_or_default();
@@ -302,6 +307,7 @@ impl App {
             notice_link: None,
             prev_foreground: HWND::default(),
             cw: COLLAPSED.0,
+            system_notices: Default::default(),
             pill_motion: super::pill_motion::PillMotion {
                 width: None,
                 intro: None,

@@ -80,6 +80,7 @@ impl App {
                         let _ = self.tint.SetOpacity(self.settings.tint_open);
                     }
                 }
+                SystemNotifications => self.configure_system_notifications(),
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
                 VpnPill => {

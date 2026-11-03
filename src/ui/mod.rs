@@ -15,3 +15,5 @@ pub mod theme;
 pub mod tip;
 pub mod tray;
 pub mod weather_icons;
+
+pub mod notification_card;

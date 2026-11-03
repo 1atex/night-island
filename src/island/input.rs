@@ -207,6 +207,21 @@ impl App {
             }
             return;
         }
+        if self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open) {
+            let hover = self.mixer_hit(fx, fy);
+            if self.ui.mixer.hover != hover {
+                self.ui.mixer.hover = hover;
+                self.repaint_expanded();
+            }
+            self.ui.hand = hover.is_some();
+        }
+        if self.ui.tab == view::Tab::Notifications {
+            let hover = view::hit_notifications(pill, self.scale, fx, fy);
+            if hover != self.ui.notifications.hover {
+                self.ui.notifications.hover = hover;
+                self.repaint_expanded();
+            }
+        }
         let hover_tab = view::hit_tab(self.pill_full(), self.scale, fx, fy, &self.ui);
         let hover_clip = match self.ui.tab {
             view::Tab::Clipboard => {
@@ -338,7 +353,10 @@ impl App {
             || hover_clip.is_some()
             || hover_ctl.is_some()
             || hover_note.is_some()
-            || hover_text.is_some();
+            || hover_text.is_some()
+            || ((self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open))
+                && self.ui.mixer.hover.is_some())
+            || (self.ui.tab == view::Tab::Notifications && self.ui.notifications.hover.is_some());
         let hover_sub = view::hit_subtab(self.pill_full(), self.scale, fx, fy, &self.ui);
         self.ui.hand |= hover_sub.is_some();
         if hover_tab != self.ui.hover_tab
@@ -471,6 +489,8 @@ impl App {
         match self.ui.tab {
             view::Tab::Clipboard => self.click_clip(x, y),
             view::Tab::Controls => self.click_ctl(x, y),
+            view::Tab::Mixer => self.click_mixer(x, y),
+            view::Tab::Notifications => self.click_notifications(x, y),
             view::Tab::Note => self.click_note(x, y),
             view::Tab::Text => self.click_text(x, y),
             view::Tab::Record => self.click_record(x, y),
@@ -530,6 +550,37 @@ impl App {
             let step = 54.0 * self.scale * if delta > 0 { 1.0 } else { -1.0 };
             self.ui.chat.hist = (self.ui.chat.hist + step).clamp(0.0, self.ui.chat.max.get());
             return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Notifications {
+            let max = self
+                .ui
+                .notifications
+                .state
+                .records
+                .len()
+                .saturating_sub(view::notifications_rows(self.pill_rect(true), self.scale));
+            self.ui.notifications.scroll = if delta > 0 {
+                self.ui.notifications.scroll.saturating_sub(1)
+            } else {
+                (self.ui.notifications.scroll + 1).min(max)
+            };
+            return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open) {
+            if self.ui.mixer.dragging.is_none() {
+                let max = self.ui.mixer.state.apps.len().saturating_sub(if self.ui.tab == view::Tab::Home {
+                    3
+                } else {
+                    view::mixer_visible_rows(self.pill_rect(true), self.scale)
+                });
+                self.ui.mixer.scroll = if delta > 0 {
+                    self.ui.mixer.scroll.saturating_sub(1)
+                } else {
+                    (self.ui.mixer.scroll + 1).min(max)
+                };
+                self.repaint_expanded();
+            }
+            return;
         }
         let rows = if self.ui.tab == view::Tab::Agy {
             view::agy_rows()

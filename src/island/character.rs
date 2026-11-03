@@ -355,5 +355,6 @@ impl App {
             }
         }
         self.set_timer(Timer::Char, if pose.lively() { self.frame_ms() } else { 80 });
+        self.maybe_show_notification();
     }
 }

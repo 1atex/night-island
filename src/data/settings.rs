@@ -383,6 +383,7 @@ pub struct Settings {
     pub dock_edge: Edge,
     pub dock_offset: f32,
     pub float_pos: Option<[i32; 2]>,
+    pub system_notifications: bool,
     pub pill_weather: bool,
     pub pill_weather_side: WeatherSide,
     pub pill_battery: BatteryStyle,
@@ -483,6 +484,7 @@ impl Default for Settings {
             dock_edge: Edge::Top,
             dock_offset: 0.5,
             float_pos: None,
+            system_notifications: false,
             pill_weather: true,
             pill_weather_side: WeatherSide::Left,
             pill_battery: BatteryStyle::Percent,
@@ -788,8 +790,20 @@ impl WeatherSide {
 pub const HEADER_TAB_LIMIT: usize = 5;
 pub const DEFAULT_HEADER_TABS: [&str; HEADER_TAB_LIMIT] = ["Clipboard", "Text", "Note", "Weather", "Record"];
 
-pub const HIDEABLE_TABS: [&str; 10] =
-    ["Clipboard", "Text", "Note", "Weather", "Record", "AI", "Privacy", "Activity", "Steam", "Controls"];
+pub const HIDEABLE_TABS: [&str; 12] = [
+    "Clipboard",
+    "Text",
+    "Note",
+    "Weather",
+    "Record",
+    "AI",
+    "Privacy",
+    "Activity",
+    "Steam",
+    "Controls",
+    "App mixer",
+    "Notifications",
+];
 
 impl Settings {
     pub fn hang(&self) -> Hang {

@@ -61,6 +61,7 @@ impl App {
     }
 
     pub(in crate::island) fn expand(&mut self) {
+        self.hide_notification_card();
         self.cancel_pill_motion();
         match self.state {
             State::Expanded => return,
@@ -77,6 +78,7 @@ impl App {
             let _ = self.set_geometry_now(Win::Big, false, hidden);
         }
         self.state = State::Expanded;
+        self.sync_mixer();
         self.update_eq();
         self.sync_metrics();
         self.set_timer(Timer::Settle, self.open_ms() as u32 + 80);
@@ -94,9 +96,12 @@ impl App {
         self.ui.cmd.open = false;
         self.ui.armed = None;
         self.ui.home.dev_menu = None;
+        self.close_home_mixer();
         self.end_edit(true);
         self.kill_timer(Timer::Collapse);
         self.state = State::Collapsing;
+        self.finish_mixer();
+        self.sync_mixer();
         self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, false);
@@ -167,7 +172,8 @@ impl App {
     }
 
     pub(in crate::island) fn schedule_autohide(&self) {
-        if self.pill_motion.intro.is_none()
+        if !self.notification_card_visible()
+            && self.pill_motion.intro.is_none()
             && self.autohide_ok()
             && self.state == State::Collapsed
             && !self.cursor_inside()
@@ -177,6 +183,7 @@ impl App {
     }
 
     pub(in crate::island) fn hide(&mut self) {
+        self.hide_notification_card();
         self.cancel_pill_motion();
         if self.state != State::Collapsed {
             return;

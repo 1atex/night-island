@@ -1,0 +1,529 @@
+use std::collections::VecDeque;
+
+use crate::island::*;
+use crate::platform::notifications::{self, Record, Status};
+use crate::ui::notification_card::{self, NotificationCard};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::island) enum CardPhase {
+    Opening,
+    Showing,
+    Closing,
+}
+
+#[derive(Default)]
+pub(in crate::island) struct SystemNotices {
+    window: Option<NotificationCard>,
+    queue: VecDeque<Record>,
+    active: Option<Record>,
+    pub phase: Option<CardPhase>,
+    hovered: bool,
+    locked: bool,
+    main_hidden: bool,
+    expires: Option<Instant>,
+    remaining: Duration,
+    failed: bool,
+}
+
+fn same(a: &Record, b: &Record) -> bool {
+    a.id == b.id && a.created == b.created && a.app_id == b.app_id
+}
+fn example(record: &Record) -> bool {
+    record.app_id == "night-island-example" && record.id == u32::MAX
+}
+
+impl App {
+    pub(in crate::island) fn notification_card_visible(&self) -> bool {
+        self.system_notices.phase.is_some()
+    }
+
+    pub(in crate::island) fn configure_system_notifications(&mut self) {
+        self.system_notices.failed = false;
+        notifications::configure(self.hwnd, self.settings.system_notifications);
+        if !self.settings.system_notifications {
+            self.system_notices.queue.clear();
+            self.hide_notification_card();
+            self.ui.notifications.state = Default::default();
+        }
+    }
+
+    pub(in crate::island) fn on_system_notifications(&mut self) {
+        self.accept_system_notifications(notifications::take_snapshot());
+    }
+
+    fn accept_system_notifications(&mut self, mut state: notifications::Snapshot) {
+        if !self.settings.system_notifications {
+            state = Default::default();
+        }
+        self.system_notices
+            .queue
+            .retain(|record| example(record) || state.records.iter().any(|item| same(item, record)));
+        for pending in &mut self.system_notices.queue {
+            if let Some(record) = state.records.iter().find(|item| same(item, pending)) {
+                *pending = record.clone();
+            }
+        }
+        if state.status != Status::Ready {
+            self.system_notices.queue.retain(example);
+            if self.system_notices.active.as_ref().is_some_and(|record| !example(record)) {
+                self.hide_notification_card();
+            }
+        }
+        if let Some(active) = &self.system_notices.active
+            && !example(active)
+            && !state.records.iter().any(|item| same(item, active))
+        {
+            self.dismiss_notification_card();
+        }
+        for record in state.added.drain(..) {
+            if self.settings.system_notifications
+                && state.status == Status::Ready
+                && !self.system_notices.active.as_ref().is_some_and(|active| same(active, &record))
+                && !self.system_notices.queue.iter().any(|pending| same(pending, &record))
+            {
+                self.system_notices.queue.push_back(record);
+            }
+        }
+        if let Some(active) = &mut self.system_notices.active
+            && let Some(record) = state.records.iter().find(|record| same(record, active))
+        {
+            *active = record.clone();
+        }
+        self.ui.notifications.state = state;
+        let rows = view::notifications_rows(self.pill_rect(true), self.scale);
+        self.ui.notifications.scroll =
+            self.ui.notifications.scroll.min(self.ui.notifications.state.records.len().saturating_sub(rows));
+        self.update_notification_card();
+        self.maybe_show_notification();
+        if self.state == State::Expanded && self.ui.tab == view::Tab::Notifications {
+            self.repaint_expanded();
+        }
+    }
+
+    pub(in crate::island) fn click_notifications(&mut self, x: i32, y: i32) {
+        match view::hit_notifications(self.pill_rect(true), self.scale, x as f32, y as f32) {
+            Some(view::NotificationsHit::Connect) => {
+                match self.ui.notifications.state.status {
+                    Status::NeedsAccess => {
+                        if notifications::request_access(self.hwnd).is_err() {
+                            self.ui.notifications.state.status = Status::Unavailable;
+                        }
+                    }
+                    Status::Denied => cmd::shell_open("ms-settings:privacy-notifications", None),
+                    Status::Unavailable => {
+                        self.settings.system_notifications = true;
+                        self.configure_system_notifications();
+                    }
+                    _ => {
+                        self.settings.system_notifications = !self.settings.system_notifications;
+                        self.configure_system_notifications();
+                    }
+                }
+                self.ui.cfg = self.settings.clone();
+                self.settings.save();
+                self.render_settings_win();
+                self.repaint_expanded();
+            }
+            Some(view::NotificationsHit::WindowsSettings) => cmd::shell_open("ms-settings:notifications", None),
+            Some(view::NotificationsHit::Setup) => {
+                self.ui.notifications.setup = true;
+                self.repaint_expanded();
+            }
+            Some(view::NotificationsHit::History) => {
+                self.ui.notifications.setup = false;
+                self.repaint_expanded();
+            }
+            Some(view::NotificationsHit::Example) => {
+                self.system_notices.queue.push_front(Record {
+                    id: u32::MAX,
+                    created: notifications::now_ticks(),
+                    app_id: "night-island-example".into(),
+                    app: "Night Island".into(),
+                    title: crate::ui::i18n::tr("Notifications from the island").into_owned(),
+                    body: crate::ui::i18n::tr("Your Windows notifications will appear here. Hover to keep reading.")
+                        .into_owned(),
+                    icon: None,
+                    avatar: None,
+                });
+                self.collapse();
+            }
+            None => {}
+        }
+    }
+
+    pub(in crate::island) fn maybe_show_notification(&mut self) {
+        if self.system_notices.phase.is_some()
+            || self.system_notices.queue.is_empty()
+            || self.system_notices.locked
+            || self.system_notices.failed
+            || self.state != State::Collapsed
+            || self.gaming
+            || self.pill_hidden
+            || self.character_interacting()
+            || self.pill_motion_busy()
+            || self.pointer.moving.is_some()
+            || self.pointer.press.is_some()
+            || !unsafe { IsWindowVisible(self.hwnd).as_bool() }
+            || self.ui.notice.is_some()
+            || self.ui.volume.is_some()
+        {
+            return;
+        }
+        let record = self.system_notices.queue.pop_front().unwrap();
+        if !example(&record)
+            && (!self.settings.system_notifications || self.ui.notifications.state.status != Status::Ready)
+        {
+            return;
+        }
+        self.reset_liquid_pull();
+        if self.system_notices.window.is_none() {
+            match NotificationCard::new(self.hwnd, &self.compositor, &self.gpu, self.scale) {
+                Ok(window) => self.system_notices.window = Some(window),
+                Err(error) => {
+                    crate::log_warn!("notification card could not open: {error}");
+                    self.system_notices.failed = true;
+                    self.ui.notifications.state.status = Status::Unavailable;
+                    self.system_notices.queue.push_front(record);
+                    return;
+                }
+            }
+        }
+        let source = self.pill_screen(false);
+        let work = Self::work_area();
+        let edge = self.docked().then_some(self.edge());
+        let window = self.system_notices.window.as_mut().unwrap();
+        window.set_capture_hidden(self.settings.capture_hidden);
+        if let Err(error) = window.show(&record, self.system_notices.queue.len(), source, work, edge, self.scale) {
+            crate::log_warn!("notification card could not render: {error}");
+            window.hide();
+            self.system_notices.failed = true;
+            self.ui.notifications.state.status = Status::Unavailable;
+            self.system_notices.queue.push_front(record);
+            return;
+        }
+        self.system_notices.active = Some(record);
+        self.system_notices.phase = Some(CardPhase::Opening);
+        self.system_notices.hovered = false;
+        self.system_notices.remaining = Duration::from_secs(7);
+        self.system_notices.expires = None;
+        self.kill_timer(Timer::Autohide);
+        self.kill_timer(Timer::Expand);
+        self.kill_timer(Timer::Liquid);
+        self.set_tip(None);
+        if let Ok(fade) = self.compositor.CreateScalarKeyFrameAnimation() {
+            let _ = fade.InsertKeyFrame(1.0, 0.0);
+            let _ = fade.SetDuration(Duration::from_millis(120).into());
+            let _ = self.root.StartAnimation(h!("Opacity"), &fade);
+        }
+        self.update_eq();
+        self.update_weather_timer();
+        self.start_progress_timer();
+        self.set_timer(Timer::NotificationStage, notification_card::OPEN_MS + 25);
+    }
+
+    pub(in crate::island) fn update_notification_card(&self) {
+        if let (Some(window), Some(record)) = (&self.system_notices.window, &self.system_notices.active) {
+            window.set_capture_hidden(self.settings.capture_hidden);
+            let _ = window.update(record, self.system_notices.queue.len());
+        }
+    }
+
+    fn start_notification_timeout(&mut self) {
+        if self.system_notices.phase == Some(CardPhase::Showing) && !self.system_notices.hovered {
+            let remaining = self.system_notices.remaining.max(Duration::from_millis(750));
+            self.system_notices.expires = Some(Instant::now() + remaining);
+            self.set_timer(Timer::NotificationExpire, remaining.as_millis().min(u128::from(u32::MAX)) as u32);
+        }
+    }
+
+    pub(in crate::island) fn on_notification_card(&mut self, action: usize, source: isize) {
+        if self.system_notices.window.as_ref().is_none_or(|window| window.hwnd().0 as isize != source)
+            || self.system_notices.phase.is_none()
+        {
+            return;
+        }
+        match action {
+            value if value == notification_card::Action::Enter as usize => {
+                self.system_notices.hovered = true;
+                if let Some(expires) = self.system_notices.expires.take() {
+                    self.system_notices.remaining = expires.saturating_duration_since(Instant::now());
+                }
+                self.kill_timer(Timer::NotificationExpire);
+            }
+            value if value == notification_card::Action::Leave as usize => {
+                self.system_notices.hovered = false;
+                self.update_notification_card();
+                self.start_notification_timeout();
+            }
+            value if value == notification_card::Action::Dismiss as usize => self.dismiss_notification_card(),
+            value if value == notification_card::Action::History as usize => {
+                self.hide_notification_card();
+                self.ui.notifications.setup = false;
+                self.open_tab(view::Tab::Notifications);
+            }
+            _ => self.update_notification_card(),
+        }
+    }
+
+    pub(in crate::island) fn notification_stage(&mut self) {
+        match self.system_notices.phase {
+            Some(CardPhase::Opening) => {
+                self.system_notices.phase = Some(CardPhase::Showing);
+                self.system_notices.main_hidden = true;
+                unsafe {
+                    let _ = ShowWindow(self.hwnd, SW_HIDE);
+                }
+                self.start_notification_timeout();
+            }
+            Some(CardPhase::Closing) => {
+                self.hide_notification_card();
+                self.maybe_show_notification();
+            }
+            _ => {}
+        }
+    }
+
+    pub(in crate::island) fn dismiss_notification_card(&mut self) {
+        if self.system_notices.phase.is_none() || self.system_notices.phase == Some(CardPhase::Closing) {
+            return;
+        }
+        self.kill_timer(Timer::NotificationExpire);
+        self.system_notices.expires = None;
+        let source = self.pill_screen(false);
+        if let (Some(window), Some(record)) = (&mut self.system_notices.window, &self.system_notices.active) {
+            let _ = window.close(source, record, self.system_notices.queue.len());
+        }
+        self.system_notices.phase = Some(CardPhase::Closing);
+        self.set_timer(Timer::NotificationStage, notification_card::CLOSE_MS + 25);
+    }
+
+    pub(in crate::island) fn hide_notification_card(&mut self) {
+        if self.system_notices.phase.take().is_none() {
+            return;
+        }
+        self.kill_timer(Timer::NotificationStage);
+        self.kill_timer(Timer::NotificationExpire);
+        if let Some(window) = &self.system_notices.window {
+            window.hide();
+        }
+        self.system_notices.active = None;
+        self.system_notices.expires = None;
+        self.system_notices.hovered = false;
+        let _ = self.root.StopAnimation(h!("Opacity"));
+        let _ = self.root.SetOpacity(1.0);
+        if self.system_notices.main_hidden && !self.gaming && !self.pill_hidden {
+            unsafe {
+                let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+            }
+        }
+        self.system_notices.main_hidden = false;
+        self.update_eq();
+        self.update_weather_timer();
+        self.start_progress_timer();
+        self.start_liquid();
+    }
+
+    pub(in crate::island) fn notification_session(&mut self, locked: bool) {
+        self.system_notices.locked = locked;
+        if locked {
+            if let Some(record) = self.system_notices.active.clone() {
+                self.system_notices.queue.push_front(record);
+            }
+            self.hide_notification_card();
+        } else {
+            self.maybe_show_notification();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    extern "system" fn test_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    fn record(id: u32) -> Record {
+        Record {
+            id,
+            created: i64::from(id),
+            app_id: "test".into(),
+            app: "Telegram".into(),
+            title: "Александр".into(),
+            body: "Привет! Встречаемся сегодня в 19:30? Я уже забронировал столик у окна.".into(),
+            icon: None,
+            avatar: None,
+        }
+    }
+
+    fn preview(app: &mut App, path: &std::path::Path) -> Result<()> {
+        use crate::ui::gfx::rgba;
+        let surface = crate::ui::popup::PopupSurface::new((1320, 600))?;
+        app.ui.mixer.state.ready = true;
+        app.ui.mixer.state.apps = [
+            ("Яндекс Музыка", 0.72, false),
+            ("Discord", 0.45, false),
+            ("Google Chrome", 0.25, true),
+            ("System sounds", 0.6, false),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, level, muted))| crate::platform::audio_mixer::AppVolume {
+            key: i.to_string(),
+            name: name.into(),
+            level,
+            muted,
+            active: i < 2,
+            icon: None,
+        })
+        .collect();
+        surface.paint(&app.gpu, |p| {
+            p.fill_rect((0.0, 0.0, 1320.0, 600.0), rgba(0.025, 0.035, 0.065, 1.0))?;
+            app.ui.tab = view::Tab::Home;
+            app.ui.home.mixer_open = true;
+            app.ui.home.device = "Динамики".into();
+            p.fill_round_rect((10.0, 10.0, 650.0, 394.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
+            view::paint_expanded(p, (10.0, 10.0, 640.0, 384.0), 1.0, &app.ui, &[])?;
+            app.ui.tab = view::Tab::Notifications;
+            p.fill_round_rect((670.0, 10.0, 1310.0, 394.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
+            view::paint_expanded(p, (670.0, 10.0, 640.0, 384.0), 1.0, &app.ui, &[])?;
+            p.fill_round_rect((450.0, 420.0, 870.0, 578.0), 26.0, rgba(0.0, 0.0, 0.0, 1.0))?;
+            let mut notification = record(1);
+            let bgra = (0..96 * 96)
+                .flat_map(|i| {
+                    let x = (i % 96) as f32 - 48.0;
+                    let y = (i / 96) as f32;
+                    if x * x + (y - 35.0).powi(2) < 16.0 * 16.0
+                        || (x / 31.0).powi(2) + ((y - 92.0) / 36.0).powi(2) < 1.0
+                    {
+                        [235, 220, 200, 255]
+                    } else {
+                        [160, 94, 55, 255]
+                    }
+                })
+                .collect();
+            notification.avatar = Some(std::sync::Arc::new(apps::Icon { side: 96, bgra }));
+            notification.icon = Some(std::sync::Arc::new(apps::Icon { side: 1, bgra: vec![220, 150, 30, 255] }));
+            view::paint_notification_card(p, (450.0, 420.0, 420.0, 158.0), 1.0, &notification, 2, false)
+        })?;
+        let rgba: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 600);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Requires Windows Composition; uses hidden windows and synthetic notifications"]
+    fn notification_cards_render_and_restore_island_without_replaying_or_losing_pending_records() -> Result<()> {
+        use windows::Win32::System::WinRT::RoUninitialize;
+        unsafe {
+            RoInitialize(RO_INIT_SINGLETHREADED)?;
+        }
+        struct Runtime;
+        impl Drop for Runtime {
+            fn drop(&mut self) {
+                unsafe {
+                    RoUninitialize();
+                }
+            }
+        }
+        let _runtime = Runtime;
+        let _queue = unsafe {
+            CreateDispatcherQueueController(DispatcherQueueOptions {
+                dwSize: size_of::<DispatcherQueueOptions>() as u32,
+                threadType: DQTYPE_THREAD_CURRENT,
+                apartmentType: DQTAT_COM_NONE,
+            })?
+        };
+        let instance = unsafe { GetModuleHandleW(None)? };
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(test_proc),
+            hInstance: instance.into(),
+            lpszClassName: w!("NightIsland.Notifications.Test"),
+            ..Default::default()
+        };
+        unsafe {
+            RegisterClassW(&class);
+        }
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW,
+                class.lpszClassName,
+                w!("Notification test"),
+                WS_POPUP,
+                -32000,
+                -32000,
+                1,
+                1,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )?
+        };
+        let settings =
+            Settings { music_eq: false, edge_spikes: false, system_notifications: true, ..Settings::default() };
+        let mut app = App::new_visuals(hwnd, 1.0, settings)?;
+        app.ui.cfg = app.settings.clone();
+        app.pill_hidden = true;
+        let a = record(1);
+        let b = record(2);
+        let state = notifications::Snapshot {
+            status: Status::Ready,
+            records: vec![a.clone(), b.clone()],
+            added: vec![a.clone(), a.clone(), b.clone()],
+        };
+        app.accept_system_notifications(state);
+        assert_eq!(app.system_notices.queue.len(), 2);
+        let mut card = NotificationCard::new(hwnd, &app.compositor, &app.gpu, 1.0)?;
+        for scale in [0.75, 1.0, 2.0] {
+            for edge in Edge::ALL.into_iter().map(Some).chain([None]) {
+                let source = (-6000.0, -6000.0, 200.0 * scale, 34.0 * scale);
+                card.show(&a, 1, source, (-8000.0, -8000.0, -4000.0, -4000.0), edge, scale)?;
+                card.update(&b, 0)?;
+                card.close(source, &b, 0)?;
+                card.hide();
+            }
+        }
+        app.system_notices.window = Some(card);
+        app.system_notices.active = app.system_notices.queue.pop_front();
+        app.system_notices.phase = Some(CardPhase::Opening);
+        app.notification_stage();
+        assert!(app.system_notices.phase == Some(CardPhase::Showing) && app.system_notices.main_hidden);
+        let source = app.system_notices.window.as_ref().unwrap().hwnd().0 as isize;
+        app.on_notification_card(notification_card::Action::Enter as usize, source);
+        assert!(app.system_notices.hovered && app.system_notices.expires.is_none());
+        app.on_notification_card(notification_card::Action::Leave as usize, source);
+        assert!(!app.system_notices.hovered && app.system_notices.expires.is_some());
+        app.notification_session(true);
+        assert_eq!(app.system_notices.queue.len(), 2);
+        assert!(app.system_notices.locked && !app.notification_card_visible());
+        assert_eq!(app.root.Opacity()?, 1.0);
+        app.notification_session(false);
+        assert!(!app.system_notices.locked);
+        app.accept_system_notifications(notifications::Snapshot {
+            status: Status::Ready,
+            records: vec![b.clone()],
+            added: Vec::new(),
+        });
+        assert_eq!(app.system_notices.queue.len(), 1);
+        app.system_notices.active = app.system_notices.queue.pop_front();
+        app.system_notices.phase = Some(CardPhase::Showing);
+        app.accept_system_notifications(notifications::Snapshot { status: Status::Denied, ..Default::default() });
+        assert!(app.system_notices.queue.is_empty() && !app.notification_card_visible());
+        assert_eq!(app.root.Opacity()?, 1.0);
+        app.ui.notifications.state =
+            notifications::Snapshot { status: Status::Ready, records: vec![a, b], added: Vec::new() };
+        if let Some(path) = std::env::var_os("NI_NOTIFICATIONS_PREVIEW") {
+            preview(&mut app, std::path::Path::new(&path))?;
+        }
+        drop(app);
+        unsafe {
+            DestroyWindow(hwnd)?;
+        }
+        Ok(())
+    }
+}
