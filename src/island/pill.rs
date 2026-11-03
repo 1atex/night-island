@@ -188,6 +188,14 @@ impl App {
         }
         let track_changed = now.title != self.ui.media.title;
         self.ui.media = now;
+        if self.pill_motion.intro.is_some()
+            && (!self.ui.media.playing
+                || self.pill_motion.track != (self.ui.media.title.clone(), self.ui.media.source.clone()))
+        {
+            self.cancel_pill_motion();
+        }
+        self.maybe_start_music_intro();
+        self.refresh_music_intro();
         if track_changed && self.ui.media.source == "SPOTIFY" {
             spotify::refresh();
         }

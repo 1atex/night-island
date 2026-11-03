@@ -86,14 +86,11 @@ impl App {
 
     fn char_origin(&self) -> (f32, f32) {
         let s = self.scale;
-        let (win_w, _) = self.window_size(self.win);
+        let (x, y, w, h) = self.pill_rect(false);
         if self.settings.vertical() {
-            ((win_w as f32 - characters::BOX_W * s) / 2.0, self.win_pad().1 * s + 6.0 * s)
+            (x + (w - characters::BOX_W * s) / 2.0, y + 6.0 * s)
         } else {
-            (
-                (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s,
-                self.win_pad().1 * s + (COLLAPSED.1 - characters::BOX_H) * s / 2.0,
-            )
+            (x + 6.0 * s, y + (h - characters::BOX_H * s) / 2.0)
         }
     }
 
@@ -160,7 +157,11 @@ impl App {
     }
 
     pub(in crate::island) fn can_release_character(&self, x: i32, y: i32) -> bool {
-        if self.state != State::Collapsed || self.settings.character == Character::None || self.pet.desktop.is_some() {
+        if self.state != State::Collapsed
+            || self.pill_motion.intro.is_some()
+            || self.settings.character == Character::None
+            || self.pet.desktop.is_some()
+        {
             return false;
         }
         let (left, top) = self.char_origin();
@@ -288,18 +289,12 @@ impl App {
         let (cw, ch) = self.char_size();
         let look = unsafe {
             if GetCursorPos(&mut pt).is_ok() && GetWindowRect(self.hwnd, &mut rc).is_ok() {
-                let s = self.scale;
-                let (win_w, _) = self.window_size(self.win);
-                let (cx, cy) = if let Some(desktop) = &self.pet.desktop {
-                    desktop.center()
-                } else if self.settings.vertical() {
-                    (rc.left as f32 + win_w as f32 / 2.0, rc.top as f32 + self.win_pad().1 * s + 6.0 * s + ch / 2.0)
-                } else {
-                    (
-                        rc.left as f32 + (win_w as f32 - self.cw * s) / 2.0 + 6.0 * s + cw / 2.0,
-                        rc.top as f32 + self.win_pad().1 * s + COLLAPSED.1 * s / 2.0,
-                    )
-                };
+                let (x, y) = self.char_origin();
+                let (cx, cy) = self
+                    .pet
+                    .desktop
+                    .as_ref()
+                    .map_or((rc.left as f32 + x + cw / 2.0, rc.top as f32 + y + ch / 2.0), |desktop| desktop.center());
                 (((pt.x as f32 - cx) / 260.0).clamp(-1.0, 1.0), ((pt.y as f32 - cy) / 200.0).clamp(-1.0, 1.0))
             } else {
                 (0.0, 0.0)

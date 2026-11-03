@@ -43,11 +43,17 @@ pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
 
 impl App {
     pub(in crate::island) fn repaint_collapsed(&mut self) {
+        if self.pill_motion.intro.is_some()
+            && (self.ui.notice.is_some() || self.ui.volume.is_some() || self.ui.downloading.is_some())
+        {
+            self.cancel_pill_motion();
+            self.update_eq();
+        }
         self.fit_width();
         if self.music.spectrum_running {
             self.place_spectrum();
         }
-        let c = self.pill_rect(false);
+        let c = self.collapsed_surface_rect();
         let _ = self.collapsed.paint(&self.gpu, |p| {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
@@ -104,7 +110,7 @@ impl App {
     }
 
     pub(in crate::island) fn repaint(&self) {
-        let c = self.pill_rect(false);
+        let c = self.collapsed_surface_rect();
         let _ = self.collapsed.paint(&self.gpu, |p| {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
@@ -134,6 +140,7 @@ impl App {
             _ => false,
         };
         shown
+            && self.pill_motion.intro.is_none()
             && self.settings.weather
             && self.ui.weather.is_some()
             && !self.gaming
@@ -149,7 +156,7 @@ impl App {
         if self.state == State::Expanded {
             return self.repaint_expanded();
         }
-        let pill = self.pill_rect(false);
+        let pill = self.collapsed_surface_rect();
         if let Some(rect) = view::pill_weather_rect(pill, self.scale, &self.ui) {
             let _ = self
                 .collapsed
