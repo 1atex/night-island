@@ -73,6 +73,7 @@ use windows_numerics::{Vector2, Vector3};
 
 mod appearance;
 mod character;
+mod companion_chat;
 mod demo;
 mod editing;
 mod geometry;
@@ -137,6 +138,7 @@ struct App {
     overlay: Option<overlay::Overlay>,
     want_dock_dialog: bool,
     want_chat_dialog: bool,
+    want_header_menu: bool,
     pending_power: Option<(voicecmd::Power, std::time::Instant)>,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,

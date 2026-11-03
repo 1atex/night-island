@@ -118,6 +118,10 @@ pub fn run() -> Result<()> {
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            let chat = with_app_value(|a| a.pet.chat.as_ref().map(|chat| chat.hwnd())).flatten();
+            if chat.is_some_and(|hwnd| IsDialogMessageW(hwnd, &msg).as_bool()) {
+                continue;
+            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -240,6 +244,7 @@ impl App {
             overlay: None,
             want_dock_dialog: false,
             want_chat_dialog: false,
+            want_header_menu: false,
             pending_power: None,
             reminders: Vec::new(),
             recording: None,
@@ -280,6 +285,9 @@ impl App {
             pet: Pet {
                 char_layer,
                 desktop: None,
+                chat: None,
+                beat: 0.0,
+                beat_at: Instant::now(),
                 born: Instant::now(),
                 next_blink: Instant::now() + Duration::from_secs(3),
                 blink_until: Instant::now(),

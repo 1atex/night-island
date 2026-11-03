@@ -152,7 +152,7 @@ impl App {
         self.start_char();
     }
 
-    pub(in crate::island) fn toggle_island_from_spark(&mut self) {
+    pub(in crate::island) fn toggle_island_from_character(&mut self) {
         if self.pill_hidden || matches!(self.state, State::Hidden | State::Hiding) {
             self.restore_pill();
             self.reveal();

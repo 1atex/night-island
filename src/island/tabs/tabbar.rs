@@ -32,7 +32,7 @@ impl App {
             return;
         }
         let rects = view::tab_rects(self.pill_full(), self.scale, &self.ui);
-        let items = view::movable_tabs(&self.ui);
+        let items: Vec<_> = view::movable_tabs(&self.ui).into_iter().filter(|&i| rects[i].2 > rects[i].0).collect();
         let Some(from) = items.iter().position(|&k| k == i) else {
             self.ui.tab_press = None;
             return;

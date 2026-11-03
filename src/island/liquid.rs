@@ -444,8 +444,8 @@ impl App {
             && self.ui.media.playing;
         let analysing = self.ui.media.playing
             && !self.gaming
-            && (!self.pill_hidden || self.ghosted)
-            && (self.settings.music_eq || spikes || open);
+            && ((self.pet.desktop.is_some())
+                || ((!self.pill_hidden || self.ghosted) && (self.settings.music_eq || spikes || open)));
         if analysing {
             audio::start();
         } else {

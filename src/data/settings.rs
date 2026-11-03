@@ -419,8 +419,10 @@ pub struct Settings {
     pub record_system_audio: bool,
     pub record_mic: bool,
     pub character: Character,
-    pub spark_detached: bool,
-    pub spark_pos: Option<[i32; 2]>,
+    #[serde(alias = "spark_detached")]
+    pub character_detached: bool,
+    #[serde(alias = "spark_pos")]
+    pub character_pos: Option<[i32; 2]>,
     pub edge_spikes: bool,
     pub style: Style,
     pub capture_hidden: bool,
@@ -515,8 +517,8 @@ impl Default for Settings {
             record_system_audio: true,
             record_mic: true,
             character: Character::Spark,
-            spark_detached: false,
-            spark_pos: None,
+            character_detached: false,
+            character_pos: None,
             edge_spikes: true,
             style: Style::Liquid,
             capture_hidden: false,
@@ -890,9 +892,9 @@ impl Settings {
             self.weather_city.chars().filter(|c| !c.is_control()).take(60).collect::<String>().trim().to_string();
         self.dock_offset = clamp_f(self.dock_offset, 0.0, 1.0, 0.5);
         self.float_pos = self.float_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
-        self.spark_pos = self.spark_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
-        if self.character != Character::Spark {
-            self.spark_detached = false;
+        self.character_pos = self.character_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
+        if self.character == Character::None {
+            self.character_detached = false;
         }
         self.overlay_pos = self.overlay_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
         self.panel_hue = clamp_f(self.panel_hue, 0.0, 360.0, d.panel_hue);
@@ -1118,16 +1120,33 @@ mod tests {
     }
 
     #[test]
-    fn desktop_spark_position_and_mode_survive_settings_round_trips() {
+    fn desktop_character_position_and_mode_survive_settings_round_trips() {
         let mut settings: Settings =
-            serde_json::from_str(r#"{"character":"spark","spark_detached":true,"spark_pos":[-200,400]}"#).unwrap();
+            serde_json::from_str(r#"{"character":"spark","character_detached":true,"character_pos":[-200,400]}"#)
+                .unwrap();
         settings.sanitize();
         let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert!(restored.spark_detached);
-        assert_eq!(restored.spark_pos, Some([-200, 400]));
+        assert!(restored.character_detached);
+        assert_eq!(restored.character_pos, Some([-200, 400]));
         settings.character = Character::None;
         settings.sanitize();
-        assert!(!settings.spark_detached);
+        assert!(!settings.character_detached);
+    }
+
+    #[test]
+    fn roaming_supports_every_character_and_preserves_old_spark_settings() {
+        for character in Character::ALL.into_iter().filter(|c| *c != Character::None) {
+            let mut settings = Settings { character, character_detached: true, ..Settings::default() };
+            settings.sanitize();
+            assert!(settings.character_detached, "{character:?}");
+            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(restored.character, character);
+            assert!(restored.character_detached);
+        }
+        let old: Settings =
+            serde_json::from_str(r#"{"character":"spark","spark_detached":true,"spark_pos":[120,340]}"#).unwrap();
+        assert!(old.character_detached);
+        assert_eq!(old.character_pos, Some([120, 340]));
     }
 }
 

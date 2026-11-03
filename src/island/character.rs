@@ -4,8 +4,11 @@ pub(in crate::island) const CHAR_INSET: f32 = 30.0;
 
 pub(in crate::island) struct Pet {
     pub(in crate::island) char_layer: Layer,
-    pub(in crate::island) desktop: Option<crate::ui::spark::SparkWindow>,
+    pub(in crate::island) desktop: Option<crate::ui::companion::CompanionWindow>,
     pub(in crate::island) born: Instant,
+    pub(in crate::island) beat: f32,
+    pub(in crate::island) beat_at: Instant,
+    pub(in crate::island) chat: Option<super::companion_chat::CompanionChat>,
     pub(in crate::island) next_blink: Instant,
     pub(in crate::island) blink_until: Instant,
     pub(in crate::island) rng: u32,
@@ -41,21 +44,21 @@ impl App {
     }
 
     pub(in crate::island) fn apply_character(&mut self) {
-        if self.settings.character != Character::Spark {
-            self.settings.spark_detached = false;
-            self.ui.cfg.spark_detached = false;
+        if self.settings.character == Character::None {
+            self.settings.character_detached = false;
+            self.ui.cfg.character_detached = false;
         }
-        let detached = self.settings.spark_detached && self.settings.character == Character::Spark;
+        let detached = self.settings.character_detached && self.settings.character != Character::None;
         if detached && self.pet.desktop.is_none() {
-            match crate::ui::spark::SparkWindow::new(self.hwnd, self.settings.spark_pos, self.scale) {
+            match crate::ui::companion::CompanionWindow::new(self.hwnd, self.settings.character_pos, self.scale) {
                 Ok(window) => {
-                    self.settings.spark_pos = Some(window.position());
+                    self.settings.character_pos = Some(window.position());
                     self.pet.desktop = Some(window);
                 }
-                Err(error) => crate::log_warn!("could not release Spark: {error}"),
+                Err(error) => crate::log_warn!("could not release character: {error}"),
             }
         } else if !detached && let Some(window) = self.pet.desktop.take() {
-            self.settings.spark_pos = Some(window.position());
+            self.settings.character_pos = Some(window.position());
             drop(window);
             self.restore_pill();
             self.reveal();
@@ -66,6 +69,7 @@ impl App {
         if let Some(desktop) = &self.pet.desktop {
             desktop.set_capture_hidden(self.settings.capture_hidden);
         }
+        self.update_eq();
         self.pet.char_key = None;
         self.place_char();
         self.place_spectrum();
@@ -86,8 +90,8 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn can_release_spark(&self, x: i32, y: i32) -> bool {
-        if self.state != State::Collapsed || self.settings.character != Character::Spark || self.pet.desktop.is_some() {
+    pub(in crate::island) fn can_release_character(&self, x: i32, y: i32) -> bool {
+        if self.state != State::Collapsed || self.settings.character == Character::None || self.pet.desktop.is_some() {
             return false;
         }
         let (left, top) = self.char_origin();
@@ -97,11 +101,11 @@ impl App {
         dx * dx + dy * dy <= 1.0
     }
 
-    pub(in crate::island) fn set_spark_detached(&mut self, detached: bool) {
-        self.settings.spark_detached = detached;
-        if detached {
+    pub(in crate::island) fn set_character_detached(&mut self, detached: bool) {
+        self.settings.character_detached = detached;
+        if detached && self.settings.character == Character::None {
             self.settings.character = Character::Spark;
-        } else {
+        } else if !detached {
             self.restore_pill();
             self.reveal();
         }
@@ -110,29 +114,24 @@ impl App {
         self.settings.save();
     }
 
-    pub(in crate::island) fn on_spark(&mut self, id: usize, source: isize) {
+    pub(in crate::island) fn on_companion(&mut self, id: usize, source: isize) {
         if self.pet.desktop.as_ref().is_none_or(|window| window.hwnd().0 as isize != source) {
             return;
         }
-        match crate::ui::spark::Action::from_id(id) {
-            Some(crate::ui::spark::Action::Chat) => {
-                self.restore_pill();
-                self.reveal();
-                self.open_tab(view::Tab::Chat);
-                self.ui.pinned = true;
-                self.kill_timer(Timer::Collapse);
-                self.repaint_expanded();
+        match crate::ui::companion::Action::from_id(id) {
+            Some(crate::ui::companion::Action::Chat) => {
+                self.open_companion_chat();
             }
-            Some(crate::ui::spark::Action::ToggleIsland) => self.toggle_island_from_spark(),
-            Some(crate::ui::spark::Action::Moved) => {
+            Some(crate::ui::companion::Action::ToggleIsland) => self.toggle_island_from_character(),
+            Some(crate::ui::companion::Action::Moved) => {
                 if let Some(window) = &self.pet.desktop {
                     window.keep_on_screen();
-                    self.settings.spark_pos = Some(window.position());
+                    self.settings.character_pos = Some(window.position());
                     self.ui.cfg = self.settings.clone();
                     self.settings.save();
                 }
             }
-            Some(crate::ui::spark::Action::Dock) => self.set_spark_detached(false),
+            Some(crate::ui::companion::Action::Dock) => self.set_character_detached(false),
             None => {}
         }
     }
@@ -213,11 +212,15 @@ impl App {
         };
 
         let t = now.duration_since(self.pet.born).as_secs_f32();
-        let beat = if self.music.spectrum_running {
+        let target = if detached || self.music.spectrum_running {
             (0..3).map(audio::level).sum::<f32>() / 3.0
         } else {
             0.5 + 0.5 * (t * 7.5).sin()
         };
+        let dt = now.duration_since(self.pet.beat_at).as_secs_f32().min(0.1);
+        self.pet.beat_at = now;
+        self.pet.beat += (target.clamp(0.0, 1.0) - self.pet.beat) * (1.0 - (-dt * 8.0).exp());
+        let beat = self.pet.beat;
         let accent =
             self.ui.media.accent.map_or((0.65, 0.7, 1.0), |(r, g, b)| {
                 (f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0)
@@ -240,8 +243,8 @@ impl App {
         if self.pet.char_key != Some(key) {
             self.pet.char_key = Some(key);
             if let Some(desktop) = &mut self.pet.desktop {
-                if let Err(error) = desktop.render(&self.gpu, &pose, self.scale) {
-                    crate::log_warn!("could not draw desktop Spark: {error}");
+                if let Err(error) = desktop.render(&self.gpu, character, &pose, self.scale) {
+                    crate::log_warn!("could not draw desktop character: {error}");
                 }
             } else {
                 let _ = self.pet.char_layer.paint(&self.gpu, |p| {

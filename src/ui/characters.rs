@@ -79,7 +79,7 @@ impl Pose {
         let t = self.t;
         match self.reaction {
             Reaction::Idle => (t * 1.8).sin() * 0.5,
-            Reaction::Music => -self.beat * 2.6 + (t * 9.0).sin() * 0.4,
+            Reaction::Music => -self.beat * 1.0 + (t * 9.0).sin() * 0.4,
             Reaction::Done => -(t * 10.0).sin().abs() * 3.2,
             Reaction::Attention => 0.0,
             Reaction::File => (t * 7.0).sin() * 1.0,
@@ -201,7 +201,7 @@ fn draw_pixel(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
 
 fn draw_spark(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
     let tint = pose.mood(WHITE);
-    let pulse = if pose.reaction == Reaction::Music { pose.beat * 2.6 } else { 0.0 };
+    let pulse = if pose.reaction == Reaction::Music { pose.beat * 0.9 } else { 0.0 };
     let r = 8.6 + pulse;
     let (cx, cy) = (20.0 + pose.shake(), 15.0 + pose.bob());
     p.fill_ellipse(cx * s, cy * s, (r + 3.0) * s, (r + 3.0) * s, c(tint, 0.22))?;

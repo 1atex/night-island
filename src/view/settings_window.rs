@@ -33,7 +33,7 @@ const ISLAND: [(Sid, &str, Kind); 13] = [
     (Sid::Edge, "Edge", Kind::Cycle),
     (Sid::Style, "Shape", Kind::Segment(["Flat", "Liquid"])),
     (Sid::Character, "Character", Kind::Cycle),
-    (Sid::SparkDetached, "Let Spark roam the desktop", Kind::Toggle),
+    (Sid::CharacterDetached, "Let the character roam the desktop", Kind::Toggle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
     (Sid::CloseDelay, "Close delay", Kind::Slider),
@@ -682,8 +682,8 @@ fn about_items(ui: &UiState) -> Vec<Item> {
     }
     for &(id, label, kind) in &ABOUT {
         out.push(Item::Row(id, label, kind));
-        if id == Sid::SparkDetached {
-            out.push(Item::Note("Spark: click for AI chat, right-click to hide/show the island. Drag to move."));
+        if id == Sid::CharacterDetached {
+            out.push(Item::Note("Click for mini AI chat, right-click to hide/show the island. Drag to move."));
         }
     }
     out
@@ -1387,17 +1387,17 @@ mod tests {
     }
 
     #[test]
-    fn desktop_spark_can_be_enabled_from_settings_and_found_in_search() {
+    fn desktop_character_preserves_the_selected_pet_and_is_searchable() {
         let mut ui = UiState::new();
         ui.cfg.character = crate::ui::characters::Character::Cat;
-        toggle_set(Sid::SparkDetached, &mut ui.cfg, true);
-        assert!(ui.cfg.spark_detached);
-        assert_eq!(ui.cfg.character, crate::ui::characters::Character::Spark);
-        ui.sw.search = "Spark".into();
-        assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::SparkDetached, ..))));
-        toggle_set(Sid::SparkDetached, &mut ui.cfg, false);
-        assert!(!ui.cfg.spark_detached);
-        assert_eq!(ui.cfg.character, crate::ui::characters::Character::Spark);
+        toggle_set(Sid::CharacterDetached, &mut ui.cfg, true);
+        assert!(ui.cfg.character_detached);
+        assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
+        ui.sw.search = "roam".into();
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::CharacterDetached, ..))));
+        toggle_set(Sid::CharacterDetached, &mut ui.cfg, false);
+        assert!(!ui.cfg.character_detached);
+        assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
     }
 
     #[test]

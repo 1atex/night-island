@@ -352,14 +352,7 @@ impl App {
             view::HeadHit::Pin => {
                 (if self.ui.pinned { "Let it close" } else { "Keep open" }, view::pin_rect(self.pill_full(), s))
             }
-            view::HeadHit::Lock => (
-                if self.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" },
-                view::lock_rect(self.pill_full(), s),
-            ),
-            view::HeadHit::TabDrag => (
-                if self.settings.tab_drag { "Stop moving tabs" } else { "Move tabs by dragging" },
-                view::tab_drag_rect(self.pill_full(), s),
-            ),
+            view::HeadHit::More => ("More tabs and actions", view::more_rect(self.pill_full(), s)),
             view::HeadHit::Mic => {
                 let muted = self.ui.mic_muted == Some(true);
                 (
@@ -368,7 +361,6 @@ impl App {
                 )
             }
             view::HeadHit::Cam => ("Camera in use", view::privacy_dots(self.pill_full(), s, &self.ui).1?),
-            view::HeadHit::TabSettings => ("Settings of this tab", view::tab_settings_rect(self.pill_full(), s)),
         };
         Some((text.to_string(), below(rect)))
     }
@@ -417,29 +409,12 @@ impl App {
                 self.repaint_expanded();
                 return;
             }
-            Some(view::HeadHit::Lock) => {
-                self.settings.lock_drag = !self.settings.lock_drag;
-                self.ui.cfg = self.settings.clone();
-                self.settings.save();
-                self.render_settings_win();
-                self.repaint_expanded();
-                return;
-            }
-            Some(view::HeadHit::TabDrag) => {
-                self.settings.tab_drag = !self.settings.tab_drag;
-                self.ui.cfg = self.settings.clone();
-                self.settings.save();
-                self.repaint_expanded();
+            Some(view::HeadHit::More) => {
+                self.want_header_menu = true;
                 return;
             }
             Some(view::HeadHit::Mic) => return self.toggle_mic(),
             Some(view::HeadHit::Cam) => return,
-            Some(view::HeadHit::TabSettings) => {
-                if let Some(group) = view::tab_settings_group(self.ui.tab) {
-                    self.open_settings_at(group);
-                }
-                return;
-            }
             None => {}
         }
         if view::hit_vpn_btn(self.pill_full(), self.scale, &self.ui, x as f32, y as f32) {
@@ -614,7 +589,7 @@ impl App {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed
                 && view::hit_mic_dot(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32);
-            let over_spark = self.can_release_spark(x, y);
+            let over_spark = self.can_release_character(x, y);
             self.ui.hand = self.state == State::Collapsed
                 && self.on_pill(x, y)
                 && (over_mic || over_spark || self.recording.is_some() || self.notice_link.is_some());
@@ -625,7 +600,7 @@ impl App {
             }
             let tip = if over_spark {
                 let (w, h) = self.char_size();
-                Some(("Right-click to release Spark".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
+                Some(("Right-click to release the character".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
             } else {
                 hover.and_then(|_| {
                     let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;

@@ -4,6 +4,75 @@ pub(in crate::island) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(in crate::island) const WM_MOUSELEAVE: u32 = 0x02A3;
 pub(in crate::island) const WM_SHOW: u32 = WM_APP + 2;
 
+fn show_header_menu(hwnd: HWND) {
+    use crate::ui::menu::Entry;
+    let mut entries = Vec::new();
+    let mut point = windows::Win32::Foundation::POINT::default();
+    with_app(|a| {
+        a.popup_open = true;
+        a.kill_timer(Timer::Collapse);
+        a.set_tip(None);
+        let pill = a.pill_full();
+        for i in view::overflow_tabs(pill, a.scale, &a.ui) {
+            let (_, glyph, name) = view::TABS[i];
+            entries.push(Entry::item(i + 1, &crate::ui::i18n::tr(name)).glyph(glyph));
+        }
+        if !entries.is_empty() {
+            entries.push(Entry::divider());
+        }
+        if view::tab_settings_group(a.ui.tab).is_some() {
+            entries.push(Entry::item(100, &crate::ui::i18n::tr("Settings of this tab")));
+        }
+        entries.push(Entry::item(
+            101,
+            &crate::ui::i18n::tr(if a.settings.lock_drag { "Unlock dragging" } else { "Lock dragging" }),
+        ));
+        entries.push(Entry::item(
+            102,
+            &crate::ui::i18n::tr(if a.settings.tab_drag { "Stop moving tabs" } else { "Move tabs by dragging" }),
+        ));
+        let r = view::more_rect(pill, a.scale);
+        point.x = r.0 as i32;
+        point.y = (r.3 + 6.0 * a.scale) as i32;
+    });
+    unsafe {
+        let _ = windows::Win32::Graphics::Gdi::ClientToScreen(hwnd, &mut point);
+    }
+    let choice = crate::ui::menu::show(entries, (point.x, point.y), false, app_scale(), &|f| {
+        with_app(|a| f(&a.gpu));
+    });
+    with_app(|a| {
+        a.popup_open = false;
+        a.pointer.tracking = false;
+        match choice {
+            Some(id) if id > 0 && id <= view::TABS.len() => {
+                let tab = a.landing_tab(view::TABS[id - 1].0);
+                a.select_tab(tab);
+            }
+            Some(100) => {
+                if let Some(group) = view::tab_settings_group(a.ui.tab) {
+                    a.open_settings_at(group);
+                }
+            }
+            Some(id @ (101 | 102)) => {
+                if id == 101 {
+                    a.settings.lock_drag = !a.settings.lock_drag;
+                } else {
+                    a.settings.tab_drag = !a.settings.tab_drag;
+                }
+                a.ui.cfg = a.settings.clone();
+                a.settings.save();
+                a.render_settings_win();
+            }
+            _ => {}
+        }
+        a.repaint_expanded();
+        if !a.cursor_inside() && !a.ui.pinned {
+            a.set_timer(Timer::Collapse, a.settings.close_delay_ms.max(1));
+        }
+    });
+}
+
 pub(in crate::island) fn point_from(lparam: LPARAM) -> (i32, i32) {
     (lparam.0 as i16 as i32, (lparam.0 >> 16) as i16 as i32)
 }
@@ -91,6 +160,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 let picked = pick_file(hwnd);
                 with_app(|a| a.finish_chat_dialog(picked));
             }
+            let mut header_menu = false;
+            with_app(|a| header_menu = std::mem::take(&mut a.want_header_menu));
+            if header_menu {
+                show_header_menu(hwnd);
+            }
             LRESULT(0)
         }
         WM_MBUTTONUP => {
@@ -104,14 +178,14 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_RBUTTONUP => {
             let (x, y) = point_from(lparam);
-            if with_app_value(|a| a.can_release_spark(x, y)) == Some(true) {
+            if with_app_value(|a| a.can_release_character(x, y)) == Some(true) {
                 with_app(|a| a.popup_open = true);
                 let mut point = windows::Win32::Foundation::POINT::default();
                 unsafe {
                     let _ = GetCursorPos(&mut point);
                 }
                 let choice = crate::ui::menu::show(
-                    vec![crate::ui::menu::Entry::item(1, &crate::ui::i18n::tr("Release Spark"))],
+                    vec![crate::ui::menu::Entry::item(1, &crate::ui::i18n::tr("Release character"))],
                     (point.x, point.y),
                     false,
                     app_scale(),
@@ -120,7 +194,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 with_app(|a| {
                     a.popup_open = false;
                     if choice == Some(1) {
-                        a.set_spark_detached(true);
+                        a.set_character_detached(true);
                     }
                 });
                 return LRESULT(0);
@@ -261,6 +335,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_transcribed());
             LRESULT(0)
         }
+        crate::ui::mini_chat::WM_MINI_CHAT => {
+            with_app(|a| a.on_mini_chat(wparam.0, lparam.0));
+            LRESULT(0)
+        }
         ai::WM_CHAT => {
             with_app(|a| a.on_chat());
             LRESULT(0)
@@ -352,8 +430,8 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.peek());
             LRESULT(0)
         }
-        crate::ui::spark::WM_SPARK => {
-            with_app(|a| a.on_spark(wparam.0, lparam.0));
+        crate::ui::companion::WM_COMPANION => {
+            with_app(|a| a.on_companion(wparam.0, lparam.0));
             LRESULT(0)
         }
         tray::WM_TRAY => {

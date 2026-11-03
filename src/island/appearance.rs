@@ -180,6 +180,9 @@ impl App {
         if let Some(desktop) = &self.pet.desktop {
             desktop.set_capture_hidden(self.settings.capture_hidden);
         }
+        if let Some(chat) = &self.pet.chat {
+            chat.set_capture_hidden(self.settings.capture_hidden);
+        }
     }
 
     pub(in crate::island) fn apply_style(&mut self) {

@@ -1,13 +1,14 @@
 pub mod anim;
 pub mod characters;
+pub mod companion;
 pub mod gfx;
 pub mod i18n;
 pub mod icons;
 pub mod markup;
 pub mod md;
 pub mod menu;
+pub mod mini_chat;
 pub mod overlay;
-pub mod spark;
 pub mod theme;
 pub mod tip;
 pub mod tray;

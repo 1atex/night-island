@@ -14,7 +14,7 @@ use windows::core::{Error, Result, w};
 use crate::ui::characters::{self, Character, Pose};
 use crate::ui::gfx::Gpu;
 
-pub const WM_SPARK: u32 = WM_APP + 45;
+pub const WM_COMPANION: u32 = WM_APP + 45;
 const SIDE: f32 = 88.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,7 +51,7 @@ struct State {
 
 fn notify(hwnd: HWND, state: &State, action: Action) {
     unsafe {
-        let _ = PostMessageW(Some(state.parent), WM_SPARK, WPARAM(action as usize), LPARAM(hwnd.0 as isize));
+        let _ = PostMessageW(Some(state.parent), WM_COMPANION, WPARAM(action as usize), LPARAM(hwnd.0 as isize));
     }
 }
 
@@ -204,13 +204,13 @@ impl Drop for Surface {
     }
 }
 
-pub struct SparkWindow {
+pub struct CompanionWindow {
     hwnd: HWND,
     _state: Box<State>,
     surface: Surface,
 }
 
-impl SparkWindow {
+impl CompanionWindow {
     pub fn new(parent: HWND, position: Option<[i32; 2]>, scale: f32) -> Result<Self> {
         static CLASS: Once = Once::new();
         unsafe {
@@ -219,7 +219,7 @@ impl SparkWindow {
                     lpfnWndProc: Some(proc),
                     hInstance: GetModuleHandleW(None).unwrap_or_default().into(),
                     hCursor: LoadCursorW(None, IDC_HAND).unwrap_or_default(),
-                    lpszClassName: w!("NightIsland.Spark"),
+                    lpszClassName: w!("NightIsland.Companion"),
                     ..Default::default()
                 };
                 RegisterClassW(&class);
@@ -231,8 +231,8 @@ impl SparkWindow {
             let mut state = Box::new(State { parent, drag: None });
             let hwnd = CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
-                w!("NightIsland.Spark"),
-                w!("Spark"),
+                w!("NightIsland.Companion"),
+                w!("Night Island character"),
                 WS_POPUP,
                 position[0],
                 position[1],
@@ -291,7 +291,7 @@ impl SparkWindow {
         }
     }
 
-    pub fn render(&mut self, gpu: &Gpu, pose: &Pose, scale: f32) -> Result<()> {
+    pub fn render(&mut self, gpu: &Gpu, character: Character, pose: &Pose, scale: f32) -> Result<()> {
         let side = (SIDE * scale).round().max(32.0) as i32;
         if self.surface.side != side {
             self.surface = Surface::new(side)?;
@@ -299,8 +299,8 @@ impl SparkWindow {
         }
         let mut drawn = Ok(());
         gpu.paint_dc(self.surface.mem, (side, side), |p| {
-            let old = p.push_offset(0.0, side as f32 * 0.125);
-            drawn = characters::draw(p, Character::Spark, side as f32, pose);
+            let old = p.push_offset(side as f32 * 0.05, side as f32 * 0.1625);
+            drawn = characters::draw(p, character, side as f32 * 0.9, pose);
             p.set_transform(&old);
         })?;
         drawn?;
@@ -328,7 +328,7 @@ impl SparkWindow {
     }
 }
 
-impl Drop for SparkWindow {
+impl Drop for CompanionWindow {
     fn drop(&mut self) {
         unsafe {
             let _ = DestroyWindow(self.hwnd);
@@ -339,6 +339,32 @@ impl Drop for SparkWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pixels(surface: &Surface) -> Vec<u8> {
+        use windows::Win32::Graphics::Gdi::{BITMAP, GetObjectW};
+        let mut bitmap = BITMAP::default();
+        unsafe {
+            assert_ne!(GetObjectW(surface.dib.into(), size_of::<BITMAP>() as i32, Some((&raw mut bitmap).cast())), 0);
+            std::slice::from_raw_parts(bitmap.bmBits.cast::<u8>(), (surface.side * surface.side * 4) as usize).to_vec()
+        }
+    }
+
+    fn save_preview(path: &std::path::Path, width: u32, height: u32, bgra: &[u8]) {
+        let rgba: Vec<_> = bgra
+            .chunks_exact(4)
+            .flat_map(|p| {
+                let alpha = p[3] as u32;
+                [p[2], p[1], p[0]]
+                    .map(|v| (u32::from(v) + (255 - alpha) * 22 / 255).min(255) as u8)
+                    .into_iter()
+                    .chain([255])
+            })
+            .collect();
+        let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+    }
 
     #[test]
     fn saved_positions_remain_reachable_after_a_monitor_change() {
@@ -352,7 +378,7 @@ mod tests {
 
     #[test]
     #[ignore = "Requires an interactive Windows desktop and an isolated Composition runtime"]
-    fn desktop_spark_stays_visible_without_its_owner_and_routes_actions() -> Result<()> {
+    fn desktop_characters_keep_their_shape_with_music_and_a_hidden_island() -> Result<()> {
         use windows::UI::Composition::Compositor;
         use windows::Win32::System::WinRT::{
             CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
@@ -393,7 +419,7 @@ mod tests {
                 None,
             )?
         };
-        let mut spark = SparkWindow::new(parent, Some([320, 320]), 1.0)?;
+        let mut spark = CompanionWindow::new(parent, Some([320, 320]), 1.0)?;
         let pose = Pose {
             t: 0.0,
             reaction: characters::Reaction::Idle,
@@ -402,17 +428,72 @@ mod tests {
             accent: (0.5, 0.6, 1.0),
             beat: 0.0,
         };
-        spark.render(&gpu, &pose, 1.0)?;
+        spark.render(&gpu, Character::Spark, &pose, 1.0)?;
         unsafe {
             assert!(IsWindowVisible(spark.hwnd()).as_bool());
             assert!(GetWindow(spark.hwnd(), GW_OWNER).is_err());
             let _ = ShowWindow(parent, SW_HIDE);
             assert!(IsWindowVisible(spark.hwnd()).as_bool());
         }
+        let mut sheet = vec![0; 6 * 88 * 3 * 88 * 4];
+        for (column, character) in Character::ALL.into_iter().filter(|c| *c != Character::None).enumerate() {
+            for (row, beat) in [0.0, 0.5, 1.0].into_iter().enumerate() {
+                let music = Pose { reaction: characters::Reaction::Music, t: row as f32 * 0.3, beat, ..pose };
+                unsafe {
+                    let _ = ShowWindow(parent, SW_SHOWNOACTIVATE);
+                }
+                spark.render(&gpu, character, &music, 1.0)?;
+                let before = pixels(&spark.surface);
+                unsafe {
+                    let _ = ShowWindow(parent, SW_HIDE);
+                }
+                spark.render(&gpu, character, &music, 1.0)?;
+                let after = pixels(&spark.surface);
+                assert_eq!(before, after, "{character:?}: hiding the island changed the canvas");
+                let mut rect = RECT::default();
+                unsafe {
+                    GetWindowRect(spark.hwnd(), &mut rect)?;
+                }
+                assert_eq!((rect.right - rect.left, rect.bottom - rect.top), (88, 88));
+                let mut bounds = (88usize, 88usize, 0usize, 0usize);
+                for (i, pixel) in after.chunks_exact(4).enumerate() {
+                    let (x, y) = (i % 88, i / 88);
+                    if pixel[3] > 0 {
+                        assert!(x > 0 && x < 87 && y > 0 && y < 87, "clipped {character:?} at beat {beat}");
+                    }
+                    if pixel[3] >= 250 {
+                        bounds = (bounds.0.min(x), bounds.1.min(y), bounds.2.max(x), bounds.3.max(y));
+                    }
+                }
+                assert!(bounds.2 > bounds.0 && bounds.3 > bounds.1);
+                if character == Character::Spark {
+                    assert!(
+                        ((bounds.2 - bounds.0) as i32 - (bounds.3 - bounds.1) as i32).abs() <= 1,
+                        "Spark lost its circular shape: {bounds:?}"
+                    );
+                }
+                for y in 0..88 {
+                    let dst = ((row * 88 + y) * 6 * 88 + column * 88) * 4;
+                    sheet[dst..dst + 88 * 4].copy_from_slice(&after[y * 88 * 4..(y + 1) * 88 * 4]);
+                }
+            }
+        }
+        if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
+            let dir = std::path::PathBuf::from(dir);
+            save_preview(&dir.join("characters.png"), 528, 264, &sheet);
+            let surface = Surface::new(640)?;
+            let ui = crate::view::UiState::new();
+            gpu.paint_dc(surface.mem, (640, 640), |p| {
+                crate::view::paint_expanded(p, (0.0, 0.0, 620.0, 400.0), 1.0, &ui, &[]).unwrap();
+            })?;
+            save_preview(&dir.join("header.png"), 640, 80, &pixels(&surface)[..640 * 80 * 4]);
+        }
         let mut message = MSG::default();
         let source = spark.hwnd().0 as isize;
         let mut next = |expected: Action| {
-            assert!(unsafe { PeekMessageW(&mut message, Some(parent), WM_SPARK, WM_SPARK, PM_REMOVE) }.as_bool());
+            assert!(
+                unsafe { PeekMessageW(&mut message, Some(parent), WM_COMPANION, WM_COMPANION, PM_REMOVE) }.as_bool()
+            );
             assert_eq!(Action::from_id(message.wParam.0), Some(expected));
             assert_eq!(message.lParam.0, source);
         };
@@ -428,7 +509,7 @@ mod tests {
         next(Action::Dock);
         spark.hide();
         assert!(!unsafe { IsWindowVisible(spark.hwnd()) }.as_bool());
-        spark.render(&gpu, &pose, 1.25)?;
+        spark.render(&gpu, Character::Spark, &pose, 1.25)?;
         let mut rect = RECT::default();
         unsafe {
             GetWindowRect(spark.hwnd(), &mut rect)?;

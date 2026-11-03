@@ -116,7 +116,7 @@ impl App {
                     crate::ui::i18n::set_ru(self.settings.language == crate::data::settings::Language::Ru);
                     self.repaint_collapsed();
                 }
-                Character | SparkDetached => self.apply_character(),
+                Character | CharacterDetached => self.apply_character(),
                 UpdateCheck | UpdateBeta => {
                     update::configure(self.settings.update_check, self.settings.update_beta);
                 }

@@ -107,11 +107,20 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Frame rate" => "Частота кадров",
         "System sound" => "Звук системы",
         "No character" => "Без персонажа",
-        "Let Spark roam the desktop" => "Выпустить Spark на рабочий стол",
-        "Release Spark" => "Выпустить Spark",
-        "Right-click to release Spark" => "ПКМ — выпустить Spark",
-        "Spark: click for AI chat, right-click to hide/show the island. Drag to move." => {
-            "Spark: ЛКМ — AI-чат, ПКМ — скрыть/показать остров. Перетаскивание — перемещение."
+        "More" => "Ещё",
+        "More tabs and actions" => "Другие вкладки и действия",
+        "AI settings" => "Настройки ИИ",
+        "You" => "Вы",
+        "Ask me anything. This chat stays beside your character." => {
+            "Задайте мне вопрос. Этот чат открывается рядом с вашим персонажем."
+        }
+        "Enter to send · Shift+Enter for a new line" => "Enter — отправить · Shift+Enter — новая строка",
+        "Connect your AI provider in AI settings." => "Подключите нейросеть в настройках ИИ.",
+        "Let the character roam the desktop" => "Выпустить персонажа на рабочий стол",
+        "Release character" => "Выпустить персонажа",
+        "Right-click to release the character" => "ПКМ — выпустить персонажа",
+        "Click for mini AI chat, right-click to hide/show the island. Drag to move." => {
+            "ЛКМ — мини-чат с ИИ, ПКМ — скрыть/показать остров. Перетаскивание — перемещение."
         }
         "Capture failed" => "Не удалось сделать снимок",
         "Copied" => "Скопировано",
