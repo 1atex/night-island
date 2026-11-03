@@ -22,6 +22,7 @@ mod agy;
 mod chat;
 mod clipboard;
 mod command;
+mod companion_popup;
 mod controls;
 mod discord;
 mod frame;
@@ -46,9 +47,9 @@ mod widgets;
 pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
 pub use self::{
-    activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
-    integrations::*, metrics::*, note::*, pill::*, pill_vertical::*, privacy::*, record::*, remind::*, settings::*,
-    settings_window::*, steam::*, text::*, weather::*, widgets::*,
+    activity::*, agy::*, chat::*, clipboard::*, command::*, companion_popup::*, controls::*, discord::*, frame::*,
+    home::*, integrations::*, metrics::*, note::*, pill::*, pill_vertical::*, privacy::*, record::*, remind::*,
+    settings::*, settings_window::*, steam::*, text::*, weather::*, widgets::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);

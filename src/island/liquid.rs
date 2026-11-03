@@ -16,7 +16,11 @@ pub(in crate::island) const SPEC_GAP: f32 = 3.0;
 pub(in crate::island) const SPEC_H: f32 = 24.0;
 
 pub(in crate::island) fn bump_room_for(settings: &Settings) -> f32 {
-    let liquid = if settings.style == Style::Liquid { BUMP_ROOM } else { 0.0 };
+    let liquid = if settings.style == Style::Liquid || (settings.edge_spikes && !settings.eq_style.around()) {
+        BUMP_ROOM
+    } else {
+        0.0
+    };
     if settings.ring_wanted() { liquid.max(RING_ROOM) } else { liquid }
 }
 
@@ -25,19 +29,33 @@ pub(in crate::island) fn bump_size(scale: f32, (w, h): (f32, f32)) -> (i32, i32)
     (straight.round() as i32, ((BUMP_DEPTH_MAX + BUMP_SEAM + 4.0) * scale).round() as i32)
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(in crate::island) struct EqClipKey {
+    body: crate::ui::gfx::ElasticBody,
+    edge: Hang,
+    size: (i32, i32),
+}
+
 pub(in crate::island) struct Liquid {
     pub(in crate::island) bump: Layer,
     pub(in crate::island) ring: Layer,
+    pub(in crate::island) highlight: Layer,
+    pub(in crate::island) eq_shape: CompositionPathGeometry,
+    pub(in crate::island) eq_clip: CompositionGeometricClip,
+    pub(in crate::island) eq_key: Cell<Option<EqClipKey>>,
+    pub(in crate::island) pull: crate::ui::gfx::ElasticPull,
+    pub(in crate::island) pull_ready: bool,
     pub(in crate::island) bump_fill: SpriteVisual,
     pub(in crate::island) bump_blur: SpriteVisual,
     pub(in crate::island) bump_shape: CompositionPathGeometry,
+    pub(in crate::island) body_shape: CompositionPathGeometry,
+    pub(in crate::island) body_clip: CompositionGeometricClip,
+    pub(in crate::island) round_clip: CompositionGeometricClip,
+    pub(in crate::island) body_active: Cell<bool>,
     pub(in crate::island) bump_amp: f32,
-    pub(in crate::island) bump_cx: f32,
     pub(in crate::island) bump_vel: f32,
-    pub(in crate::island) bump_cx_vel: f32,
     pub(in crate::island) last_tick: Instant,
     pub(in crate::island) idle_running: bool,
-    pub(in crate::island) idle_key: Option<crate::ui::gfx::Palette>,
 }
 
 pub(in crate::island) struct MusicBars {
@@ -48,6 +66,83 @@ pub(in crate::island) struct MusicBars {
 }
 
 impl App {
+    fn elastic_body_spec(&self, depth: f32) -> crate::ui::gfx::ElasticBody {
+        let (at, size, radius) = self.pill(self.win, false, false);
+        let legacy = crate::ui::gfx::LiquidBody {
+            rect: (at.X, at.Y, size.X, size.Y),
+            radius: radius.X,
+            edge: self.settings.hang(),
+            center: 0.0,
+            half: self.bump_half(depth),
+            depth,
+        }
+        .elastic();
+        let mut body = legacy;
+        if self.liquid.pull_ready {
+            body.pull = crate::ui::gfx::ElasticPull { depth, ..self.liquid.pull };
+        }
+        body.pull.depth = body.pull.depth.clamp(0.0, BUMP_DEPTH_MAX * self.scale);
+        body
+    }
+
+    fn clip_eq_to_body(&self) {
+        if !self.spikes_active() {
+            return;
+        }
+        let depth = if self.liquid_on() && self.liquid.body_active.get() { self.liquid.bump_amp } else { 0.0 };
+        let body = self.elastic_body_spec(depth);
+        let size = self.liquid.bump.size();
+        let edge = self.settings.hang();
+        let key = EqClipKey { body, edge, size };
+        if self.liquid.eq_key.get() == Some(key) {
+            return;
+        }
+        let (px, py) = self.bump_pivot();
+        let half = size.0 as f32 / 2.0;
+        let transform = match edge {
+            Hang::Down => {
+                windows_numerics::Matrix3x2 { M11: 1.0, M22: 1.0, M31: half - px, M32: -py, ..Default::default() }
+            }
+            Hang::Up => {
+                windows_numerics::Matrix3x2 { M11: -1.0, M22: -1.0, M31: half + px, M32: py, ..Default::default() }
+            }
+            Hang::Right => {
+                windows_numerics::Matrix3x2 { M12: 1.0, M21: -1.0, M31: half + py, M32: -px, ..Default::default() }
+            }
+            Hang::Left => {
+                windows_numerics::Matrix3x2 { M12: -1.0, M21: 1.0, M31: half - py, M32: px, ..Default::default() }
+            }
+        };
+        if let Ok(visible) = self.gpu.outside_body(size, &body, &transform)
+            && let Ok(path) = crate::ui::gfx::composition_path(&visible)
+        {
+            let _ = self.liquid.eq_shape.SetPath(&path);
+            let _ = self.liquid.bump.sprite.SetClip(&self.liquid.eq_clip);
+            self.liquid.eq_key.set(Some(key));
+        }
+    }
+
+    pub(in crate::island) fn restore_liquid_body(&self) {
+        let _ = self.liquid.highlight.sprite.SetIsVisible(false);
+        if self.liquid.body_active.replace(false) {
+            let _ = self.liquid.body_shape.StopAnimation(h!("Path"));
+            let _ = self._visual.SetClip(&self.liquid.round_clip);
+        }
+    }
+
+    fn liquid_body_path(&self, depth: f32, center: f32) -> Result<windows::UI::Composition::CompositionPath> {
+        let (at, size, radius) = self.pill(self.win, false, false);
+        let shape = self.gpu.liquid_body(&crate::ui::gfx::LiquidBody {
+            rect: (at.X, at.Y, size.X, size.Y),
+            radius: radius.X,
+            edge: self.settings.hang(),
+            center,
+            half: self.bump_half(depth),
+            depth: depth.clamp(0.0, BUMP_DEPTH_MAX * self.scale),
+        })?;
+        crate::ui::gfx::composition_path(&shape)
+    }
+
     pub(in crate::island) fn liquid_on(&self) -> bool {
         self.settings.style == Style::Liquid
     }
@@ -85,8 +180,7 @@ impl App {
     }
 
     pub(in crate::island) fn spikes_active(&self) -> bool {
-        self.liquid_on()
-            && self.settings.edge_spikes
+        self.settings.edge_spikes
             && !self.settings.eq_style.around()
             && self.music.spectrum_running
             && self.state == State::Collapsed
@@ -133,6 +227,8 @@ impl App {
     }
 
     pub(in crate::island) fn paint_spikes(&self) {
+        self.clip_eq_to_body();
+        let _ = self.liquid.bump_blur.SetIsVisible(self.settings.pill_blur);
         let s = self.scale;
         let (w, _) = self.liquid.bump.size();
         let count = (((w as f32 / s / 20.0) as usize) | 1).clamp(9, 31);
@@ -361,11 +457,7 @@ impl App {
         {
             self.place_spectrum();
         }
-        if self.spikes_active()
-            && self.liquid.bump_amp < 0.3
-            && self.liquid.bump_vel.abs() < 1.0
-            && self.liquid_target().0 == 0.0
-        {
+        if self.spikes_active() {
             self.paint_spikes();
         }
         if !self.settings.music_eq {
@@ -435,7 +527,7 @@ impl App {
             && self.ui.volume.is_none()
             && self.ui.downloading.is_none()
             && self.ui.notice.is_none();
-        let spikes = self.settings.edge_spikes && (self.liquid_on() || self.settings.eq_style.around());
+        let spikes = self.settings.edge_spikes;
         let open = self.state == State::Expanded
             && self.settings.eq_when_open
             && self.settings.edge_spikes
@@ -444,8 +536,8 @@ impl App {
             && self.ui.media.playing;
         let analysing = self.ui.media.playing
             && !self.gaming
-            && (!self.pill_hidden || self.ghosted)
-            && (self.settings.music_eq || spikes || open);
+            && ((self.pet.desktop.is_some())
+                || ((!self.pill_hidden || self.ghosted) && (self.settings.music_eq || spikes || open)));
         if analysing {
             audio::start();
         } else {
@@ -457,6 +549,7 @@ impl App {
     }
 
     pub(in crate::island) fn fit_bump(&mut self) {
+        let _ = self.liquid.highlight.resize(self.collapsed.size());
         let size = bump_size(self.scale, self.collapsed());
         if size == self.liquid.bump.size() {
             return;
@@ -471,7 +564,7 @@ impl App {
         } else if idle {
             self.start_idle();
         } else {
-            self.paint_bump_with(self.liquid.bump_amp, self.liquid.bump_cx);
+            self.paint_liquid_body(self.liquid.bump_amp);
         }
     }
 
@@ -530,29 +623,39 @@ impl App {
         }
     }
 
-    fn bump_fill_for(&self, width: f32) -> crate::ui::gfx::BumpFill {
-        use crate::ui::gfx::BumpFill;
-        match self.bump_look() {
-            Some((palette, tip)) => {
-                let half = COLLAPSED.1 * self.scale / 2.0;
-                BumpFill::Tone { palette, tip, span: (-half, width + half) }
-            }
-            None => {
-                let (r, g, b) = crate::ui::theme::panel();
-                BumpFill::Solid(crate::ui::gfx::rgba(r, g, b, 1.0))
-            }
+    pub(in crate::island) fn paint_liquid_body(&self, depth: f32) {
+        if !self.liquid_on() || self.state != State::Collapsed {
+            self.restore_liquid_body();
+            return;
         }
-    }
-
-    pub(in crate::island) fn paint_bump_with(&self, amp: f32, cx: f32) {
-        let (w, _) = self.liquid.bump.size();
-        let half = self.bump_half(amp);
-        let fill = self.bump_fill_for(w as f32);
-        let _ = self.liquid.bump.paint(&self.gpu, |p| {
-            if let Ok(shape) = p.fill_bump(w as f32, self.seam_px(), w as f32 / 2.0 + cx, half, amp, fill) {
-                self.clip_bump_blur(&shape);
-            }
-        });
+        if self.liquid.idle_running && self.liquid.body_active.get() {
+            return;
+        }
+        let body = self.elastic_body_spec(depth);
+        if let Ok(shape) = self.gpu.elastic_body(&body)
+            && let Ok(path) = crate::ui::gfx::composition_path(&shape)
+        {
+            let _ = self.liquid.body_shape.SetPath(&path);
+            let _ = self._visual.SetClip(&self.liquid.body_clip);
+            self.liquid.body_active.set(true);
+        }
+        if !self.spikes_active() {
+            self.set_bump_visible(false);
+        }
+        if let Some((palette, tip)) = self.bump_look().filter(|_| depth > 0.2) {
+            let color = if palette.tone == crate::ui::gfx::Tone::Horizontal {
+                palette.at(((body.pull.point.0 - body.rect.0) / body.rect.2.max(1.0)).clamp(0.0, 1.0), 1.0)
+            } else {
+                tip
+            };
+            let _ = self.liquid.highlight.paint(&self.gpu, |p| {
+                let _ = p.liquid_highlight(self.liquid.highlight.size(), &body.pull, color);
+            });
+            let _ = self.liquid.highlight.sprite.SetIsVisible(true);
+        } else {
+            let _ = self.liquid.highlight.sprite.SetIsVisible(false);
+        }
+        self.clip_eq_to_body();
     }
 
     pub(in crate::island) fn clip_bump_blur(&self, shape: &windows::Win32::Graphics::Direct2D::ID2D1PathGeometry) {
@@ -569,36 +672,35 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn liquid_target(&self) -> (f32, f32) {
-        let s = self.scale;
-        let mut pt = windows::Win32::Foundation::POINT::default();
-        let mut rc = windows::Win32::Foundation::RECT::default();
+    pub(in crate::island) fn liquid_target(&self) -> crate::ui::gfx::ElasticPull {
+        let mut cursor = windows::Win32::Foundation::POINT::default();
+        let mut window = windows::Win32::Foundation::RECT::default();
         unsafe {
-            if GetCursorPos(&mut pt).is_err() || GetWindowRect(self.hwnd, &mut rc).is_err() {
-                return (0.0, 0.0);
+            if GetCursorPos(&mut cursor).is_err() || GetWindowRect(self.hwnd, &mut window).is_err() {
+                return Default::default();
             }
         }
-        let reach = self.settings.liquid_reach * s;
-        let strength = self.settings.liquid_strength * s;
-        let (px, py) = self.bump_pivot();
-        let (cx, cy) = ((pt.x - rc.left) as f32, (pt.y - rc.top) as f32);
-        let (dy, dx) = match self.settings.hang() {
-            Hang::Down => (cy - py, cx - px),
-            Hang::Up => (py - cy, px - cx),
-            Hang::Right => (cx - px, py - cy),
-            Hang::Left => (px - cx, cy - py),
+        let (at, size, radius) = self.pill(self.win, false, false);
+        let blocked = if self.docked() {
+            Some(match self.settings.hang() {
+                Hang::Down => Hang::Up,
+                Hang::Up => Hang::Down,
+                Hang::Left => Hang::Right,
+                Hang::Right => Hang::Left,
+            })
+        } else {
+            None
         };
-        let (pw, ph) = self.collapsed();
-        let straight = (pw.max(ph) - pw.min(ph)) / 2.0 * s;
-        let slack = 120.0 * s;
-        if dy > reach || dx.abs() > straight + slack {
-            return (0.0, 0.0);
-        }
-        let t = if dy <= 0.0 { 1.0 } else { 1.0 - dy / reach };
-        let eased = t * t * (3.0 - 2.0 * t);
-        let horizontal = if dx.abs() <= straight { 1.0 } else { 1.0 - (dx.abs() - straight) / slack };
-        let limit = (straight - BUMP_HALF * s * 0.6).max(0.0);
-        (strength * eased * horizontal, dx.clamp(-limit, limit))
+        let mut pull = crate::ui::gfx::cursor_pull(
+            (at.X, at.Y, size.X, size.Y),
+            radius.X,
+            ((cursor.x - window.left) as f32, (cursor.y - window.top) as f32),
+            self.settings.liquid_reach * self.scale,
+            self.settings.liquid_strength * self.scale,
+            blocked,
+        );
+        pull.spread = BUMP_HALF * self.scale;
+        pull
     }
 
     pub(in crate::island) fn set_bump_visible(&self, visible: bool) {
@@ -619,51 +721,34 @@ impl App {
     }
 
     pub(in crate::island) fn start_idle(&mut self) {
-        if self.liquid.idle_running {
+        if self.liquid.idle_running && self.liquid.body_active.get() {
             return;
         }
         self.liquid.idle_running = true;
-        let s = self.scale;
-        let look = self.bump_look();
-        self.liquid.idle_key = look.map(|(palette, _)| palette);
-        self.paint_bump_with(IDLE_AMP * s, 0.0);
-        self.set_bump_visible(true);
+        self.set_bump_visible(false);
         let result = (|| -> Result<()> {
             let ease = self
                 .compositor
                 .CreateCubicBezierEasingFunction(Vector2 { X: 0.45, Y: 0.0 }, Vector2 { X: 0.55, Y: 1.0 })?;
-            let scale_anim = self.compositor.CreateVector3KeyFrameAnimation()?;
-            let v = |y: f32| Vector3 { X: 1.0, Y: y, Z: 1.0 };
-            scale_anim.InsertKeyFrameWithEasingFunction(0.0, v(0.45), &ease)?;
-            scale_anim.InsertKeyFrameWithEasingFunction(0.5, v(1.25), &ease)?;
-            scale_anim.InsertKeyFrameWithEasingFunction(1.0, v(0.45), &ease)?;
-            scale_anim.SetDuration(Duration::from_millis(2600).into())?;
-            scale_anim.SetIterationBehavior(AnimationIterationBehavior::Forever)?;
-            self.liquid.bump.sprite.StartAnimation(h!("Scale"), &scale_anim.cast::<CompositionAnimation>()?)?;
-
-            if look.is_some_and(|(palette, _)| palette.tone == crate::ui::gfx::Tone::Horizontal) {
-                return Ok(());
-            }
-            let (pivot_x, base_y) = self.bump_pivot();
-            let base_x = pivot_x - self.liquid.bump.size().0 as f32 / 2.0;
-            let sideways = matches!(self.settings.hang(), Hang::Left | Hang::Right);
-            let drift = ((self.liquid.bump.size().0 as f32 / 2.0) - self.bump_half(IDLE_AMP * s)) * 0.8;
-            let drift_anim = self.compositor.CreateVector3KeyFrameAnimation()?;
-            let at = |dx: f32| {
-                if sideways {
-                    Vector3 { X: base_x, Y: base_y + dx, Z: 0.0 }
-                } else {
-                    Vector3 { X: base_x + dx, Y: base_y, Z: 0.0 }
+            let animation = self.compositor.CreatePathKeyFrameAnimation()?;
+            for (key, depth, center) in [(0.0, 2.0, -6.0), (0.5, IDLE_AMP, 6.0), (1.0, 2.0, -6.0)] {
+                let shape = self.liquid_body_path(depth * self.scale, center * self.scale)?;
+                if key == 0.0 {
+                    self.liquid.body_shape.SetPath(&shape)?;
                 }
-            };
-            drift_anim.InsertKeyFrameWithEasingFunction(0.0, at(-drift), &ease)?;
-            drift_anim.InsertKeyFrameWithEasingFunction(0.5, at(drift), &ease)?;
-            drift_anim.InsertKeyFrameWithEasingFunction(1.0, at(-drift), &ease)?;
-            drift_anim.SetDuration(Duration::from_millis(7200).into())?;
-            drift_anim.SetIterationBehavior(AnimationIterationBehavior::Forever)?;
-            self.liquid.bump.sprite.StartAnimation(h!("Offset"), &drift_anim.cast::<CompositionAnimation>()?)
+                animation.InsertKeyFrameWithEasingFunction(key, &shape, &ease)?;
+            }
+            animation.SetDuration(Duration::from_millis(5200).into())?;
+            animation.SetIterationBehavior(AnimationIterationBehavior::Forever)?;
+            self.liquid.body_shape.StartAnimation(h!("Path"), &animation.cast::<CompositionAnimation>()?)?;
+            self._visual.SetClip(&self.liquid.body_clip)?;
+            self.liquid.body_active.set(true);
+            Ok(())
         })();
-        let _ = result;
+        if let Err(error) = result {
+            self.liquid.idle_running = false;
+            crate::log_warn!("liquid body animation failed: {error}");
+        }
     }
 
     pub(in crate::island) fn stop_idle(&mut self) {
@@ -671,9 +756,7 @@ impl App {
             return;
         }
         self.liquid.idle_running = false;
-        let _ = self.liquid.bump.sprite.StopAnimation(h!("Scale"));
-        let _ = self.liquid.bump.sprite.StopAnimation(h!("Offset"));
-        let _ = self.liquid.bump.sprite.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
+        self.restore_liquid_body();
         self.place_bump();
     }
 
@@ -682,6 +765,7 @@ impl App {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
             self.stop_idle();
+            self.restore_liquid_body();
             self.set_bump_visible(false);
             return;
         }
@@ -689,38 +773,73 @@ impl App {
         let dt = now.duration_since(self.liquid.last_tick).as_secs_f32().clamp(0.001, 0.05);
         self.liquid.last_tick = now;
 
-        let (target, target_cx) = self.liquid_target();
-        let active = target > 0.0 || self.liquid.bump_amp > 0.3 || self.liquid.bump_vel.abs() > 1.0;
+        let target = self.liquid_target();
+        let active = target.depth > 0.0 || self.liquid.bump_amp > 0.3 || self.liquid.bump_vel.abs() > 1.0;
         if !active {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
-            if self.liquid.idle_running && self.liquid.idle_key != self.bump_look().map(|(palette, _)| palette) {
-                self.stop_idle();
-            }
             if !self.spikes_active() && !self.ring_active() {
                 self.start_idle();
+            } else {
+                self.restore_liquid_body();
             }
             self.set_timer(Timer::Liquid, 90);
             return;
         }
         if self.liquid.idle_running {
             self.stop_idle();
-            self.liquid.bump_cx = target_cx;
-            self.liquid.bump_cx_vel = 0.0;
+            self.liquid.pull_ready = false;
         }
         let (k, c) = self.liquid_spring();
-        let acc = k * (target - self.liquid.bump_amp) - c * self.liquid.bump_vel;
+        let acc = k * (target.depth - self.liquid.bump_amp) - c * self.liquid.bump_vel;
         self.liquid.bump_vel += acc * dt;
         self.liquid.bump_amp = (self.liquid.bump_amp + self.liquid.bump_vel * dt).max(0.0);
-        let acc_x = k * (target_cx - self.liquid.bump_cx) - c * self.liquid.bump_cx_vel;
-        self.liquid.bump_cx_vel += acc_x * dt;
-        self.liquid.bump_cx += self.liquid.bump_cx_vel * dt;
-        if target == 0.0 && self.liquid.bump_amp < 0.3 && self.liquid.bump_vel.abs() < 1.0 {
+        if target.depth > 0.0 {
+            if !self.liquid.pull_ready {
+                self.liquid.pull = target;
+                self.liquid.pull_ready = true;
+            } else {
+                let a = 1.0 - (-dt * 16.0).exp();
+                self.liquid.pull.point.0 += (target.point.0 - self.liquid.pull.point.0) * a;
+                self.liquid.pull.point.1 += (target.point.1 - self.liquid.pull.point.1) * a;
+                let normal = (
+                    self.liquid.pull.normal.0 + (target.normal.0 - self.liquid.pull.normal.0) * a,
+                    self.liquid.pull.normal.1 + (target.normal.1 - self.liquid.pull.normal.1) * a,
+                );
+                let length = normal.0.hypot(normal.1).max(0.001);
+                self.liquid.pull.normal = (normal.0 / length, normal.1 / length);
+                self.liquid.pull.spread = target.spread;
+            }
+        }
+        if target.depth == 0.0 && self.liquid.bump_amp < 0.3 && self.liquid.bump_vel.abs() < 1.0 {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
         }
-        self.paint_bump_with(self.liquid.bump_amp, self.liquid.bump_cx);
-        self.set_bump_visible(self.liquid.bump_amp > 0.2);
+        self.paint_liquid_body(self.liquid.bump_amp);
         self.set_timer(Timer::Liquid, self.frame_ms());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_shape_reserves_room_for_every_edge_equalizer_and_keeps_internal_bars() {
+        let mut settings = Settings { style: Style::Flat, edge_spikes: true, ..Settings::default() };
+        for shape in crate::data::settings::EqStyle::ALL {
+            settings.eq_style = shape;
+            assert!(bump_room_for(&settings) >= if shape.around() { RING_ROOM } else { BUMP_ROOM });
+        }
+        settings.edge_spikes = false;
+        assert_eq!(bump_room_for(&settings), 0.0);
+        let mut ui = view::UiState::new();
+        ui.cfg = settings;
+        ui.cfg.music_eq = true;
+        ui.media.playing = true;
+        ui.media.title = "Test track".into();
+        assert!(view::music_slots(&ui, 1.0, 400.0).bars.is_some());
+        ui.cfg.music_eq = false;
+        assert!(view::music_slots(&ui, 1.0, 400.0).bars.is_none());
     }
 }

@@ -234,6 +234,9 @@ impl App {
 
     pub(in crate::island) fn on_chat(&mut self) {
         let Some(answer) = ai::take_chat_result() else { return };
+        if self.pet.chat.as_ref().is_some_and(|chat| chat.pending) {
+            return self.finish_companion_chat(answer);
+        }
         if !self.ui.chat.pending {
             return;
         }

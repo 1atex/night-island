@@ -1,10 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-	<defs>
-		<linearGradient id="a" x1="21.92" y1="18.75" x2="38.52" y2="47.52" gradientUnits="userSpaceOnUse">
-			<stop offset="0" stop-color="#86c3db"/>
-			<stop offset="0.45" stop-color="#86c3db"/>
-			<stop offset="1" stop-color="#5eafcf"/>
-		</linearGradient>
-	</defs>
-	<path d="M46.66,36.2A16.66,16.66,0,0,1,29.88,19.65a16.29,16.29,0,0,1,.55-4.15A16.56,16.56,0,1,0,48.5,36.1C47.89,36.16,47.28,36.2,46.66,36.2Z" stroke="#72b9d5" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.5" fill="url(#a)"/>
+<svg xmlns="http://www.w3.org/2000/svg" class="wx-clear-night" width="128" height="128" viewBox="0 0 24 24" fill="none" role="img" aria-labelledby="wx-clear-night-title wx-clear-night-desc">
+<title id="wx-clear-night-title">Ясно · ночь</title>
+<desc id="wx-clear-night-desc">Месяц и мягко мерцающие звёзды.</desc>
+<defs><linearGradient id="wx-clear-night-moon" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#EAE7FC"/><stop offset="1" stop-color="#BCB4E7"/></linearGradient><style>.wx-clear-night .star{animation:wx-clear-night-twinkle 6.8s ease-in-out infinite}.wx-clear-night .star.alt{animation-duration:8.1s;animation-delay:-3.7s}@keyframes wx-clear-night-twinkle{0%,100%{opacity:.55}50%{opacity:1}}@media(prefers-reduced-motion:reduce){.wx-clear-night *{animation:none!important}.wx-clear-night .drop,.wx-clear-night .flake,.wx-clear-night .hail{opacity:.85}.wx-clear-night .bolt{opacity:1}.wx-clear-night .wind-line,.wx-clear-night .funnel-line{stroke-dasharray:none}}</style></defs>
+<g class="moon"><path d="M14.580 6.940A6 6 0 1 0 14.700 15.820A5.1 5.1 0 0 1 14.580 6.940Z" fill="url(#wx-clear-night-moon)" stroke="#AAA2D6" stroke-width=".55" stroke-linejoin="round"/></g><g transform="translate(19.2 5)" class="star"><path d="M0 -0.85V0.85M-0.85 0H0.85" stroke="#C0B7EC" stroke-width=".6" stroke-linecap="round"/></g><g transform="translate(20 13.4)" class="star alt"><path d="M0 -0.55V0.55M-0.55 0H0.55" stroke="#C0B7EC" stroke-width=".6" stroke-linecap="round"/></g><g transform="translate(13.4 3)" class="star alt"><path d="M0 -0.4V0.4M-0.4 0H0.4" stroke="#C0B7EC" stroke-width=".6" stroke-linecap="round"/></g>
 </svg>
