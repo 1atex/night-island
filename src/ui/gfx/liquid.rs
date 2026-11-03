@@ -140,7 +140,7 @@ pub fn cursor_pull(
 ) -> ElasticPull {
     let (x, y, w, h) = rect;
     let r = radius.min(w.min(h) / 2.0);
-    let q = (cursor.0.clamp(x + r, x + w - r), cursor.1.clamp(y + r, y + h - r));
+    let q = (cursor.0.clamp((x + r).min(x + w - r), x + w - r), cursor.1.clamp((y + r).min(y + h - r), y + h - r));
     let delta = (cursor.0 - q.0, cursor.1 - q.1);
     let length = delta.0.hypot(delta.1);
     let (point, mut normal, distance) = if length > 0.001 {
@@ -299,8 +299,8 @@ mod tests {
                 for _ in 0..12 {
                     pull = pull.follow(target, rect, radius, 0.2);
                     let q = (
-                        pull.point.0.clamp(rect.0 + radius, rect.0 + rect.2 - radius),
-                        pull.point.1.clamp(rect.1 + radius, rect.1 + rect.3 - radius),
+                        pull.point.0.clamp((rect.0 + radius).min(rect.0 + rect.2 - radius), rect.0 + rect.2 - radius),
+                        pull.point.1.clamp((rect.1 + radius).min(rect.1 + rect.3 - radius), rect.1 + rect.3 - radius),
                     );
                     assert!(((pull.point.0 - q.0).hypot(pull.point.1 - q.1) - radius).abs() < 0.02);
                     let shape = elastic_geometry(&factory, &ElasticBody { rect, radius, pull })?;

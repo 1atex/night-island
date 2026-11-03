@@ -341,14 +341,14 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     }
     let chars = |s: &str| crate::ui::i18n::tr(s).chars().count() as f32;
     if let Some((_, text)) = &ui.notice {
-        return (ui.char_inset + 40.0 + chars(text) * 7.6 + 20.0).clamp(base, 460.0);
+        return (ui.char_inset + 40.0 + chars(text) * 7.6 + 20.0).clamp(base.min(460.0), 460.0);
     }
     if ui.volume.is_some() {
         return base;
     }
     if let Some(name) = &ui.downloading {
         let shift = ui.char_inset + indicators_width(ui, 1.0);
-        return (shift + 40.0 + chars(&downloading_label(name)) * 6.9 + 18.0).clamp(base, 420.0);
+        return (shift + 40.0 + chars(&downloading_label(name)) * 6.9 + 18.0).clamp(base.min(420.0), 420.0);
     }
     if row_pill(ui) {
         return music_slots(ui, 1.0, 0.0).width.max(base);
