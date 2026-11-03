@@ -35,6 +35,7 @@ pub(in crate::island) fn apply(hwnd: HWND) {
                 media::debug_timeline(pos, len);
             }
             a.apply_accent();
+            a.maybe_start_music_intro();
             a.update_eq();
             a.repaint_collapsed();
             a.repaint_expanded();

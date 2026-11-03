@@ -133,6 +133,7 @@ impl App {
     }
 
     fn hide_window(&mut self) {
+        self.cancel_pill_motion();
         self.kill_timer(Timer::Expand);
         self.kill_timer(Timer::Liquid);
         self.kill_timer(Timer::Weather);

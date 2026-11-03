@@ -225,7 +225,8 @@ impl App {
     }
 
     pub(in crate::island) fn progress_pill_visible(&self) -> bool {
-        self.state == State::Collapsed
+        self.pill_motion.intro.is_none()
+            && self.state == State::Collapsed
             && !self.gaming
             && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
             && unsafe { IsWindowVisible(self.hwnd).as_bool() }
