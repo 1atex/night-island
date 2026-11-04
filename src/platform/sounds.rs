@@ -15,6 +15,7 @@ pub enum Cue {
 }
 
 impl Cue {
+    #[cfg(test)]
     const ALL: [Cue; 3] = [Cue::Heard, Cue::Done, Cue::Error];
 
     fn index(self) -> usize {
@@ -80,6 +81,7 @@ pub fn play(cue: Cue, volume_pct: u8) {
     }
 }
 
+#[cfg(test)]
 pub fn all() -> [Cue; 3] {
     Cue::ALL
 }

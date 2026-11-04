@@ -37,6 +37,7 @@ pub const ALL: [Cap; 11] = [
 ];
 
 impl Cap {
+    #[cfg(test)]
     pub fn key(self) -> &'static str {
         match self {
             Cap::Media => "media",
@@ -63,10 +64,6 @@ impl Cap {
 
     pub fn dangerous(self) -> bool {
         matches!(self, Cap::FilesWrite | Cap::Shell | Cap::Browser | Cap::Power)
-    }
-
-    pub fn exposes_outside_text(self) -> bool {
-        matches!(self, Cap::WebSearch | Cap::FilesRead | Cap::Browser | Cap::Shell)
     }
 }
 
@@ -132,10 +129,6 @@ impl Permissions {
     pub fn commands_offered(&self) -> Vec<Cap> {
         ALL.iter().copied().filter(|&c| self.command_level(c, false) != Level::Off).collect()
     }
-
-    pub fn tools_offered(&self) -> Vec<Cap> {
-        ALL.iter().copied().filter(|&c| self.level(c) != Level::Off).collect()
-    }
 }
 
 #[cfg(test)]
@@ -150,7 +143,7 @@ mod tests {
     fn the_master_switch_turns_everything_off() {
         let p = Permissions::default();
         assert!(ALL.iter().all(|&c| p.level(c) == Level::Off));
-        assert!(p.tools_offered().is_empty());
+        assert!(!p.commands_offered().contains(&Cap::Memory));
     }
 
     #[test]
@@ -172,7 +165,7 @@ mod tests {
         assert_eq!(p.level(Cap::Browser), Level::Off);
         assert_eq!(p.level(Cap::Power), Level::Ask);
         assert_eq!(p.level(Cap::Media), Level::Auto);
-        assert!(!p.tools_offered().contains(&Cap::Shell));
+        assert!(!p.commands_offered().contains(&Cap::Shell));
     }
 
     #[test]
