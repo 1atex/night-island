@@ -31,7 +31,13 @@ impl App {
         }
         let pill = self.pill_rect(true);
         match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
-            Some(view::HomeHit::Notification) => self.activate_notification(),
+            Some(view::HomeHit::Notification) => {
+                if self.settings.notification_open_app {
+                    self.activate_notification();
+                } else {
+                    self.expand_notification_text();
+                }
+            }
             Some(view::HomeHit::NotificationExpand) => self.expand_notification_text(),
             Some(view::HomeHit::Mixer(_)) => self.click_mixer(x, y),
             Some(view::HomeHit::Media(i)) => media::control(match i {

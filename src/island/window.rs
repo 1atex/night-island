@@ -5,7 +5,7 @@ pub(in crate::island) const WM_MOUSELEAVE: u32 = 0x02A3;
 pub(in crate::island) const WM_SHOW: u32 = WM_APP + 2;
 
 fn customize_header_menu(point: windows::Win32::Foundation::POINT) {
-    use crate::data::settings::{DEFAULT_HEADER_TABS, HEADER_TAB_LIMIT, HIDEABLE_TABS};
+    use crate::data::settings::{DEFAULT_HEADER_TABS, HIDEABLE_TABS};
     use crate::ui::i18n::tr;
     use crate::ui::menu::{self, Entry};
     loop {
@@ -45,27 +45,25 @@ fn customize_header_menu(point: windows::Win32::Foundation::POINT) {
             });
         } else if let Some(name) = choice.checked_sub(1).and_then(|i| HIDEABLE_TABS.get(i)).copied() {
             let mut pinned = false;
-            let mut full = false;
             let mut replacements = Vec::new();
             with_app(|a| {
                 pinned = a.settings.header_tabs.iter().any(|tab| tab == name) && !a.settings.tab_hidden(name);
-                full = !pinned
-                    && !a.settings.header_tabs.iter().any(|tab| tab == name)
-                    && a.settings.header_tabs.len() >= HEADER_TAB_LIMIT;
                 replacements = a.settings.header_tabs.clone();
             });
-            let replacement = if full {
-                let entries = replacements
-                    .iter()
-                    .enumerate()
-                    .map(|(i, old)| Entry::item(i + 1, &format!("{} {}", tr("Replace:"), tr(old))))
-                    .collect();
+            let replacement = if !pinned {
+                let mut entries = vec![Entry::item(100, &tr("Add to header")), Entry::divider()];
+                entries.extend(
+                    replacements
+                        .iter()
+                        .enumerate()
+                        .map(|(i, old)| Entry::item(i + 1, &format!("{} {}", tr("Replace:"), tr(old)))),
+                );
                 let Some(id) =
                     menu::show(entries, (point.x, point.y), false, app_scale(), &|f| with_app(|a| f(&a.gpu)))
                 else {
                     continue;
                 };
-                replacements.get(id - 1).cloned()
+                if id == 100 { None } else { replacements.get(id - 1).cloned() }
             } else {
                 None
             };
@@ -162,6 +160,30 @@ pub(in crate::island) fn point_from(lparam: LPARAM) -> (i32, i32) {
 
 pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        crate::platform::notifications::WM_NOTIFICATION_OPENED => {
+            with_app(|a| {
+                if wparam.0 != 0 {
+                    a.collapse();
+                } else {
+                    a.notify(Notice::Error, '\u{E783}', "Could not open the sender app");
+                }
+            });
+            LRESULT(0)
+        }
+        WM_NCHITTEST => {
+            let (x, y) = point_from(lparam);
+            let mut through = false;
+            with_app(|a| {
+                if a.state == State::Collapsed && a.liquid_on() && !a.character_interacting() && !a.pill_motion_busy() {
+                    let mut rect = windows::Win32::Foundation::RECT::default();
+                    if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() } {
+                        through = !a.on_interactive_body(x - rect.left, y - rect.top);
+                        a.set_decoration_through(through);
+                    }
+                }
+            });
+            LRESULT(if through { HTTRANSPARENT as isize } else { HTCLIENT as isize })
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_MOUSEMOVE => {
             let (x, y) = point_from(lparam);

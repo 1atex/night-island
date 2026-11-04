@@ -793,8 +793,8 @@ impl WeatherSide {
     }
 }
 
-pub const HEADER_TAB_LIMIT: usize = 5;
-pub const DEFAULT_HEADER_TABS: [&str; HEADER_TAB_LIMIT] = ["Clipboard", "Text", "Note", "Weather", "Record"];
+pub const HEADER_TAB_LIMIT: usize = HIDEABLE_TABS.len();
+pub const DEFAULT_HEADER_TABS: [&str; 5] = ["Clipboard", "Text", "Note", "Weather", "Record"];
 
 pub const HIDEABLE_TABS: [&str; 13] = [
     "Clipboard",
@@ -840,10 +840,11 @@ impl Settings {
         if !pinned {
             self.header_tabs.retain(|item| item != name);
         } else if !self.header_tabs.iter().any(|item| item == name) {
-            if self.header_tabs.len() < HEADER_TAB_LIMIT {
-                self.header_tabs.push(name.to_string());
-            } else if let Some(index) = replace.and_then(|old| self.header_tabs.iter().position(|item| item == old)) {
+            if let Some(old) = replace {
+                let Some(index) = self.header_tabs.iter().position(|item| item == old) else { return false };
                 self.header_tabs[index] = name.to_string();
+            } else if self.header_tabs.len() < HEADER_TAB_LIMIT {
+                self.header_tabs.push(name.to_string());
             } else {
                 return false;
             }
@@ -1074,9 +1075,11 @@ mod tests {
     }
 
     #[test]
-    fn header_tabs_move_both_ways_and_require_an_explicit_replacement_when_full() {
+    fn header_tabs_add_without_replacing_and_can_move_back_to_more() {
         let mut settings = Settings::default();
-        assert!(!settings.set_header_tab("AI", true, None));
+        assert!(settings.set_header_tab("AI", true, None));
+        assert_eq!(settings.header_tabs.len(), 6);
+        assert!(settings.set_header_tab("AI", false, None));
         assert!(settings.set_header_tab("AI", true, Some("Record")));
         assert!(settings.header_tabs.iter().any(|name| name == "AI"));
         assert!(!settings.header_tabs.iter().any(|name| name == "Record"));
@@ -1089,7 +1092,7 @@ mod tests {
         assert_eq!(restored.header_tabs, settings.header_tabs);
         let mut invalid: Settings = serde_json::from_str(r#"{"header_tabs":["Home","AI","AI","evil","Settings","Weather","Record","Privacy","Activity","Controls"]}"#).unwrap();
         invalid.sanitize();
-        assert_eq!(invalid.header_tabs, ["AI", "Weather", "Record", "Privacy", "Activity"]);
+        assert_eq!(invalid.header_tabs, ["AI", "Weather", "Record", "Privacy", "Activity", "Controls"]);
     }
 
     #[test]

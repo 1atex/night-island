@@ -61,6 +61,7 @@ impl App {
     }
 
     pub(in crate::island) fn expand(&mut self) {
+        self.set_decoration_through(false);
         let notification_origin = self.system_notices.origin.take();
         self.hide_notification_card();
         self.cancel_pill_motion();

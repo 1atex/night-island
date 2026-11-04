@@ -198,6 +198,7 @@ impl App {
     }
 
     pub(in crate::island) fn apply_style(&mut self) {
+        self.set_decoration_through(false);
         if self.liquid_on() {
             self.start_liquid();
         } else {

@@ -131,6 +131,7 @@ impl App {
     }
 
     pub(in crate::island) fn reset_liquid_pull(&mut self) {
+        self.set_decoration_through(false);
         self.stop_idle();
         self.liquid.bump_amp = 0.0;
         self.liquid.bump_vel = 0.0;
@@ -777,6 +778,7 @@ impl App {
     }
 
     pub(in crate::island) fn liquid_tick(&mut self) {
+        self.update_decoration_input();
         if !self.liquid_on() || self.state != State::Collapsed || self.notification_card_visible() {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;

@@ -84,7 +84,7 @@ pub(super) fn wake() {
     }
 }
 
-fn sender_target(app_id: &str) -> Option<String> {
+pub(super) fn sender_target(app_id: &str) -> Option<String> {
     (!app_id.is_empty()
         && app_id != "Windows"
         && app_id.len() <= 256
@@ -92,22 +92,30 @@ fn sender_target(app_id: &str) -> Option<String> {
     .then(|| format!("shell:AppsFolder\\{app_id}"))
 }
 
-pub fn open_sender(app_id: &str) -> bool {
-    let Some(target) = sender_target(app_id) else {
-        return false;
-    };
-    unsafe {
-        windows::Win32::UI::Shell::ShellExecuteW(
-            None,
-            windows::core::w!("open"),
-            &windows::core::HSTRING::from(target),
-            None,
-            None,
-            windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
-        )
-        .0 as isize
-            > 32
+pub const WM_NOTIFICATION_OPENED: u32 = WM_APP + 69;
+static OPENING: AtomicBool = AtomicBool::new(false);
+
+pub fn open_sender(record: Record, hwnd: HWND) {
+    if OPENING.swap(true, Ordering::AcqRel) {
+        return;
     }
+    let target = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let initialized = unsafe { RoInitialize(RO_INIT_MULTITHREADED).is_ok() };
+        let opened = initialized && super::notification_activation::open(&record).is_some();
+        unsafe {
+            if initialized {
+                RoUninitialize();
+            }
+            OPENING.store(false, Ordering::Release);
+            let _ = PostMessageW(
+                Some(HWND(target as *mut _)),
+                WM_NOTIFICATION_OPENED,
+                WPARAM(usize::from(opened)),
+                LPARAM(0),
+            );
+        }
+    });
 }
 
 pub fn configure(hwnd: HWND, enabled: bool) {
@@ -210,7 +218,7 @@ fn read_record(
     let icon = icons.entry(app_id.clone()).or_insert_with(|| info.as_ref().and_then(app_icon)).clone();
     let title = lines.first().map(|line| text(line, 512)).unwrap_or_else(|| "New notification".into());
     let body = text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 16384);
-    let avatar = avatars.resolve(&app_id, &title, &body);
+    let avatar = avatars.resolve_notification(id, &app_id, &title, &body);
     Ok(Record { id, created, app_id, app, title, body, icon, avatar })
 }
 
@@ -515,6 +523,40 @@ mod tests {
         assert_eq!(text("🌙🌧️", 2), "🌙🌧");
         let seconds = now_ticks() / 10_000_000 - 11_644_473_600;
         assert!((seconds - SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64).abs() <= 1);
+    }
+
+    #[test]
+    #[ignore = "Reads only Discord notification metadata; optional activation opens the sender app"]
+    fn discord_notification_avatar_and_activation_probe() -> Result<()> {
+        unsafe {
+            RoInitialize(RO_INIT_MULTITHREADED)?;
+        }
+        let listener = UserNotificationListener::Current()?;
+        let items = listener.GetNotificationsAsync(NotificationKinds::Toast)?.join()?;
+        let mut icons = HashMap::new();
+        let mut avatars = super::super::notification_images::AvatarCache::default();
+        avatars.begin_snapshot();
+        let records: Vec<_> = items
+            .into_iter()
+            .filter(|item| {
+                item.AppInfo()
+                    .and_then(|info| info.AppUserModelId())
+                    .is_ok_and(|id| id.to_string().to_ascii_lowercase().contains("discord"))
+            })
+            .filter_map(|item| read_record(&item, &mut icons, &mut avatars).ok())
+            .collect();
+        assert!(!records.is_empty(), "A Discord notification must be present in Windows notification history");
+        let record = &records[0];
+        assert!(record.avatar.is_some(), "The actual Discord toast avatar must decode");
+        println!("Discord notifications: {}; native avatar decoded: {}", records.len(), record.avatar.is_some());
+        if std::env::var_os("NI_TEST_NOTIFICATION_ACTIVATE").is_some() {
+            let method = super::super::notification_activation::open(record).expect("The original sender must open");
+            println!("Discord notification opened via {method:?}");
+        }
+        unsafe {
+            RoUninitialize();
+        }
+        Ok(())
     }
 
     #[test]

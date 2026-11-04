@@ -419,17 +419,10 @@ impl App {
     }
 
     pub(in crate::island) fn activate_notification(&mut self) {
-        if !self.settings.notification_open_app {
-            return self.expand_notification_text();
-        }
         let Some(record) = &self.ui.notifications.preview else {
             return;
         };
-        if notifications::open_sender(&record.app_id) {
-            self.collapse();
-        } else {
-            self.notify(Notice::Error, '\u{E783}', "Could not open the sender app");
-        }
+        notifications::open_sender(record.clone(), self.hwnd);
     }
 
     pub(in crate::island) fn notification_session(&mut self, locked: bool) {
@@ -516,11 +509,11 @@ mod tests {
             notification.icon = Some(std::sync::Arc::new(apps::Icon { side: 1, bgra: vec![220, 150, 30, 255] }));
             view::paint_notification_card(p, (450.0, 420.0, 420.0, 158.0), 1.0, &notification, 2, false)
         })?;
-        let rgba: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let pixels: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
         let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 600);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+        encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
         Ok(())
     }
 
@@ -577,6 +570,11 @@ mod tests {
             Settings { music_eq: false, edge_spikes: false, system_notifications: true, ..Settings::default() };
         let mut app = App::new_visuals(hwnd, 1.0, settings)?;
         app.ui.cfg = app.settings.clone();
+        app.set_decoration_through(true);
+        let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+        assert_ne!(style & WS_EX_TRANSPARENT.0 as isize, 0);
+        app.reset_liquid_pull();
+        assert_eq!(unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } & WS_EX_TRANSPARENT.0 as isize, 0);
         app.pill_hidden = true;
         let a = record(1);
         let b = record(2);
@@ -687,11 +685,39 @@ mod tests {
             Ok(())
         })?;
         assert!(app.ui.notifications.detail_max.get() > 0.0);
-        let rgba: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let pixels: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
         let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 820);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+        encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+        let saved_tabs = app.ui.cfg.header_tabs.clone();
+        app.ui.tab = view::Tab::Home;
+        app.ui.notifications.full = false;
+        surface.paint(&app.gpu, |p| {
+            p.fill_rect((0.0, 0.0, 1320.0, 820.0), rgba(0.025, 0.035, 0.055, 1.0))?;
+            for i in 0..4 {
+                app.ui.cfg.header_tabs = match i {
+                    0 => crate::data::settings::DEFAULT_HEADER_TABS.map(String::from).to_vec(),
+                    1 => ["Clipboard", "Text", "Note", "Weather", "Record", "Notifications"].map(String::from).to_vec(),
+                    2 => ["Privacy", "Activity", "Controls", "App mixer", "Notifications"].map(String::from).to_vec(),
+                    _ => crate::data::settings::HIDEABLE_TABS.map(String::from).to_vec(),
+                };
+                let (x, y) = (10.0 + (i % 2) as f32 * 660.0, 10.0 + (i / 2) as f32 * 410.0);
+                p.fill_round_rect((x, y, x + 640.0, y + 384.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
+                view::paint_expanded(p, (x, y, 640.0, 384.0), 1.0, &app.ui, &[])?;
+            }
+            Ok(())
+        })?;
+        let pixels: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let mut encoder = png::Encoder::new(
+            std::fs::File::create(path.with_file_name("notification-header-preview.png")).unwrap(),
+            1320,
+            820,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+        app.ui.cfg.header_tabs = saved_tabs;
         for (group, filename) in [
             ("Integrations", "notification-integrations-preview.png"),
             ("Notifications", "notification-settings-preview.png"),

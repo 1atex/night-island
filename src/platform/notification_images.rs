@@ -23,6 +23,7 @@ struct ImageSource {
 
 #[derive(Default)]
 pub(super) struct AvatarCache {
+    history: Option<rusqlite::Connection>,
     sources: HashMap<String, Vec<ImageSource>>,
     images: HashMap<String, Arc<Icon>>,
 }
@@ -30,9 +31,20 @@ pub(super) struct AvatarCache {
 impl AvatarCache {
     pub fn begin_snapshot(&mut self) {
         self.sources.clear();
+        self.history = super::notification_payload::open();
         if self.images.len() > 128 {
             self.images.clear();
         }
+    }
+
+    pub fn resolve_notification(&mut self, id: u32, app_id: &str, title: &str, body: &str) -> Option<Arc<Icon>> {
+        if let Some(xml) =
+            self.history.as_ref().and_then(|db| super::notification_payload::read(db, id, app_id, title, body))
+            && let Some(item) = image_source(&xml)
+        {
+            return self.resolve_image(app_id, &item.source);
+        }
+        self.resolve(app_id, title, body)
     }
 
     pub fn resolve(&mut self, app_id: &str, title: &str, body: &str) -> Option<Arc<Icon>> {
@@ -51,6 +63,11 @@ impl AvatarCache {
         if matches.any(|item| &item.source != source) {
             return None;
         }
+        let source = source.clone();
+        self.resolve_image(app_id, &source)
+    }
+
+    fn resolve_image(&mut self, app_id: &str, source: &str) -> Option<Arc<Icon>> {
         if let Some(image) = self.images.get(source) {
             return Some(image.clone());
         }
@@ -58,7 +75,7 @@ impl AvatarCache {
             return remote_avatar(source);
         }
         let image = load(source)?;
-        self.images.insert(source.clone(), image.clone());
+        self.images.insert(source.to_string(), image.clone());
         Some(image)
     }
 }
@@ -124,7 +141,8 @@ fn local_image_uri(source: &str) -> Option<Uri> {
 }
 
 fn load(source: &str) -> Option<Arc<Icon>> {
-    let path = if local_drive_path(source) { source.to_string() } else { local_image_path(&local_image_uri(source)?)? };
+    let path =
+        if local_drive_path(source) { source.replace('/', "\\") } else { local_image_path(&local_image_uri(source)?)? };
     let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path)).ok()?.join().ok()?;
     let stream = file.OpenReadAsync().ok()?.join().ok()?;
     decode(&stream, 96)
@@ -369,6 +387,8 @@ mod tests {
         cache
             .sources
             .insert("test".into(), vec![ImageSource { title: "Sender".into(), body: "Message".into(), source }]);
+        let mixed = path.to_string_lossy().replace("\\", "/");
+        assert!(load(&mixed).is_some());
         let image = cache.resolve("test", "Sender", "Message").expect("local notification image should decode");
         assert_eq!(image.side, 96);
         assert_eq!(image.bgra.len(), 96 * 96 * 4);

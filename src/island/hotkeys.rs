@@ -268,7 +268,7 @@ impl App {
             let _ = fade.SetDuration(Duration::from_millis(180).into());
             let _ = self.root.StartAnimation(h!("Opacity"), &fade);
         }
-        let through = on && self.settings.ghost_click_through;
+        let through = (on && self.settings.ghost_click_through) || self.pointer.decoration_through;
         unsafe {
             let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
             let bits = (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0) as isize;

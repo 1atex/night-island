@@ -34,6 +34,54 @@ pub fn movable_tabs(ui: &UiState) -> Vec<usize> {
         .collect()
 }
 
+pub fn header_has_labels(ui: &UiState) -> bool {
+    movable_tabs(ui).len() <= 5
+}
+
+fn header_label_widths() -> [f32; TABS.len()] {
+    use windows::Win32::Graphics::DirectWrite::*;
+    use windows::core::w;
+    thread_local! {
+        static WIDTHS: std::cell::RefCell<Option<(bool, [f32; TABS.len()])>> = const { std::cell::RefCell::new(None) };
+    }
+    let russian = crate::ui::i18n::is_ru();
+    WIDTHS.with_borrow_mut(|cached| {
+        if let Some((language, widths)) = cached.as_ref()
+            && *language == russian
+        {
+            return *widths;
+        }
+        let measured = (|| -> windows::core::Result<[f32; TABS.len()]> {
+            unsafe {
+                let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+                let format = factory.CreateTextFormat(
+                    w!("Segoe UI"),
+                    None,
+                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                    DWRITE_FONT_STYLE_NORMAL,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    13.0,
+                    w!("en-us"),
+                )?;
+                format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+                let mut widths = [0.0; TABS.len()];
+                for (index, (_, _, name)) in TABS.iter().enumerate() {
+                    let text: Vec<u16> = crate::ui::i18n::tr(name).encode_utf16().collect();
+                    let layout = factory.CreateTextLayout(&text, &format, 10000.0, 40.0)?;
+                    let mut metrics = DWRITE_TEXT_METRICS::default();
+                    layout.GetMetrics(&mut metrics)?;
+                    widths[index] = metrics.widthIncludingTrailingWhitespace;
+                }
+                Ok(widths)
+            }
+        })();
+        let widths = measured
+            .unwrap_or_else(|_| TABS.map(|(_, _, name)| crate::ui::i18n::tr(name).chars().count() as f32 * 8.0));
+        *cached = Some((russian, widths));
+        widths
+    })
+}
+
 pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let active = bar_tab(ui.tab);
     let (x, y, w, _) = pill;
@@ -47,24 +95,24 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let home = TABS.iter().position(|tab| tab.0 == Tab::Home).unwrap();
     let available: Vec<_> = std::iter::once(home).chain(movable_tabs(ui)).collect();
     let active_index = available.iter().copied().find(|&i| TABS[i].0 == active);
+    let labels = header_has_labels(ui);
+    let label_widths = header_label_widths();
+    let desired: f32 = available.iter().map(|&i| 16.0 + label_widths[i]).sum();
+    let label_scale = ((room / scale - gap / scale * (available.len() - 1) as f32) / desired).min(1.0);
     let width = |i: usize| {
-        if Some(i) == active_index {
-            icon_w + ((crate::ui::i18n::tr(TABS[i].2).chars().count() as f32 * 8.0 + 10.0) * scale).min(120.0 * scale)
-        } else {
-            icon_w
-        }
+        if labels { (16.0 + label_widths[i]) * label_scale * scale } else { icon_w }
     };
     let mut selected = Vec::new();
     let mut used = 0.0;
     for i in available.iter().copied().filter(|&i| TABS[i].0 == Tab::Home || Some(i) == active_index) {
         let extra = width(i) + if selected.is_empty() { 0.0 } else { gap };
-        if used + extra <= room {
+        if used + extra <= room + 0.01 {
             selected.push(i);
             used += extra;
         }
     }
     for &i in &available {
-        if !selected.contains(&i) && used + gap + width(i) <= room {
+        if !selected.contains(&i) && used + gap + width(i) <= room + 0.01 {
             selected.push(i);
             used += gap + width(i);
         }
@@ -255,18 +303,19 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
             p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.16))?;
         } else if ui.hover_tab == Some(i) {
             p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.09))?;
+        } else if !header_has_labels(ui) && tab != Tab::Settings {
+            p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.045))?;
         }
         let alpha = if selected { 1.0 } else { 0.62 };
-        let icon_box = (rect.0, rect.1, rect.0 + 32.0 * scale, rect.3);
-        if selected && tab != Tab::Settings {
-            p.glyph(glyph, icon_box, 17.0 * scale, rgba(1.0, 1.0, 1.0, alpha))?;
+        if header_has_labels(ui) && tab != Tab::Settings {
+            let font = ((rect.2 - rect.0 - 10.0 * scale) / header_label_widths()[i].max(1.0) * 13.0).min(13.0 * scale);
             p.text(
                 name,
-                (rect.0 + 30.0 * scale, rect.1, rect.2 - 4.0 * scale, rect.3),
-                14.0 * scale,
+                (rect.0 + 4.0 * scale, rect.1, rect.2 - 4.0 * scale, rect.3),
+                font,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                WHITE,
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+                rgba(1.0, 1.0, 1.0, alpha),
             )?;
         } else {
             p.glyph(glyph, *rect, 17.0 * scale, rgba(1.0, 1.0, 1.0, alpha))?;
@@ -484,6 +533,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn sixth_extra_tab_switches_the_whole_header_to_compact_icons() {
+        let mut ui = UiState::new();
+        assert!(header_has_labels(&ui));
+        ui.cfg.set_header_tab("Notifications", true, None);
+        assert!(!header_has_labels(&ui));
+        for scale in [0.75, 1.0, 1.5, 2.0] {
+            let pill = (0.0, 0.0, 640.0 * scale, 384.0 * scale);
+            for &tab in &movable_tabs(&ui) {
+                let rect = tab_rects(pill, scale, &ui)[tab];
+                assert_eq!(rect.2 - rect.0, 36.0 * scale);
+                assert!(!overflow_tabs(pill, scale, &ui).contains(&tab));
+            }
+        }
+        ui.cfg.set_header_tab("Notifications", false, None);
+        assert!(header_has_labels(&ui));
+        ui.cfg.header_tabs =
+            ["Privacy", "Activity", "Controls", "App mixer", "Notifications"].map(String::from).to_vec();
+        let rects = tab_rects((0.0, 0.0, 640.0, 384.0), 1.0, &ui);
+        assert!(movable_tabs(&ui).iter().all(|&i| rects[i].2 > rects[i].0));
     }
 
     #[test]

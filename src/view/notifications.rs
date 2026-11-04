@@ -128,7 +128,7 @@ fn paint_notification_detail(
     scale: f32,
     ui: &NotificationsUi,
     record: &Record,
-    open_app: bool,
+    _open_app: bool,
 ) -> Result<()> {
     let (x, y, w, h) = pill;
     paint_notification_avatar(
@@ -169,9 +169,6 @@ fn paint_notification_detail(
         .zip(["Back", "Open sender app", "Dismiss"])
         .zip([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss])
     {
-        if hit == NotificationsHit::OpenApp && !open_app {
-            continue;
-        }
         p.fill_round_rect(rect, 11.0 * scale, rgba(1.0, 1.0, 1.0, if ui.hover == Some(hit) { 0.14 } else { 0.07 }))?;
         p.text(label, rect, 12.0 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
     }
@@ -199,15 +196,13 @@ pub fn hit_notifications(
     x: f32,
     y: f32,
     ui: &NotificationsUi,
-    open_app: bool,
+    _open_app: bool,
 ) -> Option<NotificationsHit> {
     if ui.full && ui.preview.is_some() {
         return notification_detail_buttons(pill, scale)
             .into_iter()
             .zip([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss])
-            .find_map(|(rect, hit)| {
-                (inside(rect, x, y) && (hit != NotificationsHit::OpenApp || open_app)).then_some(hit)
-            });
+            .find_map(|(rect, hit)| inside(rect, x, y).then_some(hit));
     }
     for (rect, hit) in
         notification_sections(pill, scale).into_iter().zip([NotificationsHit::Setup, NotificationsHit::History])
@@ -524,7 +519,10 @@ mod tile_tests {
             assert!(hit == Some([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss][index]));
         }
         let b = buttons[1];
-        assert!(hit_notifications(pill, 1.0, (b.0 + b.2) / 2.0, (b.1 + b.3) / 2.0, &ui, false).is_none());
+        assert!(
+            hit_notifications(pill, 1.0, (b.0 + b.2) / 2.0, (b.1 + b.3) / 2.0, &ui, false)
+                == Some(NotificationsHit::OpenApp)
+        );
         ui.full = false;
         ui.setup = false;
         ui.state.records.push(message());

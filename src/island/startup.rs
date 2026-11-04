@@ -374,6 +374,7 @@ impl App {
                 char_key: None,
             },
             pointer: Pointer {
+                decoration_through: false,
                 tracking: false,
                 press: None,
                 character_press: None,

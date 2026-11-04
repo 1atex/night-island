@@ -275,6 +275,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Left of the clock" => "Слева от времени",
         "Right of the clock" => "Справа от времени",
         "Customize header…" => "Настроить шапку…",
+        "Add to header" => "Добавить в шапку",
         "On the header" => "В шапке",
         "In More" => "В «Ещё»",
         "Replace:" => "Вместо:",

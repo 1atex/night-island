@@ -24,19 +24,25 @@ A small floating pill at the top of the screen that grows into a panel on hover.
 
 ### App volume and Windows notifications
 
-Press the **speaker on Home** to unfold the application mixer above the master volume slider. Adjust or mute each application and scroll to reach additional apps. Press the speaker again or Escape to close it. The full panel remains available under **More → App mixer**. Paused applications remain available while they have an audio session. The mixer refreshes only while its panel is open.
+Left-click the **speaker on Home** to switch between system volume and the current player's application volume. Right-click it to unfold the application mixer; right-click again or press Escape to close it. The full panel is also available under **More → App mixer**. Paused applications remain available while they have an audio session. The mixer refreshes only while open.
 
-Open **More → Notifications → Connect** and allow notification access if Windows asks. Enable **Do not disturb** through the **Windows settings** button to suppress ordinary Windows banners. New notifications unfold into a medium card from the island, queue while it is expanded and pause their timeout on hover. Click a card to open the island's notification history; close it to return to the island. Existing Windows notifications are never removed or replayed on connection. Notification contents stay in memory.
+Open **More → Notifications → Connect** and allow notification access if Windows asks. Enable **Do not disturb** through **Windows settings** to suppress ordinary Windows banners. Hover over a notification to open a Home preview occupying one, two or four tiles, as selected in notification settings. Its expand button opens the full, scrollable message. **Open sender app** is always available in the full message; an optional setting also makes the notification itself open the sender. Existing Windows notifications are never removed or replayed on connection. Notification contents stay in memory.
 
 Windows priority exceptions, reminders and alarms can still display their own banners; adjust these in [Windows notification settings](https://support.microsoft.com/en-us/windows/experience/notifications-and-do-not-disturb-in-windows). Notification quick actions are not implemented yet. On Windows versions where notification events are unavailable to unpackaged apps, the enabled listener checks for new notifications about once per second. Disable the feature to stop these checks.
 
 The **Setup guide** inside Notifications explains all three steps: notification access, hiding an application's Windows banners while keeping its notification-center entries, and enabling **Use Windows notifications** in Telegram's notification settings. Telegram's custom popup windows do not pass through the Windows listener.
 
-Cards and history display the sender/chat image supplied by the system toast, with a small application badge. Images are matched to the complete notification text and read from local image files only, then cached in memory. Telegram deletes its temporary avatar files after about a minute, so old notifications whose files have already disappeared fall back to the app icon. No Telegram login or network image requests are used.
+Cards and history display the sender/chat image with a small application badge. A read-only fallback to the current user's Windows notification database recovers images and original activation arguments unavailable through the public listener. Records must match notification ID, sender ID and full text; schema changes or locked databases safely fall back to the listener. Local paths, including Discord's mixed path separators, are supported. Discord CDN avatar requests are bounded and use an allowlist; decoded images are cached in memory. Missing images fall back to the app icon.
+
+Opening a notification uses its original registered Windows notification callback and arguments, or a supported sender-owned protocol link. The sender's registered shortcut is the fallback. Some applications provide no destination in their toast, so opening a specific conversation depends on their activation handler. No message text is interpreted as a command, and notification quick actions/replies are not replayed.
+
+### Header customization
+
+Use **More → Customize header…** to add a tab without removing another, explicitly replace a tab, or move a pinned tab back to More. Up to five additional tabs have full labels; more than five switch to compact circular icons with tooltips. Tabs that do not fit remain in More. Liquid deformation is decorative: only the original island body and its attached character capture mouse input.
 
 ### Yandex Music: My Wave
 
-Open **More → My Wave → Connect Yandex Music**, copy the code and confirm it at [ya.ru/device](https://ya.ru/device). The island never asks for your password. The access token is encrypted for your Windows account; **Sign out** stops playback and removes the local token.
+Open **More → My Wave → Connect Yandex Music** or **Settings → Integrations → Yandex Music**, copy the code and confirm it at [ya.ru/device](https://ya.ru/device). The island never asks for your password. The access token is encrypted for your Windows account; **Sign out** stops playback and removes the local token.
 
 The Home card and My Wave share playback, seeking and track colors. Yandex cover metadata supplies the background, mini-player, accent and text palette; missing colors fall back to the cover. Colors transition smoothly with readable contrast. Select **My Wave · Settings** on Home or **Open main player** in My Wave to move between them without restarting playback.
 
@@ -78,19 +84,25 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 
 ### Громкость приложений и уведомления Windows
 
-Нажми **динамик на главной**, чтобы раскрыть микшер над общей громкостью. Меняй громкость отдельных программ, отключай звук и прокручивай список. Повторное нажатие или Escape закрывает микшер. Полная панель остаётся в **Ещё → Микшер приложений**. Приложение остаётся в списке на паузе, пока у него есть звуковой сеанс. Микшер обновляется только при открытой панели.
+**ЛКМ по динамику на главной** переключает системную громкость и громкость приложения текущего плеера. **ПКМ** раскрывает микшер; повторный ПКМ или Escape закрывает его. Полная панель остаётся в **Ещё → Микшер приложений**. Приложение остаётся в списке на паузе, пока у него есть звуковой сеанс. Микшер обновляется только при открытой панели.
 
-Открой **Ещё → Уведомления → Подключить** и разреши доступ, если Windows его запросит. Через кнопку **Параметры Windows** включи **«Не беспокоить»**, чтобы скрыть обычные системные баннеры. Новые уведомления плавно раскрываются из острова в карточку среднего размера; пока остров открыт, они ждут в очереди. Наведение приостанавливает исчезновение. Нажатие открывает историю уведомлений в острове, крестик возвращает обычный остров. При подключении старые уведомления не всплывают заново и не удаляются из центра Windows. Содержимое хранится только в памяти.
+Открой **Ещё → Уведомления → Подключить** и разреши доступ, если Windows его запросит. Через **Параметры Windows** включи **«Не беспокоить»**, чтобы скрыть обычные системные баннеры. Наведение на уведомление раскрывает его на главной: размер в одну, две или четыре плитки выбирается в настройках уведомлений. Кнопка разворачивания открывает полный текст с прокруткой. **«Открыть приложение»** доступно всегда в полном уведомлении; отдельная настройка позволяет переходить в приложение и по клику на саму карточку. Старые уведомления при подключении не показываются заново и не удаляются из центра Windows. Содержимое хранится только в памяти.
 
 Приоритетные исключения, напоминания и будильники могут показывать свои баннеры — их можно настроить в [параметрах уведомлений Windows](https://support.microsoft.com/en-us/windows/experience/notifications-and-do-not-disturb-in-windows). Быстрые действия пока не добавлены. Если Windows не предоставляет события уведомлений приложению без установочного пакета, при включённой функции проверка выполняется примерно раз в секунду. Отключение функции останавливает проверки.
 
 В уведомлениях есть вкладка **«Как настроить»**: доступ к уведомлениям, отключение баннеров Windows при сохранении записей в центре и включение **«Системного окна Windows» / «Использовать уведомления Windows»** в настройках Telegram. Собственные всплывающие окна Telegram не попадают в системный обработчик.
 
-Карточки и история показывают фото отправителя/чата из системного уведомления с маленьким значком приложения. Фото сопоставляется с полным текстом уведомления, читается только из локального файла и сохраняется в памяти. Telegram удаляет временные аватарки примерно через минуту: у старых уведомлений с уже удалённым файлом отображается значок приложения. Вход в Telegram и загрузка изображений по сети не используются.
+Карточки и история показывают фото отправителя/чата со значком приложения. Недостающие изображения и аргументы открытия берутся из базы уведомлений текущего пользователя Windows, доступ к которой выполняется только для чтения. Проверяется совпадение ID уведомления, приложения и полного текста. Если база недоступна или её формат изменился, продолжает работать системный обработчик. Поддерживаются локальные пути, включая смешанные разделители Discord, и ограниченная загрузка аватарок с CDN Discord. Готовые картинки сохраняются в памяти; при отсутствии изображения остаётся значок приложения.
+
+Переход использует зарегистрированный обработчик уведомлений Windows с исходными аргументами или поддерживаемую ссылку самого приложения. Запасной вариант — зарегистрированный ярлык отправителя. Некоторые приложения не передают адрес назначения: открытие конкретного чата зависит от их обработчика. Текст сообщений не выполняется как команда. Быстрые действия и ответы не воспроизводятся.
+
+### Настройка шапки
+
+В **Ещё → Настроить шапку…** можно добавить вкладку, явно заменить другую или вернуть закреплённую вкладку в «Ещё». До пяти вкладок помимо главной показываются полные подписи; при большем количестве — круглые кнопки с иконками и подсказками. Не поместившиеся вкладки остаются в «Ещё». Тянущийся край декоративный: мышь перехватывают только исходное тело острова и прикреплённый персонаж.
 
 ### Яндекс Музыка: Моя волна
 
-Открой **Ещё → Моя волна → Подключить Яндекс Музыку**, скопируй код и подтверди вход на [ya.ru/device](https://ya.ru/device). Остров не запрашивает пароль. Токен шифруется для текущего пользователя Windows; **Выйти** останавливает музыку и удаляет сохранённый токен.
+Открой **Ещё → Моя волна → Подключить Яндекс Музыку** или **Настройки → Интеграции → Яндекс Музыка**, скопируй код и подтверди вход на [ya.ru/device](https://ya.ru/device). Остров не запрашивает пароль. Токен шифруется для текущего пользователя Windows; **Выйти** останавливает музыку и удаляет сохранённый токен.
 
 Главная карточка и «Моя волна» используют общий плеер, перемотку и палитру трека. Цвета фона, мини-плеера, акцента и текста приходят из Яндекса; недостающие вычисляются из обложки. Цвета сменяются плавно с сохранением читаемости. «Моя волна · Настроить» на главной и «К плееру» в волне переключают вкладки без перезапуска музыки.
 
