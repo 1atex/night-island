@@ -118,6 +118,21 @@ impl Permissions {
         if tainted && cap.dangerous() && level == Level::Auto { Level::Ask } else { level }
     }
 
+    pub fn command_level(&self, cap: Cap, tainted: bool) -> Level {
+        if self.enabled {
+            return self.decide(cap, tainted);
+        }
+        match cap {
+            Cap::Media | Cap::Controls | Cap::Open | Cap::Reminders => Level::Auto,
+            Cap::Power => Level::Ask,
+            _ => Level::Off,
+        }
+    }
+
+    pub fn commands_offered(&self) -> Vec<Cap> {
+        ALL.iter().copied().filter(|&c| self.command_level(c, false) != Level::Off).collect()
+    }
+
     pub fn tools_offered(&self) -> Vec<Cap> {
         ALL.iter().copied().filter(|&c| self.level(c) != Level::Off).collect()
     }
@@ -136,6 +151,17 @@ mod tests {
         let p = Permissions::default();
         assert!(ALL.iter().all(|&c| p.level(c) == Level::Off));
         assert!(p.tools_offered().is_empty());
+    }
+
+    #[test]
+    fn with_the_assistant_off_the_old_dictation_commands_still_work() {
+        let p = Permissions::default();
+        assert_eq!(p.command_level(Cap::Media, false), Level::Auto);
+        assert_eq!(p.command_level(Cap::Power, false), Level::Ask);
+        assert_eq!(p.command_level(Cap::Memory, false), Level::Off);
+        assert_eq!(p.command_level(Cap::Shell, false), Level::Off);
+        assert!(!p.commands_offered().contains(&Cap::Memory));
+        assert!(on().commands_offered().contains(&Cap::Memory));
     }
 
     #[test]

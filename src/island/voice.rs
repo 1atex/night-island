@@ -1,6 +1,17 @@
 use crate::island::*;
+use crate::platform::{sounds, speech};
+use crate::services::assistant::{Cap, Level, memory};
 
 impl App {
+    fn cue(&self, cue: sounds::Cue) {
+        sounds::play(cue, self.settings.assistant.cue_volume());
+    }
+
+    fn fail_by_voice(&mut self, text: &str) {
+        self.cue(sounds::Cue::Error);
+        self.notify_for(Notice::Error, '\u{E783}', text, 4000);
+    }
+
     fn clear_notice(&mut self) {
         self.kill_timer(Timer::Notice);
         self.ui.notice = None;
@@ -12,6 +23,7 @@ impl App {
     pub(in crate::island) fn toggle_dictation(&mut self) {
         if dictation::active() {
             dictation::stop();
+            self.cue(sounds::Cue::Done);
             self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
             return;
         }
@@ -27,6 +39,7 @@ impl App {
             return self.notify_for(Notice::Error, '\u{E783}', "Save a key for the speech service first", 3500);
         }
         if dictation::start(self.hwnd) {
+            self.cue(sounds::Cue::Heard);
             self.show_notice_for(
                 '\u{E720}',
                 "Listening… press the keys again",
@@ -62,7 +75,14 @@ impl App {
         if command.is_empty() {
             return self.show_notice_for('\u{E720}', "Say a command after the name", 2200);
         }
-        if ai::ask_command(self.hwnd, command) {
+        let perms = &self.settings.assistant.perms;
+        let notes = if perms.command_level(Cap::Memory, false) == Level::Off {
+            String::new()
+        } else {
+            memory::prompt_block(&memory::load(), 1500)
+        };
+        let system = voicecmd::system_prompt(&perms.commands_offered(), &notes);
+        if ai::ask_command(self.hwnd, command, system) {
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
         } else {
             self.notify_for(Notice::Error, '\u{E783}', "Another request is running, try again in a moment", 3500);
@@ -97,7 +117,47 @@ impl App {
                 return self.notify_for(Notice::Error, '\u{E783}', &short, 4500);
             }
         };
-        match voicecmd::parse(&reply) {
+        self.handle_command(voicecmd::parse(&reply), false);
+    }
+
+    fn handle_command(&mut self, command: voicecmd::Command, confirmed: bool) {
+        if let Some(cap) = voicecmd::cap_of(&command) {
+            match self.settings.assistant.perms.command_level(cap, false) {
+                Level::Off => {
+                    let text = format!("{}: off in the Assistant settings", crate::ui::i18n::tr(cap.title()));
+                    return self.fail_by_voice(&text);
+                }
+                Level::Ask if !confirmed && !matches!(command, voicecmd::Command::Power(_)) => {
+                    let text = format!("{}? Say the name and \"yes\"", crate::ui::i18n::tr(cap.title()));
+                    self.pending_ask = Some((command, std::time::Instant::now()));
+                    return self.notify_for(
+                        Notice::Integrations,
+                        '\u{E897}',
+                        &text,
+                        (voicecmd::CONFIRM_SECS * 1000) as u32,
+                    );
+                }
+                _ => {}
+            }
+        }
+        match command {
+            voicecmd::Command::Remember(text) => {
+                let mut notes = memory::load();
+                if memory::add(&mut notes, &text) && memory::save(&notes).is_ok() {
+                    self.show_notice_for('\u{E73E}', "Remembered", 1800);
+                } else {
+                    self.show_notice_for('\u{E711}', "Already known", 1800);
+                }
+            }
+            voicecmd::Command::Forget(what) => {
+                let mut notes = memory::load();
+                let dropped = memory::forget(&mut notes, &what);
+                if dropped > 0 && memory::save(&notes).is_ok() {
+                    self.show_notice_for('\u{E74D}', &format!("Forgot {dropped}"), 1800);
+                } else {
+                    self.show_notice_for('\u{E711}', "Nothing like that in memory", 2200);
+                }
+            }
             voicecmd::Command::Media(what) => {
                 media::control(match what {
                     voicecmd::Media::PlayPause => media::Control::PlayPause,
@@ -145,6 +205,10 @@ impl App {
                 self.notify_for(Notice::Integrations, glyph, text, (voicecmd::CONFIRM_SECS * 1000) as u32);
             }
             voicecmd::Command::Confirm => {
+                let asked = self.pending_ask.take().filter(|(_, at)| at.elapsed().as_secs() <= voicecmd::CONFIRM_SECS);
+                if let Some((command, _)) = asked {
+                    return self.handle_command(command, true);
+                }
                 let fresh =
                     self.pending_power.take().filter(|(_, at)| at.elapsed().as_secs() <= voicecmd::CONFIRM_SECS);
                 match fresh {
@@ -156,15 +220,15 @@ impl App {
             }
             voicecmd::Command::Cancel => {
                 self.pending_power = None;
+                self.pending_ask = None;
                 self.show_notice_for('\u{E711}', "Cancelled", 1500);
             }
             voicecmd::Command::Answer(text) => {
                 let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
                 self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);
+                speech::speak(&text, self.settings.assistant.voice_volume());
             }
-            voicecmd::Command::Unknown => {
-                self.notify_for(Notice::Error, '\u{E783}', "That command is not something I can do by voice", 3500);
-            }
+            voicecmd::Command::Unknown => self.fail_by_voice("That command is not something I can do by voice"),
         }
     }
 

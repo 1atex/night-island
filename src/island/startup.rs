@@ -304,6 +304,7 @@ impl App {
             want_chat_dialog: false,
             want_header_menu: false,
             pending_power: None,
+            pending_ask: None,
             reminders: Vec::new(),
             recording: None,
             notice_link: None,

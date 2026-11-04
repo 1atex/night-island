@@ -142,6 +142,7 @@ struct App {
     want_chat_dialog: bool,
     want_header_menu: bool,
     pending_power: Option<(voicecmd::Power, std::time::Instant)>,
+    pending_ask: Option<(voicecmd::Command, std::time::Instant)>,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
     notice_link: Option<std::path::PathBuf>,

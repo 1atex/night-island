@@ -28,11 +28,11 @@ impl Assistant {
     }
 
     pub fn cue_volume(&self) -> u8 {
-        if self.sounds { self.volume } else { 0 }
+        if self.perms.enabled && self.sounds { self.volume } else { 0 }
     }
 
     pub fn voice_volume(&self) -> u8 {
-        if self.speak { self.volume } else { 0 }
+        if self.perms.enabled && self.speak { self.volume } else { 0 }
     }
 }
 
@@ -86,6 +86,8 @@ mod tests {
     #[test]
     fn muted_parts_have_zero_volume() {
         let mut a = Assistant::default();
+        assert_eq!((a.cue_volume(), a.voice_volume()), (0, 0));
+        a.perms.enabled = true;
         assert_eq!(a.cue_volume(), 70);
         a.sounds = false;
         a.speak = false;

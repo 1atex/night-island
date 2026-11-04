@@ -554,15 +554,13 @@ pub fn take_command_result() -> Option<Answer> {
     COMMAND_RESULT.lock().ok()?.take()
 }
 
-pub fn ask_command(hwnd: HWND, command: &str) -> bool {
+pub fn ask_command(hwnd: HWND, command: &str, system: String) -> bool {
     if BUSY.swap(true, Ordering::SeqCst) {
         return false;
     }
     let (raw, settings, turn) = (hwnd.0 as isize, config(), ChatTurn::text(false, command));
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| {
-            build(&settings, key, &[turn], crate::tools::voicecmd::SYSTEM_PROMPT, COMMAND_OUTPUT_TOKENS)
-        });
+        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, COMMAND_OUTPUT_TOKENS));
         if let Ok(mut r) = COMMAND_RESULT.lock() {
             *r = Some(answer);
         }
