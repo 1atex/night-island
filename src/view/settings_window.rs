@@ -137,9 +137,9 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
-    [(0, "Application"), (4, "Look and feel"), (8, "Monitoring"), (11, "Services"), (14, "Program")];
+    [(0, "Application"), (5, "Look and feel"), (9, "Monitoring"), (12, "Services"), (15, "Program")];
 
-pub const GROUPS: [Group; 15] = [
+pub const GROUPS: [Group; 16] = [
     Group {
         glyph: '\u{E713}',
         name: "General",
@@ -154,6 +154,7 @@ pub const GROUPS: [Group; 15] = [
         custom: None,
         sections: &[(0, "Ghost mode"), (5, "Placement and look"), (13, "Open and close")],
     },
+    Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None, sections: &[] },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items), sections: &[] },
     Group {
@@ -225,7 +226,7 @@ const ROW_H: f32 = 46.0;
 const SERVICE_H: f32 = 56.0;
 const NOTE_H: f32 = 19.0;
 const CTL_W: f32 = 300.0;
-const GROUP_H: f32 = 32.0;
+const GROUP_H: f32 = 31.0;
 const SIDE_SECTION_H: f32 = 26.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -271,12 +272,14 @@ pub enum Act {
     KeysReset,
     LyricsAppAdd,
     LyricsAppRemove(usize),
+    DockRemove(usize),
     Metric(usize),
     Agent(usize),
 }
 
 #[derive(Default)]
 pub struct SwUi {
+    pub dock_status: String,
     pub group: usize,
     pub scroll: f32,
     pub search: String,
@@ -840,6 +843,61 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
 fn matches(label: &str, query: &str) -> bool {
     let q = query.trim().to_lowercase();
     q.is_empty() || label.to_lowercase().contains(&q) || crate::ui::i18n::tr(label).to_lowercase().contains(&q)
+}
+
+fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![
+        Item::Heading("Desktop dock"),
+        Item::Row(Sid::DockEnabled, "Enable desktop dock", Kind::Toggle),
+        Item::Note("One process with Island. Enable after closing your other dock."),
+        Item::Section("Behaviour"),
+        Item::Row(Sid::DockAutoHide, "Automatically hide the dock", Kind::Toggle),
+        Item::Row(Sid::DockRunning, "Show running applications", Kind::Toggle),
+        Item::Row(Sid::DockFullscreen, "Hide over fullscreen applications", Kind::Toggle),
+        Item::Row(Sid::DockEconomy, "Economy animations (30 fps)", Kind::Toggle),
+        Item::Section("Appearance"),
+        Item::Row(Sid::DockIconSize, "Dock icon size", Kind::Slider),
+        Item::Row(Sid::DockZoom, "Magnification on hover", Kind::Slider),
+        Item::Row(Sid::DockOpacity, "Dock opacity", Kind::Slider),
+        Item::Row(Sid::DockMargin, "Bottom margin", Kind::Slider),
+        Item::Row(Sid::DockMonitor, "Switch dock monitor", Kind::Button),
+        Item::Text(if ui.cfg.desktop_dock.monitor.is_empty() {
+            crate::ui::i18n::tr("Primary monitor").into_owned()
+        } else {
+            crate::platform::desktop_dock::monitors()
+                .iter()
+                .enumerate()
+                .find(|(_, m)| m.device == ui.cfg.desktop_dock.monitor)
+                .map(|(i, m)| {
+                    format!(
+                        "{} {} · {} × {}",
+                        crate::ui::i18n::tr("Monitor"),
+                        i + 1,
+                        m.bounds.right - m.bounds.left,
+                        m.bounds.bottom - m.bounds.top
+                    )
+                })
+                .unwrap_or_else(|| crate::ui::i18n::tr("Primary monitor").into_owned())
+        }),
+        Item::Section("Applications"),
+        Item::Row(Sid::DockImport, "Import applications from MyDockFinder", Kind::Button),
+        Item::Row(Sid::DockAdd, "Add application or file", Kind::Button),
+        Item::Note("Drop shortcuts onto the dock. Drag pinned icons to reorder."),
+        Item::Note("Right-click for windows, pinning and settings. Scroll for more apps."),
+        Item::Row(Sid::DockTaskbar, "Windows taskbar settings", Kind::Button),
+        Item::Note("To free the bottom edge, enable taskbar auto-hide in Windows."),
+    ];
+    if !ui.sw.dock_status.is_empty() {
+        let index = out.iter().position(|item| matches!(item, Item::Row(Sid::DockImport, ..))).unwrap_or(0);
+        out.insert(index + 1, Item::Text(ui.sw.dock_status.clone()));
+    }
+    if !ui.cfg.desktop_dock.pins.is_empty() {
+        out.push(Item::Section("Pinned applications"));
+    }
+    for (i, pin) in ui.cfg.desktop_dock.pins.iter().enumerate() {
+        out.push(Item::Pair(Act::DockRemove(i), pin.name.clone(), "Remove".into(), false));
+    }
+    out
 }
 
 fn rows_with_sections(group: &Group) -> Vec<Item> {
@@ -1429,6 +1487,41 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_dock_controls_persist_and_sidebar_stays_inside_the_window() {
+        let mut ui = UiState::new();
+        ui.sw.group = GROUPS.iter().position(|g| g.name == "Desktop dock").unwrap();
+        let rows = items(&ui);
+        for sid in [
+            Sid::DockEnabled,
+            Sid::DockAutoHide,
+            Sid::DockRunning,
+            Sid::DockFullscreen,
+            Sid::DockEconomy,
+            Sid::DockIconSize,
+            Sid::DockZoom,
+            Sid::DockOpacity,
+            Sid::DockMargin,
+            Sid::DockMonitor,
+            Sid::DockImport,
+            Sid::DockAdd,
+            Sid::DockTaskbar,
+        ] {
+            assert!(rows.iter().any(|item| matches!(item, Item::Row(id, ..) if *id == sid)));
+        }
+        toggle_set(Sid::DockEnabled, &mut ui.cfg, true);
+        toggle_set(Sid::DockAutoHide, &mut ui.cfg, true);
+        slider_apply(Sid::DockIconSize, &mut ui.cfg, 1.0);
+        let saved = serde_json::to_string(&ui.cfg).unwrap();
+        let restored: Settings = serde_json::from_str(&saved).unwrap();
+        assert!(restored.desktop_dock.enabled && restored.desktop_dock.auto_hide);
+        assert_eq!(restored.desktop_dock.icon_size, 72);
+        for scale in [1.0, 1.5, 2.0] {
+            let size = (SW_SIZE.0 * scale, SW_SIZE.1 * scale);
+            assert!(group_rect(&layout(size, scale), scale, GROUPS.len() - 1).3 <= size.1);
+        }
+    }
 
     #[test]
     fn wave_integration_covers_sign_in_code_and_connected_account() {

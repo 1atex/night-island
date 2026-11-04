@@ -28,6 +28,54 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Applications" => "Приложения",
+        "Pinned applications" => "Закреплённые приложения",
+        "Add" => "Добавить",
+        "Monitor" => "Монитор",
+        "Desktop dock" => "Нижний док",
+        "Enable desktop dock" => "Включить нижний док",
+        "One process with Island. Enable after closing your other dock." => {
+            "Работает внутри Island. Перед включением закрой другой док."
+        }
+        "Automatically hide the dock" => "Автоматически скрывать док",
+        "Show running applications" => "Показывать запущенные приложения",
+        "Hide over fullscreen applications" => "Скрывать поверх полноэкранных приложений",
+        "Economy animations (30 fps)" => "Экономичные анимации (30 кадров/с)",
+        "Dock icon size" => "Размер иконок",
+        "Magnification on hover" => "Увеличение при наведении",
+        "Dock opacity" => "Непрозрачность дока",
+        "Bottom margin" => "Отступ снизу",
+        "Switch dock monitor" => "Переключить монитор дока",
+        "Primary monitor" => "Основной монитор",
+        "Import applications from MyDockFinder" => "Импорт приложений из MyDockFinder",
+        "Add application or file" => "Добавить приложение или файл",
+        "Drop shortcuts onto the dock. Drag pinned icons to reorder." => {
+            "Перетащи ярлыки на док. Закреплённые значки можно переставлять."
+        }
+        "Right-click for windows, pinning and settings. Scroll for more apps." => {
+            "ПКМ — окна и закрепление. Колесо — прокрутка приложений."
+        }
+        "Windows taskbar settings" => "Параметры панели задач Windows",
+        "To free the bottom edge, enable taskbar auto-hide in Windows." => {
+            "Чтобы освободить низ экрана, включи автоскрытие панели Windows."
+        }
+        "Could not create the desktop dock" => "Не удалось создать док",
+        "Application added to the dock" => "Приложение добавлено в док",
+        "Already pinned or dock is full (32)" => "Уже закреплено или достигнут лимит (32)",
+        "Could not read ico.ini" => "Не удалось прочитать ico.ini",
+        "Imported applications" => "Добавлено приложений",
+        "Open new window" => "Открыть новое окно",
+        "Unpin from desktop dock" => "Открепить от дока",
+        "Pin to desktop dock" => "Закрепить в доке",
+        "Move left" => "Передвинуть влево",
+        "Move right" => "Передвинуть вправо",
+        "Desktop dock settings" => "Настройки нижнего дока",
+        "Dock configuration is too large" => "Файл настроек дока слишком большой",
+        "Unsupported dock configuration encoding" => "Неподдерживаемая кодировка настроек дока",
+        "No applications found in ico.ini" => "В ico.ini не найдены приложения",
+        "Import" => "Импортировать",
+        "Switch" => "Переключить",
+
         "Create a pet from this photo" => "Создай питомца по этой фотографии",
         "Preview ready. Apply your pet or describe another change below." => {
             "Питомец готов. Нажми «Применить» или опиши, что ещё изменить."

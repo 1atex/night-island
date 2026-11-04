@@ -550,6 +550,12 @@ impl App {
                     self.metrics_changed();
                 }
             }
+            view::Act::DockRemove(i) => {
+                if i < self.settings.desktop_dock.pins.len() {
+                    self.settings.desktop_dock.pins.remove(i);
+                    self.save_desktop_dock();
+                }
+            }
             view::Act::LyricsAppRemove(i) => {
                 if i < self.settings.lyrics_apps.len() {
                     self.settings.lyrics_apps.remove(i);
@@ -712,6 +718,12 @@ impl App {
                 unsafe { SetCapture(self.settings_win.unwrap_or_default()) };
             }
             view::SetHit::Button => {
+                if matches!(
+                    id,
+                    view::Sid::DockImport | view::Sid::DockMonitor | view::Sid::DockAdd | view::Sid::DockTaskbar
+                ) {
+                    self.desktop_dock_setting(id);
+                }
                 if id == view::Sid::WindowsNotificationsSettings {
                     cmd::shell_open("ms-settings:notifications", None);
                 }

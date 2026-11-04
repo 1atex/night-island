@@ -2,6 +2,20 @@ use crate::view::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sid {
+    DockEnabled,
+    DockAutoHide,
+    DockRunning,
+    DockFullscreen,
+    DockEconomy,
+    DockIconSize,
+    DockZoom,
+    DockOpacity,
+    DockMargin,
+    DockMonitor,
+    DockImport,
+    DockAdd,
+    DockTaskbar,
+
     PillBlur,
     Autostart,
     PillOpacity,
@@ -192,6 +206,10 @@ pub(in crate::view) fn setting_row(pill: Rect, scale: f32, index: usize) -> (Rec
 
 pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
     match id {
+        Sid::DockIconSize => (32.0, 72.0, 2.0),
+        Sid::DockZoom => (1.0, 1.7, 0.05),
+        Sid::DockOpacity => (0.4, 1.0, 0.02),
+        Sid::DockMargin => (0.0, 40.0, 1.0),
         Sid::Size => (80.0, 200.0, 5.0),
         Sid::LiquidReach => (60.0, 300.0, 5.0),
         Sid::LiquidStrength => (6.0, 40.0, 1.0),
@@ -215,6 +233,10 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
 
 pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
     match id {
+        Sid::DockIconSize => c.desktop_dock.icon_size as f32,
+        Sid::DockZoom => c.desktop_dock.zoom,
+        Sid::DockOpacity => c.desktop_dock.opacity,
+        Sid::DockMargin => c.desktop_dock.margin as f32,
         Sid::Size => c.scale_percent as f32,
         Sid::LiquidReach => c.liquid_reach,
         Sid::LiquidStrength => c.liquid_strength,
@@ -242,6 +264,9 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
 
 pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
     match id {
+        Sid::DockIconSize | Sid::DockMargin => format!("{v:.0} px"),
+        Sid::DockZoom => format!("{v:.2}×"),
+        Sid::DockOpacity => format!("{:.0}%", v * 100.0),
         Sid::Size => format!("{v:.0}%"),
         Sid::LiquidReach | Sid::LiquidStrength => format!("{v:.0} px"),
         Sid::EqStrength => format!("\u{00D7}{v:.1}"),
@@ -263,6 +288,10 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
     let raw = min + (max - min) * norm.clamp(0.0, 1.0);
     let v = (raw / step).round() * step;
     match id {
+        Sid::DockIconSize => c.desktop_dock.icon_size = v as u32,
+        Sid::DockZoom => c.desktop_dock.zoom = v,
+        Sid::DockOpacity => c.desktop_dock.opacity = v,
+        Sid::DockMargin => c.desktop_dock.margin = v as u32,
         Sid::Size => c.scale_percent = v as u32,
         Sid::LiquidReach => c.liquid_reach = v,
         Sid::LiquidStrength => c.liquid_strength = v,
@@ -298,6 +327,11 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::DockEnabled => c.desktop_dock.enabled,
+        Sid::DockAutoHide => c.desktop_dock.auto_hide,
+        Sid::DockRunning => c.desktop_dock.show_running,
+        Sid::DockFullscreen => c.desktop_dock.hide_fullscreen,
+        Sid::DockEconomy => c.desktop_dock.economy,
         Sid::AutoHide => c.auto_hide,
         Sid::LockDrag => c.lock_drag,
         Sid::Acrylic => c.acrylic,
@@ -361,6 +395,11 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::DockEnabled => c.desktop_dock.enabled = on,
+        Sid::DockAutoHide => c.desktop_dock.auto_hide = on,
+        Sid::DockRunning => c.desktop_dock.show_running = on,
+        Sid::DockFullscreen => c.desktop_dock.hide_fullscreen = on,
+        Sid::DockEconomy => c.desktop_dock.economy = on,
         Sid::AutoHide => c.auto_hide = on,
         Sid::LockDrag => c.lock_drag = on,
         Sid::Acrylic => c.acrylic = on,
@@ -745,7 +784,12 @@ pub(in crate::view) fn paint_control(
         Kind::Button => {
             p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
             p.text(
-                "Open",
+                match id {
+                    Sid::DockImport => "Import",
+                    Sid::DockAdd => "Add",
+                    Sid::DockMonitor => "Switch",
+                    _ => "Open",
+                },
                 (ctl.0, ctl.1, ctl.2 - 26.0 * scale, ctl.3),
                 12.0 * scale,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,

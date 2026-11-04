@@ -188,6 +188,9 @@ impl App {
     }
 
     pub(in crate::island) fn apply_capture(&self) {
+        if let Some(dock) = &self.desktop_dock {
+            dock.set_capture_hidden(self.settings.capture_hidden);
+        }
         let affinity = if self.settings.capture_hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, affinity);

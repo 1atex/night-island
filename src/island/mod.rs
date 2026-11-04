@@ -76,6 +76,7 @@ mod character;
 mod companion_chat;
 mod cover_motion;
 mod demo;
+mod desktop_dock;
 mod editing;
 mod geometry;
 mod hotkeys;
@@ -133,6 +134,7 @@ struct App {
     backdrop: SpriteVisual,
     tint: SpriteVisual,
     settings_win: Option<HWND>,
+    desktop_dock: Option<crate::ui::desktop_dock::Dock>,
     power_last: Option<(u8, bool)>,
     lock_pending: Vec<u16>,
     ui: view::UiState,

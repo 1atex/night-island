@@ -450,7 +450,12 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         winevent::WM_FOREGROUND => {
             winevent::acknowledge();
-            with_app(|a| a.on_foreground_changed());
+            with_app(|a| {
+                a.on_foreground_changed();
+                if let Some(dock) = &mut a.desktop_dock {
+                    dock.refresh_windows();
+                }
+            });
             LRESULT(0)
         }
         metrics::WM_METRICS => {
@@ -617,8 +622,15 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             tray::add(hwnd);
             LRESULT(0)
         }
+        crate::ui::desktop_dock::WM_DESKTOP_DOCK => {
+            crate::island::desktop_dock::handle_request(hwnd, wparam.0);
+            LRESULT(0)
+        }
         WM_DESTROY => {
-            with_app(|a| a.save_note());
+            with_app(|a| {
+                a.save_note();
+                a.desktop_dock.take();
+            });
             dnd::unregister(hwnd);
             clips::sys::unlisten(hwnd);
             tray::remove(hwnd);

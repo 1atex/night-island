@@ -23,3 +23,5 @@ pub mod system;
 pub mod volume;
 pub mod vpn;
 pub mod winevent;
+
+pub mod desktop_dock;

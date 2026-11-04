@@ -363,6 +363,7 @@ impl ProgressStyle {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
     pub weather: bool,
     pub weather_city: String,
@@ -470,6 +471,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            desktop_dock: Default::default(),
             language: Language::Ru,
             weather: true,
             weather_city: String::new(),
@@ -945,6 +947,7 @@ impl Settings {
     }
 
     pub fn sanitize(&mut self) {
+        self.desktop_dock.sanitize();
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
         if ![1, 2, 4].contains(&self.notification_tiles) {

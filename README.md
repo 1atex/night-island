@@ -50,6 +50,14 @@ Start your personal wave and adjust activity, variety, mood and language with th
 
 This integration uses the unofficial Yandex Music API and native Windows audio playback (MP3). An eligible subscription and region are required. Protocol behavior was researched in [yamusic-md3](https://github.com/yaskorinov/yamusic-md3); the implementation uses Night Island's native UI and workers. Account-specific playback has been confirmed by the user; automated checks cover device authorization endpoints, API requests, queue metadata, native audio and UI rendering.
 
+### Desktop dock
+
+An optional bottom dock shares Island's process and graphics device. Enable it in **Settings → Desktop dock** after closing another dock. It includes pinned apps and files, running-window indicators, click to launch/restore/minimize, a window list on right-click, pinned-icon reordering and file drops. Scroll when the app list exceeds the screen width.
+
+Settings control icon size, hover magnification, opacity, bottom margin, monitor, auto-hide, hiding over fullscreen apps and 30/60 fps motion. Animation frames stop at rest, Windows reduced-motion settings are respected, and the dock is destroyed when disabled. The Windows taskbar settings link lets you enable its auto-hide; Island does not replace Explorer or change taskbar visibility automatically.
+
+**Import applications from MyDockFinder** reads `ico.ini` from the default Steam installation, or asks for the file when it is elsewhere. It merges application paths in order without copying MyDockFinder binaries, themes or icon packs. Icons come from Windows. The first version does not include window previews, notification badges or window-minimization effects. The upper panel remains Island.
+
 ### Interface motion
 
 Home action tiles, playback buttons, header selection and control tiles use short hover transitions. Pressed Home buttons compress slightly; settings switches slide their thumb and segmented controls move their selection. Repeated input retargets from the currently visible value. The feedback timer stops when transitions finish.
@@ -129,6 +137,14 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 Запусти свою волну и стрелками выбери занятие, характер, настроение и язык. Варианты загружаются из Яндекса. Новые настройки применяются после текущего трека; кнопка **Следующий** переключает сразу. Музыка играет и в свёрнутом острове: работают цвета обложки, прогресс, управление на главной и у персонажа. **Остановить** возвращает управление другим плеерам. Запуск волны вместе с островом включается отдельно.
 
 Используется неофициальный API Яндекс Музыки и встроенный аудиоплеер Windows (MP3). Нужны подходящая подписка и доступность сервиса в регионе. Связь с API изучена по [yamusic-md3](https://github.com/yaskorinov/yamusic-md3), интерфейс и обработчики написаны для Night Island. Пользователь подтвердил работу персональной волны после входа; автоматические проверки покрывают получение кода, запросы API, данные очереди, воспроизведение Windows и отрисовку вкладки.
+
+### Нижний док
+
+Отдельная нижняя панель работает внутри процесса Island на общем графическом устройстве. Включается в **Настройки → Нижний док**, после закрытия другого дока. Поддерживает закреплённые приложения и файлы, индикаторы запущенных окон, запуск/возврат/сворачивание по клику, список окон по ПКМ, перестановку значков и добавление перетаскиванием. Если приложения не помещаются, список прокручивается колесом.
+
+В настройках: размер, увеличение при наведении, прозрачность, отступ, монитор, автоскрытие, скрытие поверх полноэкранных приложений и анимации 30/60 кадров/с. В покое отрисовка останавливается; учитывается отключение анимаций Windows. При выключении освобождается окно дока. По отдельной кнопке открываются параметры панели задач Windows для включения её автоскрытия; Island сам не скрывает панель задач и не заменяет Explorer.
+
+Кнопка **Импорт приложений из MyDockFinder** читает `ico.ini` из стандартной папки Steam или предлагает выбрать файл. Приложения добавляются в исходном порядке без дубликатов; значки берутся из Windows. Бинарники, темы и наборы иконок MyDockFinder не копируются. Предпросмотр окон, счётчики уведомлений и эффекты сворачивания чужих окон в первую версию не входят. Верхнюю панель пока заменяет сам Island.
 
 ### Анимации интерфейса
 

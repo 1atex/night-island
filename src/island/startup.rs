@@ -96,6 +96,7 @@ pub fn run() -> Result<()> {
             windows::Win32::System::RemoteDesktop::NOTIFY_FOR_THIS_SESSION,
         );
         with_app(|app| app.configure_system_notifications());
+        with_app(|app| app.configure_desktop_dock());
 
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         let failed = with_app_value(|a| register_hotkeys(hwnd, &a.settings)).unwrap_or_default();
@@ -288,6 +289,7 @@ impl App {
             scale,
             dpi_scale,
             settings_win: None,
+            desktop_dock: None,
             power_last: view::battery(),
             lock_pending: Vec::new(),
             settings,

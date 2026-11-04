@@ -59,6 +59,10 @@ pub fn icon_for_path(path: &str) -> Option<Arc<Icon>> {
     loaded
 }
 
+pub fn large_icon_for_path(path: &str) -> Option<Arc<Icon>> {
+    shell_image(path, 128, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).map(Arc::new)
+}
+
 pub fn thumbnail(path: &str) -> Option<Arc<Icon>> {
     shell_image(path, 96, SIIGBF_THUMBNAILONLY | SIIGBF_CROPTOSQUARE).map(Arc::new)
 }

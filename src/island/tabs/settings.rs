@@ -81,6 +81,8 @@ impl App {
                         let _ = self.tint.SetOpacity(self.settings.tint_open);
                     }
                 }
+                DockEnabled | DockAutoHide | DockRunning | DockFullscreen | DockEconomy | DockIconSize | DockZoom
+                | DockOpacity | DockMargin => self.configure_desktop_dock(),
                 SystemNotifications => self.configure_system_notifications(),
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
@@ -103,7 +105,10 @@ impl App {
                         let _ = self.animate_to(true, false);
                     }
                 }
-                PanelHue | PanelSat | PanelVal | AccentHue | AccentSat => self.apply_theme(),
+                PanelHue | PanelSat | PanelVal | AccentHue | AccentSat => {
+                    self.apply_theme();
+                    self.configure_desktop_dock();
+                }
                 PillOpacity => self.apply_pill_opacity(),
                 PillBlur => self.set_blur(self.state == State::Expanded),
                 Capture => self.apply_capture(),
