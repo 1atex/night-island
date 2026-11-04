@@ -312,6 +312,44 @@ impl Painter<'_> {
         }
     }
 
+    pub fn text_wrapped_trimmed(
+        &self,
+        text: &str,
+        rect: (f32, f32, f32, f32),
+        size: f32,
+        weight: DWRITE_FONT_WEIGHT,
+        color: D2D1_COLOR_F,
+    ) -> Result<()> {
+        unsafe {
+            let format = self.dwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                weight,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                w!("en-us"),
+            )?;
+            format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+            let sign = self.dwrite.CreateEllipsisTrimmingSign(&format)?;
+            format.SetTrimming(
+                &DWRITE_TRIMMING {
+                    granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                    delimiter: 0,
+                    delimiterCount: 0,
+                },
+                &sign,
+            )?;
+            let wide: Vec<u16> = text.encode_utf16().collect();
+            let layout =
+                self.dwrite.CreateTextLayout(&wide, &format, (rect.2 - rect.0).max(1.0), (rect.3 - rect.1).max(1.0))?;
+            self.push_clip(rect);
+            let result = self.draw_layout(rect.0, rect.1, &layout, color);
+            self.pop_clip();
+            result
+        }
+    }
+
     pub fn md_layout(
         &self,
         doc: &crate::ui::md::Doc,

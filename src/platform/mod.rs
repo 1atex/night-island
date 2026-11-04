@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod apps;
 pub mod audio;
+pub mod audio_mixer;
 pub mod autostart;
 pub mod capture;
 pub mod dictation;
@@ -9,6 +10,8 @@ pub mod downloads;
 pub mod lockkeys;
 pub mod media;
 pub mod metrics;
+mod notification_images;
+pub mod notifications;
 pub mod privacy;
 pub mod recognize;
 pub mod recorder;

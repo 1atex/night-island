@@ -71,16 +71,13 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
         HomeHit::VolumeIcon => {
             let row = volume_row(pill, scale, wide);
             (
-                if ui.home.vol_track {
-                    "Volume of this program: press for the system"
-                } else {
-                    "System volume: press for the playing program"
-                }
-                .into(),
+                if ui.home.mixer_open { "Close the app mixer" } else { "App mixer: adjust each application's volume" }
+                    .into(),
                 (row.0 + 2.0 * scale, row.1, row.0 + 42.0 * scale, row.3),
             )
         }
         HomeHit::Device => ("Sound output".into(), device_chip(pill, scale, wide)),
+        HomeHit::Mixer(_) => return None,
         HomeHit::DiscordMute => ("Mute".into(), strip_toggle(pill, scale, 1)),
         HomeHit::DiscordDeaf => ("Deafen".into(), strip_toggle(pill, scale, 0)),
         HomeHit::DiscordOverlay => ("Voice overlay".into(), strip_toggle(pill, scale, 2)),
