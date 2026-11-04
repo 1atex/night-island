@@ -74,6 +74,7 @@ use windows_numerics::{Vector2, Vector3};
 mod appearance;
 mod character;
 mod companion_chat;
+mod cover_motion;
 mod demo;
 mod editing;
 mod geometry;
@@ -165,6 +166,8 @@ struct App {
     ears: [Layer; 2],
     collapsed: Layer,
     expanded: Layer,
+    cover_layer: Layer,
+    cover_flight_until: Option<Instant>,
 }
 
 thread_local! {

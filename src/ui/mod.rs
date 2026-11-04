@@ -2,6 +2,7 @@ pub mod anim;
 pub mod characters;
 pub mod companion;
 mod companion_controls;
+pub mod feedback;
 pub mod gfx;
 pub mod i18n;
 pub mod icons;

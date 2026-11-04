@@ -120,10 +120,14 @@ impl App {
     }
 
     pub(in crate::island) fn repaint_expanded(&self) {
+        self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let e = self.pill_full();
         let _ = self.expanded.paint(&self.gpu, |p| {
             let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
+        if self.state == State::Expanded && (self.ui.feedback.active() || self.ui.home.track_transition.active()) {
+            self.set_timer(Timer::UiAnim, self.frame_ms());
+        }
         self.update_weather_timer();
     }
 

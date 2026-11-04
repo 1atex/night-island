@@ -135,6 +135,7 @@ impl App {
     }
 
     pub(in crate::island) fn render_settings_win(&self) {
+        self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let (Some(hwnd), Some((w, h))) = (self.settings_win, self.sw_client()) else { return };
         if w <= 0 || h <= 0 {
             return;
@@ -168,6 +169,9 @@ impl App {
             }
             let _ = DeleteDC(mem);
             ReleaseDC(Some(hwnd), screen);
+        }
+        if self.ui.feedback.active() {
+            self.set_timer(Timer::SwAnim, 16);
         }
     }
 
@@ -205,18 +209,19 @@ impl App {
         let mut moving = false;
         for (key, level) in &mut self.ui.sw.plates {
             let target = if Some(*key) == now { 1.0 } else { 0.0 };
-            let step = 0.16;
+            let step = if crate::ui::feedback::motion_allowed() { 0.16 } else { 1.0 };
             *level = if *level < target { (*level + step).min(target) } else { (*level - step).max(target) };
             moving |= *level != target;
         }
         self.ui.sw.plates.retain(|(key, level)| *level > 0.0 || Some(*key) == now);
         self.render_settings_win();
-        if moving {
+        if moving || self.ui.feedback.active() {
             self.set_timer(Timer::SwAnim, 16);
         }
     }
 
     pub(in crate::island) fn on_sw_down(&mut self, x: i32, y: i32) {
+        self.set_timer(Timer::SwAnim, 16);
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
         if let Some(id) = self.ui.sw.dropdown.take() {
             if let Some(view::SwHit::Pick(_, k)) = hit {

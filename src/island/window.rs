@@ -241,6 +241,9 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_CAPTURECHANGED => {
             with_app(|a| {
+                if a.ui.pressed_action.take().is_some() {
+                    a.repaint_expanded();
+                }
                 if a.pointer.seek_drag {
                     a.pointer.seek_drag = false;
                     a.ui.home.seek = None;

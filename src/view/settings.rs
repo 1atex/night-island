@@ -633,7 +633,7 @@ pub(in crate::view) fn paint_rows(
             DWRITE_TEXT_ALIGNMENT_LEADING,
             rgba(1.0, 1.0, 1.0, 0.85),
         )?;
-        paint_control(p, scale, &ui.cfg, *id, *kind, ctl)?;
+        paint_control(p, scale, &ui.cfg, *id, *kind, ctl, &ui.feedback)?;
     }
     Ok(())
 }
@@ -645,6 +645,7 @@ pub(in crate::view) fn paint_control(
     id: Sid,
     kind: Kind,
     ctl: Rect,
+    feedback: &crate::ui::feedback::Feedback,
 ) -> Result<()> {
     let accent = acc(1.0);
     let cy = (ctl.1 + ctl.3) / 2.0;
@@ -653,15 +654,19 @@ pub(in crate::view) fn paint_control(
             let selected = segment_value(id, cfg);
             p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
             let half = (ctl.2 - ctl.0) / 2.0;
+            let position = feedback.sample(600_000 + id as u64, selected as f32, selected as f32, 180);
+            p.fill_round_rect(
+                (
+                    ctl.0 + position * half + 2.0 * scale,
+                    ctl.1 + 2.0 * scale,
+                    ctl.0 + (position + 1.0) * half - 2.0 * scale,
+                    ctl.3 - 2.0 * scale,
+                ),
+                7.0 * scale,
+                acc(0.35),
+            )?;
             for (n, text) in opts.iter().enumerate() {
                 let r = (ctl.0 + n as f32 * half, ctl.1, ctl.0 + (n + 1) as f32 * half, ctl.3);
-                if n == selected {
-                    p.fill_round_rect(
-                        (r.0 + 2.0 * scale, r.1 + 2.0 * scale, r.2 - 2.0 * scale, r.3 - 2.0 * scale),
-                        7.0 * scale,
-                        acc(0.35),
-                    )?;
-                }
                 let alpha = if n == selected { 1.0 } else { 0.6 };
                 p.text(
                     text,
@@ -750,12 +755,22 @@ pub(in crate::view) fn paint_control(
             p.glyph('\u{E76C}', (ctl.2 - 26.0 * scale, ctl.1, ctl.2, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
         }
         Kind::Toggle => {
-            let on = toggle_value(id, cfg);
+            let on = f32::from(toggle_value(id, cfg));
+            let level = feedback.sample(500_000 + id as u64, on, on, 180);
             let (w, h) = (40.0 * scale, 22.0 * scale);
             let track = (ctl.2 - w, cy - h / 2.0, ctl.2, cy + h / 2.0);
-            p.fill_round_rect(track, h / 2.0, if on { acc(0.9) } else { rgba(1.0, 1.0, 1.0, 0.16) })?;
+            p.fill_round_rect(
+                track,
+                h / 2.0,
+                rgba(
+                    1.0 + (accent.r - 1.0) * level,
+                    1.0 + (accent.g - 1.0) * level,
+                    1.0 + (accent.b - 1.0) * level,
+                    0.16 + 0.74 * level,
+                ),
+            )?;
             let knob = 16.0 * scale;
-            let kx = if on { track.2 - knob - 3.0 * scale } else { track.0 + 3.0 * scale };
+            let kx = track.0 + 3.0 * scale + (w - knob - 6.0 * scale) * level;
             p.fill_round_rect((kx, cy - knob / 2.0, kx + knob, cy + knob / 2.0), knob / 2.0, WHITE)?;
         }
     }

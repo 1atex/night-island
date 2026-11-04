@@ -1255,7 +1255,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         DWRITE_TEXT_ALIGNMENT_LEADING,
                         rgba(1.0, 1.0, 1.0, 0.9),
                     )?;
-                    paint_control(p, scale, &ui.cfg, id, kind, ctl)?;
+                    paint_control(p, scale, &ui.cfg, id, kind, ctl, &ui.feedback)?;
                 }
                 Item::Service { name, glyph, status, live } => {
                     let d = 38.0 * scale;

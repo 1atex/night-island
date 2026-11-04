@@ -17,6 +17,10 @@ pub(in crate::island) struct Pointer {
 
 impl App {
     pub(in crate::island) fn mouse_down(&mut self, x: i32, y: i32) {
+        if self.state == State::Expanded {
+            self.ui.pressed_action = self.ui.home.hover_act;
+            self.repaint_expanded();
+        }
         if self.can_release_character(x, y) {
             let mut point = windows::Win32::Foundation::POINT::default();
             unsafe {
@@ -101,6 +105,9 @@ impl App {
     }
 
     pub(in crate::island) fn mouse_up(&mut self) {
+        if self.ui.pressed_action.take().is_some() {
+            self.repaint_expanded();
+        }
         if self.pointer.character_press.take().is_some() {
             unsafe {
                 let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
@@ -774,6 +781,7 @@ impl App {
     }
 
     pub(in crate::island) fn on_mouse_leave(&mut self) {
+        self.ui.pressed_action = None;
         self.pointer.tracking = false;
         let had_hover = self.ui.hover_tab.take().is_some()
             | self.ui.clip.hover.take().is_some()

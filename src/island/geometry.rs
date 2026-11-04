@@ -219,11 +219,11 @@ impl App {
     }
 
     pub(in crate::island) fn open_ms(&self) -> u64 {
-        (OPEN_BASE_MS / self.settings.open_speed) as u64
+        if crate::ui::feedback::motion_allowed() { (OPEN_BASE_MS / self.settings.open_speed) as u64 } else { 1 }
     }
 
     pub(in crate::island) fn close_ms(&self) -> u64 {
-        (CLOSE_BASE_MS / self.settings.close_speed) as u64
+        if crate::ui::feedback::motion_allowed() { (CLOSE_BASE_MS / self.settings.close_speed) as u64 } else { 1 }
     }
 
     pub(in crate::island) fn window_size(&self, win: Win) -> (i32, i32) {
@@ -501,6 +501,7 @@ impl App {
     }
 
     pub(in crate::island) fn apply_layout(&mut self) {
+        self.finish_cover_motion();
         self.hide_notification_card();
         self.cancel_pill_motion();
         self.ui.cfg = self.settings.clone();

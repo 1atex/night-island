@@ -203,6 +203,8 @@ impl App {
         char_layer.sprite.SetIsVisible(false)?;
 
         let intro_cover = gpu.layer(&compositor, ((28.0 * scale).ceil() as i32, (28.0 * scale).ceil() as i32))?;
+        let cover_layer = gpu.layer(&compositor, ((72.0 * scale).ceil() as i32, (72.0 * scale).ceil() as i32))?;
+        cover_layer.sprite.SetIsVisible(false)?;
         let previous_pill = gpu.layer(&compositor, collapsed.size())?;
         previous_pill.sprite.SetIsVisible(false)?;
         let intro_title = gpu.layer(&compositor, ((240.0 * scale).ceil() as i32, (34.0 * scale).ceil() as i32))?;
@@ -264,6 +266,7 @@ impl App {
 
         let geometry = compositor.CreateRoundedRectangleGeometry()?;
         children.InsertAtTop(&intro_cover.sprite)?;
+        children.InsertAtTop(&cover_layer.sprite)?;
         children.InsertAtTop(&intro_title.sprite)?;
         let round_clip = compositor.CreateGeometricClipWithGeometry(&geometry)?;
         visual.SetClip(&round_clip)?;
@@ -333,6 +336,8 @@ impl App {
             ears,
             collapsed,
             expanded,
+            cover_layer,
+            cover_flight_until: None,
             liquid: Liquid {
                 ring,
                 highlight,

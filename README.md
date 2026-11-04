@@ -50,6 +50,12 @@ Start your personal wave and adjust activity, variety, mood and language with th
 
 This integration uses the unofficial Yandex Music API and native Windows audio playback (MP3). An eligible subscription and region are required. Protocol behavior was researched in [yamusic-md3](https://github.com/yaskorinov/yamusic-md3); the implementation uses Night Island's native UI and workers. Account-specific playback has been confirmed by the user; automated checks cover device authorization endpoints, API requests, queue metadata, native audio and UI rendering.
 
+### Interface motion
+
+Home action tiles, playback buttons, header selection and control tiles use short hover transitions. Pressed Home buttons compress slightly; settings switches slide their thumb and segmented controls move their selection. Repeated input retargets from the currently visible value. The feedback timer stops when transitions finish.
+
+When Home is opened from the music pill, its cover moves between the compact slot and the player card; closing reverses that movement. Changing a track or player fades the artwork, replaces the labels in two phases for readability and blends the card tint. Rapid track changes preserve the current visual mixture. Cover motion is cleaned up on hiding, layout changes and navigation. New motion respects Windows' animation setting.
+
 ### Desktop pets
 
 Drag a character out of the collapsed island to release it; drag it back over the island to dock it. Pets breathe, follow the pointer smoothly, blink, react to gentle pointer strokes, stretch while carried and settle when released. Bear joins the character list. Music controls and the mini AI chat remain available beside every detached character, including custom pets.
@@ -123,6 +129,12 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 Запусти свою волну и стрелками выбери занятие, характер, настроение и язык. Варианты загружаются из Яндекса. Новые настройки применяются после текущего трека; кнопка **Следующий** переключает сразу. Музыка играет и в свёрнутом острове: работают цвета обложки, прогресс, управление на главной и у персонажа. **Остановить** возвращает управление другим плеерам. Запуск волны вместе с островом включается отдельно.
 
 Используется неофициальный API Яндекс Музыки и встроенный аудиоплеер Windows (MP3). Нужны подходящая подписка и доступность сервиса в регионе. Связь с API изучена по [yamusic-md3](https://github.com/yaskorinov/yamusic-md3), интерфейс и обработчики написаны для Night Island. Пользователь подтвердил работу персональной волны после входа; автоматические проверки покрывают получение кода, запросы API, данные очереди, воспроизведение Windows и отрисовку вкладки.
+
+### Анимации интерфейса
+
+На главной плавно подсвечиваются плитки действий и кнопки плеера; нажатие слегка сжимает кнопку. В шапке плавно меняется выделение, а в настройках двигаются бегунок переключателя и выделение сегментов. Повторное действие продолжает переход из текущего состояния; после завершения таймер останавливается.
+
+При открытии главной из музыкального острова обложка переходит в карточку плеера и возвращается при закрытии. При смене трека или источника обложка и оттенок карточки плавно меняются, а старая подпись уступает место новой без наложения текста. Быстрые переключения сохраняют текущую смесь изображений. Новые эффекты учитывают настройку анимаций Windows.
 
 ### Питомцы на рабочем столе
 

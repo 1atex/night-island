@@ -187,6 +187,9 @@ impl App {
             return;
         }
         let track_changed = now.title != self.ui.media.title;
+        if now.title != self.ui.media.title || now.source != self.ui.media.source || now.cover != self.ui.media.cover {
+            self.finish_cover_motion();
+        }
         if (track_changed || now.artist != self.ui.media.artist || now.source != self.ui.media.source)
             && self.ui.tab != view::Tab::Yandex
         {
@@ -200,6 +203,19 @@ impl App {
         }
         if now.source != self.ui.media.source {
             self.pointer.vol_drag = false;
+        }
+        if now.title != self.ui.media.title
+            || now.artist != self.ui.media.artist
+            || now.source != self.ui.media.source
+            || now.cover != self.ui.media.cover
+        {
+            self.ui.home.track_transition.retarget(
+                &self.ui.media,
+                self.state == State::Expanded
+                    && self.ui.tab == view::Tab::Home
+                    && !now.title.is_empty()
+                    && crate::ui::feedback::motion_allowed(),
+            );
         }
         self.ui.media = now;
         if self.ui.home.vol_track {
