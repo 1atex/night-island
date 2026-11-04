@@ -6,9 +6,42 @@ pub struct YandexUi {
     pub state: Snapshot,
     pub hover: Option<YandexHit>,
     pub copied: bool,
+    pub colour_transition: Option<(WaveColours, std::time::Instant)>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+impl YandexUi {
+    pub fn colours(&self) -> WaveColours {
+        let target =
+            WaveColours::new(self.state.palette, self.state.media.accent.unwrap_or_else(crate::ui::theme::accent_u8));
+        self.colour_transition.map_or(target, |(from, at)| {
+            let t = (at.elapsed().as_secs_f32() / 0.42).clamp(0.0, 1.0);
+            from.blend(target, t * t * (3.0 - 2.0 * t))
+        })
+    }
+
+    pub fn accept(&mut self, next: Snapshot, animate: bool) {
+        let from = self.colours();
+        if next.code != self.state.code {
+            self.copied = false;
+        }
+        self.state = next;
+        self.colour_transition = None;
+        if animate && from != self.colours() {
+            self.colour_transition = Some((from, std::time::Instant::now()));
+        }
+    }
+
+    pub fn animate_colours(&mut self) -> bool {
+        if self.colour_transition.is_some_and(|(_, at)| at.elapsed().as_millis() < 420) {
+            true
+        } else {
+            self.colour_transition = None;
+            false
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum YandexHit {
     Connect,
     Browser,
@@ -22,6 +55,17 @@ pub enum YandexHit {
     Retry,
     Autoplay,
     Filter(usize, i32),
+    Home,
+    Seek,
+}
+
+pub fn wave_seek_rect(pill: Rect, s: f32) -> Rect {
+    (pill.0 + 24.0 * s, pill.1 + 284.0 * s, pill.0 + 220.0 * s, pill.1 + 307.0 * s)
+}
+
+pub fn wave_fraction(pill: Rect, s: f32, x: f32) -> f32 {
+    let r = wave_seek_rect(pill, s);
+    ((x - r.0) / (r.2 - r.0).max(1.0)).clamp(0.0, 1.0)
 }
 
 pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHit)> {
@@ -43,14 +87,16 @@ pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHi
         }
     } else {
         let mut controls = vec![
-            (r(24.0, 248.0, 65.0, 290.0), YandexHit::Previous),
-            (r(73.0, 248.0, 171.0, 290.0), YandexHit::Toggle),
-            (r(179.0, 248.0, 220.0, 290.0), YandexHit::Next),
+            (r(24.0, 244.0, 65.0, 280.0), YandexHit::Previous),
+            (r(73.0, 244.0, 171.0, 280.0), YandexHit::Toggle),
+            (r(179.0, 244.0, 220.0, 280.0), YandexHit::Next),
             (r(24.0, 310.0, 320.0, 344.0), YandexHit::Autoplay),
             (r(width - 106.0, 62.0, width - 24.0, 90.0), YandexHit::Disconnect),
         ];
         if ui.state.active {
             controls.push((r(width - 132.0, 310.0, width - 24.0, 344.0), YandexHit::Stop));
+            controls.push((r(width - 238.0, 62.0, width - 118.0, 90.0), YandexHit::Home));
+            controls.push((wave_seek_rect(pill, s), YandexHit::Seek));
         }
         if !ui.state.error.is_empty() {
             controls.push((r(width - 116.0, 350.0, width - 24.0, 376.0), YandexHit::Retry));
@@ -71,10 +117,26 @@ pub fn hit_yandex(pill: Rect, scale: f32, ui: &YandexUi, x: f32, y: f32) -> Opti
     yandex_controls(pill, scale, ui).into_iter().find(|(r, _)| inside(*r, x, y)).map(|(_, h)| h)
 }
 
-pub fn paint_yandex(p: &Painter, pill: Rect, s: f32, ui: &YandexUi) -> Result<()> {
+pub fn paint_yandex(
+    p: &Painter,
+    pill: Rect,
+    s: f32,
+    ui: &YandexUi,
+    seek: Option<f32>,
+    progress: Option<(f32, f32)>,
+) -> Result<()> {
     let (x, y, w, _) = pill;
     let width = w / s;
     let r = |a: f32, b: f32, c: f32, d: f32| (x + a * s, y + b * s, x + c * s, y + d * s);
+    let colours = ui.colours();
+    if !ui.state.account.is_empty() {
+        p.fill_round_gradient(
+            r(12.0, 54.0, width - 12.0, 344.0),
+            22.0 * s,
+            wave_colour(colours.background, 1.0),
+            rgba(0.0, 0.0, 0.0, 0.0),
+        )?;
+    }
     let text = |value: &str, rect: Rect, size: f32, alpha: f32| {
         p.text(
             value,
@@ -82,7 +144,7 @@ pub fn paint_yandex(p: &Painter, pill: Rect, s: f32, ui: &YandexUi) -> Result<()
             size * s,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_TEXT_ALIGNMENT_LEADING,
-            rgba(1.0, 1.0, 1.0, alpha),
+            wave_colour(colours.text, alpha),
         )
     };
     p.text(
@@ -125,7 +187,12 @@ pub fn paint_yandex(p: &Painter, pill: Rect, s: f32, ui: &YandexUi) -> Result<()
             rgba(1.0, 1.0, 1.0, 0.6),
         )?;
     } else {
-        p.fill_round_rect(r(24.0, 104.0, 220.0, 236.0), 18.0 * s, acc(0.14))?;
+        p.fill_round_gradient(
+            r(24.0, 104.0, 220.0, 236.0),
+            18.0 * s,
+            wave_colour(colours.card, 1.0),
+            wave_colour(colours.background, 1.0),
+        )?;
         let cover = r(36.0, 116.0, 92.0, 172.0);
         if let Some(image) = &ui.state.media.cover {
             p.image(cover, 12.0 * s, image.size, &image.bgra)?;
@@ -158,18 +225,48 @@ pub fn paint_yandex(p: &Painter, pill: Rect, s: f32, ui: &YandexUi) -> Result<()
         }
     }
     for (rect, hit) in yandex_controls(pill, s, ui) {
+        if hit == YandexHit::Seek {
+            let (pos, len) = progress.unwrap_or_default();
+            let pos = seek.map_or(pos, |f| f * len);
+            let fraction = if len > 0.0 { (pos / len).clamp(0.0, 1.0) } else { 0.0 };
+            let y = rect.1 + 3.0 * s;
+            p.fill_round_rect((rect.0, y, rect.2, y + 3.0 * s), 1.5 * s, rgba(1.0, 1.0, 1.0, 0.16))?;
+            if fraction > 0.0 {
+                p.fill_round_rect(
+                    (rect.0, y, rect.0 + (rect.2 - rect.0) * fraction, y + 3.0 * s),
+                    1.5 * s,
+                    wave_colour(colours.accent, 1.0),
+                )?;
+            }
+            if len > 0.0 && (seek.is_some() || ui.hover == Some(YandexHit::Seek)) {
+                let x = rect.0 + (rect.2 - rect.0) * fraction;
+                p.fill_ellipse(x, y + 1.5 * s, 4.0 * s, 4.0 * s, wave_colour(colours.text, 1.0))?;
+            }
+            text(&mmss(pos), (rect.0, y + 4.0 * s, rect.0 + 60.0 * s, rect.3), 10.0, 0.7)?;
+            p.text(
+                &format!("-{}", mmss(len - pos)),
+                (rect.2 - 60.0 * s, y + 4.0 * s, rect.2, rect.3),
+                10.0 * s,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_TRAILING,
+                rgba(1.0, 1.0, 1.0, 0.7),
+            )?;
+            continue;
+        }
         let hover = !ui.state.busy && ui.hover == Some(hit);
         let primary = matches!(hit, YandexHit::Connect | YandexHit::Toggle | YandexHit::Browser);
         p.fill_round_rect(
             rect,
             11.0 * s,
             if primary {
-                acc(if hover { 0.4 } else { 0.28 })
+                wave_colour(colours.accent, if hover { 0.4 } else { 0.28 })
             } else {
                 rgba(1.0, 1.0, 1.0, if hover { 0.12 } else { 0.06 })
             },
         )?;
         let label = match hit {
+            YandexHit::Home => "Open main player",
+            YandexHit::Seek => unreachable!(),
             YandexHit::Connect => {
                 if ui.state.busy {
                     "Connecting…"
@@ -285,5 +382,41 @@ mod tests {
         ui.state.busy = false;
         ui.state.code = "123456".into();
         assert!(yandex_controls(pill, 1.0, &ui).iter().any(|(_, h)| *h == YandexHit::Copy));
+    }
+
+    #[test]
+    fn wave_seek_and_navigation_do_not_overlap_other_controls_at_any_scale() {
+        let mut ui = YandexUi::default();
+        ui.state.account = "Fixture".into();
+        ui.state.active = true;
+        for s in [0.8, 1.0, 1.25, 1.5, 2.0] {
+            let pill = (13.0, 17.0, 640.0 * s, 384.0 * s);
+            for (rect, hit) in yandex_controls(pill, s, &ui) {
+                assert_eq!(hit_yandex(pill, s, &ui, (rect.0 + rect.2) / 2.0, (rect.1 + rect.3) / 2.0), Some(hit));
+            }
+            let seek = wave_seek_rect(pill, s);
+            assert_eq!(wave_fraction(pill, s, seek.0 - 10.0), 0.0);
+            assert_eq!(wave_fraction(pill, s, seek.2 + 10.0), 1.0);
+        }
+    }
+
+    #[test]
+    fn palette_updates_can_disable_motion_and_interrupted_transitions_start_from_current_colour() {
+        let mut ui = YandexUi::default();
+        let state = Snapshot {
+            palette: crate::services::yandex::palette::Palette { average: Some((250, 80, 30)), ..Default::default() },
+            ..Default::default()
+        };
+        ui.accept(state.clone(), false);
+        assert!(ui.colour_transition.is_none());
+        let old = ui.colours();
+        let next = Snapshot {
+            palette: crate::services::yandex::palette::Palette { average: Some((20, 150, 250)), ..Default::default() },
+            ..Default::default()
+        };
+        ui.accept(next, true);
+        assert_eq!(ui.colour_transition.unwrap().0, old);
+        ui.accept(state, false);
+        assert_eq!(ui.colours(), old);
     }
 }

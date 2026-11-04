@@ -335,6 +335,7 @@ impl App {
                 Some(view::HomeHit::VolumeIcon) => Some(530),
                 Some(view::HomeHit::Edit) => Some(550),
                 Some(view::HomeHit::Player) => Some(560),
+                Some(view::HomeHit::Wave) => Some(561),
                 _ => None,
             }
         } else {

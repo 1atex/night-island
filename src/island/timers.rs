@@ -241,7 +241,7 @@ impl App {
                 }
             }
             Timer::Progress => {
-                if self.state == State::Expanded && self.ui.tab == view::Tab::Home {
+                if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) {
                     self.repaint_expanded();
                     self.start_progress_timer();
                 } else if self.progress_pill_visible() && view::progress_strip_on(&self.ui) {

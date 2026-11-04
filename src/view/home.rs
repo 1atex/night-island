@@ -575,6 +575,7 @@ pub enum HomeHit {
     VolumeIcon,
     Edit,
     Player,
+    Wave,
 }
 
 pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<HomeHit> {
@@ -595,6 +596,9 @@ pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Optio
                 return Some(hit);
             }
         }
+    }
+    if wave_active(ui) && inside(wave_link(pill, scale, ui), px, py) {
+        return Some(HomeHit::Wave);
     }
     if spotify && let Some(i) = (0..3).find(|&i| inside(extra_btn(pill, scale, i, wide), px, py)) {
         return Some(HomeHit::Extra(i));
@@ -663,6 +667,15 @@ pub(in crate::view) fn player_btn(pill: Rect, scale: f32, wide: bool) -> Rect {
     (card.2 - 14.0 * scale - size, card.1 + 10.0 * scale, card.2 - 14.0 * scale, card.1 + 10.0 * scale + size)
 }
 
+pub fn wave_active(ui: &UiState) -> bool {
+    ui.yandex.state.active && ui.media.source == "Night Island · Yandex Music"
+}
+
+pub fn wave_link(pill: Rect, s: f32, ui: &UiState) -> Rect {
+    let card = media_card(pill, s, home_wide(ui));
+    (card.0 + (16.0 + 72.0 * cover_aspect(ui) + 14.0) * s, card.1 + 10.0 * s, card.2 - 16.0 * s, card.1 + 32.0 * s)
+}
+
 pub fn spotify_active(ui: &UiState) -> bool {
     ui.spotify.status == crate::services::spotify::Status::Connected
         && ui.media.source == "SPOTIFY"
@@ -677,7 +690,18 @@ pub(in crate::view) fn mmss(secs: f32) -> String {
 pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let wide = home_wide(ui);
     let card = media_card(pill, scale, wide);
-    p.fill_round_rect(card, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+    let wave = wave_active(ui);
+    let colours = ui.yandex.colours();
+    if wave {
+        p.fill_round_gradient(
+            card,
+            20.0 * scale,
+            wave_colour(colours.card, 1.0),
+            wave_colour(colours.background, 1.0),
+        )?;
+    } else {
+        p.fill_round_rect(card, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+    }
     let (cl, ct, cr, cb) = card;
     let pad = 16.0 * scale;
     if ui.media.title.is_empty() {
@@ -717,16 +741,29 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
             }
         }
         let tx = cover.2 + 14.0 * scale;
-        let (ar, ag, ab) = ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
+        let (ar, ag, ab) =
+            if wave { colours.accent } else { ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8) };
         let accent = rgba(f32::from(ar) / 255.0, f32::from(ag) / 255.0, f32::from(ab) / 255.0, 1.0);
         p.text(
-            &ui.media.source,
-            (tx, ct + 14.0 * scale, cr - pad, ct + 32.0 * scale),
+            if wave { "My Wave · Settings" } else { &ui.media.source },
+            (tx, ct + 14.0 * scale, cr - pad - if wave { 20.0 * scale } else { 0.0 }, ct + 32.0 * scale),
             11.0 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_LEADING,
             rgba(1.0, 1.0, 1.0, 0.5),
         )?;
+        if wave {
+            let link = wave_link(pill, scale, ui);
+            p.glyph(
+                '\u{E76C}',
+                (link.2 - 20.0 * scale, link.1, link.2, link.3),
+                10.0 * scale,
+                wave_colour(colours.accent, 1.0),
+            )?;
+            if ui.home.hover_act == Some(561) {
+                p.fill_round_rect(link, 7.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+            }
+        }
         p.text(
             &ui.media.title,
             (tx, ct + 32.0 * scale, cr - pad, ct + 58.0 * scale),
@@ -994,6 +1031,22 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wave_link_preserves_transport_controls_and_respects_the_mixer_overlay() {
+        let mut ui = UiState::new();
+        ui.media.title = "Fixture".into();
+        ui.media.source = "Night Island · Yandex Music".into();
+        ui.yandex.state.active = true;
+        let pill = (0.0, 0.0, 640.0, 384.0);
+        let r = wave_link(pill, 1.0, &ui);
+        assert!(matches!(hit_home(pill, 1.0, (r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0, &ui), Some(HomeHit::Wave)));
+        let r = media_btn(pill, 1.0, 1, home_wide(&ui));
+        assert!(matches!(hit_home(pill, 1.0, (r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0, &ui), Some(HomeHit::Media(1))));
+        ui.home.mixer_open = true;
+        let r = wave_link(pill, 1.0, &ui);
+        assert!(!matches!(hit_home(pill, 1.0, (r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0, &ui), Some(HomeHit::Wave)));
+    }
 
     #[test]
     fn every_tile_of_the_catalogue_has_a_kind() {

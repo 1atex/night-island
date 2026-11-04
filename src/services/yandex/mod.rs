@@ -1,4 +1,5 @@
 mod api;
+pub mod palette;
 mod player;
 
 use crate::platform::media::{self, Media};
@@ -37,6 +38,7 @@ pub struct Snapshot {
     pub config: Config,
     pub active: bool,
     pub media: Media,
+    pub palette: palette::Palette,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -64,6 +66,7 @@ pub struct Track {
     pub cover: String,
     pub batch: String,
     pub session: String,
+    pub palette: palette::Palette,
 }
 
 pub enum Command {
@@ -399,7 +402,8 @@ impl Worker {
                 return Err("Could not play this track. Check your connection and start the wave again.");
             }
             Command::Cover(generation, cover) if generation == self.generation && self.state.active => {
-                self.state.media.accent = Some(media::dominant(&cover.bgra));
+                self.state.palette = self.state.palette.with_cover(media::dominant(&cover.bgra));
+                self.state.media.accent = self.state.palette.accent;
                 self.state.media.cover = Some(cover);
             }
             Command::Ended(_) | Command::Failed(_) | Command::Cover(_, _) => {}
@@ -417,6 +421,7 @@ impl Worker {
         self.session.clear();
         self.state.active = false;
         self.state.media = Media::default();
+        self.state.palette = Default::default();
         self.generation += 1;
         self.replace_pending = false;
         self.was_playing = false;
@@ -568,7 +573,9 @@ impl Worker {
         self.sampled = Instant::now();
         self.was_playing = false;
         self.state.active = true;
+        self.state.palette = track.palette;
         self.state.media = Media {
+            accent: track.palette.accent.or(track.palette.average),
             title: track.title.clone(),
             artist: track.artist.clone(),
             source: "Night Island · Yandex Music".into(),
@@ -700,5 +707,22 @@ mod tests {
         w.command(Command::Ended(1)).unwrap();
         w.command(Command::Failed(1)).unwrap();
         assert!(w.state.active);
+    }
+
+    #[test]
+    fn delayed_cover_keeps_server_colours_and_old_track_cannot_recolour_the_player() {
+        let (tx, _) = mpsc::sync_channel(8);
+        let mut w = Worker::new(0, tx);
+        w.generation = 4;
+        w.state.active = true;
+        w.state.palette =
+            palette::Palette { accent: Some((250, 120, 50)), average: Some((80, 30, 10)), ..Default::default() };
+        let cover = media::debug_cover(1, &[10, 30, 240, 255]).unwrap();
+        w.command(Command::Cover(3, cover.clone())).unwrap();
+        assert!(w.state.media.cover.is_none());
+        w.command(Command::Cover(4, cover)).unwrap();
+        assert_eq!(w.state.media.accent, Some((250, 120, 50)));
+        assert_eq!(w.state.palette.average, Some((80, 30, 10)));
+        assert!(w.state.palette.mini_player.is_some());
     }
 }

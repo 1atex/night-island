@@ -38,6 +38,7 @@ impl App {
                 _ => media::Control::Next,
             }),
             Some(view::HomeHit::Player) => media::next_player(),
+            Some(view::HomeHit::Wave) => self.select_tab(view::Tab::Yandex),
             Some(view::HomeHit::Action(i)) if self.ui.home.edit => self.toggle_home_action(i),
             Some(view::HomeHit::Action(i)) => {
                 match self.settings.home_actions.iter().position(|&a| usize::from(a) == i) {
@@ -72,9 +73,7 @@ impl App {
             Some(view::HomeHit::DiscordMute) => discord::set_mute(!self.ui.discord.self_mute),
             Some(view::HomeHit::DiscordDeaf) => discord::set_deaf(!self.ui.discord.self_deaf),
             Some(view::HomeHit::Seek(f)) => {
-                self.pointer.seek_drag = true;
-                self.ui.home.seek = Some(f);
-                self.repaint_expanded();
+                self.begin_seek(f);
             }
             Some(view::HomeHit::VolumeIcon) => {
                 self.finish_mixer();
@@ -157,12 +156,25 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn begin_seek(&mut self, fraction: f32) {
+        self.pointer.seek_drag = true;
+        self.ui.home.seek = Some(fraction.clamp(0.0, 1.0));
+        unsafe {
+            windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
+        }
+        self.repaint_expanded();
+    }
+
     pub(in crate::island) fn drag_seek(&mut self, x: i32) {
         if !self.pointer.seek_drag {
             return;
         }
-        let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
-        self.ui.home.seek = Some(((x as f32 - l) / (r - l).max(1.0)).clamp(0.0, 1.0));
+        self.ui.home.seek = Some(if self.ui.tab == view::Tab::Yandex {
+            view::wave_fraction(self.pill_rect(true), self.scale, x as f32)
+        } else {
+            let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
+            ((x as f32 - l) / (r - l).max(1.0)).clamp(0.0, 1.0)
+        });
         self.repaint_expanded();
     }
 
@@ -171,6 +183,9 @@ impl App {
             return;
         }
         self.pointer.seek_drag = false;
+        unsafe {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+        }
         if let (Some(f), Some((_, len))) = (self.ui.home.seek.take(), media::progress()) {
             media::seek(f * len);
         }
@@ -219,7 +234,9 @@ impl App {
     }
 
     pub(in crate::island) fn start_progress_timer(&self) {
-        let home = self.state == State::Expanded && self.ui.tab == view::Tab::Home && self.ui.media.playing;
+        let home = self.state == State::Expanded
+            && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex)
+            && self.ui.media.playing;
         let pill = self.progress_pill_visible() && view::progress_strip_on(&self.ui);
         if home || pill {
             let interval = if pill && view::pill_progress_fill_on(&self.ui) { self.frame_ms() } else { 1000 };

@@ -4,11 +4,15 @@ use crate::services::yandex::{self, Command};
 impl App {
     pub(in crate::island) fn on_yandex(&mut self) {
         let next = yandex::snapshot();
-        if next.code != self.ui.yandex.state.code {
-            self.ui.yandex.copied = false;
+        let animate = self.state == State::Expanded
+            && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex)
+            && self.settings.tab_anim != crate::data::settings::TabAnim::None;
+        self.ui.yandex.accept(next, animate);
+        if self.ui.yandex.colour_transition.is_some() {
+            self.set_timer(Timer::UiAnim, self.frame_ms());
         }
-        self.ui.yandex.state = next;
         self.on_media();
+        self.start_progress_timer();
         if self.ui.tab == view::Tab::Yandex {
             self.repaint_expanded();
         }
@@ -18,6 +22,17 @@ impl App {
         use view::YandexHit as Hit;
         let hit = view::hit_yandex(self.pill_rect(true), self.scale, &self.ui.yandex, x as f32, y as f32);
         let command = match hit {
+            Some(Hit::Home) => {
+                self.select_tab(view::Tab::Home);
+                return;
+            }
+            Some(Hit::Seek) => {
+                if yandex::progress().is_none() {
+                    return;
+                }
+                self.begin_seek(view::wave_fraction(self.pill_rect(true), self.scale, x as f32));
+                return;
+            }
             Some(Hit::Connect) => Command::Connect,
             Some(Hit::Cancel) => Command::Cancel,
             Some(Hit::Disconnect) => Command::Disconnect,
@@ -105,23 +120,38 @@ mod tests {
         surface.paint(&gpu, |p| {
             p.fill_rect((0.0, 0.0, 1320.0, 820.0), rgba(0.025, 0.035, 0.06, 1.0))?;
             for (i, (x, y)) in [(10.0, 10.0), (670.0, 10.0), (10.0, 420.0), (670.0, 420.0)].into_iter().enumerate() {
+                ui.tab = if i % 2 == 0 { view::Tab::Home } else { view::Tab::Yandex };
                 ui.yandex.state = Default::default();
-                if i == 1 {
-                    ui.yandex.state.code = "A1B2-C3D4".into();
-                }
-                if i >= 2 {
-                    ui.yandex.state.account = "Музыка для тебя".into();
-                    ui.yandex.state.groups = groups.clone();
-                    ui.yandex.state.config.selection.insert("moodEnergy".into(), "settingMoodEnergy:calm".into());
-                    ui.yandex.state.config.selection.insert("language".into(), "settingLanguage:without-words".into());
-                }
-                if i == 3 {
-                    ui.yandex.state.active = true;
-                    ui.yandex.state.media.playing = true;
-                    ui.yandex.state.media.title = "Ночной город".into();
-                    ui.yandex.state.media.artist = "Любимый исполнитель".into();
-                    ui.yandex.state.error = "Could not connect to Yandex Music. Try again.".into();
-                }
+                ui.yandex.state.account = "Музыка для тебя".into();
+                ui.yandex.state.groups = groups.clone();
+                ui.yandex.state.active = true;
+                ui.yandex.state.config.selection.insert("moodEnergy".into(), "settingMoodEnergy:calm".into());
+                let rgb = if i < 2 { (238, 108, 48) } else { (50, 156, 230) };
+                ui.yandex.state.palette = crate::services::yandex::palette::Palette {
+                    average: Some(rgb),
+                    mini_player: Some(rgb),
+                    accent: Some(rgb),
+                    wave_text: Some((245, 238, 230)),
+                };
+                ui.yandex.state.media = crate::platform::media::Media {
+                    title: if i < 2 { "Тёплый вечер" } else { "Ночной город" }.into(),
+                    artist: "Любимый исполнитель".into(),
+                    source: "Night Island · Yandex Music".into(),
+                    playing: true,
+                    accent: Some(rgb),
+                    ..Default::default()
+                };
+                let pixels: Vec<u8> = (0..96 * 96)
+                    .flat_map(|n| {
+                        let x = (n % 96) as f32 / 96.0;
+                        let y = (n / 96) as f32 / 96.0;
+                        let light = 0.3 + 0.7 * (1.0 - (x - y).abs());
+                        [(rgb.0 as f32 * light) as u8, (rgb.1 as f32 * light) as u8, (rgb.2 as f32 * light) as u8, 255]
+                    })
+                    .collect();
+                ui.yandex.state.media.cover = crate::platform::media::debug_cover(96, &pixels);
+                ui.media = ui.yandex.state.media.clone();
+                crate::platform::media::debug_timeline(83.0, 241.0);
                 p.fill_round_rect((x, y, x + 640.0, y + 384.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
                 view::paint_expanded(p, (x, y, 640.0, 384.0), 1.0, &ui, &[])?;
             }

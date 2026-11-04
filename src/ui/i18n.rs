@@ -28,6 +28,9 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "My Wave · Settings" => "Моя волна · Настроить",
+        "Open My Wave settings" => "Открыть настройки Моей волны",
+        "Open main player" => "К плееру",
         "Could not remove the saved sign-in. Try signing out again." => {
             "Не удалось удалить сохранённый вход. Повтори выход из аккаунта."
         }

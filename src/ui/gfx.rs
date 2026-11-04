@@ -996,6 +996,36 @@ impl Painter<'_> {
         Ok(())
     }
 
+    pub fn fill_round_gradient(
+        &self,
+        rect: (f32, f32, f32, f32),
+        radius: f32,
+        from: D2D1_COLOR_F,
+        to: D2D1_COLOR_F,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+        };
+        unsafe {
+            let stops = self.dc.CreateGradientStopCollection(
+                &[D2D1_GRADIENT_STOP { position: 0.0, color: from }, D2D1_GRADIENT_STOP { position: 1.0, color: to }],
+                D2D1_GAMMA_2_2,
+                D2D1_EXTEND_MODE_CLAMP,
+            )?;
+            let brush = self.dc.CreateLinearGradientBrush(
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: windows_numerics::Vector2 { X: rect.0, Y: rect.1 },
+                    endPoint: windows_numerics::Vector2 { X: rect.2, Y: rect.3 },
+                },
+                None,
+                &stops,
+            )?;
+            self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
+        }
+        Ok(())
+    }
+
     pub fn fill_capsule_progress(&self, rect: (f32, f32, f32, f32), fraction: f32, base: (u8, u8, u8)) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
         use windows::Win32::Graphics::Direct2D::{

@@ -219,6 +219,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_CAPTURECHANGED => {
             with_app(|a| {
+                if a.pointer.seek_drag {
+                    a.pointer.seek_drag = false;
+                    a.ui.home.seek = None;
+                    a.repaint_expanded();
+                }
                 a.pointer.character_press = None;
                 if a.ui.mixer.dragging.take().is_some() {
                     a.sync_mixer();

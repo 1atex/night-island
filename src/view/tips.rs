@@ -64,6 +64,7 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
     let (text, rect): (String, Rect) = match hit_home(pill, scale, px, py, ui)? {
         HomeHit::Media(i) => (["Previous", "Play or pause", "Next"][i].into(), media_btn(pill, scale, i, wide)),
         HomeHit::Extra(i) => (["Shuffle", "Repeat", "Like"][i].into(), extra_btn(pill, scale, i, wide)),
+        HomeHit::Wave => ("Open My Wave settings".into(), wave_link(pill, scale, ui)),
         HomeHit::Player => ("Next player".into(), player_btn(pill, scale, wide)),
         HomeHit::Edit => {
             (if ui.home.edit { "Done" } else { "Choose the tiles" }.into(), edit_button(pill, scale, wide))

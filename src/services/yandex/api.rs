@@ -266,6 +266,7 @@ pub fn parse_tracks(value: &Value) -> Vec<Track> {
                 cover,
                 batch: value["batchId"].as_str().unwrap_or_default().into(),
                 session: String::new(),
+                palette: super::palette::Palette::from_track(t),
             })
         })
         .collect()

@@ -433,7 +433,7 @@ pub fn start(hwnd: HWND) {
     });
 }
 
-#[cfg(feature = "demo")]
+#[cfg(any(feature = "demo", test))]
 pub fn debug_timeline(pos: f32, len: f32) {
     if let Ok(mut g) = TIMELINE.lock() {
         *g = Some((pos, len, Instant::now(), false));

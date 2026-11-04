@@ -44,6 +44,7 @@ mod settings_window;
 mod steam;
 mod text;
 mod tips;
+mod wave_theme;
 mod weather;
 mod widgets;
 mod yandex;
@@ -58,6 +59,7 @@ pub use self::{
 };
 
 pub type Rect = (f32, f32, f32, f32);
+pub use wave_theme::{WaveColours, wave_colour};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {

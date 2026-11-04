@@ -182,6 +182,7 @@ mod tests {
             cover: String::new(),
             batch: String::new(),
             session: String::new(),
+            palette: Default::default(),
         };
         let player = Player::open(&url, &track, 73, tx)?;
         let deadline = Instant::now() + Duration::from_secs(10);

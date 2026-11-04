@@ -187,6 +187,15 @@ impl App {
             return;
         }
         let track_changed = now.title != self.ui.media.title;
+        if track_changed || now.artist != self.ui.media.artist || now.source != self.ui.media.source {
+            if self.pointer.seek_drag {
+                unsafe {
+                    let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+                }
+            }
+            self.pointer.seek_drag = false;
+            self.ui.home.seek = None;
+        }
         self.ui.media = now;
         if self.pill_motion.intro.is_some()
             && (!self.ui.media.playing
