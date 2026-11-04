@@ -17,6 +17,8 @@ pub struct Window {
     pub path: String,
     pub title: String,
     pub active: bool,
+    pub minimized: bool,
+    pub island_settings: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +114,9 @@ pub fn windows() -> Vec<Window> {
             }
             let mut pid = 0;
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
-            if pid == std::process::id() {
+            let island_settings =
+                pid == std::process::id() && String::from_utf16_lossy(&class[..n]) == "NightIsland.Settings";
+            if pid == std::process::id() && !island_settings {
                 return true.into();
             }
             let path = scan.paths.entry(pid).or_insert_with(|| process_path(pid));
@@ -124,6 +128,8 @@ pub fn windows() -> Vec<Window> {
                 path: path.clone(),
                 title: String::from_utf16_lossy(&title[..n]),
                 active: hwnd == scan.foreground,
+                minimized: IsIconic(hwnd).as_bool(),
+                island_settings,
             });
         }
         (scan.out.len() < 256).into()
@@ -159,29 +165,140 @@ pub fn activate(window: &Window, minimize_active: bool) {
     }
 }
 
-pub fn fullscreen(monitor: &Monitor) -> bool {
+fn foreground_app() -> Option<HWND> {
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.0.is_null() || IsIconic(hwnd).as_bool() {
-            return false;
+        if hwnd.0.is_null() || IsIconic(hwnd).as_bool() || !IsWindowVisible(hwnd).as_bool() {
+            return None;
         }
         let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
         if pid == std::process::id() {
-            return false;
+            return None;
         }
         let mut class = [0u16; 128];
         let n = GetClassNameW(hwnd, &mut class) as usize;
-        if matches!(String::from_utf16_lossy(&class[..n]).as_str(), "Progman" | "WorkerW") {
+        if matches!(
+            String::from_utf16_lossy(&class[..n]).as_str(),
+            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        ) {
+            return None;
+        }
+        let mut cloaked = 0u32;
+        let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), size_of::<u32>() as u32);
+        (cloaked == 0).then_some(hwnd)
+    }
+}
+
+fn on_monitor(hwnd: HWND, monitor: &Monitor) -> bool {
+    unsafe {
+        let handle = windows::Win32::Graphics::Gdi::MonitorFromWindow(
+            hwnd,
+            windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST,
+        );
+        let mut info = windows::Win32::Graphics::Gdi::MONITORINFO {
+            cbSize: size_of::<windows::Win32::Graphics::Gdi::MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        GetMonitorInfoW(handle, &mut info).as_bool() && info.rcMonitor == monitor.bounds
+    }
+}
+
+fn fullscreen_bounds(rect: RECT, monitor: RECT, captioned: bool) -> bool {
+    !captioned
+        && monitor.right > monitor.left
+        && monitor.bottom > monitor.top
+        && rect.left <= monitor.left + 2
+        && rect.top <= monitor.top + 2
+        && rect.right >= monitor.right - 2
+        && rect.bottom >= monitor.bottom - 2
+}
+
+#[derive(Clone, Copy)]
+pub enum WindowAction {
+    Restore,
+    Minimize,
+    Close,
+}
+
+pub fn change_window(window: &Window, action: WindowAction) -> bool {
+    let hwnd = HWND(window.handle as *mut _);
+    unsafe {
+        if !IsWindow(Some(hwnd)).as_bool() {
             return false;
         }
-        let mut rect = RECT::default();
-        GetWindowRect(hwnd, &mut rect).is_ok()
-            && rect.left <= monitor.bounds.left
-            && rect.top <= monitor.bounds.top
-            && rect.right >= monitor.bounds.right
-            && rect.bottom >= monitor.bounds.bottom
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if process_path(pid)
+            .is_none_or(|path| crate::data::desktop_dock::key(&path) != crate::data::desktop_dock::key(&window.path))
+        {
+            return false;
+        }
+        match action {
+            WindowAction::Restore => ShowWindowAsync(hwnd, SW_RESTORE).as_bool(),
+            WindowAction::Minimize => ShowWindowAsync(hwnd, SW_MINIMIZE).as_bool(),
+            WindowAction::Close => {
+                PostMessageW(Some(hwnd), WM_CLOSE, windows::Win32::Foundation::WPARAM(0), LPARAM(0)).is_ok()
+            }
+        }
     }
+}
+
+pub fn file_properties(owner: HWND, target: &str) {
+    unsafe {
+        let _ = windows::Win32::UI::Shell::SHObjectProperties(
+            Some(owner),
+            windows::Win32::UI::Shell::SHOP_FILEPATH,
+            &HSTRING::from(target),
+            windows::core::PCWSTR::null(),
+        );
+    }
+}
+
+pub fn fullscreen(monitor: &Monitor) -> bool {
+    use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
+    let Some(hwnd) = foreground_app() else { return false };
+    let exclusive = unsafe { SHQueryUserNotificationState() }.is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN);
+    fullscreen_window(hwnd, monitor, exclusive)
+}
+
+fn fullscreen_window(hwnd: HWND, monitor: &Monitor, exclusive: bool) -> bool {
+    use windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS;
+    unsafe {
+        if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            return false;
+        }
+        if exclusive && on_monitor(hwnd, monitor) {
+            return true;
+        }
+        let captioned = GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_CAPTION.0 == WS_CAPTION.0;
+        let mut rect = RECT::default();
+        if DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, (&raw mut rect).cast(), size_of::<RECT>() as u32)
+            .is_err()
+            && GetWindowRect(hwnd, &mut rect).is_err()
+        {
+            return false;
+        }
+        fullscreen_bounds(rect, monitor.bounds, captioned)
+    }
+}
+
+pub fn foreground_app_hidden(monitor: &Monitor, hidden_apps: &[String]) -> bool {
+    if hidden_apps.is_empty() {
+        return false;
+    }
+    let Some(hwnd) = foreground_app() else { return false };
+    if !on_monitor(hwnd, monitor) {
+        return false;
+    }
+    let mut pid = 0;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
+    process_path(pid).is_some_and(|path| {
+        let path = crate::data::desktop_dock::key(&path);
+        hidden_apps.iter().any(|hidden| crate::data::desktop_dock::key(hidden) == path)
+    })
 }
 
 #[cfg(test)]
@@ -190,8 +307,99 @@ mod tests {
     use std::os::windows::process::CommandExt;
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
-    use windows::Win32::Foundation::WPARAM;
     use windows::core::w;
+
+    #[test]
+    fn fullscreen_geometry_distinguishes_games_from_maximized_windows_and_other_monitors() {
+        let primary = RECT { left: 0, top: 0, right: 1920, bottom: 1080 };
+        let secondary = RECT { left: -2560, top: -360, right: 0, bottom: 1080 };
+        assert!(fullscreen_bounds(primary, primary, false));
+        assert!(fullscreen_bounds(secondary, secondary, false));
+        assert!(!fullscreen_bounds(primary, primary, true));
+        assert!(!fullscreen_bounds(primary, secondary, false));
+        assert!(!fullscreen_bounds(RECT { bottom: 1040, ..primary }, primary, false));
+        assert!(fullscreen_bounds(RECT { left: 1, top: 1, right: 1919, bottom: 1079 }, primary, false));
+        assert!(!fullscreen_bounds(RECT::default(), RECT::default(), false));
+    }
+
+    #[test]
+    #[ignore = "Creates a temporary native window behind the desktop"]
+    fn native_dock_fullscreen_monitor_and_windowed_transitions() -> windows::core::Result<()> {
+        use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext};
+        unsafe {
+            let previous_dpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            struct Dpi(windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT);
+            impl Drop for Dpi {
+                fn drop(&mut self) {
+                    unsafe {
+                        SetThreadDpiAwarenessContext(self.0);
+                    }
+                }
+            }
+            let _dpi = Dpi(previous_dpi);
+            let monitor = monitors().into_iter().next().unwrap();
+            let hwnd = CreateWindowExW(
+                WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                w!("Dock fullscreen geometry test"),
+                WS_POPUP,
+                -12000,
+                -12000,
+                320,
+                180,
+                None,
+                None,
+                Some(windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?.into()),
+                None,
+            )?;
+            struct WindowGuard(HWND);
+            impl Drop for WindowGuard {
+                fn drop(&mut self) {
+                    unsafe {
+                        let _ = DestroyWindow(self.0);
+                    }
+                }
+            }
+            let _guard = WindowGuard(hwnd);
+            let place = |rect: RECT| -> windows::core::Result<()> {
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_BOTTOM),
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+                )?;
+                windows::Win32::Graphics::Dwm::DwmFlush()?;
+                Ok(())
+            };
+            place(monitor.bounds)?;
+            assert!(fullscreen_window(hwnd, &monitor, false));
+            let caption = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
+            SetWindowLongW(hwnd, GWL_STYLE, caption.0 as i32);
+            place(monitor.bounds)?;
+            assert!(!fullscreen_window(hwnd, &monitor, false));
+            SetWindowLongW(hwnd, GWL_STYLE, (WS_VISIBLE | WS_POPUP).0 as i32);
+            let inset = RECT { right: monitor.bounds.right - 80, bottom: monitor.bounds.bottom - 80, ..monitor.bounds };
+            place(inset)?;
+            assert!(!fullscreen_window(hwnd, &monitor, false));
+            assert!(fullscreen_window(hwnd, &monitor, true));
+            let elsewhere = Monitor {
+                device: "Disconnected".into(),
+                bounds: RECT { left: -30000, top: -30000, right: -28080, bottom: -28920 },
+                work: RECT::default(),
+                primary: false,
+            };
+            assert!(!fullscreen_window(hwnd, &elsewhere, false));
+            assert!(!fullscreen_window(hwnd, &elsewhere, true));
+            place(monitor.bounds)?;
+            assert!(fullscreen_window(hwnd, &monitor, false));
+            let _ = ShowWindow(hwnd, SW_HIDE);
+            assert!(!fullscreen_window(hwnd, &monitor, false));
+        }
+        Ok(())
+    }
 
     #[test]
     #[ignore = "Helper for the isolated dock window test"]
@@ -290,16 +498,16 @@ mod tests {
         assert_eq!(found[0].path, found[1].path);
         assert!(!found[0].path.is_empty());
         let hwnd = HWND(found[0].handle as *mut _);
-        unsafe {
-            let _ = ShowWindowAsync(hwnd, SW_MINIMIZE);
-        }
+        assert!(change_window(&found[0], WindowAction::Minimize));
         wait(&|| unsafe { IsIconic(hwnd) }.as_bool());
         assert!(windows().iter().any(|w| w.handle == found[0].handle));
         activate(&found[0], false);
         wait(&|| !unsafe { IsIconic(hwnd) }.as_bool());
-        unsafe {
-            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
-        }
+        let mut stale = found[0].clone();
+        stale.path = r"C:\not-the-original-application.exe".into();
+        assert!(!change_window(&stale, WindowAction::Close));
+        assert!(change_window(&found[0], WindowAction::Restore));
+        assert!(change_window(&found[0], WindowAction::Close));
         wait(&|| !windows().iter().any(|w| w.handle == found[0].handle));
     }
 }

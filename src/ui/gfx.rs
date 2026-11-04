@@ -256,6 +256,30 @@ impl Layer {
     }
 }
 
+#[derive(Default)]
+pub struct IconBitmapCache {
+    domain: Option<windows::core::IUnknown>,
+    bitmaps: std::collections::HashMap<
+        usize,
+        (std::sync::Arc<crate::platform::apps::Icon>, windows::Win32::Graphics::Direct2D::ID2D1Bitmap),
+    >,
+}
+
+impl IconBitmapCache {
+    #[cfg(test)]
+    pub fn identities(&self) -> Vec<(usize, usize)> {
+        let mut entries: Vec<_> =
+            self.bitmaps.iter().map(|(key, (_, bitmap))| (*key, bitmap.as_raw() as usize)).collect();
+        entries.sort_unstable();
+        entries
+    }
+
+    pub fn retain(&mut self, icons: impl Iterator<Item = usize>) {
+        let live: std::collections::HashSet<_> = icons.collect();
+        self.bitmaps.retain(|key, _| live.contains(key));
+    }
+}
+
 pub struct Painter<'a> {
     dc: &'a ID2D1RenderTarget,
     dwrite: &'a IDWriteFactory,
@@ -1171,6 +1195,65 @@ impl Painter<'_> {
             self.push_clip((left, top, left + (right - left) * fraction, bottom));
             self.dc.FillRoundedRectangle(&rounded(rect, (bottom - top).min(right - left) / 2.0), &brush);
             self.pop_clip();
+        }
+        Ok(())
+    }
+
+    pub fn cached_icon(
+        &self,
+        rect: (f32, f32, f32, f32),
+        icon: &std::sync::Arc<crate::platform::apps::Icon>,
+        cache: &mut IconBitmapCache,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::{
+            D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
+        };
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_BITMAP_PROPERTIES, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+        };
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+        if icon.side == 0 || icon.side > 1024 || icon.bgra.len() != (icon.side * icon.side * 4) as usize {
+            return Ok(());
+        }
+        let context = self.dc.cast::<ID2D1DeviceContext>().ok();
+        let domain: windows::core::IUnknown =
+            if let Some(context) = &context { unsafe { context.GetDevice()? }.cast()? } else { self.dc.cast()? };
+        if cache.domain.as_ref().is_none_or(|cached| cached.as_raw() != domain.as_raw()) {
+            cache.bitmaps.clear();
+            cache.domain = Some(domain);
+        }
+        let key = std::sync::Arc::as_ptr(icon) as usize;
+        if !cache.bitmaps.contains_key(&key) {
+            if cache.bitmaps.len() >= 64 {
+                cache.bitmaps.clear();
+            }
+            let properties = D2D1_BITMAP_PROPERTIES {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0,
+                dpiY: 96.0,
+            };
+            let bitmap = unsafe {
+                self.dc.CreateBitmap(
+                    D2D_SIZE_U { width: icon.side, height: icon.side },
+                    Some(icon.bgra.as_ptr().cast()),
+                    icon.side * 4,
+                    &properties,
+                )?
+            };
+            cache.bitmaps.insert(key, (icon.clone(), bitmap));
+        }
+        let bitmap = &cache.bitmaps[&key].1;
+        let dest =
+            D2D_RECT_F { left: rect.0.round(), top: rect.1.round(), right: rect.2.round(), bottom: rect.3.round() };
+        unsafe {
+            if let Some(context) = context {
+                context.DrawBitmap(bitmap, Some(&dest), 1.0, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, None, None);
+            } else {
+                self.dc.DrawBitmap(bitmap, Some(&dest), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+            }
         }
         Ok(())
     }

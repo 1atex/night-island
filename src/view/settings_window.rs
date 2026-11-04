@@ -273,6 +273,7 @@ pub enum Act {
     LyricsAppAdd,
     LyricsAppRemove(usize),
     DockRemove(usize),
+    DockHiddenRemove(usize),
     Metric(usize),
     Agent(usize),
 }
@@ -854,11 +855,16 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockAutoHide, "Automatically hide the dock", Kind::Toggle),
         Item::Row(Sid::DockRunning, "Show running applications", Kind::Toggle),
         Item::Row(Sid::DockFullscreen, "Hide over fullscreen applications", Kind::Toggle),
+        Item::Note("Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back."),
         Item::Row(Sid::DockEconomy, "Economy animations (30 fps)", Kind::Toggle),
         Item::Section("Appearance"),
         Item::Row(Sid::DockIconSize, "Dock icon size", Kind::Slider),
         Item::Row(Sid::DockZoom, "Magnification on hover", Kind::Slider),
+        Item::Row(Sid::DockBlur, "Blur behind the dock", Kind::Toggle),
         Item::Row(Sid::DockOpacity, "Dock opacity", Kind::Slider),
+        Item::Row(Sid::DockTintHue, "Dock tint", Kind::Slider),
+        Item::Row(Sid::DockTintSaturation, "Dock tint saturation", Kind::Slider),
+        Item::Row(Sid::DockTintBrightness, "Dock tint brightness", Kind::Slider),
         Item::Row(Sid::DockMargin, "Bottom margin", Kind::Slider),
         Item::Row(Sid::DockMonitor, "Switch dock monitor", Kind::Button),
         Item::Text(if ui.cfg.desktop_dock.monitor.is_empty() {
@@ -890,6 +896,12 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
     if !ui.sw.dock_status.is_empty() {
         let index = out.iter().position(|item| matches!(item, Item::Row(Sid::DockImport, ..))).unwrap_or(0);
         out.insert(index + 1, Item::Text(ui.sw.dock_status.clone()));
+    }
+    out.push(Item::Section("Games and application rules"));
+    out.push(Item::Note("For a windowed game, right-click its dock icon and choose Hide dock in this app."));
+    for (i, path) in ui.cfg.desktop_dock.hidden_apps.iter().enumerate() {
+        let name = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy().into_owned();
+        out.push(Item::Pair(Act::DockHiddenRemove(i), name, "Remove rule".into(), false));
     }
     if !ui.cfg.desktop_dock.pins.is_empty() {
         out.push(Item::Section("Pinned applications"));
@@ -1502,6 +1514,10 @@ mod tests {
             Sid::DockIconSize,
             Sid::DockZoom,
             Sid::DockOpacity,
+            Sid::DockBlur,
+            Sid::DockTintHue,
+            Sid::DockTintSaturation,
+            Sid::DockTintBrightness,
             Sid::DockMargin,
             Sid::DockMonitor,
             Sid::DockImport,
@@ -1513,10 +1529,25 @@ mod tests {
         toggle_set(Sid::DockEnabled, &mut ui.cfg, true);
         toggle_set(Sid::DockAutoHide, &mut ui.cfg, true);
         slider_apply(Sid::DockIconSize, &mut ui.cfg, 1.0);
+        toggle_set(Sid::DockBlur, &mut ui.cfg, true);
+        slider_apply(Sid::DockTintHue, &mut ui.cfg, 0.5);
+        slider_apply(Sid::DockTintSaturation, &mut ui.cfg, 0.6);
+        slider_apply(Sid::DockTintBrightness, &mut ui.cfg, 0.5);
+        slider_apply(Sid::DockOpacity, &mut ui.cfg, 0.5);
+        assert!((ui.cfg.desktop_dock.blur_opacity - 0.6).abs() < 0.001);
+        assert_eq!(ui.cfg.desktop_dock.opacity, 0.94);
+        toggle_set(Sid::DockBlur, &mut ui.cfg, false);
+        slider_apply(Sid::DockOpacity, &mut ui.cfg, 1.0);
+        assert_eq!(ui.cfg.desktop_dock.opacity, 1.0);
+        assert!((ui.cfg.desktop_dock.blur_opacity - 0.6).abs() < 0.001);
+        ui.cfg.desktop_dock.hidden_apps.push(r"c:\games\game.exe".into());
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Pair(Act::DockHiddenRemove(0), ..))));
         let saved = serde_json::to_string(&ui.cfg).unwrap();
         let restored: Settings = serde_json::from_str(&saved).unwrap();
         assert!(restored.desktop_dock.enabled && restored.desktop_dock.auto_hide);
         assert_eq!(restored.desktop_dock.icon_size, 72);
+        assert_eq!(restored.desktop_dock.tint_hue, 180.0);
+        assert_eq!(restored.desktop_dock.hidden_apps.len(), 1);
         for scale in [1.0, 1.5, 2.0] {
             let size = (SW_SIZE.0 * scale, SW_SIZE.1 * scale);
             assert!(group_rect(&layout(size, scale), scale, GROUPS.len() - 1).3 <= size.1);

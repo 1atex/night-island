@@ -82,7 +82,9 @@ impl App {
                     }
                 }
                 DockEnabled | DockAutoHide | DockRunning | DockFullscreen | DockEconomy | DockIconSize | DockZoom
-                | DockOpacity | DockMargin => self.configure_desktop_dock(),
+                | DockOpacity | DockMargin | DockBlur | DockTintHue | DockTintSaturation | DockTintBrightness => {
+                    self.configure_desktop_dock()
+                }
                 SystemNotifications => self.configure_system_notifications(),
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),

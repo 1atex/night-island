@@ -10,6 +10,10 @@ pub enum Sid {
     DockIconSize,
     DockZoom,
     DockOpacity,
+    DockBlur,
+    DockTintHue,
+    DockTintSaturation,
+    DockTintBrightness,
     DockMargin,
     DockMonitor,
     DockImport,
@@ -208,7 +212,10 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
     match id {
         Sid::DockIconSize => (32.0, 72.0, 2.0),
         Sid::DockZoom => (1.0, 1.7, 0.05),
-        Sid::DockOpacity => (0.4, 1.0, 0.02),
+        Sid::DockOpacity => (0.2, 1.0, 0.02),
+        Sid::DockTintHue => (0.0, 360.0, 1.0),
+        Sid::DockTintSaturation => (0.0, 1.0, 0.01),
+        Sid::DockTintBrightness => (0.02, 0.35, 0.01),
         Sid::DockMargin => (0.0, 40.0, 1.0),
         Sid::Size => (80.0, 200.0, 5.0),
         Sid::LiquidReach => (60.0, 300.0, 5.0),
@@ -235,7 +242,16 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
     match id {
         Sid::DockIconSize => c.desktop_dock.icon_size as f32,
         Sid::DockZoom => c.desktop_dock.zoom,
-        Sid::DockOpacity => c.desktop_dock.opacity,
+        Sid::DockOpacity => {
+            if c.desktop_dock.blur {
+                c.desktop_dock.blur_opacity
+            } else {
+                c.desktop_dock.opacity
+            }
+        }
+        Sid::DockTintHue => c.desktop_dock.tint_hue,
+        Sid::DockTintSaturation => c.desktop_dock.tint_saturation,
+        Sid::DockTintBrightness => c.desktop_dock.tint_brightness,
         Sid::DockMargin => c.desktop_dock.margin as f32,
         Sid::Size => c.scale_percent as f32,
         Sid::LiquidReach => c.liquid_reach,
@@ -266,7 +282,8 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
     match id {
         Sid::DockIconSize | Sid::DockMargin => format!("{v:.0} px"),
         Sid::DockZoom => format!("{v:.2}×"),
-        Sid::DockOpacity => format!("{:.0}%", v * 100.0),
+        Sid::DockOpacity | Sid::DockTintSaturation | Sid::DockTintBrightness => format!("{:.0}%", v * 100.0),
+        Sid::DockTintHue => format!("{v:.0}°"),
         Sid::Size => format!("{v:.0}%"),
         Sid::LiquidReach | Sid::LiquidStrength => format!("{v:.0} px"),
         Sid::EqStrength => format!("\u{00D7}{v:.1}"),
@@ -290,7 +307,16 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
     match id {
         Sid::DockIconSize => c.desktop_dock.icon_size = v as u32,
         Sid::DockZoom => c.desktop_dock.zoom = v,
-        Sid::DockOpacity => c.desktop_dock.opacity = v,
+        Sid::DockOpacity => {
+            if c.desktop_dock.blur {
+                c.desktop_dock.blur_opacity = v
+            } else {
+                c.desktop_dock.opacity = v
+            }
+        }
+        Sid::DockTintHue => c.desktop_dock.tint_hue = v,
+        Sid::DockTintSaturation => c.desktop_dock.tint_saturation = v,
+        Sid::DockTintBrightness => c.desktop_dock.tint_brightness = v,
         Sid::DockMargin => c.desktop_dock.margin = v as u32,
         Sid::Size => c.scale_percent = v as u32,
         Sid::LiquidReach => c.liquid_reach = v,
@@ -327,6 +353,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::DockBlur => c.desktop_dock.blur,
         Sid::DockEnabled => c.desktop_dock.enabled,
         Sid::DockAutoHide => c.desktop_dock.auto_hide,
         Sid::DockRunning => c.desktop_dock.show_running,
@@ -395,6 +422,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::DockBlur => c.desktop_dock.blur = on,
         Sid::DockEnabled => c.desktop_dock.enabled = on,
         Sid::DockAutoHide => c.desktop_dock.auto_hide = on,
         Sid::DockRunning => c.desktop_dock.show_running = on,

@@ -108,6 +108,165 @@ fn import_dock(hwnd: HWND) {
     });
 }
 
+fn menu_title(value: &str) -> String {
+    let mut text: String = value.chars().take(90).collect();
+    if value.chars().count() > 90 {
+        text.push('…');
+    }
+    text
+}
+
+fn current_windows(entry: &crate::ui::desktop_dock::Entry) -> Vec<desktop::Window> {
+    desktop::windows()
+        .into_iter()
+        .filter(|w| entry.windows.iter().any(|old| old.handle == w.handle && key(&old.path) == key(&w.path)))
+        .collect()
+}
+
+fn entry_app_path(entry: &crate::ui::desktop_dock::Entry) -> String {
+    entry.windows.first().map(|w| w.path.clone()).unwrap_or_else(|| desktop::resolved_target(&entry.pin.target))
+}
+
+fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize> {
+    use crate::ui::menu::{self, Entry};
+    let mut point = windows::Win32::Foundation::POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut point);
+    }
+    let scale = with_app_value(|a| a.desktop_dock.as_ref().map_or(a.dpi_scale, Dock::scale)).unwrap_or(1.0);
+    let config = with_app_value(|a| a.settings.desktop_dock.clone()).unwrap_or_default();
+    let mut page = 0;
+    loop {
+        let mut items = Vec::new();
+        if let Some(entry) = entry {
+            let own_settings = entry.windows.iter().any(|w| w.island_settings);
+            items.push(Entry::info(&menu_title(&entry.pin.name)));
+            match page {
+                0 => {
+                    let state = if entry.windows.is_empty() { "Not running" } else { "Running" };
+                    items.push(Entry::info(&format!(
+                        "{} · {}: {} · {}: {}",
+                        tr(state),
+                        tr("Windows"),
+                        entry.windows.len(),
+                        tr("Minimized"),
+                        entry.windows.iter().filter(|w| w.minimized).count()
+                    )));
+                    items.push(
+                        Entry::item(1, &tr(if own_settings { "Island settings" } else { "Open new window" }))
+                            .glyph('\u{E8A7}'),
+                    );
+                    if !entry.windows.is_empty() {
+                        items.push(
+                            Entry::item(18, &format!("{} ({})…", tr("Windows"), entry.windows.len())).glyph('\u{E737}'),
+                        );
+                    }
+                    items.push(
+                        Entry::item(
+                            2,
+                            &tr(if entry.pinned { "Unpin from desktop dock" } else { "Pin to desktop dock" }),
+                        )
+                        .glyph('\u{E718}'),
+                    );
+                    items.push(Entry::item(20, &tr("Dock behavior…")).glyph('\u{E713}'));
+                    items.push(Entry::item(8, &tr("Application actions…")).glyph('\u{E712}'));
+                    items.push(Entry::divider());
+                }
+                1 => {
+                    let target = std::path::Path::new(&entry.pin.target);
+                    if target.exists() {
+                        items.push(Entry::item(14, &tr("Show in folder")).glyph('\u{E838}'));
+                        items.push(Entry::item(15, &tr("Properties")).glyph('\u{E946}'));
+                        if !own_settings
+                            && target
+                                .extension()
+                                .is_some_and(|e| e.eq_ignore_ascii_case("exe") || e.eq_ignore_ascii_case("lnk"))
+                        {
+                            items.push(Entry::item(17, &tr("Run as administrator")).glyph('\u{E7EF}'));
+                        }
+                    }
+                    items.push(Entry::item(16, &tr("Copy application path")).glyph('\u{E8C8}'));
+                    if !entry.windows.is_empty() {
+                        items.push(Entry::divider());
+                        items.push(Entry::item(11, &tr("Restore all windows")).glyph('\u{E923}'));
+                        items.push(Entry::item(12, &tr("Minimize all windows")).glyph('\u{E921}'));
+                        items.push(Entry::item(13, &tr("Close windows normally")).glyph('\u{E711}').danger());
+                    }
+                }
+                2 => {
+                    if let Some(i) = config.pins.iter().position(|p| key(&p.target) == key(&entry.pin.target)) {
+                        if i > 0 {
+                            items.push(Entry::item(3, &tr("Move left")).glyph('\u{E72B}'));
+                        }
+                        if i + 1 < config.pins.len() {
+                            items.push(Entry::item(4, &tr("Move right")).glyph('\u{E72A}'));
+                        }
+                    }
+                    let path = key(&entry_app_path(entry));
+                    let hidden = config.hidden_apps.iter().any(|p| key(p) == path);
+                    if !own_settings
+                        && std::path::Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"))
+                    {
+                        items.push(
+                            Entry::item(
+                                10,
+                                &tr(if hidden {
+                                    "Stop hiding dock for this app"
+                                } else {
+                                    "Hide dock while this app is active"
+                                }),
+                            )
+                            .glyph(if hidden { '\u{E73E}' } else { '\u{E739}' }),
+                        );
+                    }
+                    items.push(
+                        Entry::item(23, &tr(if config.auto_hide { "Keep dock visible" } else { "Auto-hide dock" }))
+                            .glyph('\u{E8B3}'),
+                    );
+                }
+                _ => {
+                    for (i, window) in entry.windows.iter().enumerate() {
+                        let state = if window.minimized {
+                            "Minimized"
+                        } else if window.active {
+                            "Active"
+                        } else {
+                            "Open"
+                        };
+                        items.push(
+                            Entry::item(100 + i, &format!("{} · {}", menu_title(&window.title), tr(state)))
+                                .glyph(if window.active { '\u{E73E}' } else { '\u{E737}' }),
+                        );
+                    }
+                }
+            }
+        } else {
+            items.push(Entry::info("Night Island Dock"));
+            items.push(Entry::info(&format!("{}: {}", tr("Pinned applications"), config.pins.len())));
+            items.push(Entry::item(22, &tr("Import applications from MyDockFinder")).glyph('\u{E8B5}'));
+            items.push(
+                Entry::item(23, &tr(if config.auto_hide { "Keep dock visible" } else { "Auto-hide dock" }))
+                    .glyph('\u{E8B3}'),
+            );
+        }
+        if page == 0 {
+            items.push(Entry::item(5, &tr("Add application or file")).glyph('\u{E710}'));
+            items.push(Entry::item(6, &tr("Desktop dock settings")).glyph('\u{E713}'));
+            items.push(Entry::item(7, &tr("Island settings")).glyph('\u{E80F}'));
+        } else {
+            items.push(Entry::divider());
+            items.push(Entry::item(21, &tr("Back")).glyph('\u{E72B}'));
+        }
+        match menu::show(items, (point.x, point.y), true, scale, &|f| with_app(|a| f(&a.gpu))) {
+            Some(8) => page = 1,
+            Some(20) => page = 2,
+            Some(18) => page = 3,
+            Some(21) => page = 0,
+            other => return other,
+        }
+    }
+}
+
 pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
     if command == 1 {
         add_file(hwnd);
@@ -140,34 +299,11 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
             }
         }
         Some(Request::Menu(entry)) => {
-            use crate::ui::menu::{self, Entry};
-            let mut items = Vec::new();
-            if let Some(entry) = &entry {
-                items.push(Entry::item(1, &tr("Open new window")));
-                items.push(Entry::item(
-                    2,
-                    &tr(if entry.pinned { "Unpin from desktop dock" } else { "Pin to desktop dock" }),
-                ));
-                if entry.pinned {
-                    items.push(Entry::item(3, &tr("Move left")));
-                    items.push(Entry::item(4, &tr("Move right")));
-                }
-                if !entry.windows.is_empty() {
-                    items.push(Entry::divider());
-                    for (i, window) in entry.windows.iter().take(32).enumerate() {
-                        items.push(Entry::item(100 + i, &window.title));
-                    }
-                }
-                items.push(Entry::divider());
-            }
-            items.push(Entry::item(5, &tr("Add application or file")));
-            items.push(Entry::item(6, &tr("Desktop dock settings")));
-            let mut point = windows::Win32::Foundation::POINT::default();
-            unsafe {
-                let _ = GetCursorPos(&mut point);
-            }
-            let scale = with_app_value(|a| a.dpi_scale).unwrap_or(1.0);
-            let chosen = menu::show(items, (point.x, point.y), true, scale, &|f| with_app(|a| f(&a.gpu)));
+            let entry = entry.map(|mut entry| {
+                entry.windows = current_windows(&entry);
+                entry
+            });
+            let chosen = dock_context(entry.as_ref());
             with_app(|a| {
                 if let Some(dock) = &mut a.desktop_dock {
                     dock.close_menu();
@@ -176,7 +312,11 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
             match chosen {
                 Some(1) => {
                     if let Some(entry) = entry {
-                        cmd::shell_open(&entry.pin.target, None);
+                        if let Some(window) = entry.windows.iter().find(|w| w.island_settings) {
+                            desktop::activate(window, false);
+                        } else {
+                            cmd::shell_open(&entry.pin.target, None);
+                        }
                     }
                 }
                 Some(2..=4) => {
@@ -189,7 +329,11 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                                     pins.remove(i);
                                 }
                                 (Some(2), None) => {
-                                    a.settings.desktop_dock.add(entry.pin);
+                                    let mut pin = entry.pin;
+                                    if entry.windows.iter().any(|w| w.island_settings) {
+                                        pin.name = "Night Island".into();
+                                    }
+                                    a.settings.desktop_dock.add(pin);
                                 }
                                 (Some(3), Some(i)) if i > 0 => pins.swap(i, i - 1),
                                 (Some(4), Some(i)) if i + 1 < pins.len() => pins.swap(i, i + 1),
@@ -204,6 +348,62 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                     if let Some(group) = view::GROUPS.iter().position(|g| g.name == "Desktop dock") {
                         a.open_settings_at(group);
                     }
+                }),
+                Some(7) => with_app(|a| {
+                    if let Some(i) = view::GROUPS.iter().position(|g| g.name == "Island") {
+                        a.open_settings_at(i);
+                    }
+                }),
+                Some(10) => {
+                    if let Some(entry) = &entry {
+                        let path = key(&entry_app_path(entry));
+                        with_app(|a| {
+                            let hidden = &mut a.settings.desktop_dock.hidden_apps;
+                            if let Some(i) = hidden.iter().position(|p| key(p) == path) {
+                                hidden.remove(i);
+                            } else {
+                                hidden.push(path);
+                            }
+                            a.save_desktop_dock();
+                        });
+                    }
+                }
+                Some(11..=13) => {
+                    if let Some(entry) = &entry {
+                        let action = match chosen {
+                            Some(11) => desktop::WindowAction::Restore,
+                            Some(12) => desktop::WindowAction::Minimize,
+                            _ => desktop::WindowAction::Close,
+                        };
+                        for window in current_windows(entry) {
+                            desktop::change_window(&window, action);
+                        }
+                    }
+                }
+                Some(14) => {
+                    if let Some(entry) = &entry {
+                        cmd::reveal(std::path::Path::new(&entry.pin.target));
+                    }
+                }
+                Some(15) => {
+                    if let Some(entry) = &entry {
+                        desktop::file_properties(hwnd, &entry.pin.target);
+                    }
+                }
+                Some(16) => {
+                    if let Some(entry) = &entry {
+                        clips::sys::write_text(hwnd, &entry_app_path(entry));
+                    }
+                }
+                Some(17) => {
+                    if let Some(entry) = &entry {
+                        cmd::shell_open(&entry.pin.target, Some("runas"));
+                    }
+                }
+                Some(22) => import_dock(hwnd),
+                Some(23) => with_app(|a| {
+                    a.settings.desktop_dock.auto_hide = !a.settings.desktop_dock.auto_hide;
+                    a.save_desktop_dock();
                 }),
                 Some(id) if id >= 100 => {
                     if let Some(window) = entry.as_ref().and_then(|e| e.windows.get(id - 100)) {

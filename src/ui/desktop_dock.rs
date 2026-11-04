@@ -1,9 +1,10 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
-use windows::UI::Composition::{Compositor, ContainerVisual};
+use windows::UI::Composition::{CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER};
 use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRoundRectRgn, DeleteObject, RGN_OR, SetWindowRgn};
@@ -12,12 +13,12 @@ use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+    GetCapture, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
 use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Interface, Result, w};
-use windows_numerics::Vector2;
+use windows_numerics::{Vector2, Vector3};
 
 use crate::data::desktop_dock::{DockSettings, Pin, key};
 use crate::platform::{apps, desktop_dock as desktop};
@@ -50,6 +51,9 @@ struct State {
     config: DockSettings,
     gpu: Gpu,
     content: Layer,
+    backdrop: Option<(SpriteVisual, CompositionRoundedRectangleGeometry)>,
+    icon_bitmaps: RefCell<crate::ui::gfx::IconBitmapCache>,
+    icons: apps::DockIconCache,
     _target: DesktopWindowTarget,
     _root: ContainerVisual,
     entries: Vec<Entry>,
@@ -73,6 +77,8 @@ struct State {
     offset: usize,
     request: Option<Request>,
     menu_open: bool,
+    allowed_visible: bool,
+    resumed: bool,
 }
 
 pub struct Dock {
@@ -87,6 +93,30 @@ pub fn capacity(width: f32, scale: f32, icon: f32, zoom: f32) -> usize {
     (((width / scale - 48.0 - icon * (zoom - 1.0) * 3.0) / (icon + 12.0)).floor() as usize).clamp(2, 64)
 }
 
+fn create_backdrop(
+    hwnd: HWND,
+    compositor: &Compositor,
+    root: &ContainerVisual,
+) -> Option<(SpriteVisual, CompositionRoundedRectangleGeometry)> {
+    use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
+    let enabled = windows::core::BOOL::from(true);
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_HOSTBACKDROPBRUSH,
+            (&raw const enabled).cast(),
+            size_of::<windows::core::BOOL>() as u32,
+        )
+        .ok()?;
+    }
+    let sprite = compositor.CreateSpriteVisual().ok()?;
+    sprite.SetBrush(&compositor.CreateHostBackdropBrush().ok()?).ok()?;
+    let geometry = compositor.CreateRoundedRectangleGeometry().ok()?;
+    sprite.SetClip(&compositor.CreateGeometricClipWithGeometry(&geometry).ok()?).ok()?;
+    root.Children().ok()?.InsertAtBottom(&sprite).ok()?;
+    Some((sprite, geometry))
+}
+
 impl State {
     fn post(&mut self, request: Request) {
         if self.request.is_none() {
@@ -98,9 +128,10 @@ impl State {
     }
 
     fn refresh(&mut self, force: bool) {
-        if self.pressed.is_some() || self.menu_open {
+        if self.suppressed || self.pressed.is_some() || self.menu_open {
             return;
         }
+        let force = force || std::mem::take(&mut self.resumed);
         let scan = desktop::windows();
         self.scanned_at = Instant::now();
         if !force && scan == self.scan {
@@ -108,8 +139,6 @@ impl State {
         }
         self.scan = scan;
         let previous: Vec<String> = self.entries.iter().map(|e| key(&e.pin.target)).collect();
-        let icons: HashMap<_, _> = self.entries.iter().map(|e| (e.pin.target.clone(), e.icon.clone())).collect();
-        let icon_for = |path: &str| icons.get(path).cloned().unwrap_or_else(|| apps::large_icon_for_path(path));
         let mut entries: Vec<Entry> = self
             .config
             .pins
@@ -123,7 +152,7 @@ impl State {
                     pin: pin.clone(),
                     pinned: true,
                     windows: self.scan.iter().filter(|w| key(&w.path) == *resolved).cloned().collect(),
-                    icon: icon_for(&pin.target),
+                    icon: None,
                 }
             })
             .collect();
@@ -137,10 +166,14 @@ impl State {
                     entry.windows.push(window.clone());
                 } else {
                     entries.push(Entry {
-                        pin: Pin::from_path(&window.path),
+                        pin: if window.island_settings {
+                            Pin { name: window.title.clone(), target: window.path.clone() }
+                        } else {
+                            Pin::from_path(&window.path)
+                        },
                         pinned: false,
                         windows: vec![window.clone()],
-                        icon: icon_for(&window.path),
+                        icon: None,
                     });
                 }
             }
@@ -152,7 +185,66 @@ impl State {
         self.targets.retain(|target, _| self.config.pins.iter().any(|p| p.target == *target));
         self.offset = self.offset.min(self.entries.len().saturating_sub(1));
         self.layout();
+        self.load_icons();
         self.render();
+    }
+
+    fn load_icons(&mut self) {
+        let requested = (self.config.icon_size as f32 * self.config.zoom * self.scale).ceil() as u32;
+        let slots = capacity(
+            (self.monitor.work.right - self.monitor.work.left) as f32,
+            self.scale,
+            self.config.icon_size as f32,
+            self.config.zoom,
+        )
+        .saturating_sub(1);
+        let targets: Vec<_> = self.entries.iter().map(|e| e.pin.target.clone()).collect();
+        self.icons.retain(&targets);
+        for (i, entry) in self.entries.iter_mut().enumerate() {
+            entry.icon = if i >= self.offset && i < self.offset + slots {
+                self.icons.get(&entry.pin.target, requested)
+            } else {
+                None
+            };
+        }
+        self.icon_bitmaps
+            .borrow_mut()
+            .retain(self.entries.iter().filter_map(|e| e.icon.as_ref()).map(|icon| Arc::as_ptr(icon) as usize));
+    }
+
+    fn update_suppression(&mut self) -> bool {
+        let suppressed = (self.config.hide_fullscreen && desktop::fullscreen(&self.monitor))
+            || desktop::foreground_app_hidden(&self.monitor, &self.config.hidden_apps);
+        self.set_suppressed(suppressed);
+        suppressed
+    }
+
+    fn set_suppressed(&mut self, suppressed: bool) {
+        if suppressed != self.suppressed {
+            self.suppressed = suppressed;
+            self.pointer = None;
+            self.hover = None;
+            self.pressed = None;
+            self.dragging = false;
+            unsafe {
+                let _ = KillTimer(Some(self.hwnd), FRAME);
+                if suppressed {
+                    let _ = PostMessageW(Some(self.hwnd), WM_APP + 72, WPARAM(0), LPARAM(0));
+                }
+                SetTimer(Some(self.hwnd), PULSE, if suppressed { 500 } else { 200 }, None);
+                if self.allowed_visible {
+                    let _ = ShowWindow(self.hwnd, if suppressed { SW_HIDE } else { SW_SHOWNOACTIVATE });
+                }
+            }
+            if let Some((backdrop, _)) = &self.backdrop {
+                let _ = backdrop.SetIsVisible(!suppressed && self.config.blur);
+            }
+            if !suppressed {
+                self.resumed = true;
+                self.scanned_at = Instant::now() - Duration::from_secs(3);
+                self.leave_at = Instant::now();
+            }
+        }
     }
 
     fn layout(&mut self) {
@@ -234,6 +326,14 @@ impl State {
         }
         let hint = self.hover.and_then(|i| self.entries.get(i)).map(|e| e.pin.name.clone());
         let label = self.label_rect();
+        if let Some((backdrop, geometry)) = &self.backdrop {
+            let _ = backdrop.SetIsVisible(self.config.blur && hide < 0.99);
+            let _ = backdrop.SetOffset(Vector3 { X: self.panel.0, Y: self.panel.1, Z: 0.0 });
+            let size = Vector2 { X: self.panel.2 - self.panel.0, Y: self.panel.3 - self.panel.1 };
+            let _ = backdrop.SetSize(size);
+            let _ = geometry.SetSize(size);
+            let _ = geometry.SetCornerRadius(Vector2 { X: 22.0 * s, Y: 22.0 * s });
+        }
         let _ = self.content.paint(&self.gpu, |p| self.paint_content(p, hide));
         unsafe {
             let r = if hide > 0.99 { (0.0, height - 4.0 * s, width, height) } else { self.panel };
@@ -242,8 +342,8 @@ impl State {
                 r.1 as i32,
                 r.2.ceil() as i32,
                 r.3.ceil() as i32,
-                (20.0 * s) as i32,
-                (20.0 * s) as i32,
+                (44.0 * s) as i32,
+                (44.0 * s) as i32,
             );
             if hide <= 0.99 {
                 for (_, rect) in &self.rects {
@@ -312,13 +412,18 @@ impl State {
             );
             return;
         }
-        let (r, g, b) = crate::ui::theme::panel_u8();
-        let _ = p.fill_round_rect(
+        let (r, g, b) =
+            crate::ui::theme::hsv(self.config.tint_hue, self.config.tint_saturation, self.config.tint_brightness);
+        let alpha = if self.config.blur { self.config.blur_opacity } else { self.config.opacity };
+        let _ = p.fill_round_gradient(
             self.panel,
             22.0 * s,
-            rgba(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, self.config.opacity),
+            rgba((r + 0.045).min(1.0), (g + 0.045).min(1.0), (b + 0.05).min(1.0), alpha),
+            rgba(r, g, b, alpha),
         );
-        let _ = p.stroke_round_rect(self.panel, 22.0 * s, s, rgba(1.0, 1.0, 1.0, 0.15));
+        let _ = p.stroke_round_rect(self.panel, 22.0 * s, s, rgba(1.0, 1.0, 1.0, 0.19));
+        let inner = (self.panel.0 + s, self.panel.1 + s, self.panel.2 - s, self.panel.3 - s);
+        let _ = p.stroke_round_rect(inner, 21.0 * s, s, rgba(0.0, 0.0, 0.0, 0.12));
         for &(i, rect) in &self.rects {
             let active = self.entries.get(i).is_some_and(|e| e.windows.iter().any(|w| w.active));
             if self.hover == Some(i) || active {
@@ -340,7 +445,7 @@ impl State {
             let image = (rect.0 + shrink, rect.1 + shrink, rect.2 - shrink, rect.3 - shrink);
             if let Some(entry) = self.entries.get(i) {
                 if let Some(icon) = &entry.icon {
-                    let _ = p.image(image, 0.0, icon.side, &icon.bgra);
+                    let _ = p.cached_icon(image, icon, &mut self.icon_bitmaps.borrow_mut());
                 } else {
                     let _ = p.glyph('\u{E8A5}', image, icon * 0.65, rgba(0.85, 0.85, 0.9, 1.0));
                 }
@@ -391,18 +496,15 @@ impl State {
     }
 
     fn pulse(&mut self) {
+        if self.update_suppression() {
+            return;
+        }
         self.feedback.set_enabled(motion_allowed());
         if self.scanned_at.elapsed() >= Duration::from_secs(2) {
             self.refresh(false);
         }
-        let suppressed = self.config.hide_fullscreen && desktop::fullscreen(&self.monitor);
-        if suppressed != self.suppressed {
-            self.suppressed = suppressed;
-            self.pointer = None;
-            self.hover = None;
-            unsafe {
-                let _ = ShowWindow(self.hwnd, if suppressed { SW_HIDE } else { SW_SHOWNOACTIVATE });
-            }
+        if self.icons.poll() {
+            self.load_icons();
             self.render();
         }
         let mut pt = POINT::default();
@@ -435,7 +537,18 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
         if ptr.is_null() {
             return DefWindowProcW(hwnd, msg, wparam, lparam);
         }
+        if (*ptr).suppressed
+            && matches!(msg, WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONUP | WM_MOUSEWHEEL)
+        {
+            return LRESULT(0);
+        }
         match msg {
+            m if m == WM_APP + 72 => {
+                if GetCapture() == hwnd && (*ptr).pressed.is_none() {
+                    let _ = ReleaseCapture();
+                }
+                LRESULT(0)
+            }
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
             WM_ERASEBKGND => LRESULT(1),
             WM_TIMER => {
@@ -545,6 +658,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 };
                 state.hover = None;
                 state.pointer = None;
+                state.load_icons();
                 state.render();
                 LRESULT(0)
             }
@@ -584,6 +698,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 if (scale - state.scale).abs() > 0.01 {
                     state.scale = scale;
                     state.layout();
+                    state.load_icons();
                     state.render();
                 }
                 LRESULT(0)
@@ -639,6 +754,7 @@ impl Dock {
         let target = unsafe { compositor.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, true)? };
         let root = compositor.CreateContainerVisual()?;
         root.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+        let backdrop = create_backdrop(hwnd, compositor, &root);
         let content = gpu.layer(compositor, (1, 1))?;
         root.Children()?.InsertAtTop(&content.sprite)?;
         target.SetRoot(&root)?;
@@ -649,6 +765,9 @@ impl Dock {
             config: config.clone(),
             gpu: gpu.popup(),
             content,
+            backdrop,
+            icon_bitmaps: RefCell::default(),
+            icons: apps::DockIconCache::new(),
             _target: target,
             _root: root,
             entries: Vec::new(),
@@ -672,14 +791,21 @@ impl Dock {
             offset: 0,
             request: None,
             menu_open: false,
+            allowed_visible: visible,
+            resumed: false,
         });
         state.feedback.set_enabled(motion_allowed());
-        state.refresh(true);
+        state.update_suppression();
+        if state.suppressed {
+            state.layout();
+        } else {
+            state.refresh(true);
+        }
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&raw mut *state) as isize);
             DragAcceptFiles(hwnd, true);
-            SetTimer(Some(hwnd), PULSE, 200, None);
-            if visible {
+            SetTimer(Some(hwnd), PULSE, if state.suppressed { 500 } else { 200 }, None);
+            if visible && !state.suppressed {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             }
         }
@@ -688,19 +814,35 @@ impl Dock {
     }
 
     pub fn update(&mut self, config: &DockSettings) {
+        let rebuild = self.state.config.pins != config.pins || self.state.config.show_running != config.show_running;
         self.state.config = config.clone();
-        self.state.refresh(true);
+        if self.state.update_suppression() {
+            return;
+        }
+        if rebuild {
+            self.state.refresh(true);
+        } else {
+            self.state.layout();
+            self.state.load_icons();
+            self.state.render();
+        }
         self.state.pulse();
     }
 
     pub fn refresh_windows(&mut self) {
-        self.state.refresh(false);
+        if !self.state.update_suppression() {
+            self.state.refresh(false);
+        }
     }
 
     pub fn set_capture_hidden(&self, hidden: bool) {
         unsafe {
             let _ = SetWindowDisplayAffinity(self.state.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
         }
+    }
+
+    pub fn scale(&self) -> f32 {
+        self.state.scale
     }
 
     pub fn config(&self) -> DockSettings {
@@ -732,6 +874,144 @@ impl Drop for Dock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn verify_live_backdrop(dock: &mut Dock, folder: &std::path::Path) -> Result<()> {
+        use windows::Win32::Foundation::{COLORREF, RECT};
+        use windows::Win32::Graphics::Dwm::DwmFlush;
+        use windows::Win32::Graphics::Gdi::*;
+        use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext};
+        struct Fixture(HWND, windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                    SetThreadDpiAwarenessContext(self.1);
+                }
+            }
+        }
+        assert!(dock.state.backdrop.is_some(), "Windows host backdrop is unavailable");
+        std::fs::create_dir_all(folder).unwrap();
+        let old_config = dock.state.config.clone();
+        let old_scale = dock.state.scale;
+        let old_dpi = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        dock.state.scale = unsafe { GetDpiForWindow(dock.state.hwnd) } as f32 / 96.0;
+        dock.state.feedback.set_enabled(false);
+        dock.state.pointer = None;
+        dock.state.hover = None;
+        dock.state.layout();
+        let (width, height) = dock.state.size;
+        let origin = dock.state.origin;
+        let backdrop = unsafe {
+            CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                w!("STATIC"),
+                w!("Night Island blur fixture"),
+                WS_POPUP,
+                origin.0,
+                origin.1,
+                width,
+                height,
+                None,
+                None,
+                Some(GetModuleHandleW(None)?.into()),
+                None,
+            )?
+        };
+        let _fixture = Fixture(backdrop, old_dpi);
+        unsafe {
+            let _ = ShowWindow(backdrop, SW_SHOWNOACTIVATE);
+            let _ = SetWindowPos(backdrop, Some(HWND_TOPMOST), origin.0, origin.1, width, height, SWP_NOACTIVATE);
+            let dc = GetDC(Some(backdrop));
+            for x in (0..width).step_by(6) {
+                let brush = CreateSolidBrush(COLORREF(if (x / 6) % 2 == 0 { 0x00ffffff } else { 0x00000000 }));
+                FillRect(dc, &RECT { left: x, top: 0, right: (x + 6).min(width), bottom: height }, brush);
+                let _ = DeleteObject(brush.into());
+            }
+            ReleaseDC(Some(backdrop), dc);
+            let _ = ValidateRect(Some(backdrop), None);
+            let _ =
+                SetWindowPos(dock.state.hwnd, Some(HWND_TOPMOST), origin.0, origin.1, width, height, SWP_NOACTIVATE);
+            let _ = ShowWindow(dock.state.hwnd, SW_SHOWNOACTIVATE);
+            let _ = KillTimer(Some(dock.state.hwnd), PULSE);
+        }
+        let mut energies = Vec::new();
+        for blur in [false, true] {
+            dock.state.config.blur = blur;
+            dock.state.config.opacity = 0.0;
+            dock.state.config.blur_opacity = 0.0;
+            dock.state.render();
+            let until = Instant::now() + Duration::from_millis(250);
+            while Instant::now() < until {
+                unsafe {
+                    let mut msg = MSG::default();
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    let _ = DwmFlush();
+                }
+                std::thread::sleep(Duration::from_millis(15));
+            }
+            let mut pixels = vec![0u8; (width * height * 4) as usize];
+            unsafe {
+                let screen = GetDC(None);
+                let mem = CreateCompatibleDC(Some(screen));
+                let mut bitmap = BITMAPINFO {
+                    bmiHeader: BITMAPINFOHEADER {
+                        biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: width,
+                        biHeight: -height,
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let mut bits = std::ptr::null_mut();
+                let image = CreateDIBSection(Some(mem), &bitmap, DIB_RGB_COLORS, &mut bits, None, 0)?;
+                let previous = SelectObject(mem, image.into());
+                BitBlt(mem, 0, 0, width, height, Some(screen), origin.0, origin.1, SRCCOPY | CAPTUREBLT)?;
+                SelectObject(mem, previous);
+                GetDIBits(mem, image, 0, height as u32, Some(pixels.as_mut_ptr().cast()), &mut bitmap, DIB_RGB_COLORS);
+                let _ = DeleteObject(image.into());
+                let _ = DeleteDC(mem);
+                ReleaseDC(None, screen);
+            }
+            let y = (dock.state.panel.3 - 8.0 * dock.state.scale) as usize;
+            let x0 = (dock.state.panel.0 + 26.0 * dock.state.scale) as usize;
+            let x1 = (dock.state.panel.2 - 26.0 * dock.state.scale) as usize;
+            let lum = |x: usize| {
+                let i = (y * width as usize + x) * 4;
+                (pixels[i] as f32 + pixels[i + 1] as f32 + pixels[i + 2] as f32) / 3.0
+            };
+            let energy: f32 = (x0 + 1..x1).map(|x| (lum(x) - lum(x - 1)).abs()).sum::<f32>() / (x1 - x0 - 1) as f32;
+            energies.push(energy);
+            for px in pixels.chunks_exact_mut(4) {
+                px.swap(0, 2);
+                px[3] = 255;
+            }
+            let mut encoder = png::Encoder::new(
+                std::fs::File::create(folder.join(if blur { "blur-on.png" } else { "blur-off.png" })).unwrap(),
+                width as u32,
+                height as u32,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+        }
+        unsafe {
+            let _ = ShowWindow(dock.state.hwnd, SW_HIDE);
+            SetTimer(Some(dock.state.hwnd), PULSE, 200, None);
+        }
+        dock.state.config = old_config;
+        dock.state.scale = old_scale;
+        dock.state.layout();
+        dock.state.render();
+        assert!(energies[0] > 15.0, "Backdrop fixture must be visible: {energies:?}");
+        assert!(energies[1] < energies[0] * 0.6, "Host backdrop must reduce stripe detail: {energies:?}");
+        Ok(())
+    }
 
     #[test]
     #[ignore = "Requires an isolated Windows Composition runtime"]
@@ -792,8 +1072,25 @@ mod tests {
             dock.state.scale = scale;
             dock.state.feedback.set_enabled(false);
             dock.state.layout();
+            dock.state.load_icons();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while dock.state.icons.pending() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+                dock.state.icons.poll();
+            }
+            dock.state.load_icons();
             dock.state.render();
             let panel = dock.state.panel;
+            let bitmaps = dock.state.icon_bitmaps.borrow().identities();
+            assert!(!bitmaps.is_empty(), "Native icons should be uploaded after loading");
+            for _ in 0..4 {
+                dock.state.render();
+                assert_eq!(
+                    dock.state.icon_bitmaps.borrow().identities(),
+                    bitmaps,
+                    "Settled rendering must reuse native bitmap uploads"
+                );
+            }
             unsafe {
                 let region = CreateRectRgn(0, 0, 0, 0);
                 assert!(GetWindowRgn(hwnd, region).0 > 0);
@@ -853,6 +1150,9 @@ mod tests {
                 let _ = DeleteObject(region.into());
             }
             assert!(!dock.state.feedback.active());
+            if let Some((backdrop, _)) = &dock.state.backdrop {
+                assert!(!backdrop.IsVisible()?);
+            }
             dock.state.hidden = false;
             dock.state.render();
         }
@@ -875,6 +1175,33 @@ mod tests {
                 encoder.set_depth(png::BitDepth::Eight);
                 encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
             }
+        }
+        dock.state.hover = Some(0);
+        dock.state.pressed = Some((0, 10.0));
+        unsafe {
+            SetCapture(hwnd);
+        }
+        dock.state.set_suppressed(true);
+        unsafe {
+            SendMessageW(hwnd, WM_LBUTTONDOWN, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(hwnd, WM_LBUTTONUP, Some(WPARAM(0)), Some(LPARAM(0)));
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            assert_ne!(GetCapture(), hwnd);
+            assert!(!IsWindowVisible(hwnd).as_bool());
+        }
+        assert!(dock.state.request.is_none());
+        assert!(dock.state.hover.is_none() && dock.state.pressed.is_none());
+        dock.state.set_suppressed(false);
+        assert!(dock.state.resumed);
+        dock.state.refresh(false);
+        assert!(!dock.state.resumed);
+        assert!(dock.state.hover.is_none());
+        if let Some(folder) = std::env::var_os("NI_DOCK_LIVE_PREVIEW") {
+            verify_live_backdrop(&mut dock, std::path::Path::new(&folder))?;
         }
         let before = dock.config().pins;
         let a = dock.state.rects[0].1;

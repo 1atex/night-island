@@ -28,6 +28,37 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Running" => "Запущено",
+        "Windows" => "Окна",
+        "Minimized" => "Свёрнуто",
+        "Active" => "Активно",
+        "Properties" => "Свойства",
+        "Copy application path" => "Копировать путь приложения",
+        "Restore all windows" => "Восстановить все окна",
+        "Minimize all windows" => "Свернуть все окна",
+        "Close windows normally" => "Закрыть окна",
+        "Stop hiding dock for this app" => "Не скрывать док в этом приложении",
+        "Hide dock while this app is active" => "Скрывать док в этом приложении",
+        "Keep dock visible" => "Оставлять док видимым",
+        "Auto-hide dock" => "Автоматически скрывать док",
+        "Island settings" => "Настройки Island",
+        "Dock behavior…" => "Поведение дока…",
+        "Application actions…" => "Действия с приложением…",
+        "Windows…" => "Окна…",
+        "Night Island · Settings" => "Night Island · Настройки",
+
+        "Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back." => {
+            "Полноэкранные приложения скрывают док на своём мониторе. Alt+Tab вернёт его."
+        }
+        "Games and application rules" => "Игры и правила приложений",
+        "For a windowed game, right-click its dock icon and choose Hide dock in this app." => {
+            "Для игры в окне: ПКМ по значку → «Скрывать док в этом приложении»."
+        }
+        "Remove rule" => "Убрать правило",
+        "Blur behind the dock" => "Размытие фона за доком",
+        "Dock tint" => "Оттенок панели",
+        "Dock tint saturation" => "Насыщенность оттенка",
+        "Dock tint brightness" => "Яркость панели",
         "Applications" => "Приложения",
         "Pinned applications" => "Закреплённые приложения",
         "Add" => "Добавить",
