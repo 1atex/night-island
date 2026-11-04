@@ -55,7 +55,7 @@ const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 19] = [
+const PILL: [(Sid, &str, Kind); 20] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
@@ -63,6 +63,7 @@ const PILL: [(Sid, &str, Kind); 19] = [
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
     (Sid::MusicCover, "Cover art on the pill", Kind::Toggle),
+    (Sid::PreferPlayingMedia, "Prefer the player that is playing", Kind::Toggle),
     (Sid::CoverMode, "Cover shape", Kind::Cycle),
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
@@ -171,7 +172,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (4, "Music"), (12, "Edges")],
+        sections: &[(0, "Pill"), (4, "Music"), (13, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',
@@ -625,6 +626,7 @@ fn pill_items(ui: &UiState) -> Vec<Item> {
     if let Some(group) = GROUPS.iter().find(|g| g.name == "Pill and music") {
         out.extend(rows_with_sections(group));
     }
+    out.push(Item::Note("Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls."));
     out.push(Item::Section("Players for lyrics"));
     let apps = &ui.cfg.lyrics_apps;
     if apps.is_empty() {

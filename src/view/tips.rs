@@ -72,8 +72,12 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
         HomeHit::VolumeIcon => {
             let row = volume_row(pill, scale, wide);
             (
-                if ui.home.mixer_open { "Close the app mixer" } else { "App mixer: adjust each application's volume" }
-                    .into(),
+                if ui.home.vol_track {
+                    "Player volume: left-click for system, right-click for mixer"
+                } else {
+                    "System volume: left-click for player, right-click for mixer"
+                }
+                .into(),
                 (row.0 + 2.0 * scale, row.1, row.0 + 42.0 * scale, row.3),
             )
         }

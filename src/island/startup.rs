@@ -105,6 +105,7 @@ pub fn run() -> Result<()> {
         #[cfg(feature = "demo")]
         demo::apply(hwnd);
         apps::start_indexing();
+        with_app(|app| media::configure_priority(app.settings.prefer_playing_media));
         media::start(hwnd);
         crate::services::yandex::start(hwnd);
         downloads::start(hwnd);

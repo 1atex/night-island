@@ -4,6 +4,18 @@ use crate::services::yandex::{self, Command};
 impl App {
     pub(in crate::island) fn on_yandex(&mut self) {
         let next = yandex::snapshot();
+        if self.ui.tab == view::Tab::Yandex
+            && self.pointer.seek_drag
+            && (next.media.title != self.ui.yandex.state.media.title
+                || next.media.artist != self.ui.yandex.state.media.artist
+                || next.active != self.ui.yandex.state.active)
+        {
+            self.pointer.seek_drag = false;
+            self.ui.home.seek = None;
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+        }
         let animate = self.state == State::Expanded
             && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex)
             && self.settings.tab_anim != crate::data::settings::TabAnim::None;
@@ -152,6 +164,7 @@ mod tests {
                 ui.yandex.state.media.cover = crate::platform::media::debug_cover(96, &pixels);
                 ui.media = ui.yandex.state.media.clone();
                 crate::platform::media::debug_timeline(83.0, 241.0);
+                crate::services::yandex::debug_timeline(83.0, 241.0);
                 p.fill_round_rect((x, y, x + 640.0, y + 384.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
                 view::paint_expanded(p, (x, y, 640.0, 384.0), 1.0, &ui, &[])?;
             }

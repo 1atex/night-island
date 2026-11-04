@@ -76,16 +76,16 @@ impl App {
                 self.begin_seek(f);
             }
             Some(view::HomeHit::VolumeIcon) => {
-                self.finish_mixer();
-                let from = view::home_mixer_progress(&self.ui);
-                self.ui.home.mixer_open = !self.ui.home.mixer_open;
-                self.ui.home.mixer_motion = Some((from, Instant::now()));
-                self.ui.home.vol_track = false;
-                self.ui.home.edit = false;
-                self.ui.home.dev_menu = None;
-                self.ui.home.dock_open = false;
-                self.sync_mixer();
-                self.set_timer(Timer::UiAnim, self.frame_ms());
+                self.close_home_mixer();
+                if self.ui.home.vol_track {
+                    self.ui.home.vol_track = false;
+                } else if let Some(level) = volume::app_volume(&self.ui.media.source) {
+                    self.ui.home.vol_track = true;
+                    self.ui.home.app_vol = level;
+                } else {
+                    self.notify(Notice::Error, '\u{E767}', "Player volume is unavailable. Right-click for the mixer");
+                }
+                self.refresh_home();
                 self.repaint_expanded();
             }
             Some(view::HomeHit::Volume) => {
@@ -100,6 +100,29 @@ impl App {
             },
             None => {}
         }
+    }
+
+    pub(in crate::island) fn right_click_home_volume(&mut self, x: i32, y: i32) -> bool {
+        if self.state != State::Expanded || self.ui.tab != view::Tab::Home || self.ui.home.dev_menu.is_some() {
+            return false;
+        }
+        if !matches!(
+            view::hit_home(self.pill_rect(true), self.scale, x as f32, y as f32, &self.ui),
+            Some(view::HomeHit::VolumeIcon)
+        ) {
+            return false;
+        }
+        self.finish_mixer();
+        let from = view::home_mixer_progress(&self.ui);
+        self.ui.home.mixer_open = !self.ui.home.mixer_open;
+        self.ui.home.mixer_motion = Some((from, Instant::now()));
+        self.ui.home.edit = false;
+        self.ui.home.dev_menu = None;
+        self.ui.home.dock_open = false;
+        self.sync_mixer();
+        self.set_timer(Timer::UiAnim, self.frame_ms());
+        self.repaint_expanded();
+        true
     }
 
     fn toggle_home_action(&mut self, id: usize) {
@@ -186,8 +209,14 @@ impl App {
         unsafe {
             let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
         }
-        if let (Some(f), Some((_, len))) = (self.ui.home.seek.take(), media::progress()) {
-            media::seek(f * len);
+        let wave = self.ui.tab == view::Tab::Yandex;
+        let progress = if wave { crate::services::yandex::progress() } else { media::progress() };
+        if let (Some(f), Some((_, len))) = (self.ui.home.seek.take(), progress) {
+            if wave {
+                crate::services::yandex::send(crate::services::yandex::Command::Seek(f * len));
+            } else {
+                media::seek(f * len);
+            }
         }
         self.repaint_expanded();
     }
@@ -235,8 +264,11 @@ impl App {
 
     pub(in crate::island) fn start_progress_timer(&self) {
         let home = self.state == State::Expanded
-            && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex)
-            && self.ui.media.playing;
+            && match self.ui.tab {
+                view::Tab::Home => self.ui.media.playing,
+                view::Tab::Yandex => self.ui.yandex.state.media.playing,
+                _ => false,
+            };
         let pill = self.progress_pill_visible() && view::progress_strip_on(&self.ui);
         if home || pill {
             let interval = if pill && view::pill_progress_fill_on(&self.ui) { self.frame_ms() } else { 1000 };

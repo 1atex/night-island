@@ -191,6 +191,34 @@ mod tests {
         }
         assert!(player.state().2, "native player did not start");
         assert!(player.state().1 > 1.5);
+        let source = "Night Island · Yandex Music";
+        let original = crate::platform::volume::app_volume(source).expect("missing native wave volume session");
+        assert!(crate::platform::volume::set_app_volume(source, 0.27));
+        let adjusted = crate::platform::volume::app_volume(source).unwrap();
+        crate::platform::volume::set_app_volume(source, original);
+        assert!((adjusted - 0.27).abs() < 0.001);
+        let manager =
+            windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.join()?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let session = manager.GetSessions()?.into_iter().find(|session| {
+                session
+                    .TryGetMediaPropertiesAsync()
+                    .and_then(|p| p.join())
+                    .and_then(|p| p.Title())
+                    .is_ok_and(|title| title == "Night Island audio test")
+            });
+            if let Some(session) = session {
+                let id = session.SourceAppUserModelId()?.to_string();
+                assert!(
+                    crate::platform::media::own_session(&id),
+                    "native player has unexpected session identity: {id}"
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline, "native player was not published to Windows media sessions");
+            std::thread::sleep(Duration::from_millis(50));
+        }
         player.pause();
         std::thread::sleep(Duration::from_millis(100));
         assert!(!player.state().2);

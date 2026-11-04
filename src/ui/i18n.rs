@@ -95,6 +95,17 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
 
         "Close the app mixer" => "Закрыть микшер приложений",
+        "Prefer the player that is playing" => "Приоритет играющего плеера",
+        "Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls." => {
+            "При включённом приоритете: поставьте волну на паузу и запустите видео — главная переключится на браузер. Во вкладке «Моя волна» остаётся управление Яндексом."
+        }
+        "Player volume: left-click for system, right-click for mixer" => {
+            "Громкость плеера: ЛКМ — система, ПКМ — микшер"
+        }
+        "System volume: left-click for player, right-click for mixer" => "Громкость системы: ЛКМ — плеер, ПКМ — микшер",
+        "Player volume is unavailable. Right-click for the mixer" => {
+            "Громкость этого плеера недоступна. ПКМ — открыть микшер"
+        }
         "App mixer: adjust each application's volume" => "Микшер: громкость каждого приложения",
         "Setup guide" => "Как настроить",
         "Connected. The island receives Windows system notifications" => {

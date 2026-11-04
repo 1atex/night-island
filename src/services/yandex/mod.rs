@@ -91,15 +91,19 @@ pub enum Command {
 pub fn snapshot() -> Snapshot {
     STATE.lock().ok().and_then(|s| s.clone()).unwrap_or_default()
 }
-pub fn active() -> bool {
-    STATE.lock().is_ok_and(|s| s.as_ref().is_some_and(|s| s.active))
-}
 pub fn media() -> Option<Media> {
     STATE.lock().ok().and_then(|s| s.as_ref().filter(|s| s.active).map(|s| s.media.clone()))
 }
 pub fn progress() -> Option<(f32, f32)> {
     let (p, l, at, playing) = (*POSITION.lock().ok()?)?;
     (l > 0.0).then(|| ((p + if playing { at.elapsed().as_secs_f32() } else { 0.0 }).clamp(0.0, l), l))
+}
+
+#[cfg(test)]
+pub fn debug_timeline(pos: f32, len: f32) {
+    if let Ok(mut position) = POSITION.lock() {
+        *position = Some((pos, len, Instant::now(), false));
+    }
 }
 pub fn send(command: Command) {
     if matches!(command, Command::Cancel | Command::Disconnect) {

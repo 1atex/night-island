@@ -278,6 +278,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_RBUTTONUP => {
             let (x, y) = point_from(lparam);
+            let mut handled = false;
+            with_app(|a| handled = a.right_click_home_volume(x, y));
+            if handled {
+                return LRESULT(0);
+            }
             if with_app_value(|a| a.can_release_character(x, y)) == Some(true) {
                 with_app(|a| a.popup_open = true);
                 let mut point = windows::Win32::Foundation::POINT::default();

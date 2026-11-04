@@ -390,6 +390,7 @@ pub struct Settings {
     pub music_eq: bool,
     pub music_title: bool,
     pub music_cover: bool,
+    pub prefer_playing_media: bool,
     pub metrics_tab: Vec<String>,
     pub metrics_pill: Vec<String>,
     pub metrics_secs: u32,
@@ -491,6 +492,7 @@ impl Default for Settings {
             music_eq: true,
             music_title: true,
             music_cover: true,
+            prefer_playing_media: false,
             voice_paste: true,
             activity_track: true,
             activity_ai: false,
@@ -1204,6 +1206,15 @@ mod tests {
         assert!(s.auto_hide);
         assert_eq!(s.style, Style::Liquid);
         assert!(serde_json::from_str::<Settings>("not json").is_err());
+    }
+
+    #[test]
+    fn player_priority_is_opt_in_and_persists() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.prefer_playing_media);
+        settings.prefer_playing_media = true;
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(restored.prefer_playing_media);
     }
 
     #[test]

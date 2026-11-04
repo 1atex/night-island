@@ -187,7 +187,9 @@ impl App {
             return;
         }
         let track_changed = now.title != self.ui.media.title;
-        if track_changed || now.artist != self.ui.media.artist || now.source != self.ui.media.source {
+        if (track_changed || now.artist != self.ui.media.artist || now.source != self.ui.media.source)
+            && self.ui.tab != view::Tab::Yandex
+        {
             if self.pointer.seek_drag {
                 unsafe {
                     let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
@@ -196,7 +198,17 @@ impl App {
             self.pointer.seek_drag = false;
             self.ui.home.seek = None;
         }
+        if now.source != self.ui.media.source {
+            self.pointer.vol_drag = false;
+        }
         self.ui.media = now;
+        if self.ui.home.vol_track {
+            match volume::app_volume(&self.ui.media.source) {
+                Some(level) => self.ui.home.app_vol = level,
+                None => self.ui.home.vol_track = false,
+            }
+        }
+        self.start_progress_timer();
         if self.pill_motion.intro.is_some()
             && (!self.ui.media.playing
                 || self.pill_motion.track != (self.ui.media.title.clone(), self.ui.media.source.clone()))
