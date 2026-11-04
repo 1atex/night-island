@@ -1,7 +1,7 @@
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegDeleteValueW, RegOpenKeyExW,
-    RegQueryValueExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
+    RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::core::HSTRING;
 
@@ -43,8 +43,28 @@ pub fn set(on: bool) {
     set_as("NightIsland", on);
 }
 
+fn open_or_create() -> Option<HKEY> {
+    let mut key = HKEY::default();
+    unsafe {
+        RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            &HSTRING::from(KEY),
+            None,
+            windows::core::PCWSTR::null(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            None,
+            &mut key,
+            None,
+        )
+        .ok()
+        .ok()?
+    };
+    Some(key)
+}
+
 fn set_as(name: &str, on: bool) {
-    let Some(key) = open(KEY_SET_VALUE) else { return };
+    let Some(key) = open_or_create() else { return };
     unsafe {
         if on {
             if let Some(cmd) = command() {
