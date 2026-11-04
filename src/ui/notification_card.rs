@@ -252,6 +252,14 @@ impl NotificationCard {
         self.hwnd
     }
 
+    pub fn screen_rect(&self) -> Rect {
+        self.state.rect()
+    }
+
+    pub fn hovering_close(&self) -> bool {
+        self.state.hover_close
+    }
+
     pub fn set_capture_hidden(&self, hidden: bool) {
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });

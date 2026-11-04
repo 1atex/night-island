@@ -28,7 +28,98 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "My Wave · Settings" => "Моя волна · Настроить",
+        "Open My Wave settings" => "Открыть настройки Моей волны",
+        "Open main player" => "К плееру",
+        "Could not remove the saved sign-in. Try signing out again." => {
+            "Не удалось удалить сохранённый вход. Повтори выход из аккаунта."
+        }
+        "Cancel" => "Отмена",
+        "Yandex Music" => "Яндекс Музыка",
+        "Dismiss" => "Закрыть",
+        "Back" => "Назад",
+        "Expand notification" => "Развернуть уведомление",
+        "Could not open the sender app" => "Не удалось открыть приложение-отправитель",
+        "Open sender app" => "Открыть приложение",
+        "4 tiles" => "4 плитки",
+        "2 tiles" => "2 плитки",
+        "1 tile" => "1 плитка",
+        "Click a notification to open its app" => "Клик по уведомлению открывает приложение",
+        "Notification preview size" => "Размер превью уведомления",
+        "Code" => "Код",
+        "Start My Wave with the island" => "Запускать волну вместе с островом",
+        "Open sign-in page" => "Открыть страницу входа",
+        "Open My Wave" => "Открыть Мою волну",
+        "Wave activity" => "Занятие",
+        "Connected for this session; Windows could not save the sign-in" => {
+            "Вход выполнен, но Windows не сохранила его для следующего запуска"
+        }
+        "Sign out" => "Выйти",
+        "Resume" => "Продолжить",
+        "Pause" => "Пауза",
+        "Connecting…" => "Подключение…",
+        "Loading music…" => "Загружаем…",
+
+        "My Wave" => "Моя волна",
+        "Yandex Music inside your island" => "Яндекс Музыка в острове",
+        "Sign in in your browser. Your password stays with Yandex." => {
+            "Войди через браузер. Пароль остаётся у Яндекса."
+        }
+        "Enter this code at ya.ru/device" => "Введи этот код на ya.ru/device",
+        "Waiting for confirmation in your browser…" => "Ждём подтверждения в браузере…",
+        "Requires Yandex Music access. The connection uses an unofficial API." => {
+            "Нужен доступ к Яндекс Музыке по подписке. Подключение использует неофициальный API."
+        }
+        "Connect Yandex Music" => "Подключить Яндекс Музыку",
+        "Open Yandex" => "Открыть Яндекс",
+        "Copy code" => "Скопировать код",
+        "Made for you" => "Подобрано для тебя",
+        "Music for this moment" => "Музыка под настроение",
+        "Variety" => "Характер",
+        "Mood" => "Настроение",
+        "Any" => "Любое",
+        "Start wave" => "Запустить",
+        "Stop wave" => "Остановить",
+        "Start wave when Island starts" => "Запускать при старте острова",
+        "Could not connect to Yandex Music. Try again." => "Не удалось связаться с Яндекс Музыкой. Попробуй снова.",
+        "Sign in to Yandex Music again" => "Войди в Яндекс Музыку снова",
+        "Yandex Music requires an active subscription and an available region" => {
+            "Нужна действующая подписка и доступность Яндекс Музыки в регионе"
+        }
+        "Yandex Music is busy. Wait a moment and try again." => {
+            "Яндекс Музыка занята. Подожди немного и попробуй снова."
+        }
+        "Yandex Music could not complete the request. Try again." => {
+            "Яндекс Музыка не выполнила запрос. Попробуй снова."
+        }
+        "This track is unavailable with your subscription or in your region" => {
+            "Трек недоступен по подписке или в твоём регионе"
+        }
+        "Could not save My Wave settings" => "Не удалось сохранить настройки волны",
+        "Could not start Yandex sign-in. Try again." => "Не удалось начать вход. Попробуй снова.",
+        "Could not play this track. Check your connection and start the wave again." => {
+            "Трек не воспроизводится. Проверь соединение и запусти волну снова."
+        }
+        "My Wave returned no tracks. Try different settings." => "Волна не вернула треки. Попробуй другие настройки.",
+        "Could not start the Windows audio player" => "Не удалось запустить аудиоплеер Windows",
+        "The sign-in code expired. Connect again." => "Код входа истёк. Нажми «Подключить» снова.",
+        "Yandex sign-in was cancelled or expired. Connect again." => "Вход отменён или код истёк. Подключись снова.",
+        "Wave settings are unavailable. Press Try again to reload." => {
+            "Настройки волны недоступны. Нажми «Повторить», чтобы загрузить снова."
+        }
+
         "Close the app mixer" => "Закрыть микшер приложений",
+        "Prefer the player that is playing" => "Приоритет играющего плеера",
+        "Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls." => {
+            "При включённом приоритете: поставьте волну на паузу и запустите видео — главная переключится на браузер. Во вкладке «Моя волна» остаётся управление Яндексом."
+        }
+        "Player volume: left-click for system, right-click for mixer" => {
+            "Громкость плеера: ЛКМ — система, ПКМ — микшер"
+        }
+        "System volume: left-click for player, right-click for mixer" => "Громкость системы: ЛКМ — плеер, ПКМ — микшер",
+        "Player volume is unavailable. Right-click for the mixer" => {
+            "Громкость этого плеера недоступна. ПКМ — открыть микшер"
+        }
         "App mixer: adjust each application's volume" => "Микшер: громкость каждого приложения",
         "Setup guide" => "Как настроить",
         "Connected. The island receives Windows system notifications" => {
@@ -184,6 +275,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Left of the clock" => "Слева от времени",
         "Right of the clock" => "Справа от времени",
         "Customize header…" => "Настроить шапку…",
+        "Add to header" => "Добавить в шапку",
         "On the header" => "В шапке",
         "In More" => "В «Ещё»",
         "Replace:" => "Вместо:",

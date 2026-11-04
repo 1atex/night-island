@@ -64,6 +64,17 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
     let (text, rect): (String, Rect) = match hit_home(pill, scale, px, py, ui)? {
         HomeHit::Media(i) => (["Previous", "Play or pause", "Next"][i].into(), media_btn(pill, scale, i, wide)),
         HomeHit::Extra(i) => (["Shuffle", "Repeat", "Like"][i].into(), extra_btn(pill, scale, i, wide)),
+        HomeHit::Wave => ("Open My Wave settings".into(), wave_link(pill, scale, ui)),
+        HomeHit::Notification | HomeHit::NotificationExpand => (
+            if matches!(hit_home(pill, scale, px, py, ui), Some(HomeHit::Notification)) && ui.cfg.notification_open_app
+            {
+                "Open sender app"
+            } else {
+                "Expand notification"
+            }
+            .into(),
+            home_notification_rect(pill, scale, ui)?,
+        ),
         HomeHit::Player => ("Next player".into(), player_btn(pill, scale, wide)),
         HomeHit::Edit => {
             (if ui.home.edit { "Done" } else { "Choose the tiles" }.into(), edit_button(pill, scale, wide))
@@ -71,8 +82,12 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
         HomeHit::VolumeIcon => {
             let row = volume_row(pill, scale, wide);
             (
-                if ui.home.mixer_open { "Close the app mixer" } else { "App mixer: adjust each application's volume" }
-                    .into(),
+                if ui.home.vol_track {
+                    "Player volume: left-click for system, right-click for mixer"
+                } else {
+                    "System volume: left-click for player, right-click for mixer"
+                }
+                .into(),
                 (row.0 + 2.0 * scale, row.1, row.0 + 42.0 * scale, row.3),
             )
         }

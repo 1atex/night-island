@@ -60,10 +60,11 @@ pub(in crate::island) enum Timer {
     MusicIntro = 38,
     NotificationStage = 39,
     NotificationExpire = 40,
+    NotificationHover = 41,
 }
 
 impl Timer {
-    const ALL: [Timer; 40] = [
+    const ALL: [Timer; 41] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -104,6 +105,7 @@ impl Timer {
         Timer::MusicIntro,
         Timer::NotificationStage,
         Timer::NotificationExpire,
+        Timer::NotificationHover,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -241,7 +243,7 @@ impl App {
                 }
             }
             Timer::Progress => {
-                if self.state == State::Expanded && self.ui.tab == view::Tab::Home {
+                if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) {
                     self.repaint_expanded();
                     self.start_progress_timer();
                 } else if self.progress_pill_visible() && view::progress_strip_on(&self.ui) {
@@ -252,6 +254,7 @@ impl App {
                     self.start_progress_timer();
                 }
             }
+            Timer::NotificationHover => self.notification_hover(),
             Timer::DlStale => {
                 self.ui.downloading = None;
                 self.update_eq();

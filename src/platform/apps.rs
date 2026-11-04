@@ -208,6 +208,30 @@ fn scan() -> Vec<AppEntry> {
     out
 }
 
+pub(super) fn notification_shortcuts() -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack: Vec<_> = roots().into_iter().map(|p| (p, 0)).collect();
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(dir) else { continue };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if kind.is_dir() && depth < MAX_DEPTH {
+                stack.push((path, depth + 1));
+            } else if kind.is_file() && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk")) {
+                out.push(path.to_string_lossy().into_owned());
+                if out.len() >= MAX_ENTRIES {
+                    return out;
+                }
+            }
+        }
+    }
+    out
+}
+
 pub fn find(query: &str, limit: usize) -> Vec<&'static AppEntry> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {

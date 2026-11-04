@@ -12,3 +12,4 @@ pub mod spotify;
 pub mod sync;
 pub mod update;
 pub mod weather;
+pub mod yandex;

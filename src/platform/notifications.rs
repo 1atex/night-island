@@ -61,6 +61,7 @@ pub struct Snapshot {
 enum Command {
     Enabled(bool),
     Wake,
+    ImagesReady,
 }
 static WORKER: OnceLock<mpsc::Sender<Command>> = OnceLock::new();
 static STATE: Mutex<Snapshot> =
@@ -75,6 +76,46 @@ pub fn take_snapshot() -> Snapshot {
             snapshot
         })
         .unwrap_or_default()
+}
+
+pub(super) fn wake() {
+    if let Some(worker) = WORKER.get() {
+        let _ = worker.send(Command::ImagesReady);
+    }
+}
+
+pub(super) fn sender_target(app_id: &str) -> Option<String> {
+    (!app_id.is_empty()
+        && app_id != "Windows"
+        && app_id.len() <= 256
+        && app_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '!' | '{' | '}')))
+    .then(|| format!("shell:AppsFolder\\{app_id}"))
+}
+
+pub const WM_NOTIFICATION_OPENED: u32 = WM_APP + 69;
+static OPENING: AtomicBool = AtomicBool::new(false);
+
+pub fn open_sender(record: Record, hwnd: HWND) {
+    if OPENING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let target = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let initialized = unsafe { RoInitialize(RO_INIT_MULTITHREADED).is_ok() };
+        let opened = initialized && super::notification_activation::open(&record).is_some();
+        unsafe {
+            if initialized {
+                RoUninitialize();
+            }
+            OPENING.store(false, Ordering::Release);
+            let _ = PostMessageW(
+                Some(HWND(target as *mut _)),
+                WM_NOTIFICATION_OPENED,
+                WPARAM(usize::from(opened)),
+                LPARAM(0),
+            );
+        }
+    });
 }
 
 pub fn configure(hwnd: HWND, enabled: bool) {
@@ -170,23 +211,35 @@ fn read_record(
         .into_iter()
         .flat_map(|elements| elements.into_iter())
         .filter_map(|line| line.Text().ok())
-        .map(|value| text(&value.to_string(), 1200))
+        .map(|value| text(&value.to_string(), 16384))
         .filter(|s| !s.is_empty())
         .take(8)
         .collect();
     let icon = icons.entry(app_id.clone()).or_insert_with(|| info.as_ref().and_then(app_icon)).clone();
-    let title = lines.first().map(|line| text(line, 180)).unwrap_or_else(|| "New notification".into());
-    let body = text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 1200);
-    let avatar = avatars.resolve(&app_id, &title, &body);
+    let title = lines.first().map(|line| text(line, 512)).unwrap_or_else(|| "New notification".into());
+    let body = text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 16384);
+    let avatar = avatars.resolve_notification(id, &app_id, &title, &body);
     Ok(Record { id, created, app_id, app, title, body, icon, avatar })
 }
 
 fn merge(state: &mut Snapshot, status: Status, records: Vec<Record>, added: Vec<Record>) -> bool {
     let changed = state.status != status || state.records != records || !added.is_empty();
     if status == Status::Ready {
-        state.added.retain(|pending| records.iter().any(|record| record == pending));
+        state.added.retain_mut(|pending| {
+            if let Some(record) = records.iter().find(|record| {
+                (record.id, record.created, &record.app_id) == (pending.id, pending.created, &pending.app_id)
+            }) {
+                *pending = record.clone();
+                true
+            } else {
+                false
+            }
+        });
         for record in added {
-            if !state.added.contains(&record) && records.contains(&record) {
+            if !state.added.iter().any(|pending| {
+                (pending.id, pending.created, &pending.app_id) == (record.id, record.created, &record.app_id)
+            }) && records.contains(&record)
+            {
                 state.added.push(record);
             }
         }
@@ -259,6 +312,7 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
         } else {
             rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected)
         };
+        let images_ready = matches!(command, Ok(Command::ImagesReady));
         match command {
             Ok(Command::Enabled(on)) => {
                 enabled = on;
@@ -308,7 +362,7 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
             let old = cache.get(&id);
             let record = if let Some(record) = old.filter(|record| {
                 record.created == created.UniversalTime
-                    && (record.avatar.is_some() || now_ticks() - record.created > 50_000_000)
+                    && (record.avatar.is_some() || (!images_ready && now_ticks() - record.created > 50_000_000))
             }) {
                 Some(record.clone())
             } else {
@@ -342,6 +396,18 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sender_launch_uses_registered_app_identity_without_toast_arguments() {
+        assert_eq!(
+            sender_target("com.squirrel.Discord.Discord").as_deref(),
+            Some("shell:AppsFolder\\com.squirrel.Discord.Discord")
+        );
+        assert!(sender_target("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App").is_some());
+        for id in ["", "Windows", "https://example.com", "C:\\app.exe", "discord.exe --argument", "../test"] {
+            assert!(sender_target(id).is_none());
+        }
+    }
 
     #[test]
     #[ignore = "Reads Telegram toast image availability without logging notification contents"]
@@ -437,11 +503,60 @@ mod tests {
     }
 
     #[test]
+    fn late_avatar_keeps_pending_delivery_without_replaying_the_notification() {
+        let initial = record(1, 200);
+        let mut state = Snapshot::default();
+        merge(&mut state, Status::Ready, vec![initial.clone()], vec![initial.clone()]);
+        let mut ready = initial.clone();
+        ready.avatar = Some(Arc::new(super::super::apps::Icon { side: 1, bgra: vec![20, 30, 40, 255] }));
+        merge(&mut state, Status::Ready, vec![ready.clone()], Vec::new());
+        assert!(state.added == [ready.clone()]);
+        assert!(!should_present(Some(&initial), ready.created, 100, Status::Ready));
+        state.added.clear();
+        merge(&mut state, Status::Ready, vec![ready], Vec::new());
+        assert!(state.added.is_empty());
+    }
+
+    #[test]
     fn notification_text_is_bounded_without_splitting_unicode() {
         assert_eq!(text("  Привет\0\r\nмир  ", 100), "Привет\nмир");
         assert_eq!(text("🌙🌧️", 2), "🌙🌧");
         let seconds = now_ticks() / 10_000_000 - 11_644_473_600;
         assert!((seconds - SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64).abs() <= 1);
+    }
+
+    #[test]
+    #[ignore = "Reads only Discord notification metadata; optional activation opens the sender app"]
+    fn discord_notification_avatar_and_activation_probe() -> Result<()> {
+        unsafe {
+            RoInitialize(RO_INIT_MULTITHREADED)?;
+        }
+        let listener = UserNotificationListener::Current()?;
+        let items = listener.GetNotificationsAsync(NotificationKinds::Toast)?.join()?;
+        let mut icons = HashMap::new();
+        let mut avatars = super::super::notification_images::AvatarCache::default();
+        avatars.begin_snapshot();
+        let records: Vec<_> = items
+            .into_iter()
+            .filter(|item| {
+                item.AppInfo()
+                    .and_then(|info| info.AppUserModelId())
+                    .is_ok_and(|id| id.to_string().to_ascii_lowercase().contains("discord"))
+            })
+            .filter_map(|item| read_record(&item, &mut icons, &mut avatars).ok())
+            .collect();
+        assert!(!records.is_empty(), "A Discord notification must be present in Windows notification history");
+        let record = &records[0];
+        assert!(record.avatar.is_some(), "The actual Discord toast avatar must decode");
+        println!("Discord notifications: {}; native avatar decoded: {}", records.len(), record.avatar.is_some());
+        if std::env::var_os("NI_TEST_NOTIFICATION_ACTIVATE").is_some() {
+            let method = super::super::notification_activation::open(record).expect("The original sender must open");
+            println!("Discord notification opened via {method:?}");
+        }
+        unsafe {
+            RoUninitialize();
+        }
+        Ok(())
     }
 
     #[test]
