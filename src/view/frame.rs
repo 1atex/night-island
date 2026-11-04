@@ -405,7 +405,14 @@ fn paint_tab(p: &Painter, tab: Tab, pill: Rect, scale: f32, ui: &UiState, clips:
         }
         Tab::Yandex => paint_yandex(p, pill, scale, &ui.yandex, ui.home.seek, crate::services::yandex::progress())?,
         Tab::Mixer => paint_mixer(p, pill, scale, &ui.mixer)?,
-        Tab::Notifications => paint_notifications(p, pill, scale, &ui.notifications, ui.cfg.system_notifications)?,
+        Tab::Notifications => paint_notifications(
+            p,
+            pill,
+            scale,
+            &ui.notifications,
+            ui.cfg.system_notifications,
+            ui.cfg.notification_open_app,
+        )?,
         Tab::Note => paint_note(p, pill, scale, ui)?,
         Tab::Text => paint_text(p, pill, scale, ui)?,
         Tab::Settings => {}

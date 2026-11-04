@@ -350,6 +350,39 @@ impl Painter<'_> {
         }
     }
 
+    pub fn text_scrolled(
+        &self,
+        text: &str,
+        rect: (f32, f32, f32, f32),
+        size: f32,
+        scroll: f32,
+        color: D2D1_COLOR_F,
+    ) -> Result<f32> {
+        use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
+        unsafe {
+            let format = self.dwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                w!("en-us"),
+            )?;
+            format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+            let wide: Vec<u16> = text.encode_utf16().collect();
+            let layout = self.dwrite.CreateTextLayout(&wide, &format, (rect.2 - rect.0).max(1.0), 100_000.0)?;
+            let mut metrics = DWRITE_TEXT_METRICS::default();
+            layout.GetMetrics(&mut metrics)?;
+            let max = (metrics.height - (rect.3 - rect.1)).max(0.0);
+            self.push_clip(rect);
+            let result = self.draw_layout(rect.0, rect.1 - scroll.clamp(0.0, max), &layout, color);
+            self.pop_clip();
+            result?;
+            Ok(max)
+        }
+    }
+
     pub fn md_layout(
         &self,
         doc: &crate::ui::md::Doc,

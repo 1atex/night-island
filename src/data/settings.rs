@@ -384,6 +384,8 @@ pub struct Settings {
     pub dock_offset: f32,
     pub float_pos: Option<[i32; 2]>,
     pub system_notifications: bool,
+    pub notification_tiles: u8,
+    pub notification_open_app: bool,
     pub pill_weather: bool,
     pub pill_weather_side: WeatherSide,
     pub pill_battery: BatteryStyle,
@@ -486,6 +488,8 @@ impl Default for Settings {
             dock_offset: 0.5,
             float_pos: None,
             system_notifications: false,
+            notification_tiles: 4,
+            notification_open_app: false,
             pill_weather: true,
             pill_weather_side: WeatherSide::Left,
             pill_battery: BatteryStyle::Percent,
@@ -936,6 +940,9 @@ impl Settings {
     pub fn sanitize(&mut self) {
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
+        if ![1, 2, 4].contains(&self.notification_tiles) {
+            self.notification_tiles = 4;
+        }
         let (chat, agy) = (self.tab_hidden("Chat"), self.tab_hidden("AGY"));
         self.hidden_tabs.retain(|t| t != "Chat" && t != "AGY");
         if chat && agy && !self.tab_hidden("AI") {

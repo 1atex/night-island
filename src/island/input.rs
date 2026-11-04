@@ -223,7 +223,14 @@ impl App {
             }
         }
         if self.ui.tab == view::Tab::Notifications {
-            let hover = view::hit_notifications(pill, self.scale, fx, fy);
+            let hover = view::hit_notifications(
+                pill,
+                self.scale,
+                fx,
+                fy,
+                &self.ui.notifications,
+                self.settings.notification_open_app,
+            );
             if hover != self.ui.notifications.hover {
                 self.ui.notifications.hover = hover;
                 self.repaint_expanded();
@@ -336,6 +343,8 @@ impl App {
                 Some(view::HomeHit::Edit) => Some(550),
                 Some(view::HomeHit::Player) => Some(560),
                 Some(view::HomeHit::Wave) => Some(561),
+                Some(view::HomeHit::Notification) => Some(562),
+                Some(view::HomeHit::NotificationExpand) => Some(563),
                 _ => None,
             }
         } else {
@@ -562,6 +571,12 @@ impl App {
             return self.repaint_expanded();
         }
         if self.ui.tab == view::Tab::Notifications {
+            if self.ui.notifications.full {
+                let amount = if delta > 0 { -48.0 } else { 48.0 } * self.scale;
+                self.ui.notifications.detail_scroll =
+                    (self.ui.notifications.detail_scroll + amount).clamp(0.0, self.ui.notifications.detail_max.get());
+                return self.repaint_expanded();
+            }
             let max = self
                 .ui
                 .notifications

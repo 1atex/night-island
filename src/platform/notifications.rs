@@ -61,6 +61,7 @@ pub struct Snapshot {
 enum Command {
     Enabled(bool),
     Wake,
+    ImagesReady,
 }
 static WORKER: OnceLock<mpsc::Sender<Command>> = OnceLock::new();
 static STATE: Mutex<Snapshot> =
@@ -75,6 +76,38 @@ pub fn take_snapshot() -> Snapshot {
             snapshot
         })
         .unwrap_or_default()
+}
+
+pub(super) fn wake() {
+    if let Some(worker) = WORKER.get() {
+        let _ = worker.send(Command::ImagesReady);
+    }
+}
+
+fn sender_target(app_id: &str) -> Option<String> {
+    (!app_id.is_empty()
+        && app_id != "Windows"
+        && app_id.len() <= 256
+        && app_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '!' | '{' | '}')))
+    .then(|| format!("shell:AppsFolder\\{app_id}"))
+}
+
+pub fn open_sender(app_id: &str) -> bool {
+    let Some(target) = sender_target(app_id) else {
+        return false;
+    };
+    unsafe {
+        windows::Win32::UI::Shell::ShellExecuteW(
+            None,
+            windows::core::w!("open"),
+            &windows::core::HSTRING::from(target),
+            None,
+            None,
+            windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        )
+        .0 as isize
+            > 32
+    }
 }
 
 pub fn configure(hwnd: HWND, enabled: bool) {
@@ -170,13 +203,13 @@ fn read_record(
         .into_iter()
         .flat_map(|elements| elements.into_iter())
         .filter_map(|line| line.Text().ok())
-        .map(|value| text(&value.to_string(), 1200))
+        .map(|value| text(&value.to_string(), 16384))
         .filter(|s| !s.is_empty())
         .take(8)
         .collect();
     let icon = icons.entry(app_id.clone()).or_insert_with(|| info.as_ref().and_then(app_icon)).clone();
-    let title = lines.first().map(|line| text(line, 180)).unwrap_or_else(|| "New notification".into());
-    let body = text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 1200);
+    let title = lines.first().map(|line| text(line, 512)).unwrap_or_else(|| "New notification".into());
+    let body = text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 16384);
     let avatar = avatars.resolve(&app_id, &title, &body);
     Ok(Record { id, created, app_id, app, title, body, icon, avatar })
 }
@@ -184,9 +217,21 @@ fn read_record(
 fn merge(state: &mut Snapshot, status: Status, records: Vec<Record>, added: Vec<Record>) -> bool {
     let changed = state.status != status || state.records != records || !added.is_empty();
     if status == Status::Ready {
-        state.added.retain(|pending| records.iter().any(|record| record == pending));
+        state.added.retain_mut(|pending| {
+            if let Some(record) = records.iter().find(|record| {
+                (record.id, record.created, &record.app_id) == (pending.id, pending.created, &pending.app_id)
+            }) {
+                *pending = record.clone();
+                true
+            } else {
+                false
+            }
+        });
         for record in added {
-            if !state.added.contains(&record) && records.contains(&record) {
+            if !state.added.iter().any(|pending| {
+                (pending.id, pending.created, &pending.app_id) == (record.id, record.created, &record.app_id)
+            }) && records.contains(&record)
+            {
                 state.added.push(record);
             }
         }
@@ -259,6 +304,7 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
         } else {
             rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected)
         };
+        let images_ready = matches!(command, Ok(Command::ImagesReady));
         match command {
             Ok(Command::Enabled(on)) => {
                 enabled = on;
@@ -308,7 +354,7 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
             let old = cache.get(&id);
             let record = if let Some(record) = old.filter(|record| {
                 record.created == created.UniversalTime
-                    && (record.avatar.is_some() || now_ticks() - record.created > 50_000_000)
+                    && (record.avatar.is_some() || (!images_ready && now_ticks() - record.created > 50_000_000))
             }) {
                 Some(record.clone())
             } else {
@@ -342,6 +388,18 @@ fn run(target: isize, wake: mpsc::Sender<Command>, rx: mpsc::Receiver<Command>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sender_launch_uses_registered_app_identity_without_toast_arguments() {
+        assert_eq!(
+            sender_target("com.squirrel.Discord.Discord").as_deref(),
+            Some("shell:AppsFolder\\com.squirrel.Discord.Discord")
+        );
+        assert!(sender_target("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App").is_some());
+        for id in ["", "Windows", "https://example.com", "C:\\app.exe", "discord.exe --argument", "../test"] {
+            assert!(sender_target(id).is_none());
+        }
+    }
 
     #[test]
     #[ignore = "Reads Telegram toast image availability without logging notification contents"]
@@ -433,6 +491,21 @@ mod tests {
         assert!(state.added.is_empty() && state.records.is_empty());
         merge(&mut state, Status::Ready, vec![a.clone()], vec![a]);
         merge(&mut state, Status::NeedsQuietMode, vec![b], Vec::new());
+        assert!(state.added.is_empty());
+    }
+
+    #[test]
+    fn late_avatar_keeps_pending_delivery_without_replaying_the_notification() {
+        let initial = record(1, 200);
+        let mut state = Snapshot::default();
+        merge(&mut state, Status::Ready, vec![initial.clone()], vec![initial.clone()]);
+        let mut ready = initial.clone();
+        ready.avatar = Some(Arc::new(super::super::apps::Icon { side: 1, bgra: vec![20, 30, 40, 255] }));
+        merge(&mut state, Status::Ready, vec![ready.clone()], Vec::new());
+        assert!(state.added == [ready.clone()]);
+        assert!(!should_present(Some(&initial), ready.created, 100, Status::Ready));
+        state.added.clear();
+        merge(&mut state, Status::Ready, vec![ready], Vec::new());
         assert!(state.added.is_empty());
     }
 

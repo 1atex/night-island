@@ -13,6 +13,7 @@ pub(in crate::island) enum CardPhase {
 
 #[derive(Default)]
 pub(in crate::island) struct SystemNotices {
+    pub origin: Option<view::Rect>,
     window: Option<NotificationCard>,
     queue: VecDeque<Record>,
     active: Option<Record>,
@@ -43,6 +44,8 @@ impl App {
         if !self.settings.system_notifications {
             self.system_notices.queue.clear();
             self.hide_notification_card();
+            self.ui.notifications.preview = None;
+            self.ui.notifications.full = false;
             self.ui.notifications.state = Default::default();
         }
     }
@@ -90,18 +93,44 @@ impl App {
             *active = record.clone();
         }
         self.ui.notifications.state = state;
+        if let Some(preview) = &mut self.ui.notifications.preview
+            && let Some(record) = self.ui.notifications.state.records.iter().find(|record| same(record, preview))
+        {
+            *preview = record.clone();
+        }
         let rows = view::notifications_rows(self.pill_rect(true), self.scale);
         self.ui.notifications.scroll =
             self.ui.notifications.scroll.min(self.ui.notifications.state.records.len().saturating_sub(rows));
         self.update_notification_card();
         self.maybe_show_notification();
-        if self.state == State::Expanded && self.ui.tab == view::Tab::Notifications {
+        if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::Notifications | view::Tab::Home) {
             self.repaint_expanded();
         }
     }
 
     pub(in crate::island) fn click_notifications(&mut self, x: i32, y: i32) {
-        match view::hit_notifications(self.pill_rect(true), self.scale, x as f32, y as f32) {
+        match view::hit_notifications(
+            self.pill_rect(true),
+            self.scale,
+            x as f32,
+            y as f32,
+            &self.ui.notifications,
+            self.settings.notification_open_app,
+        ) {
+            Some(view::NotificationsHit::Row(i)) => {
+                self.ui.notifications.preview = self.ui.notifications.state.records.get(i).cloned();
+                self.expand_notification_text();
+            }
+            Some(view::NotificationsHit::Back) => {
+                self.ui.notifications.full = false;
+                self.select_tab(view::Tab::Home);
+            }
+            Some(view::NotificationsHit::Dismiss) => {
+                self.ui.notifications.preview = None;
+                self.ui.notifications.full = false;
+                self.select_tab(view::Tab::Home);
+            }
+            Some(view::NotificationsHit::OpenApp) => self.activate_notification(),
             Some(view::NotificationsHit::Connect) => {
                 match self.ui.notifications.state.status {
                     Status::NeedsAccess => {
@@ -152,6 +181,26 @@ impl App {
     }
 
     pub(in crate::island) fn maybe_show_notification(&mut self) {
+        if self.state == State::Expanded
+            && self.ui.tab == view::Tab::Home
+            && self.ui.notifications.preview.is_none()
+            && !self.ui.home.edit
+            && self.ui.home.tile_press.is_none()
+            && self.ui.home.tile_reorder.is_none()
+            && self.ui.home.dev_menu.is_none()
+            && !self.ui.home.dock_open
+            && !self.pointer.vol_drag
+            && !self.pointer.seek_drag
+            && !self.system_notices.locked
+            && self.settings.system_notifications
+            && self.ui.notifications.state.status == Status::Ready
+        {
+            self.ui.notifications.preview = self.system_notices.queue.pop_front();
+            if self.ui.notifications.preview.is_some() {
+                self.repaint_expanded();
+            }
+            return;
+        }
         if self.system_notices.phase.is_some()
             || self.system_notices.queue.is_empty()
             || self.system_notices.locked
@@ -249,19 +298,30 @@ impl App {
                     self.system_notices.remaining = expires.saturating_duration_since(Instant::now());
                 }
                 self.kill_timer(Timer::NotificationExpire);
+                self.set_timer(Timer::NotificationHover, notification_card::OPEN_MS + 200);
             }
             value if value == notification_card::Action::Leave as usize => {
                 self.system_notices.hovered = false;
+                self.kill_timer(Timer::NotificationHover);
                 self.update_notification_card();
                 self.start_notification_timeout();
             }
             value if value == notification_card::Action::Dismiss as usize => self.dismiss_notification_card(),
             value if value == notification_card::Action::History as usize => {
-                self.hide_notification_card();
-                self.ui.notifications.setup = false;
-                self.open_tab(view::Tab::Notifications);
+                self.ui.notifications.preview = self.system_notices.active.clone();
+                if self.settings.notification_open_app {
+                    self.hide_notification_card();
+                    self.activate_notification();
+                } else {
+                    self.open_notification_preview();
+                }
             }
-            _ => self.update_notification_card(),
+            _ => {
+                self.update_notification_card();
+                if self.system_notices.hovered {
+                    self.set_timer(Timer::NotificationHover, 350);
+                }
+            }
         }
     }
 
@@ -298,6 +358,7 @@ impl App {
     }
 
     pub(in crate::island) fn hide_notification_card(&mut self) {
+        self.kill_timer(Timer::NotificationHover);
         if self.system_notices.phase.take().is_none() {
             return;
         }
@@ -321,6 +382,54 @@ impl App {
         self.update_weather_timer();
         self.start_progress_timer();
         self.start_liquid();
+    }
+
+    pub(in crate::island) fn notification_hover(&mut self) {
+        self.kill_timer(Timer::NotificationHover);
+        if self.system_notices.hovered
+            && self.system_notices.phase == Some(CardPhase::Showing)
+            && self.system_notices.window.as_ref().is_some_and(|w| !w.hovering_close())
+        {
+            self.open_notification_preview();
+        }
+    }
+
+    fn open_notification_preview(&mut self) {
+        let Some(record) = self.system_notices.active.clone() else {
+            return;
+        };
+        self.ui.notifications.preview = Some(record);
+        self.ui.notifications.full = false;
+        self.ui.home.edit = false;
+        self.ui.home.tile_press = None;
+        self.ui.home.tile_reorder = None;
+        self.system_notices.origin = self.system_notices.window.as_ref().map(|w| w.screen_rect());
+        self.open_tab(view::Tab::Home);
+    }
+
+    pub(in crate::island) fn expand_notification_text(&mut self) {
+        if self.ui.notifications.preview.is_none() {
+            return;
+        }
+        self.ui.notifications.full = true;
+        self.ui.notifications.detail_scroll = 0.0;
+        self.ui.notifications.hover = None;
+        self.open_tab(view::Tab::Notifications);
+        self.repaint_expanded();
+    }
+
+    pub(in crate::island) fn activate_notification(&mut self) {
+        if !self.settings.notification_open_app {
+            return self.expand_notification_text();
+        }
+        let Some(record) = &self.ui.notifications.preview else {
+            return;
+        };
+        if notifications::open_sender(&record.app_id) {
+            self.collapse();
+        } else {
+            self.notify(Notice::Error, '\u{E783}', "Could not open the sender app");
+        }
     }
 
     pub(in crate::island) fn notification_session(&mut self, locked: bool) {
@@ -517,12 +626,88 @@ mod tests {
         assert_eq!(app.root.Opacity()?, 1.0);
         app.ui.notifications.state =
             notifications::Snapshot { status: Status::Ready, records: vec![a, b], added: Vec::new() };
+        app.system_notices.active = Some(record(1));
+        app.system_notices.phase = Some(CardPhase::Showing);
+        app.system_notices.hovered = true;
+        app.notification_hover();
+        assert!(app.state == State::Expanded && app.ui.tab == view::Tab::Home);
+        assert!(app.ui.notifications.preview.is_some() && !app.notification_card_visible());
+        app.expand_notification_text();
+        assert!(app.ui.notifications.full && app.ui.tab == view::Tab::Notifications);
+        app.ui.notifications.preview = None;
+        app.ui.notifications.full = false;
+        if let Some(path) = std::env::var_os("NI_NOTIFICATION_TILES_PREVIEW") {
+            preview_tiles(&mut app, std::path::Path::new(&path))?;
+        }
         if let Some(path) = std::env::var_os("NI_NOTIFICATIONS_PREVIEW") {
             preview(&mut app, std::path::Path::new(&path))?;
         }
         drop(app);
         unsafe {
             DestroyWindow(hwnd)?;
+        }
+        Ok(())
+    }
+
+    fn preview_tiles(app: &mut App, path: &std::path::Path) -> Result<()> {
+        use crate::ui::gfx::rgba;
+        let surface = crate::ui::popup::PopupSurface::new((1320, 820))?;
+        app.ui.tab_change = None;
+        let mut notification = record(42);
+        notification.app = "Discord".into();
+        notification.body = "Встречаемся в голосовом канале вечером? Я подготовил несколько идей для нового проекта.\n\nЕсли будешь свободен после восьми — заходи, всё обсудим. ".repeat(8);
+        notification.avatar = Some(std::sync::Arc::new(apps::Icon {
+            side: 32,
+            bgra: (0..1024)
+                .flat_map(|i| {
+                    if (i % 32 - 16_i32).pow(2) + (i / 32 - 12_i32).pow(2) < 49 {
+                        [235, 220, 200, 255]
+                    } else {
+                        [170, 100, 70, 255]
+                    }
+                })
+                .collect(),
+        }));
+        notification.icon = Some(std::sync::Arc::new(apps::Icon { side: 1, bgra: vec![240, 100, 90, 255] }));
+        app.ui.home.mixer_open = false;
+        app.ui.cfg.home_actions = vec![0, 3, 22];
+        app.ui.cfg.notification_open_app = true;
+        app.ui.home.device = "Динамики".into();
+        app.ui.notifications.preview = Some(notification);
+        surface.paint(&app.gpu, |p| {
+            p.fill_rect((0.0, 0.0, 1320.0, 820.0), rgba(0.025, 0.035, 0.055, 1.0))?;
+            for (i, count) in [1, 2, 4, 4].into_iter().enumerate() {
+                let (x, y) = (10.0 + (i % 2) as f32 * 660.0, 10.0 + (i / 2) as f32 * 410.0);
+                app.ui.cfg.notification_tiles = count;
+                app.ui.tab = if i == 3 { view::Tab::Notifications } else { view::Tab::Home };
+                app.ui.notifications.full = i == 3;
+                p.fill_round_rect((x, y, x + 640.0, y + 384.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
+                view::paint_expanded(p, (x, y, 640.0, 384.0), 1.0, &app.ui, &[])?;
+            }
+            Ok(())
+        })?;
+        assert!(app.ui.notifications.detail_max.get() > 0.0);
+        let rgba: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 820);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+        for (group, filename) in [
+            ("Integrations", "notification-integrations-preview.png"),
+            ("Notifications", "notification-settings-preview.png"),
+        ] {
+            app.ui.sw.group = view::GROUPS.iter().position(|g| g.name == group).unwrap();
+            app.ui.sw.scroll = 0.0;
+            app.ui.yandex.state.has_token = true;
+            app.ui.yandex.state.account = "Пример аккаунта".into();
+            let surface = crate::ui::popup::PopupSurface::new((940, 680))?;
+            surface.paint(&app.gpu, |p| view::paint_settings_window(p, (940.0, 680.0), 1.0, &app.ui))?;
+            let pixels: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+            let mut encoder =
+                png::Encoder::new(std::fs::File::create(path.with_file_name(filename)).unwrap(), 940, 680);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
         }
         Ok(())
     }

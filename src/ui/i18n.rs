@@ -36,6 +36,20 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "Cancel" => "Отмена",
         "Yandex Music" => "Яндекс Музыка",
+        "Dismiss" => "Закрыть",
+        "Back" => "Назад",
+        "Expand notification" => "Развернуть уведомление",
+        "Could not open the sender app" => "Не удалось открыть приложение-отправитель",
+        "Open sender app" => "Открыть приложение",
+        "4 tiles" => "4 плитки",
+        "2 tiles" => "2 плитки",
+        "1 tile" => "1 плитка",
+        "Click a notification to open its app" => "Клик по уведомлению открывает приложение",
+        "Notification preview size" => "Размер превью уведомления",
+        "Code" => "Код",
+        "Start My Wave with the island" => "Запускать волну вместе с островом",
+        "Open sign-in page" => "Открыть страницу входа",
+        "Open My Wave" => "Открыть Мою волну",
         "Wave activity" => "Занятие",
         "Connected for this session; Windows could not save the sign-in" => {
             "Вход выполнен, но Windows не сохранила его для следующего запуска"

@@ -65,6 +65,16 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
         HomeHit::Media(i) => (["Previous", "Play or pause", "Next"][i].into(), media_btn(pill, scale, i, wide)),
         HomeHit::Extra(i) => (["Shuffle", "Repeat", "Like"][i].into(), extra_btn(pill, scale, i, wide)),
         HomeHit::Wave => ("Open My Wave settings".into(), wave_link(pill, scale, ui)),
+        HomeHit::Notification | HomeHit::NotificationExpand => (
+            if matches!(hit_home(pill, scale, px, py, ui), Some(HomeHit::Notification)) && ui.cfg.notification_open_app
+            {
+                "Open sender app"
+            } else {
+                "Expand notification"
+            }
+            .into(),
+            home_notification_rect(pill, scale, ui)?,
+        ),
         HomeHit::Player => ("Next player".into(), player_btn(pill, scale, wide)),
         HomeHit::Edit => {
             (if ui.home.edit { "Done" } else { "Choose the tiles" }.into(), edit_button(pill, scale, wide))

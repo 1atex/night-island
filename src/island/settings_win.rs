@@ -558,6 +558,32 @@ impl App {
                 discord::Status::Authorizing => {}
             },
             view::Act::DiscordMute => discord::set_mute(!self.ui.discord.self_mute),
+            view::Act::YandexMain => {
+                use crate::services::yandex::{self, Command};
+                let state = &self.ui.yandex.state;
+                yandex::send(if state.has_token {
+                    Command::Disconnect
+                } else if state.busy || !state.code.is_empty() {
+                    Command::Cancel
+                } else {
+                    Command::Connect
+                });
+            }
+            view::Act::YandexAutoplay => crate::services::yandex::send(crate::services::yandex::Command::Autoplay(
+                !self.ui.yandex.state.config.autoplay,
+            )),
+            view::Act::YandexBrowser => cmd::shell_open("https://ya.ru/device", None),
+            view::Act::YandexCopy => {
+                self.ui.yandex.copied = clips::sys::write_text(self.hwnd, &self.ui.yandex.state.code);
+            }
+            view::Act::YandexWave => {
+                if let Some(hwnd) = self.settings_win {
+                    unsafe {
+                        let _ = ShowWindow(hwnd, SW_HIDE);
+                    }
+                }
+                self.open_tab(view::Tab::Yandex);
+            }
             view::Act::DiscordDeaf => discord::set_deaf(!self.ui.discord.self_deaf),
             view::Act::DiscordOverlay => self.toggle_overlay(),
             view::Act::SpotifyMain => match self.ui.spotify.status {

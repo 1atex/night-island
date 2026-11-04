@@ -20,6 +20,7 @@ impl App {
             && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex)
             && self.settings.tab_anim != crate::data::settings::TabAnim::None;
         self.ui.yandex.accept(next, animate);
+        self.render_settings_win();
         if self.ui.yandex.colour_transition.is_some() {
             self.set_timer(Timer::UiAnim, self.frame_ms());
         }

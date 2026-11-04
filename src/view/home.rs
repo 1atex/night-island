@@ -171,7 +171,7 @@ pub(in crate::view) const GRID_ROW_H: f32 = 46.0;
 pub(in crate::view) const GRID_GAP: f32 = 8.0;
 
 pub fn home_wide(ui: &UiState) -> bool {
-    !ui.home.edit && ui.cfg.home_actions.is_empty()
+    !ui.home.edit && ui.cfg.home_actions.is_empty() && ui.notifications.preview.is_none()
 }
 
 pub(in crate::view) fn slot_action(ui: &UiState, slot: usize) -> Option<usize> {
@@ -179,7 +179,9 @@ pub(in crate::view) fn slot_action(ui: &UiState, slot: usize) -> Option<usize> {
         let id = ui.home.edit_scroll * 2 + slot;
         (id < HOME_ACTION_COUNT).then_some(id)
     } else {
-        ui.cfg.home_actions.get(slot).map(|&id| usize::from(id))
+        slot.checked_sub(notification_tile_count(ui))
+            .and_then(|i| ui.cfg.home_actions.get(i))
+            .map(|&id| usize::from(id))
     }
 }
 
@@ -187,7 +189,7 @@ fn slot_count(ui: &UiState) -> usize {
     if ui.home.edit {
         HOME_ACTION_COUNT.saturating_sub(ui.home.edit_scroll * 2).min(MAX_HOME_TILES)
     } else {
-        ui.cfg.home_actions.len().min(MAX_HOME_TILES)
+        (ui.cfg.home_actions.len() + notification_tile_count(ui)).min(MAX_HOME_TILES)
     }
 }
 
@@ -558,6 +560,8 @@ pub(in crate::view) fn media_btn(pill: Rect, scale: f32, i: usize, wide: bool) -
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum HomeHit {
+    Notification,
+    NotificationExpand,
     Mixer(MixerHit),
     Media(usize),
     Action(usize),
@@ -579,6 +583,17 @@ pub enum HomeHit {
 }
 
 pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<HomeHit> {
+    if let Some(rect) = home_notification_rect(pill, scale, ui)
+        && inside(rect, px, py)
+        && !ui.home.dock_open
+        && ui.home.dev_menu.is_none()
+    {
+        return Some(if inside(home_notification_expand(rect, scale), px, py) {
+            HomeHit::NotificationExpand
+        } else {
+            HomeHit::Notification
+        });
+    }
     if ui.home.mixer_open && inside(media_card(pill, scale, home_wide(ui)), px, py) {
         return hit_home_mixer(pill, scale, ui, px, py).map(HomeHit::Mixer);
     }
@@ -1020,6 +1035,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         p.fill_round_rect((track.0, top, track.2, top + thumb_h), 1.5 * scale, rgba(1.0, 1.0, 1.0, 0.35))?;
     }
 
+    paint_home_notification(p, pill, scale, ui)?;
     paint_dock(p, pill, scale, ui)?;
     if discord_strip(ui) {
         paint_discord_strip(p, pill, scale, ui)?;
