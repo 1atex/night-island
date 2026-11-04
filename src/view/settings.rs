@@ -29,6 +29,7 @@ pub enum Sid {
     MusicEq,
     MusicTitle,
     MusicCover,
+    PreferPlayingMedia,
     MusicLyrics,
     MusicProgress,
     CoverMode,
@@ -53,7 +54,10 @@ pub enum Sid {
     TabControls,
     TabMixer,
     TabNotifications,
+    TabYandex,
     SystemNotifications,
+    NotificationTiles,
+    NotificationOpenApp,
     WindowsNotificationsSettings,
     NotifyMic,
     NotifyDownloads,
@@ -133,6 +137,7 @@ pub(in crate::view) fn tab_toggle_name(id: Sid) -> Option<&'static str> {
         Sid::TabControls => "Controls",
         Sid::TabMixer => "App mixer",
         Sid::TabNotifications => "Notifications",
+        Sid::TabYandex => "My Wave",
         _ => return None,
     })
 }
@@ -306,6 +311,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::MusicEq => c.music_eq,
         Sid::MusicTitle => c.music_title,
         Sid::MusicCover => c.music_cover,
+        Sid::PreferPlayingMedia => c.prefer_playing_media,
         Sid::MusicLyrics => c.music_lyrics,
         Sid::MusicProgress => c.music_progress,
         Sid::EqWhenOpen => c.eq_when_open,
@@ -322,6 +328,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::UpdateCheck => c.update_check,
         Sid::UpdateBeta => c.update_beta,
         Sid::SystemNotifications => c.system_notifications,
+        Sid::NotificationOpenApp => c.notification_open_app,
         Sid::NotifyMic => c.notify.mic,
         Sid::NotifyDownloads => c.notify.downloads,
         Sid::NotifyCapture => c.notify.capture,
@@ -371,6 +378,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::MusicEq => c.music_eq = on,
         Sid::MusicTitle => c.music_title = on,
         Sid::MusicCover => c.music_cover = on,
+        Sid::PreferPlayingMedia => c.prefer_playing_media = on,
         Sid::MusicLyrics => c.music_lyrics = on,
         Sid::MusicProgress => c.music_progress = on,
         Sid::EqWhenOpen => c.eq_when_open = on,
@@ -387,6 +395,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::UpdateCheck => c.update_check = on,
         Sid::UpdateBeta => c.update_beta = on,
         Sid::SystemNotifications => c.system_notifications = on,
+        Sid::NotificationOpenApp => c.notification_open_app = on,
         Sid::NotifyMic => c.notify.mic = on,
         Sid::NotifyDownloads => c.notify.downloads = on,
         Sid::NotifyCapture => c.notify.capture = on,
@@ -423,6 +432,13 @@ pub(in crate::view) fn segment_value(id: Sid, c: &Settings) -> usize {
 
 pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
     match id {
+        Sid::NotificationTiles => {
+            c.notification_tiles = match (c.notification_tiles, forward) {
+                (1, true) | (4, false) => 2,
+                (2, true) | (1, false) => 4,
+                _ => 1,
+            };
+        }
         Sid::Character => c.character = c.character.step(forward),
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
@@ -446,6 +462,11 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
 
 pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
     match id {
+        Sid::NotificationTiles => match c.notification_tiles {
+            1 => "1 tile",
+            2 => "2 tiles",
+            _ => "4 tiles",
+        },
         Sid::Character => c.character.name(),
         Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
@@ -470,6 +491,10 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
         (items.iter().map(|i| name(*i)).collect(), items.iter().position(|i| *i == now).unwrap_or(0))
     }
     match id {
+        Sid::NotificationTiles => (
+            vec!["1 tile", "2 tiles", "4 tiles"],
+            [1, 2, 4].iter().position(|v| *v == c.notification_tiles).unwrap_or(2),
+        ),
         Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
         Sid::AiProvider => all(&AiProvider::ALL, c.ai.provider, |v| v.name()),
         Sid::PillBattery => all(&BatteryStyle::ALL, c.pill_battery, |v| v.name()),
@@ -491,6 +516,7 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
 pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
     use crate::data::settings::*;
     match id {
+        Sid::NotificationTiles => c.notification_tiles = [1, 2, 4][k.min(2)],
         Sid::Character => c.character = crate::ui::characters::Character::ALL[k.min(6)],
         Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
         Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],

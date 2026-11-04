@@ -2,6 +2,10 @@ use crate::platform::notifications::{Record, Snapshot, Status};
 use crate::view::*;
 
 pub struct NotificationsUi {
+    pub preview: Option<Record>,
+    pub full: bool,
+    pub detail_scroll: f32,
+    pub detail_max: std::cell::Cell<f32>,
     pub state: Snapshot,
     pub scroll: usize,
     pub hover: Option<NotificationsHit>,
@@ -10,12 +14,25 @@ pub struct NotificationsUi {
 
 impl Default for NotificationsUi {
     fn default() -> Self {
-        Self { state: Snapshot::default(), scroll: 0, hover: None, setup: true }
+        Self {
+            preview: None,
+            full: false,
+            detail_scroll: 0.0,
+            detail_max: Default::default(),
+            state: Snapshot::default(),
+            scroll: 0,
+            hover: None,
+            setup: true,
+        }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum NotificationsHit {
+    Row(usize),
+    Back,
+    OpenApp,
+    Dismiss,
     Connect,
     WindowsSettings,
     Example,
@@ -24,6 +41,139 @@ pub enum NotificationsHit {
 }
 
 pub const NOTIFICATION_SIZE: (f32, f32) = (420.0, 158.0);
+
+pub fn notification_tile_count(ui: &UiState) -> usize {
+    if ui.home.edit || ui.notifications.preview.is_none() {
+        return 0;
+    }
+    match ui.cfg.notification_tiles {
+        1 => 1,
+        2 => 2,
+        _ => 4,
+    }
+}
+
+pub fn home_notification_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
+    let count = notification_tile_count(ui);
+    if count == 0 {
+        return None;
+    }
+    let first = action_tile(pill, scale, 0);
+    let last = action_tile(pill, scale, count - 1);
+    Some((first.0, first.1, last.2, last.3))
+}
+
+pub fn home_notification_expand(rect: Rect, scale: f32) -> Rect {
+    (rect.2 - 30.0 * scale, rect.1 + 6.0 * scale, rect.2 - 4.0 * scale, rect.1 + 40.0 * scale)
+}
+
+pub fn paint_home_notification(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    let Some(rect) = home_notification_rect(pill, scale, ui) else {
+        return Ok(());
+    };
+    let Some(record) = &ui.notifications.preview else {
+        return Ok(());
+    };
+    let large = notification_tile_count(ui) == 4;
+    let hover = matches!(ui.home.hover_act, Some(562 | 563));
+    p.fill_round_rect(rect, 16.0 * scale, acc(if hover { 0.23 } else { 0.14 }))?;
+    let icon = (rect.0 + 9.0 * scale, rect.1 + 9.0 * scale, rect.0 + 37.0 * scale, rect.1 + 37.0 * scale);
+    paint_notification_avatar(p, icon, scale, record)?;
+    let text_left = icon.2 + 8.0 * scale;
+    p.text(
+        &record.title,
+        (text_left, rect.1 + 4.0 * scale, rect.2 - 30.0 * scale, rect.1 + 25.0 * scale),
+        12.0 * scale,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_TEXT_ALIGNMENT_LEADING,
+        WHITE,
+    )?;
+    p.text(
+        if large { &record.app } else { &record.body },
+        (text_left, rect.1 + 24.0 * scale, rect.2 - 30.0 * scale, rect.1 + 42.0 * scale),
+        11.5 * scale,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_TEXT_ALIGNMENT_LEADING,
+        rgba(1.0, 1.0, 1.0, 0.65),
+    )?;
+    if large {
+        p.text_wrapped_trimmed(
+            &record.body,
+            (rect.0 + 12.0 * scale, rect.1 + 47.0 * scale, rect.2 - 12.0 * scale, rect.3 - 8.0 * scale),
+            12.0 * scale,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            rgba(1.0, 1.0, 1.0, 0.8),
+        )?;
+    }
+    let button = home_notification_expand(rect, scale);
+    if ui.home.hover_act == Some(563) {
+        p.fill_round_rect(button, 9.0 * scale, acc(0.3))?;
+    }
+    p.glyph('\u{E76C}', button, 11.0 * scale, WHITE)
+}
+
+fn notification_detail_buttons(pill: Rect, scale: f32) -> [Rect; 3] {
+    let (x, y, w, h) = pill;
+    let top = y + h - 54.0 * scale;
+    [
+        (x + 24.0 * scale, top, x + 124.0 * scale, top + 32.0 * scale),
+        (x + w / 2.0 - 100.0 * scale, top, x + w / 2.0 + 100.0 * scale, top + 32.0 * scale),
+        (x + w - 124.0 * scale, top, x + w - 24.0 * scale, top + 32.0 * scale),
+    ]
+}
+
+fn paint_notification_detail(
+    p: &Painter,
+    pill: Rect,
+    scale: f32,
+    ui: &NotificationsUi,
+    record: &Record,
+    _open_app: bool,
+) -> Result<()> {
+    let (x, y, w, h) = pill;
+    paint_notification_avatar(
+        p,
+        (x + 24.0 * scale, y + 63.0 * scale, x + 64.0 * scale, y + 103.0 * scale),
+        scale,
+        record,
+    )?;
+    p.text(
+        &record.app,
+        (x + 78.0 * scale, y + 63.0 * scale, x + w - 24.0 * scale, y + 103.0 * scale),
+        15.0 * scale,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_TEXT_ALIGNMENT_LEADING,
+        WHITE,
+    )?;
+    let body = (x + 24.0 * scale, y + 116.0 * scale, x + w - 32.0 * scale, y + h - 68.0 * scale);
+    let max = p.text_scrolled(
+        &format!("{}\n\n{}", record.title, record.body),
+        body,
+        14.0 * scale,
+        ui.detail_scroll,
+        rgba(1.0, 1.0, 1.0, 0.85),
+    )?;
+    ui.detail_max.set(max);
+    if max > 0.0 {
+        let height = body.3 - body.1;
+        let thumb = (height * height / (height + max)).max(20.0 * scale);
+        let top = body.1 + (height - thumb) * ui.detail_scroll.clamp(0.0, max) / max;
+        p.fill_round_rect(
+            (body.2 + 6.0 * scale, top, body.2 + 9.0 * scale, top + thumb),
+            1.5 * scale,
+            rgba(1.0, 1.0, 1.0, 0.35),
+        )?;
+    }
+    for ((rect, label), hit) in notification_detail_buttons(pill, scale)
+        .into_iter()
+        .zip(["Back", "Open sender app", "Dismiss"])
+        .zip([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss])
+    {
+        p.fill_round_rect(rect, 11.0 * scale, rgba(1.0, 1.0, 1.0, if ui.hover == Some(hit) { 0.14 } else { 0.07 }))?;
+        p.text(label, rect, 12.0 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
+    }
+    Ok(())
+}
 
 pub fn notification_buttons(pill: Rect, scale: f32) -> [Rect; 3] {
     let left = pill.0 + SIDE_PAD * scale;
@@ -40,12 +190,35 @@ pub fn notifications_rows(pill: Rect, scale: f32) -> usize {
     ((pill.3 - 218.0 * scale) / (62.0 * scale)).floor().max(1.0) as usize
 }
 
-pub fn hit_notifications(pill: Rect, scale: f32, x: f32, y: f32) -> Option<NotificationsHit> {
+pub fn hit_notifications(
+    pill: Rect,
+    scale: f32,
+    x: f32,
+    y: f32,
+    ui: &NotificationsUi,
+    _open_app: bool,
+) -> Option<NotificationsHit> {
+    if ui.full && ui.preview.is_some() {
+        return notification_detail_buttons(pill, scale)
+            .into_iter()
+            .zip([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss])
+            .find_map(|(rect, hit)| inside(rect, x, y).then_some(hit));
+    }
     for (rect, hit) in
         notification_sections(pill, scale).into_iter().zip([NotificationsHit::Setup, NotificationsHit::History])
     {
         if inside(rect, x, y) {
             return Some(hit);
+        }
+    }
+    if !ui.setup {
+        for row in 0..notifications_rows(pill, scale) {
+            let top = pill.1 + (216.0 + row as f32 * 62.0) * scale;
+            if inside((pill.0 + SIDE_PAD * scale, top, pill.0 + pill.2 - SIDE_PAD * scale, top + 56.0 * scale), x, y)
+                && row + ui.scroll < ui.state.records.len()
+            {
+                return Some(NotificationsHit::Row(row + ui.scroll));
+            }
         }
     }
     notification_buttons(pill, scale)
@@ -145,7 +318,19 @@ pub fn notification_status(status: Status) -> &'static str {
     }
 }
 
-pub fn paint_notifications(p: &Painter, pill: Rect, scale: f32, ui: &NotificationsUi, enabled: bool) -> Result<()> {
+pub fn paint_notifications(
+    p: &Painter,
+    pill: Rect,
+    scale: f32,
+    ui: &NotificationsUi,
+    enabled: bool,
+    open_app: bool,
+) -> Result<()> {
+    if ui.full
+        && let Some(record) = &ui.preview
+    {
+        return paint_notification_detail(p, pill, scale, ui, record, open_app);
+    }
     let (x, y, w, _) = pill;
     let left = x + SIDE_PAD * scale;
     let right = x + w - SIDE_PAD * scale;
@@ -272,4 +457,75 @@ pub fn paint_notifications(p: &Painter, pill: Rect, scale: f32, ui: &Notificatio
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tile_tests {
+    use super::*;
+
+    fn message() -> Record {
+        Record {
+            id: 1,
+            created: 1,
+            app_id: "com.squirrel.Discord.Discord".into(),
+            app: "Discord".into(),
+            title: "Александр".into(),
+            body: "Уведомление с полным текстом".into(),
+            icon: None,
+            avatar: None,
+        }
+    }
+
+    #[test]
+    fn notification_tiles_reserve_only_the_selected_slots_at_every_scale() {
+        for scale in [0.8, 1.0, 1.25, 1.5, 2.0] {
+            for count in [1, 2, 4] {
+                let mut ui = UiState::new();
+                ui.cfg.home_actions = vec![0, 3, 22];
+                ui.cfg.notification_tiles = count;
+                ui.notifications.preview = Some(message());
+                let pill = (20.0, 10.0, 640.0 * scale, 384.0 * scale);
+                let rect = home_notification_rect(pill, scale, &ui).unwrap();
+                let end = action_tile(pill, scale, count as usize - 1);
+                assert_eq!((rect.2, rect.3), (end.2, end.3));
+                assert!(matches!(
+                    hit_home(pill, scale, rect.0 + 10.0 * scale, rect.1 + 20.0 * scale, &ui),
+                    Some(HomeHit::Notification)
+                ));
+                let button = home_notification_expand(rect, scale);
+                assert!(matches!(
+                    hit_home(pill, scale, (button.0 + button.2) / 2.0, (button.1 + button.3) / 2.0, &ui),
+                    Some(HomeHit::NotificationExpand)
+                ));
+                let next = action_tile(pill, scale, count as usize);
+                assert!(matches!(
+                    hit_home(pill, scale, (next.0 + next.2) / 2.0, (next.1 + next.3) / 2.0, &ui),
+                    Some(HomeHit::Action(0))
+                ));
+                ui.notifications.preview = None;
+                assert_eq!(notification_tile_count(&ui), 0);
+                assert_eq!(ui.cfg.home_actions, vec![0, 3, 22]);
+            }
+        }
+    }
+
+    #[test]
+    fn full_notification_has_separate_reading_and_app_actions() {
+        let mut ui = NotificationsUi { preview: Some(message()), full: true, ..Default::default() };
+        let pill = (0.0, 0.0, 640.0, 384.0);
+        let buttons = notification_detail_buttons(pill, 1.0);
+        for (index, button) in buttons.iter().enumerate() {
+            let hit = hit_notifications(pill, 1.0, (button.0 + button.2) / 2.0, (button.1 + button.3) / 2.0, &ui, true);
+            assert!(hit == Some([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss][index]));
+        }
+        let b = buttons[1];
+        assert!(
+            hit_notifications(pill, 1.0, (b.0 + b.2) / 2.0, (b.1 + b.3) / 2.0, &ui, false)
+                == Some(NotificationsHit::OpenApp)
+        );
+        ui.full = false;
+        ui.setup = false;
+        ui.state.records.push(message());
+        assert!(hit_notifications(pill, 1.0, 40.0, 240.0, &ui, false) == Some(NotificationsHit::Row(0)));
+    }
 }

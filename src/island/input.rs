@@ -2,6 +2,7 @@ use crate::island::*;
 
 #[derive(Default)]
 pub(in crate::island) struct Pointer {
+    pub(in crate::island) decoration_through: bool,
     pub(in crate::island) tracking: bool,
     pub(in crate::island) press: Option<((i32, i32), (i32, i32))>,
     pub(in crate::island) character_press: Option<(i32, i32)>,
@@ -215,8 +216,22 @@ impl App {
             }
             self.ui.hand = hover.is_some();
         }
+        if self.ui.tab == view::Tab::Yandex {
+            let hover = view::hit_yandex(pill, self.scale, &self.ui.yandex, fx, fy);
+            if hover != self.ui.yandex.hover {
+                self.ui.yandex.hover = hover;
+                self.repaint_expanded();
+            }
+        }
         if self.ui.tab == view::Tab::Notifications {
-            let hover = view::hit_notifications(pill, self.scale, fx, fy);
+            let hover = view::hit_notifications(
+                pill,
+                self.scale,
+                fx,
+                fy,
+                &self.ui.notifications,
+                self.settings.notification_open_app,
+            );
             if hover != self.ui.notifications.hover {
                 self.ui.notifications.hover = hover;
                 self.repaint_expanded();
@@ -328,6 +343,9 @@ impl App {
                 Some(view::HomeHit::VolumeIcon) => Some(530),
                 Some(view::HomeHit::Edit) => Some(550),
                 Some(view::HomeHit::Player) => Some(560),
+                Some(view::HomeHit::Wave) => Some(561),
+                Some(view::HomeHit::Notification) => Some(562),
+                Some(view::HomeHit::NotificationExpand) => Some(563),
                 _ => None,
             }
         } else {
@@ -356,6 +374,7 @@ impl App {
             || hover_text.is_some()
             || ((self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open))
                 && self.ui.mixer.hover.is_some())
+            || (self.ui.tab == view::Tab::Yandex && self.ui.yandex.hover.is_some())
             || (self.ui.tab == view::Tab::Notifications && self.ui.notifications.hover.is_some());
         let hover_sub = view::hit_subtab(self.pill_full(), self.scale, fx, fy, &self.ui);
         self.ui.hand |= hover_sub.is_some();
@@ -489,6 +508,7 @@ impl App {
         match self.ui.tab {
             view::Tab::Clipboard => self.click_clip(x, y),
             view::Tab::Controls => self.click_ctl(x, y),
+            view::Tab::Yandex => self.click_yandex(x, y),
             view::Tab::Mixer => self.click_mixer(x, y),
             view::Tab::Notifications => self.click_notifications(x, y),
             view::Tab::Note => self.click_note(x, y),
@@ -552,6 +572,12 @@ impl App {
             return self.repaint_expanded();
         }
         if self.ui.tab == view::Tab::Notifications {
+            if self.ui.notifications.full {
+                let amount = if delta > 0 { -48.0 } else { 48.0 } * self.scale;
+                self.ui.notifications.detail_scroll =
+                    (self.ui.notifications.detail_scroll + amount).clamp(0.0, self.ui.notifications.detail_max.get());
+                return self.repaint_expanded();
+            }
             let max = self
                 .ui
                 .notifications
@@ -630,6 +656,56 @@ impl App {
             *scroll = next;
             self.ui.clip.hover = None;
             self.repaint_expanded();
+        }
+    }
+
+    pub(in crate::island) fn on_interactive_body(&self, x: i32, y: i32) -> bool {
+        if self.can_release_character(x, y) {
+            return true;
+        }
+        let (at, size, radius) = self.pill(self.win, false, false);
+        rounded_body_contains((at.X, at.Y, size.X, size.Y), radius.X, (x as f32, y as f32))
+    }
+
+    pub(in crate::island) fn set_decoration_through(&mut self, through: bool) {
+        if self.pointer.decoration_through == through {
+            return;
+        }
+        self.pointer.decoration_through = through;
+        if through && self.pointer.tracking {
+            self.on_mouse_leave();
+        }
+        let through = through || (self.ghosted && self.settings.ghost_click_through);
+        unsafe {
+            let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE);
+            let bits = (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0) as isize;
+            SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, if through { ex | bits } else { ex & !bits });
+            if through {
+                let _ = SetLayeredWindowAttributes(self.hwnd, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
+            }
+        }
+    }
+
+    pub(in crate::island) fn update_decoration_input(&mut self) {
+        let mut point = windows::Win32::Foundation::POINT::default();
+        let mut window = windows::Win32::Foundation::RECT::default();
+        let valid = unsafe { GetCursorPos(&mut point).is_ok() && GetWindowRect(self.hwnd, &mut window).is_ok() };
+        let through = valid
+            && self.state == State::Collapsed
+            && self.liquid_on()
+            && !self.character_interacting()
+            && !self.pill_motion_busy()
+            && !self.on_interactive_body(point.x - window.left, point.y - window.top);
+        let was_through = self.pointer.decoration_through;
+        self.set_decoration_through(through);
+        if was_through
+            && !through
+            && valid
+            && self.state == State::Collapsed
+            && !self.character_interacting()
+            && self.on_interactive_body(point.x - window.left, point.y - window.top)
+        {
+            self.on_mouse_move(point.x - window.left, point.y - window.top);
         }
     }
 
@@ -727,6 +803,34 @@ impl App {
             State::Expanded => self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1)),
             State::Collapsed => self.schedule_autohide(),
             _ => {}
+        }
+    }
+}
+
+fn rounded_body_contains((left, top, width, height): view::Rect, radius: f32, (x, y): (f32, f32)) -> bool {
+    if x < left || x >= left + width || y < top || y >= top + height {
+        return false;
+    }
+    let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
+    let cx = x.clamp(left + radius, left + width - radius);
+    let cy = y.clamp(top + radius, top + height - radius);
+    (x - cx).powi(2) + (y - cy).powi(2) <= radius.powi(2)
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn decorative_pull_does_not_enlarge_the_clickable_body() {
+        for scale in [0.75, 1.0, 1.5, 2.0] {
+            let frame = (50.0 * scale, 40.0 * scale, 220.0 * scale, 36.0 * scale);
+            for point in [(160.0, 50.0), (60.0, 58.0), (260.0, 58.0)] {
+                assert!(rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
+            }
+            for point in [(160.0, 85.0), (35.0, 58.0), (285.0, 58.0), (51.0, 41.0), (160.0, 30.0)] {
+                assert!(!rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
+            }
         }
     }
 }

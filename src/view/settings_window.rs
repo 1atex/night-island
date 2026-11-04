@@ -55,7 +55,7 @@ const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 19] = [
+const PILL: [(Sid, &str, Kind); 20] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
@@ -63,6 +63,7 @@ const PILL: [(Sid, &str, Kind); 19] = [
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
     (Sid::MusicCover, "Cover art on the pill", Kind::Toggle),
+    (Sid::PreferPlayingMedia, "Prefer the player that is playing", Kind::Toggle),
     (Sid::CoverMode, "Cover shape", Kind::Cycle),
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
@@ -77,8 +78,10 @@ const PILL: [(Sid, &str, Kind); 19] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 18] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 20] = [
     (Sid::SystemNotifications, "Windows notifications from the island", Kind::Toggle),
+    (Sid::NotificationTiles, "Notification preview size", Kind::Cycle),
+    (Sid::NotificationOpenApp, "Click a notification to open its app", Kind::Toggle),
     (Sid::WindowsNotificationsSettings, "Windows notification settings", Kind::Button),
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
@@ -114,7 +117,7 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 13] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
     (Sid::TabNote, "Note", Kind::Toggle),
@@ -128,6 +131,7 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 13] = [
     (Sid::TabControls, "Controls", Kind::Toggle),
     (Sid::TabMixer, "App mixer", Kind::Toggle),
     (Sid::TabNotifications, "Notifications", Kind::Toggle),
+    (Sid::TabYandex, "My Wave", Kind::Toggle),
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
@@ -170,14 +174,14 @@ pub const GROUPS: [Group; 15] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (4, "Music"), (12, "Edges")],
+        sections: &[(0, "Pill"), (4, "Music"), (13, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',
         name: "Notifications",
         rows: &NOTIFICATIONS,
         custom: None,
-        sections: &[(0, "System"), (7, "Clipboard and keys"), (11, "Apps and services")],
+        sections: &[(0, "System"), (9, "Clipboard and keys"), (13, "Apps and services")],
     },
     Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
     Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
@@ -240,6 +244,11 @@ pub enum Field {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
+    YandexMain,
+    YandexWave,
+    YandexBrowser,
+    YandexCopy,
+    YandexAutoplay,
     DiscordMain,
     DiscordMute,
     DiscordDeaf,
@@ -365,6 +374,42 @@ fn spotify_status_text(s: &spotify::State) -> (String, bool) {
 fn integration_items(ui: &UiState) -> Vec<Item> {
     use discord::Status as D;
     let mut out = vec![Item::Heading("Integrations")];
+
+    let wave = &ui.yandex.state;
+    let status = if !wave.error.is_empty() {
+        wave.error.clone()
+    } else if !wave.code.is_empty() {
+        crate::ui::i18n::tr("Waiting for the browser…").into_owned()
+    } else if wave.busy {
+        crate::ui::i18n::tr("Connecting…").into_owned()
+    } else if wave.has_token {
+        wave.account.clone()
+    } else {
+        crate::ui::i18n::tr("Not connected").into_owned()
+    };
+    out.push(Item::Service { name: "Yandex Music", glyph: '\u{E8D6}', status, live: wave.has_token });
+    if !wave.code.is_empty() {
+        out.push(Item::Text(format!("{}: {}", crate::ui::i18n::tr("Code"), wave.code)));
+        out.push(Item::Button(Act::YandexCopy, if ui.yandex.copied { "Copied" } else { "Copy code" }.into(), true));
+        out.push(Item::Button(Act::YandexBrowser, "Open sign-in page".into(), true));
+    }
+    let label = if wave.has_token {
+        "Disconnect"
+    } else if wave.busy || !wave.code.is_empty() {
+        "Cancel"
+    } else {
+        "Connect"
+    };
+    out.push(Item::Button(Act::YandexMain, label.into(), true));
+    if wave.has_token {
+        out.push(Item::Pair(
+            Act::YandexAutoplay,
+            "Start My Wave with the island".into(),
+            if wave.config.autoplay { "On" } else { "Off" }.into(),
+            wave.config.autoplay,
+        ));
+    }
+    out.push(Item::Button(Act::YandexWave, "Open My Wave".into(), true));
 
     let (status, live) = discord_status_text(&ui.discord);
     out.push(Item::Service { name: "Discord", glyph: '\u{E8F2}', status, live });
@@ -624,6 +669,7 @@ fn pill_items(ui: &UiState) -> Vec<Item> {
     if let Some(group) = GROUPS.iter().find(|g| g.name == "Pill and music") {
         out.extend(rows_with_sections(group));
     }
+    out.push(Item::Note("Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls."));
     out.push(Item::Section("Players for lyrics"));
     let apps = &ui.cfg.lyrics_apps;
     if apps.is_empty() {
@@ -1378,6 +1424,44 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wave_integration_covers_sign_in_code_and_connected_account() {
+        let mut ui = UiState::new();
+        let rows = integration_items(&ui);
+        assert!(rows.iter().any(|row| matches!(row, Item::Service { name: "Yandex Music", .. })));
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexMain,label,true) if label == "Connect")));
+        ui.yandex.state.code = "TEST-CODE".into();
+        let rows = integration_items(&ui);
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexCopy, _, true))));
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexBrowser, _, true))));
+        ui.yandex.state.code.clear();
+        ui.yandex.state.has_token = true;
+        ui.yandex.state.account = "Account".into();
+        let rows = integration_items(&ui);
+        assert!(
+            rows.iter().any(|row| matches!(row, Item::Button(Act::YandexMain,label,true) if label == "Disconnect"))
+        );
+        assert!(rows.iter().any(|row| matches!(row, Item::Pair(Act::YandexAutoplay, ..))));
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexWave, _, true))));
+    }
+
+    #[test]
+    fn notification_size_dropdown_and_settings_round_trip() {
+        let mut settings = Settings::default();
+        for (index, count) in [1, 2, 4].into_iter().enumerate() {
+            cycle_pick(Sid::NotificationTiles, &mut settings, index);
+            assert_eq!(settings.notification_tiles, count);
+            assert_eq!(cycle_options(Sid::NotificationTiles, &settings).1, index);
+            toggle_set(Sid::NotificationOpenApp, &mut settings, true);
+            let saved: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(saved.notification_tiles, count);
+            assert!(saved.notification_open_app);
+        }
+        settings.notification_tiles = 255;
+        settings.sanitize();
+        assert_eq!(settings.notification_tiles, 4);
+    }
 
     #[test]
     fn search_finds_rows_in_both_languages() {

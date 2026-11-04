@@ -350,6 +350,39 @@ impl Painter<'_> {
         }
     }
 
+    pub fn text_scrolled(
+        &self,
+        text: &str,
+        rect: (f32, f32, f32, f32),
+        size: f32,
+        scroll: f32,
+        color: D2D1_COLOR_F,
+    ) -> Result<f32> {
+        use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
+        unsafe {
+            let format = self.dwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                size,
+                w!("en-us"),
+            )?;
+            format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+            let wide: Vec<u16> = text.encode_utf16().collect();
+            let layout = self.dwrite.CreateTextLayout(&wide, &format, (rect.2 - rect.0).max(1.0), 100_000.0)?;
+            let mut metrics = DWRITE_TEXT_METRICS::default();
+            layout.GetMetrics(&mut metrics)?;
+            let max = (metrics.height - (rect.3 - rect.1)).max(0.0);
+            self.push_clip(rect);
+            let result = self.draw_layout(rect.0, rect.1 - scroll.clamp(0.0, max), &layout, color);
+            self.pop_clip();
+            result?;
+            Ok(max)
+        }
+    }
+
     pub fn md_layout(
         &self,
         doc: &crate::ui::md::Doc,
@@ -991,6 +1024,36 @@ impl Painter<'_> {
     pub fn fill_round_rect(&self, rect: (f32, f32, f32, f32), radius: f32, color: D2D1_COLOR_F) -> Result<()> {
         unsafe {
             let brush = self.dc.CreateSolidColorBrush(&color, None)?;
+            self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
+        }
+        Ok(())
+    }
+
+    pub fn fill_round_gradient(
+        &self,
+        rect: (f32, f32, f32, f32),
+        radius: f32,
+        from: D2D1_COLOR_F,
+        to: D2D1_COLOR_F,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+        };
+        unsafe {
+            let stops = self.dc.CreateGradientStopCollection(
+                &[D2D1_GRADIENT_STOP { position: 0.0, color: from }, D2D1_GRADIENT_STOP { position: 1.0, color: to }],
+                D2D1_GAMMA_2_2,
+                D2D1_EXTEND_MODE_CLAMP,
+            )?;
+            let brush = self.dc.CreateLinearGradientBrush(
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: windows_numerics::Vector2 { X: rect.0, Y: rect.1 },
+                    endPoint: windows_numerics::Vector2 { X: rect.2, Y: rect.3 },
+                },
+                None,
+                &stops,
+            )?;
             self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
         }
         Ok(())

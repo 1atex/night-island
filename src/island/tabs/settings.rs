@@ -142,6 +142,10 @@ impl App {
                     self.liquid_tick();
                 }
                 EqStrength | EqGradient => self.refresh_eq_shape(),
+                PreferPlayingMedia => {
+                    media::configure_priority(self.settings.prefer_playing_media);
+                    self.on_media();
+                }
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | ProgressStyle
                 | PillWeather | PillWeatherSide | PillBattery | SpikeColor => {
                     self.update_eq();

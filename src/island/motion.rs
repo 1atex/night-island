@@ -61,6 +61,8 @@ impl App {
     }
 
     pub(in crate::island) fn expand(&mut self) {
+        self.set_decoration_through(false);
+        let notification_origin = self.system_notices.origin.take();
         self.hide_notification_card();
         self.cancel_pill_motion();
         match self.state {
@@ -78,6 +80,13 @@ impl App {
             let _ = self.set_geometry_now(Win::Big, false, hidden);
         }
         self.state = State::Expanded;
+        if let Some((x, y, w, h)) = notification_origin {
+            let (wx, wy) = self.window_origin(Win::Big);
+            let _ = self.geometry.SetOffset(windows_numerics::Vector2 { X: x - wx, Y: y - wy });
+            let _ = self.geometry.SetSize(windows_numerics::Vector2 { X: w, Y: h });
+            let _ =
+                self.geometry.SetCornerRadius(windows_numerics::Vector2 { X: 26.0 * self.scale, Y: 26.0 * self.scale });
+        }
         self.sync_mixer();
         self.update_eq();
         self.sync_metrics();

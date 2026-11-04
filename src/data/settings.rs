@@ -384,12 +384,15 @@ pub struct Settings {
     pub dock_offset: f32,
     pub float_pos: Option<[i32; 2]>,
     pub system_notifications: bool,
+    pub notification_tiles: u8,
+    pub notification_open_app: bool,
     pub pill_weather: bool,
     pub pill_weather_side: WeatherSide,
     pub pill_battery: BatteryStyle,
     pub music_eq: bool,
     pub music_title: bool,
     pub music_cover: bool,
+    pub prefer_playing_media: bool,
     pub metrics_tab: Vec<String>,
     pub metrics_pill: Vec<String>,
     pub metrics_secs: u32,
@@ -485,12 +488,15 @@ impl Default for Settings {
             dock_offset: 0.5,
             float_pos: None,
             system_notifications: false,
+            notification_tiles: 4,
+            notification_open_app: false,
             pill_weather: true,
             pill_weather_side: WeatherSide::Left,
             pill_battery: BatteryStyle::Percent,
             music_eq: true,
             music_title: true,
             music_cover: true,
+            prefer_playing_media: false,
             voice_paste: true,
             activity_track: true,
             activity_ai: false,
@@ -787,10 +793,10 @@ impl WeatherSide {
     }
 }
 
-pub const HEADER_TAB_LIMIT: usize = 5;
-pub const DEFAULT_HEADER_TABS: [&str; HEADER_TAB_LIMIT] = ["Clipboard", "Text", "Note", "Weather", "Record"];
+pub const HEADER_TAB_LIMIT: usize = HIDEABLE_TABS.len();
+pub const DEFAULT_HEADER_TABS: [&str; 5] = ["Clipboard", "Text", "Note", "Weather", "Record"];
 
-pub const HIDEABLE_TABS: [&str; 12] = [
+pub const HIDEABLE_TABS: [&str; 13] = [
     "Clipboard",
     "Text",
     "Note",
@@ -803,6 +809,7 @@ pub const HIDEABLE_TABS: [&str; 12] = [
     "Controls",
     "App mixer",
     "Notifications",
+    "My Wave",
 ];
 
 impl Settings {
@@ -833,10 +840,11 @@ impl Settings {
         if !pinned {
             self.header_tabs.retain(|item| item != name);
         } else if !self.header_tabs.iter().any(|item| item == name) {
-            if self.header_tabs.len() < HEADER_TAB_LIMIT {
-                self.header_tabs.push(name.to_string());
-            } else if let Some(index) = replace.and_then(|old| self.header_tabs.iter().position(|item| item == old)) {
+            if let Some(old) = replace {
+                let Some(index) = self.header_tabs.iter().position(|item| item == old) else { return false };
                 self.header_tabs[index] = name.to_string();
+            } else if self.header_tabs.len() < HEADER_TAB_LIMIT {
+                self.header_tabs.push(name.to_string());
             } else {
                 return false;
             }
@@ -933,6 +941,9 @@ impl Settings {
     pub fn sanitize(&mut self) {
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
+        if ![1, 2, 4].contains(&self.notification_tiles) {
+            self.notification_tiles = 4;
+        }
         let (chat, agy) = (self.tab_hidden("Chat"), self.tab_hidden("AGY"));
         self.hidden_tabs.retain(|t| t != "Chat" && t != "AGY");
         if chat && agy && !self.tab_hidden("AI") {
@@ -1064,9 +1075,11 @@ mod tests {
     }
 
     #[test]
-    fn header_tabs_move_both_ways_and_require_an_explicit_replacement_when_full() {
+    fn header_tabs_add_without_replacing_and_can_move_back_to_more() {
         let mut settings = Settings::default();
-        assert!(!settings.set_header_tab("AI", true, None));
+        assert!(settings.set_header_tab("AI", true, None));
+        assert_eq!(settings.header_tabs.len(), 6);
+        assert!(settings.set_header_tab("AI", false, None));
         assert!(settings.set_header_tab("AI", true, Some("Record")));
         assert!(settings.header_tabs.iter().any(|name| name == "AI"));
         assert!(!settings.header_tabs.iter().any(|name| name == "Record"));
@@ -1079,7 +1092,7 @@ mod tests {
         assert_eq!(restored.header_tabs, settings.header_tabs);
         let mut invalid: Settings = serde_json::from_str(r#"{"header_tabs":["Home","AI","AI","evil","Settings","Weather","Record","Privacy","Activity","Controls"]}"#).unwrap();
         invalid.sanitize();
-        assert_eq!(invalid.header_tabs, ["AI", "Weather", "Record", "Privacy", "Activity"]);
+        assert_eq!(invalid.header_tabs, ["AI", "Weather", "Record", "Privacy", "Activity", "Controls"]);
     }
 
     #[test]
@@ -1203,6 +1216,15 @@ mod tests {
         assert!(s.auto_hide);
         assert_eq!(s.style, Style::Liquid);
         assert!(serde_json::from_str::<Settings>("not json").is_err());
+    }
+
+    #[test]
+    fn player_priority_is_opt_in_and_persists() {
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.prefer_playing_media);
+        settings.prefer_playing_media = true;
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(restored.prefer_playing_media);
     }
 
     #[test]
