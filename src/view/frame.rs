@@ -299,15 +299,14 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         }
         let selected = tab == bar_tab(ui.tab);
         let radius = (rect.3 - rect.1) / 2.0;
-        let selection = ui.feedback.sample(300_000 + i as u64, f32::from(selected), f32::from(selected), 180);
-        let hover = ui.feedback.sample(400_000 + i as u64, f32::from(ui.hover_tab == Some(i)), 0.0, 140);
-        let base = if !header_has_labels(ui) && tab != Tab::Settings { 0.045 } else { 0.0 };
-        p.fill_round_rect(
-            *rect,
-            radius,
-            rgba(1.0, 1.0, 1.0, base + (0.16 - base) * selection + 0.09 * hover * (1.0 - selection)),
-        )?;
-        let alpha = 0.62 + 0.38 * selection;
+        if selected {
+            p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.16))?;
+        } else if ui.hover_tab == Some(i) {
+            p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.09))?;
+        } else if !header_has_labels(ui) && tab != Tab::Settings {
+            p.fill_round_rect(*rect, radius, rgba(1.0, 1.0, 1.0, 0.045))?;
+        }
+        let alpha = if selected { 1.0 } else { 0.62 };
         if header_has_labels(ui) && tab != Tab::Settings {
             let font = ((rect.2 - rect.0 - 10.0 * scale) / header_label_widths()[i].max(1.0) * 13.0).min(13.0 * scale);
             p.text(

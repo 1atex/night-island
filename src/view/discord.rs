@@ -85,12 +85,7 @@ pub(in crate::view) fn paint_discord_strip(p: &Painter, pill: Rect, scale: f32, 
         } else {
             glyph
         };
-        p.glyph(
-            g,
-            r,
-            14.0 * scale,
-            if n == 2 || ui.discord.voice_available { WHITE } else { rgba(1.0, 1.0, 1.0, 0.3) },
-        )?;
+        p.glyph(g, r, 14.0 * scale, WHITE)?;
     }
     Ok(())
 }
@@ -183,7 +178,7 @@ pub fn paint_discord_overlay(
         } else {
             glyph
         };
-        p.glyph(g, r, 14.0 * scale, if d.voice_available { WHITE } else { rgba(1.0, 1.0, 1.0, 0.3) })?;
+        p.glyph(g, r, 14.0 * scale, WHITE)?;
     }
     Ok(())
 }

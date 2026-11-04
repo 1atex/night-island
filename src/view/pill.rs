@@ -652,9 +652,7 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
             let side = (COVER_SLOT * scale).min(h - 10.0 * scale);
             let top = y + (h - side) / 2.0;
             let wide = width.min(side * cover_aspect(ui));
-            if !ui.cover_in_flight {
-                p.cover((x + off, top, x + off + wide, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
-            }
+            p.cover((x + off, top, x + off + wide, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
         }
         if slots.weather.is_some() {
             weather_at()?;
@@ -740,22 +738,6 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         BatteryStyle::Percent => paint_pill_battery(x + w - 16.0 * scale - 62.0 * scale, x + w - 16.0 * scale)?,
     }
     Ok(())
-}
-
-pub fn pill_cover_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
-    if ui.notice.is_some() || ui.volume.is_some() || !row_pill(ui) || !cover_visible(ui) {
-        return None;
-    }
-    let (x, y, w, h) = pill;
-    if ui.cfg.vertical() {
-        let (off, _) = vertical_slots(ui, scale, h).cover?;
-        let side = (w - 14.0 * scale).min(30.0 * scale);
-        return Some((x + (w - side) / 2.0, y + off, x + (w + side) / 2.0, y + off + side));
-    }
-    let (off, width) = music_slots(ui, scale, w).cover?;
-    let side = (COVER_SLOT * scale).min(h - 10.0 * scale);
-    let wide = width.min(side * cover_aspect(ui));
-    Some((x + off, y + (h - side) / 2.0, x + off + wide, y + (h + side) / 2.0))
 }
 
 #[cfg(test)]

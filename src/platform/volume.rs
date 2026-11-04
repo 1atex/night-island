@@ -11,41 +11,6 @@ fn endpoint() -> Result<IAudioEndpointVolume> {
     }
 }
 
-pub fn muted() -> Option<bool> {
-    unsafe { endpoint().ok()?.GetMute().ok().map(|v| v.as_bool()) }
-}
-
-pub fn set_muted(muted: bool) {
-    unsafe {
-        if let Ok(ep) = endpoint() {
-            let _ = ep.SetMute(muted, std::ptr::null());
-        }
-    }
-}
-
-fn microphone() -> Result<IAudioEndpointVolume> {
-    unsafe {
-        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        enumerator.GetDefaultAudioEndpoint(eCapture, eConsole)?.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)
-    }
-}
-
-pub fn microphone_muted() -> Option<bool> {
-    unsafe { microphone().ok()?.GetMute().ok().map(|v| v.as_bool()) }
-}
-
-pub fn toggle_microphone() -> bool {
-    unsafe {
-        let Ok(endpoint) = microphone() else {
-            return false;
-        };
-        let Ok(current) = endpoint.GetMute() else {
-            return false;
-        };
-        endpoint.SetMute(!current.as_bool(), std::ptr::null()).is_ok()
-    }
-}
-
 pub fn get() -> Option<f32> {
     unsafe { endpoint().ok()?.GetMasterVolumeLevelScalar().ok() }
 }

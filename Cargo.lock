@@ -599,7 +599,6 @@ dependencies = [
  "toml_edit",
  "windows",
  "windows-core",
- "windows-future",
  "windows-numerics",
 ]
 

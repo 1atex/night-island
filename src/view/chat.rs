@@ -6,7 +6,6 @@ use crate::view::*;
 
 #[derive(Default)]
 pub struct ChatUi {
-    pub pet: PetStudio,
     pub turns: Vec<ChatTurn>,
     pub msgs: Vec<Msg>,
     pub error: Option<String>,
@@ -82,9 +81,6 @@ pub fn chat_text_at(ui: &UiState, px: f32, py: f32) -> Option<(usize, u32)> {
 }
 
 pub fn chat_model_text_at(chat: &ChatUi, px: f32, py: f32) -> Option<(usize, u32)> {
-    if chat.pet.enabled {
-        return None;
-    }
     use windows::Win32::Graphics::DirectWrite::{DWRITE_HIT_TEST_METRICS, DWRITE_TEXT_METRICS};
     let geom = chat.geom.borrow();
     let end_of = |index: usize| chat.msgs.get(index).map_or(0, |m| m.doc.text.encode_utf16().count() as u32);
@@ -121,8 +117,6 @@ fn shown_text(turn: &ChatTurn) -> String {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ChatHit {
-    Pet,
-    PetAction(PetStudioHit),
     Input,
     Send,
     New,
@@ -135,14 +129,13 @@ pub enum ChatHit {
     History,
 }
 
-pub(in crate::view) fn chat_buttons(pill: Rect, scale: f32) -> (Rect, Rect, Rect, Rect) {
+pub(in crate::view) fn chat_buttons(pill: Rect, scale: f32) -> (Rect, Rect, Rect) {
     let (_, r) = agy_side(pill, scale);
     let (top, bottom) = (pill.1 + 58.0 * scale, pill.1 + 86.0 * scale);
     let new = (r - 64.0 * scale, top, r, bottom);
     let chats = (new.0 - 6.0 * scale - 74.0 * scale, top, new.0 - 6.0 * scale, bottom);
     let attach = (chats.0 - 6.0 * scale - 74.0 * scale, top, chats.0 - 6.0 * scale, bottom);
-    let pet = (attach.0 - 90.0 * scale, top, attach.0 - 6.0 * scale, bottom);
-    (new, chats, attach, pet)
+    (new, chats, attach)
 }
 
 pub(in crate::view) fn chat_reserve(files: usize, scale: f32) -> f32 {
@@ -180,10 +173,7 @@ pub fn hit_chat(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Optio
     if !ui.chat.keyed {
         return Some(ChatHit::Setup);
     }
-    let (new, chats, attach, pet) = chat_buttons(pill, scale);
-    if inside(pet, px, py) {
-        return Some(ChatHit::Pet);
-    }
+    let (new, chats, attach) = chat_buttons(pill, scale);
     if inside(new, px, py) {
         return Some(ChatHit::New);
     }
@@ -207,16 +197,6 @@ pub fn hit_chat(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Optio
         return Some(ChatHit::History);
     }
     let input_h = ui.chat.input_h.get();
-    if ui.chat.pet.enabled {
-        if inside(agy_input(pill, scale, input_h).0, px, py) {
-            return Some(ChatHit::Input);
-        }
-        if inside(agy_send_button(pill, scale), px, py) {
-            return Some(ChatHit::Send);
-        }
-        return hit_pet_studio(chat_view(pill, scale, input_h, 0), scale, (px, py), &ui.chat.pet)
-            .map(ChatHit::PetAction);
-    }
     let n = ui.chat.files.len();
     for i in 0..n {
         if inside(chip_remove(chat_chip(pill, scale, input_h, i, n), scale), px, py) {
@@ -353,15 +333,9 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         ui.chat.input_h.set(p.layout_height(&layout) + 16.0 * scale);
     }
 
-    let (new, chats, attach, pet) = chat_buttons(pill, scale);
-    let title = if ui.chat.pet.enabled {
-        "Pet studio"
-    } else if ui.chat.title.is_empty() {
-        "Chat"
-    } else {
-        ui.chat.title.as_str()
-    };
-    let title_right = pet.0 - 12.0 * scale;
+    let (new, chats, attach) = chat_buttons(pill, scale);
+    let title = if ui.chat.title.is_empty() { "Chat" } else { ui.chat.title.as_str() };
+    let title_right = attach.0 - 12.0 * scale;
     p.text(
         title,
         (l + 2.0 * scale, y + 56.0 * scale, title_right, y + 74.0 * scale),
@@ -379,48 +353,15 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         rgba(1.0, 1.0, 1.0, 0.5),
     )?;
     let hover = |id| ui.home.hover_act == Some(id);
-    header_button(
-        p,
-        pet,
-        if ui.chat.pet.enabled { "Back to chat" } else { "Pet studio" },
-        hover(1204),
-        ui.chat.pet.enabled,
-        scale,
-    )?;
     header_button(p, new, "New", hover(1201), false, scale)?;
     header_button(p, chats, "Chats", hover(1202), ui.chat.list_open, scale)?;
-    header_button(
-        p,
-        attach,
-        "Attach",
-        hover(1203),
-        if ui.chat.pet.enabled {
-            !ui.chat.pet.files.is_empty() && !ui.chat.pet.text_only
-        } else {
-            !ui.chat.files.is_empty()
-        },
-        scale,
-    )?;
+    header_button(p, attach, "Attach", hover(1203), !ui.chat.files.is_empty(), scale)?;
 
     if ui.chat.list_open {
         return paint_list(p, pill, scale, ui);
     }
-    let n = if ui.chat.pet.enabled { 0 } else { ui.chat.files.len() };
-    if ui.chat.pet.enabled {
-        paint_pet_studio(
-            p,
-            chat_view(pill, scale, ui.chat.input_h.get(), 0),
-            scale,
-            &ui.chat.pet,
-            match ui.home.hover_act {
-                Some(1280) => Some(PetStudioHit::Apply),
-                Some(1281) => Some(PetStudioHit::Photo),
-                Some(1282) => Some(PetStudioHit::TextOnly),
-                _ => None,
-            },
-            None,
-        )?;
-    } else if ui.chat.msgs.is_empty() && !ui.chat.pending {
+    let n = ui.chat.files.len();
+    if ui.chat.msgs.is_empty() && !ui.chat.pending {
         let view = chat_view(pill, scale, ui.chat.input_h.get(), n);
         p.text(
             "Ask anything",
@@ -444,9 +385,7 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         };
         paint_history(p, pill, scale, &history, ui.chat.pending)?;
     }
-    if !ui.chat.pet.enabled {
-        paint_chips(p, pill, scale, ui)?;
-    }
+    paint_chips(p, pill, scale, ui)?;
     let (frame, text_area) = agy_input(pill, scale, ui.chat.input_h.get());
     paint_editor(
         p,
@@ -455,17 +394,16 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         &ui.chat.input,
         ui.editing && ui.tab == Tab::Chat && ui.chat.sel.is_none(),
         ui.caret_on,
-        if ui.chat.pet.enabled { "Describe your pet…" } else { "Message…" },
+        "Message…",
         AGY_FONT,
         scale,
     )?;
     let button = agy_send_button(pill, scale);
-    let pending = ui.chat.pending || ui.chat.pet.pending;
-    let hover = ui.home.hover_act == Some(1200) && !pending;
+    let hover = ui.home.hover_act == Some(1200) && !ui.chat.pending;
     p.fill_round_rect(
         button,
         12.0 * scale,
-        acc(if pending {
+        acc(if ui.chat.pending {
             0.15
         } else if hover {
             0.5
@@ -474,12 +412,12 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         }),
     )?;
     p.text(
-        if pending { "…" } else { "Send" },
+        if ui.chat.pending { "…" } else { "Send" },
         button,
         13.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_CENTER,
-        rgba(1.0, 1.0, 1.0, if pending { 0.5 } else { 1.0 }),
+        rgba(1.0, 1.0, 1.0, if ui.chat.pending { 0.5 } else { 1.0 }),
     )?;
     if ui.chat.drop_hot {
         let area = (l, y + 94.0 * scale, r, y + 368.0 * scale);

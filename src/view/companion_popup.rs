@@ -5,7 +5,7 @@ pub const COMPANION_CHAT_SIZE: (f32, f32) = (416.0, 460.0);
 pub const COMPANION_PLAYER_SIZE: (f32, f32) = (300.0, 140.0);
 pub const POPUP_MARGIN: f32 = crate::ui::popup::POPUP_MARGIN;
 
-pub fn paint_popup_shadow(p: &Painter, size: (f32, f32), scale: f32) -> Result<()> {
+pub fn paint_popup_panel(p: &Painter, size: (f32, f32), scale: f32) -> Result<()> {
     let m = POPUP_MARGIN * scale;
     let rect = (m, m, size.0 - m, size.1 - m);
     for i in (1..=8).rev() {
@@ -16,13 +16,6 @@ pub fn paint_popup_shadow(p: &Painter, size: (f32, f32), scale: f32) -> Result<(
             rgba(0.0, 0.0, 0.0, 0.025),
         )?;
     }
-    Ok(())
-}
-
-pub fn paint_popup_panel(p: &Painter, size: (f32, f32), scale: f32) -> Result<()> {
-    paint_popup_shadow(p, size, scale)?;
-    let m = POPUP_MARGIN * scale;
-    let rect = (m, m, size.0 - m, size.1 - m);
     let (r, g, b) = crate::ui::theme::panel();
     p.fill_round_rect(rect, 28.0 * scale, rgba(r, g, b, 0.98))?;
     p.stroke_round_rect(rect, 28.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.07))
@@ -30,8 +23,6 @@ pub fn paint_popup_panel(p: &Painter, size: (f32, f32), scale: f32) -> Result<()
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CompanionChatHit {
-    Pet,
-    PetAction(PetStudioHit),
     Close,
     Setup,
     Send,
@@ -44,7 +35,6 @@ pub enum CompanionChatHit {
 pub struct CompanionChatView {
     pub chat: ChatUi,
     pub character: Character,
-    pub custom_pet: crate::ui::pet_design::PetDesign,
     pub provider: String,
     pub hover: Option<CompanionChatHit>,
     pub focus: CompanionChatHit,
@@ -57,7 +47,6 @@ impl Default for CompanionChatView {
         Self {
             chat: ChatUi::default(),
             character: Character::Spark,
-            custom_pet: Default::default(),
             provider: String::new(),
             hover: None,
             focus: CompanionChatHit::Input,
@@ -68,7 +57,6 @@ impl Default for CompanionChatView {
 }
 
 pub struct CompanionChatLayout {
-    pub pet: Rect,
     pub close: Rect,
     pub setup: Rect,
     pub header: Rect,
@@ -90,7 +78,6 @@ pub fn companion_chat_layout(size: (f32, f32), scale: f32, input_h: f32) -> Comp
     let send =
         (composer.2 - 43.0 * scale, composer.3 - 43.0 * scale, composer.2 - 9.0 * scale, composer.3 - 9.0 * scale);
     CompanionChatLayout {
-        pet: (setup.0 - 82.0 * scale, setup.1, setup.0 - 6.0 * scale, setup.3),
         close,
         setup,
         header: (pad, 20.0 * scale, w - pad, 76.0 * scale),
@@ -104,7 +91,6 @@ pub fn companion_chat_layout(size: (f32, f32), scale: f32, input_h: f32) -> Comp
 
 pub fn hit_companion_chat(layout: &CompanionChatLayout, x: f32, y: f32) -> Option<CompanionChatHit> {
     [
-        (CompanionChatHit::Pet, layout.pet),
         (CompanionChatHit::Close, layout.close),
         (CompanionChatHit::Setup, layout.setup),
         (CompanionChatHit::Send, layout.send),
@@ -130,7 +116,6 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
         layout = companion_chat_layout(size, scale, ui.chat.input_h.get());
     }
     let pose = Pose {
-        motion: Default::default(),
         t: 0.0,
         reaction: Reaction::Idle,
         look: (0.0, 0.0),
@@ -139,25 +124,12 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
         beat: 0.0,
     };
     let transform = p.push_offset(26.0 * scale, 25.0 * scale);
-    let drawn = characters::draw_with_design(p, ui.character, 40.0 * scale, &pose, Some(&ui.custom_pet));
+    let drawn = characters::draw(p, ui.character, 40.0 * scale, &pose);
     p.set_transform(&transform);
     drawn?;
-    let title = if ui.chat.pet.enabled {
-        crate::ui::i18n::tr("Pet studio").into_owned()
-    } else {
-        format!(
-            "{} · {}",
-            if ui.character == Character::Custom {
-                ui.custom_pet.name.clone()
-            } else {
-                crate::ui::i18n::tr(ui.character.name()).into_owned()
-            },
-            crate::ui::i18n::tr("Chat")
-        )
-    };
     p.text(
-        &title,
-        (74.0 * scale, 26.0 * scale, layout.pet.0 - 8.0 * scale, 48.0 * scale),
+        &format!("{} · {}", ui.character.name(), crate::ui::i18n::tr("Chat")),
+        (74.0 * scale, 26.0 * scale, layout.setup.0 - 8.0 * scale, 48.0 * scale),
         14.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -165,7 +137,7 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
     )?;
     p.text(
         &ui.provider,
-        (74.0 * scale, 47.0 * scale, layout.pet.0 - 8.0 * scale, 65.0 * scale),
+        (74.0 * scale, 47.0 * scale, layout.setup.0 - 8.0 * scale, 65.0 * scale),
         11.0 * scale,
         DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -179,44 +151,7 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
         }
         p.glyph(glyph, rect, 13.0 * scale, rgba(1.0, 1.0, 1.0, 0.65))?;
     }
-    p.fill_round_rect(
-        layout.pet,
-        12.0 * scale,
-        if ui.hover == Some(CompanionChatHit::Pet) {
-            rgba(1.0, 1.0, 1.0, 0.15)
-        } else if ui.chat.pet.enabled {
-            acc(0.14)
-        } else {
-            rgba(1.0, 1.0, 1.0, 0.06)
-        },
-    )?;
-    p.text(
-        if ui.chat.pet.enabled { "Back to chat" } else { "Pet studio" },
-        layout.pet,
-        11.5 * scale,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_TEXT_ALIGNMENT_CENTER,
-        WHITE,
-    )?;
-    if ui.active && ui.focus == CompanionChatHit::Pet {
-        p.stroke_round_rect(layout.pet, 12.0 * scale, 1.3 * scale, rgba(0.86, 0.9, 1.0, 0.9))?;
-    }
-    if ui.chat.pet.enabled {
-        paint_pet_studio(
-            p,
-            layout.history,
-            scale,
-            &ui.chat.pet,
-            match ui.hover {
-                Some(CompanionChatHit::PetAction(action)) => Some(action),
-                _ => None,
-            },
-            match ui.focus {
-                CompanionChatHit::PetAction(action) => Some(action),
-                _ => None,
-            },
-        )?;
-    } else if ui.chat.msgs.is_empty() && !ui.chat.pending {
+    if ui.chat.msgs.is_empty() && !ui.chat.pending {
         let (cx, cy) =
             ((layout.history.0 + layout.history.2) / 2.0, (layout.history.1 + layout.history.3) / 2.0 - 34.0 * scale);
         p.fill_round_rect(
@@ -267,14 +202,11 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
         &ui.chat.input,
         ui.active && ui.focus == CompanionChatHit::Input,
         ui.caret_on,
-        if ui.chat.pet.enabled { "Describe your pet…" } else { "Message…" },
+        "Message…",
         AGY_FONT,
         scale,
     )?;
-    let enabled = !ui.chat.pending
-        && !ui.chat.pet.pending
-        && (!ui.chat.input.text().trim().is_empty()
-            || (ui.chat.pet.enabled && !ui.chat.pet.text_only && !ui.chat.pet.files.is_empty()));
+    let enabled = !ui.chat.pending && !ui.chat.input.text().trim().is_empty();
     p.fill_round_rect(
         layout.send,
         12.0 * scale,
@@ -287,7 +219,7 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
         }),
     )?;
     p.glyph(
-        if ui.chat.pending || ui.chat.pet.pending { '\u{E895}' } else { '\u{E724}' },
+        if ui.chat.pending { '\u{E895}' } else { '\u{E724}' },
         layout.send,
         15.0 * scale,
         rgba(1.0, 1.0, 1.0, if enabled { 1.0 } else { 0.35 }),

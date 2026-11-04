@@ -84,29 +84,6 @@ pub fn set_muted(key: &str, muted: bool) {
     }
 }
 
-pub(super) fn target_audio(keys: &[String], level: Option<f32>, muted: Option<bool>) -> Option<(f32, bool)> {
-    let sessions: Vec<_> = sessions().ok()?.into_iter().filter(|session| keys.contains(&session.key)).collect();
-    if level.is_some_and(|value| !value.is_finite()) {
-        return None;
-    }
-    if level.is_some() || muted.is_some() {
-        for key in keys {
-            apply(&sessions, key, level, muted);
-        }
-    }
-    let mut result: Option<(f32, bool)> = None;
-    for session in sessions {
-        let (Ok(level), Ok(muted)) = (unsafe { session.volume.GetMasterVolume() }, unsafe { session.volume.GetMute() })
-        else {
-            continue;
-        };
-        let current = result.get_or_insert((0.0, true));
-        current.0 = current.0.max(level.clamp(0.0, 1.0));
-        current.1 &= muted.as_bool();
-    }
-    result
-}
-
 struct ProcessInfo {
     key: String,
     name: String,

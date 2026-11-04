@@ -34,17 +34,6 @@ fn example(record: &Record) -> bool {
 }
 
 impl App {
-    pub(in crate::island) fn notification_occupied_rect(&self) -> Option<view::Rect> {
-        self.notification_card_visible().then(|| {
-            notification_card::card_target(
-                self.pill_screen(false),
-                self.island_work_area(),
-                self.docked().then_some(self.edge()),
-                self.scale,
-            )
-        })
-    }
-
     pub(in crate::island) fn notification_card_visible(&self) -> bool {
         self.system_notices.phase.is_some()
     }
@@ -249,7 +238,7 @@ impl App {
             }
         }
         let source = self.pill_screen(false);
-        let work = self.island_work_area();
+        let work = Self::work_area();
         let edge = self.docked().then_some(self.edge());
         let window = self.system_notices.window.as_mut().unwrap();
         window.set_capture_hidden(self.settings.capture_hidden);
@@ -279,7 +268,6 @@ impl App {
         self.update_weather_timer();
         self.start_progress_timer();
         self.set_timer(Timer::NotificationStage, notification_card::OPEN_MS + 25);
-        self.update_top_panel(false);
     }
 
     pub(in crate::island) fn update_notification_card(&self) {

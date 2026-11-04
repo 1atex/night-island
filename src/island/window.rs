@@ -241,9 +241,6 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_CAPTURECHANGED => {
             with_app(|a| {
-                if a.ui.pressed_action.take().is_some() {
-                    a.repaint_expanded();
-                }
                 if a.pointer.seek_drag {
                     a.pointer.seek_drag = false;
                     a.ui.home.seek = None;
@@ -450,13 +447,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         winevent::WM_FOREGROUND => {
             winevent::acknowledge();
-            with_app(|a| {
-                a.on_foreground_changed();
-                a.update_top_panel(true);
-                if let Some(dock) = &mut a.desktop_dock {
-                    dock.refresh_windows();
-                }
-            });
+            with_app(|a| a.on_foreground_changed());
             LRESULT(0)
         }
         metrics::WM_METRICS => {
@@ -473,13 +464,6 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         crate::ui::mini_chat::WM_MINI_CHAT => {
             with_app(|a| a.on_mini_chat(wparam.0, lparam.0));
-            let mut dialog = false;
-            with_app(|a| dialog = std::mem::take(&mut a.want_chat_dialog));
-            if dialog {
-                with_app(|a| a.popup_open = true);
-                let picked = pick_file(hwnd);
-                with_app(|a| a.finish_chat_dialog(picked));
-            }
             LRESULT(0)
         }
         ai::WM_CHAT => {
@@ -621,60 +605,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         m if m != 0 && m == TASKBAR_CREATED.load(Ordering::Relaxed) => {
             tray::add(hwnd);
-            with_app(|a| a.top_panel_request(4));
-            LRESULT(0)
-        }
-        WM_DPICHANGED => {
-            with_app(|a| {
-                a.dpi_scale = (wparam.0 & 0xffff) as f32 / 96.0;
-                a.apply_layout();
-                if a.top_panel.is_some() {
-                    a.configure_top_panel();
-                }
-            });
-            LRESULT(0)
-        }
-        WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
-            with_app(|a| a.top_panel_request(3));
-            LRESULT(0)
-        }
-        crate::platform::app_capture::WM_APP_CAPTURE => {
-            crate::island::desktop_dock::capture_result();
-            LRESULT(0)
-        }
-        crate::platform::system_tray::inline::WM_RESULT => {
-            if let Some(result) = crate::platform::system_tray::inline::take() {
-                with_app(|a| {
-                    if let Some(panel) = &mut a.top_panel {
-                        match result {
-                            Ok(entries) if wparam.0 == 0 => panel.set_tray_icons(entries),
-                            Err(()) => panel.tray_failed(),
-                            _ => {}
-                        }
-                    }
-                });
-            }
-            LRESULT(0)
-        }
-        crate::ui::top_panel::WM_TOP_PANEL => {
-            with_app(|a| a.top_panel_request(wparam.0));
-            LRESULT(0)
-        }
-        crate::ui::desktop_dock::WM_DESKTOP_DOCK => {
-            crate::island::desktop_dock::handle_request(hwnd, wparam.0);
-            LRESULT(0)
-        }
-        settings_win::WM_SETTINGS_WINDOW_CHANGED => {
-            settings_win::on_settings_window_changed();
             LRESULT(0)
         }
         WM_DESTROY => {
-            with_app(|a| {
-                a.save_note();
-                a.top_panel.take();
-                a.desktop_dock.take();
-                a.windows_taskbar.take();
-            });
+            with_app(|a| a.save_note());
             dnd::unregister(hwnd);
             clips::sys::unlisten(hwnd);
             tray::remove(hwnd);

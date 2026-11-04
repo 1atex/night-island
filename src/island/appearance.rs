@@ -88,9 +88,6 @@ impl App {
         if let Some(chat) = &mut self.pet.chat {
             chat.repaint();
         }
-        if let Some(panel) = &mut self.top_panel {
-            panel.repaint();
-        }
     }
 
     pub(in crate::island) fn apply_accent(&self) {
@@ -123,14 +120,10 @@ impl App {
     }
 
     pub(in crate::island) fn repaint_expanded(&self) {
-        self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let e = self.pill_full();
         let _ = self.expanded.paint(&self.gpu, |p| {
             let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
-        if self.state == State::Expanded && (self.ui.feedback.active() || self.ui.home.track_transition.active()) {
-            self.set_timer(Timer::UiAnim, self.frame_ms());
-        }
         self.update_weather_timer();
     }
 
@@ -191,12 +184,6 @@ impl App {
     }
 
     pub(in crate::island) fn apply_capture(&self) {
-        if let Some(panel) = &self.top_panel {
-            panel.set_capture_hidden(self.settings.capture_hidden);
-        }
-        if let Some(dock) = &self.desktop_dock {
-            dock.set_capture_hidden(self.settings.capture_hidden);
-        }
         let affinity = if self.settings.capture_hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, affinity);

@@ -37,21 +37,9 @@ impl App {
     pub(in crate::island) fn click_chat(&mut self, x: i32, y: i32) {
         let pill = self.pill_rect(true);
         match view::hit_chat(pill, self.scale, x as f32, y as f32, &self.ui) {
-            Some(view::ChatHit::Pet) => return self.toggle_pet_studio(),
-            Some(view::ChatHit::PetAction(action)) => return self.pet_studio_action(action),
             Some(view::ChatHit::Setup) => return self.open_ai_settings(),
-            Some(view::ChatHit::New) if !self.ui.chat.pending && !self.ui.chat.pet.pending => {
-                self.ui.chat.pet.enabled = false;
-                self.new_chat();
-                self.sync_pet_studio();
-            }
-            Some(view::ChatHit::New) => {}
+            Some(view::ChatHit::New) => self.new_chat(),
             Some(view::ChatHit::Chats) => {
-                if self.ui.chat.pending || self.ui.chat.pet.pending {
-                    return;
-                }
-                self.ui.chat.pet.enabled = false;
-                self.sync_pet_studio();
                 self.ui.chat.list_open = !self.ui.chat.list_open;
                 if self.ui.chat.list_open {
                     self.end_edit(false);
@@ -191,24 +179,6 @@ impl App {
     }
 
     pub(in crate::island) fn attach_files(&mut self, paths: Vec<PathBuf>) {
-        if self.ui.chat.pet.enabled {
-            if self.ui.chat.pet.pending {
-                return;
-            }
-            if let Some(path) = paths.first() {
-                match attach::load(path) {
-                    Ok(file) if file.kind == attach::Kind::Image => {
-                        self.ui.chat.pet.reference = crate::platform::apps::thumbnail(&path.to_string_lossy());
-                        self.ui.chat.pet.files = vec![file];
-                        self.ui.chat.pet.text_only = false;
-                        self.ui.chat.pet.error = None;
-                    }
-                    Ok(_) => self.ui.chat.pet.error = Some("Choose a PNG, JPEG or WebP photo for your pet".into()),
-                    Err(error) => self.ui.chat.pet.error = Some(error.into()),
-                }
-            }
-            return self.sync_pet_studio();
-        }
         for path in paths {
             if self.ui.chat.files.len() >= attach::MAX_FILES {
                 self.notify(Notice::Error, '\u{E783}', "Up to 4 files go with one message");
@@ -235,9 +205,6 @@ impl App {
     }
 
     pub(in crate::island) fn send_chat(&mut self) {
-        if self.ui.chat.pet.enabled {
-            return self.send_pet_request(self.ui.chat.input.text().trim().to_string(), false);
-        }
         if self.ui.chat.pending {
             return;
         }
@@ -267,9 +234,6 @@ impl App {
 
     pub(in crate::island) fn on_chat(&mut self) {
         let Some(answer) = ai::take_chat_result() else { return };
-        if self.ui.chat.pet.pending {
-            return self.finish_pet_request(answer);
-        }
         if self.pet.chat.as_ref().is_some_and(|chat| chat.pending) {
             return self.finish_companion_chat(answer);
         }

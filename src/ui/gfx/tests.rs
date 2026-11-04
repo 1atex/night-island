@@ -117,7 +117,6 @@ fn capsule_progress_fills_the_width_without_painting_outside_its_corners() -> Re
                     crate::ui::characters::Character::Spark,
                     40.0,
                     &crate::ui::characters::Pose {
-                        motion: Default::default(),
                         t: 0.0,
                         reaction: crate::ui::characters::Reaction::Idle,
                         look: (0.0, 0.0),

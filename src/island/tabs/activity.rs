@@ -204,18 +204,11 @@ impl App {
     }
 
     pub(in crate::island) fn ui_anim_tick(&mut self) {
-        if self.cover_flight_until.is_some_and(|until| Instant::now() >= until) {
-            self.finish_cover_motion();
-        }
-        if !self.ui.home.track_transition.active() {
-            self.ui.home.track_transition.finish();
-        }
         if self.state != State::Expanded {
             self.ui.tab_change = None;
             return;
         }
-        let mut again = self.cover_flight_until.is_some()
-            || (matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) && self.ui.yandex.animate_colours());
+        let mut again = matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) && self.ui.yandex.animate_colours();
         if let Some((_, start)) = self.ui.home.mixer_motion {
             if start.elapsed().as_millis() >= 220 {
                 self.ui.home.mixer_motion = None;
@@ -247,15 +240,8 @@ impl App {
             again |= moving || self.ui.activity.animating();
         }
         self.repaint_expanded();
-        let preview = if !self.gaming && !self.pill_hidden && self.ui.tab == view::Tab::Chat {
-            self.ui.chat.pet.preview_interval()
-        } else {
-            None
-        };
         if again {
             self.set_timer(Timer::UiAnim, self.frame_ms());
-        } else if let Some(interval) = preview {
-            self.set_timer(Timer::UiAnim, interval);
         }
     }
 

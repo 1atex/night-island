@@ -1,6 +1,5 @@
 use std::ffi::c_void;
 use std::sync::Once;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::Graphics::Dwm::DwmSetWindowAttribute;
 use windows::Win32::Graphics::Gdi::{
@@ -13,29 +12,6 @@ use crate::island::*;
 
 const MAX_SEARCH_CHARS: usize = 40;
 const SCROLL_STEP: f32 = 64.0;
-pub(in crate::island) const WM_SETTINGS_WINDOW_CHANGED: u32 = WM_APP + 72;
-static SETTINGS_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
-
-fn notify_settings_window_changed(hwnd: HWND) {
-    unsafe {
-        let parent = HWND(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut _);
-        if !parent.0.is_null()
-            && !SETTINGS_REFRESH_PENDING.swap(true, Ordering::AcqRel)
-            && PostMessageW(Some(parent), WM_SETTINGS_WINDOW_CHANGED, WPARAM(0), LPARAM(0)).is_err()
-        {
-            SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-        }
-    }
-}
-
-pub(in crate::island) fn on_settings_window_changed() {
-    SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-    with_app(|a| {
-        if let Some(dock) = &mut a.desktop_dock {
-            dock.refresh_windows();
-        }
-    });
-}
 
 impl App {
     pub(in crate::island) fn open_settings_at(&mut self, group: usize) {
@@ -80,7 +56,7 @@ impl App {
             let Ok(hwnd) = CreateWindowExW(
                 WINDOW_EX_STYLE(0),
                 w!("NightIsland.Settings"),
-                &windows::core::HSTRING::from(format!("Night Island · {}", crate::ui::i18n::tr("Settings"))),
+                w!("Night Island"),
                 style,
                 x,
                 y,
@@ -94,7 +70,6 @@ impl App {
                 crate::log_error!("could not create the settings window");
                 return;
             };
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, self.hwnd.0 as isize);
             for (kind, cx, cy) in [
                 (ICON_SMALL, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)),
                 (ICON_BIG, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)),
@@ -160,7 +135,6 @@ impl App {
     }
 
     pub(in crate::island) fn render_settings_win(&self) {
-        self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let (Some(hwnd), Some((w, h))) = (self.settings_win, self.sw_client()) else { return };
         if w <= 0 || h <= 0 {
             return;
@@ -194,9 +168,6 @@ impl App {
             }
             let _ = DeleteDC(mem);
             ReleaseDC(Some(hwnd), screen);
-        }
-        if self.ui.feedback.active() {
-            self.set_timer(Timer::SwAnim, 16);
         }
     }
 
@@ -234,19 +205,18 @@ impl App {
         let mut moving = false;
         for (key, level) in &mut self.ui.sw.plates {
             let target = if Some(*key) == now { 1.0 } else { 0.0 };
-            let step = if crate::ui::feedback::motion_allowed() { 0.16 } else { 1.0 };
+            let step = 0.16;
             *level = if *level < target { (*level + step).min(target) } else { (*level - step).max(target) };
             moving |= *level != target;
         }
         self.ui.sw.plates.retain(|(key, level)| *level > 0.0 || Some(*key) == now);
         self.render_settings_win();
-        if moving || self.ui.feedback.active() {
+        if moving {
             self.set_timer(Timer::SwAnim, 16);
         }
     }
 
     pub(in crate::island) fn on_sw_down(&mut self, x: i32, y: i32) {
-        self.set_timer(Timer::SwAnim, 16);
         let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
         if let Some(id) = self.ui.sw.dropdown.take() {
             if let Some(view::SwHit::Pick(_, k)) = hit {
@@ -575,18 +545,6 @@ impl App {
                     self.metrics_changed();
                 }
             }
-            view::Act::DockRemove(i) => {
-                if i < self.settings.desktop_dock.pins.len() {
-                    self.settings.desktop_dock.pins.remove(i);
-                    self.save_desktop_dock();
-                }
-            }
-            view::Act::DockHiddenRemove(i) => {
-                if i < self.settings.desktop_dock.hidden_apps.len() {
-                    self.settings.desktop_dock.hidden_apps.remove(i);
-                    self.save_desktop_dock();
-                }
-            }
             view::Act::LyricsAppRemove(i) => {
                 if i < self.settings.lyrics_apps.len() {
                     self.settings.lyrics_apps.remove(i);
@@ -720,7 +678,6 @@ impl App {
                 if matches!(
                     id,
                     view::Sid::Character
-                        | view::Sid::PetPerformance
                         | view::Sid::Edge
                         | view::Sid::PillBattery
                         | view::Sid::AiProvider
@@ -749,12 +706,6 @@ impl App {
                 unsafe { SetCapture(self.settings_win.unwrap_or_default()) };
             }
             view::SetHit::Button => {
-                if matches!(
-                    id,
-                    view::Sid::DockImport | view::Sid::DockMonitor | view::Sid::DockAdd | view::Sid::DockTaskbar
-                ) {
-                    self.desktop_dock_setting(id);
-                }
                 if id == view::Sid::WindowsNotificationsSettings {
                     cmd::shell_open("ms-settings:notifications", None);
                 }
@@ -968,10 +919,6 @@ impl App {
 
 extern "system" fn sw_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
-        WM_SHOWWINDOW | WM_SIZE | WM_ACTIVATE => {
-            notify_settings_window_changed(hwnd);
-            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
-        }
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
@@ -1059,140 +1006,8 @@ extern "system" fn sw_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         WM_DESTROY => {
             with_app(|a| a.on_sw_destroyed());
-            notify_settings_window_changed(hwnd);
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore = "Creates temporary native settings windows offscreen"]
-    fn native_settings_window_is_listed_minimized_and_refreshes_without_app_borrow() -> Result<()> {
-        unsafe {
-            let instance = GetModuleHandleW(None)?;
-            RegisterClassW(&WNDCLASSW {
-                lpfnWndProc: Some(sw_proc),
-                hInstance: instance.into(),
-                lpszClassName: w!("NightIsland.Settings"),
-                ..Default::default()
-            });
-            let parent = CreateWindowExW(
-                WS_EX_TOOLWINDOW,
-                w!("STATIC"),
-                w!("Settings test parent"),
-                WS_POPUP,
-                -12000,
-                -12000,
-                1,
-                1,
-                None,
-                None,
-                Some(instance.into()),
-                None,
-            )?;
-            struct Windows(Vec<HWND>);
-            impl Drop for Windows {
-                fn drop(&mut self) {
-                    for hwnd in self.0.iter().rev() {
-                        unsafe {
-                            let _ = DestroyWindow(*hwnd);
-                        }
-                    }
-                    SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-                }
-            }
-            let mut windows = Windows(vec![parent]);
-            let hwnd = CreateWindowExW(
-                WS_EX_NOACTIVATE,
-                w!("NightIsland.Settings"),
-                w!("Night Island settings test"),
-                WS_OVERLAPPEDWINDOW,
-                -12000,
-                -12000,
-                400,
-                300,
-                None,
-                None,
-                Some(instance.into()),
-                None,
-            )?;
-            windows.0.push(hwnd);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, parent.0 as isize);
-            SETTINGS_REFRESH_PENDING.store(false, Ordering::Release);
-            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-            notify_settings_window_changed(hwnd);
-            notify_settings_window_changed(hwnd);
-            let mut message = MSG::default();
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            assert!(
-                !PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            on_settings_window_changed();
-            let listed = crate::platform::desktop_dock::windows();
-            assert!(listed.iter().any(|w| w.handle == hwnd.0 as isize));
-            assert!(!listed.iter().any(|w| w.handle == parent.0 as isize));
-            let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
-            assert!(IsIconic(hwnd).as_bool());
-            assert!(crate::platform::desktop_dock::windows().iter().any(|w| w.handle == hwnd.0 as isize));
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            on_settings_window_changed();
-            let _ = ShowWindow(hwnd, SW_HIDE);
-            assert!(!crate::platform::desktop_dock::windows().iter().any(|w| w.handle == hwnd.0 as isize));
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            on_settings_window_changed();
-            DestroyWindow(hwnd)?;
-            windows.0.pop();
-            assert!(
-                PeekMessageW(
-                    &mut message,
-                    Some(parent),
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    WM_SETTINGS_WINDOW_CHANGED,
-                    PM_REMOVE
-                )
-                .as_bool()
-            );
-            assert!(!IsWindow(Some(hwnd)).as_bool());
-        }
-        Ok(())
     }
 }

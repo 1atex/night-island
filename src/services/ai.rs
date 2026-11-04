@@ -596,44 +596,6 @@ pub fn ask_chat(hwnd: HWND, turns: Vec<ChatTurn>) -> bool {
     true
 }
 
-pub fn build_pet_call(
-    settings: &AiSettings,
-    key: &str,
-    turn: &ChatTurn,
-    current: &crate::ui::pet_design::PetDesign,
-) -> Option<Call> {
-    let context =
-        format!("{}\nCurrent design: {}", crate::ui::pet_design::DESIGN_PROMPT, serde_json::to_string(current).ok()?);
-    build(settings, key, std::slice::from_ref(turn), &context, 1000)
-}
-
-pub fn ask_pet(hwnd: HWND, turn: ChatTurn, current: &crate::ui::pet_design::PetDesign) -> bool {
-    if BUSY.swap(true, Ordering::SeqCst) {
-        return false;
-    }
-    let (raw, settings, current) = (hwnd.0 as isize, config(), current.clone());
-    std::thread::spawn(move || {
-        let mut answer = run_with(&settings, |key| build_pet_call(&settings, key, &turn, &current));
-        if let Err(error) = &answer {
-            let lower = error.to_lowercase();
-            if !turn.attachments.is_empty()
-                && (lower.contains("image") || lower.contains("vision") || lower.contains("multimodal"))
-                && (lower.contains("support") || lower.contains("invalid") || lower.contains("accept"))
-            {
-                answer = Err("This model did not accept the photo. Select Text only and describe your pet, or choose a vision model.".into());
-            }
-        }
-        if let Ok(mut result) = CHAT_RESULT.lock() {
-            *result = Some(answer);
-        }
-        BUSY.store(false, Ordering::SeqCst);
-        unsafe {
-            let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_CHAT, WPARAM(0), LPARAM(0));
-        }
-    });
-    true
-}
-
 fn run(settings: &AiSettings, prompt: &str) -> Answer {
     run_with(settings, |key| build_call(settings, key, prompt))
 }
@@ -767,56 +729,6 @@ mod tests {
             kind: FileKind::Image,
             mime: "image/png",
             data: std::sync::Arc::new(vec![7; size]),
-        }
-    }
-
-    #[test]
-    #[ignore = "Sends two requests to the configured AI provider using an explicitly supplied test image"]
-    fn configured_provider_creates_pets_from_text_and_reference() {
-        let path = std::env::var_os("NI_PET_TEST_REFERENCE")
-            .expect("NI_PET_TEST_REFERENCE must name a non-private test image");
-        let image = crate::services::attach::load(std::path::Path::new(&path)).expect("test image must load");
-        let settings = crate::data::settings::Settings::load().ai;
-        assert!(has_key(settings.provider), "No configured API key");
-        let current = crate::ui::pet_design::PetDesign::default();
-        for attachments in [vec![], vec![image]] {
-            let with_image = !attachments.is_empty();
-            let turn = ChatTurn { assistant: false, text: "Создай коричневого медведя с синим шарфом. Если есть изображение, используй медведя справа как образец.".into(), attachments };
-            let answer = run_with(&settings, |key| build_pet_call(&settings, key, &turn, &current))
-                .expect("pet generation request failed");
-            let pet = crate::ui::pet_design::PetDesign::from_reply(&answer).expect("provider returned an invalid pet");
-            assert_eq!(pet.body, crate::ui::pet_design::PetBody::Bear);
-            assert_eq!(pet.accessory, crate::ui::pet_design::PetAccessory::Scarf);
-            println!("Configured provider returned a valid pet; reference image: {with_image}");
-        }
-    }
-
-    #[test]
-    fn pet_requests_keep_the_design_context_and_photo_for_every_provider() {
-        let design = crate::ui::pet_design::PetDesign { name: "Mochi".into(), ..Default::default() };
-        for provider in [AiProvider::Claude, AiProvider::OpenAi, AiProvider::Gemini] {
-            for with_photo in [false, true] {
-                let turn = file_turn("Make the scarf blue", if with_photo { vec![picture(3)] } else { vec![] });
-                let call = build_pet_call(&settings(provider), "test-key", &turn, &design).unwrap();
-                let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
-                let (system, photo) = match provider {
-                    AiProvider::Claude => {
-                        (body["system"].as_str().unwrap(), !body["messages"][0]["content"][0]["source"].is_null())
-                    }
-                    AiProvider::OpenAi => (
-                        body["messages"][0]["content"].as_str().unwrap(),
-                        !body["messages"][1]["content"][0]["image_url"].is_null(),
-                    ),
-                    AiProvider::Gemini => (
-                        body["systemInstruction"]["parts"][0]["text"].as_str().unwrap(),
-                        !body["contents"][0]["parts"][0]["inlineData"].is_null(),
-                    ),
-                };
-                assert!(system.contains("Mochi") && system.contains("Return ONLY one JSON object"));
-                assert_eq!(photo, with_photo, "{provider:?}");
-                assert!(call.body.contains("Make the scarf blue"));
-                assert!(!call.body.contains("test-key"));
-            }
         }
     }
 
