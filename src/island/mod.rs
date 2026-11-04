@@ -83,6 +83,7 @@ mod liquid;
 mod lyric;
 mod motion;
 mod pill;
+mod pill_motion;
 mod settings_win;
 mod startup;
 mod tabs;
@@ -146,6 +147,7 @@ struct App {
     pet: Pet,
     prev_foreground: HWND,
     cw: f32,
+    pill_motion: pill_motion::PillMotion,
     pending_high_surrogate: Option<u16>,
     music: MusicBars,
     gaming: bool,

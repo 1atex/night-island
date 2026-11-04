@@ -584,9 +584,7 @@ impl App {
 
     pub(in crate::island) fn on_pill(&self, x: i32, y: i32) -> bool {
         let s = self.scale;
-        let (win_w, _) = self.window_size(self.win);
-        let (w, h) = (self.collapsed().0 * s, self.collapsed().1 * s);
-        let (left, top) = ((win_w as f32 - w) / 2.0, self.win_pad().1 * s);
+        let (left, top, w, h) = self.pill_rect(false);
         let tol = 3.0 * s;
         let (fx, fy) = (x as f32, y as f32);
         let above = if self.liquid_on() { tol } else { tol + 40.0 };

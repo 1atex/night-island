@@ -56,10 +56,12 @@ pub(in crate::island) enum Timer {
     Tip = 34,
     SwAnim = 35,
     Weather = 36,
+    WidthMotion = 37,
+    MusicIntro = 38,
 }
 
 impl Timer {
-    const ALL: [Timer; 36] = [
+    const ALL: [Timer; 38] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -96,6 +98,8 @@ impl Timer {
         Timer::Tip,
         Timer::SwAnim,
         Timer::Weather,
+        Timer::WidthMotion,
+        Timer::MusicIntro,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -185,6 +189,8 @@ impl App {
         let Some(timer) = Timer::from_id(id) else { return };
         self.kill_timer(timer);
         match timer {
+            Timer::WidthMotion => self.width_motion_done(),
+            Timer::MusicIntro => self.music_intro_step(),
             Timer::Expand if self.character_interacting() => {}
             Timer::Expand if matches!(self.state, State::Hidden | State::Hiding) => self.reveal(),
             Timer::Expand => self.expand(),
@@ -233,7 +239,7 @@ impl App {
                     self.repaint_expanded();
                     self.start_progress_timer();
                 } else if self.progress_pill_visible() && view::progress_strip_on(&self.ui) {
-                    let c = self.pill_rect(false);
+                    let c = self.collapsed_surface_rect();
                     let _ = self.collapsed.paint(&self.gpu, |p| {
                         let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
                     });

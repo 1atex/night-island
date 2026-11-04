@@ -61,6 +61,7 @@ impl App {
     }
 
     pub(in crate::island) fn expand(&mut self) {
+        self.cancel_pill_motion();
         match self.state {
             State::Expanded => return,
             State::Collapsing => self.kill_timer(Timer::Shrink),
@@ -124,6 +125,9 @@ impl App {
     }
 
     pub(in crate::island) fn settle_layers(&self) {
+        if self.pill_motion_busy() {
+            return;
+        }
         let expanded = match self.state {
             State::Expanded => true,
             State::Collapsed => false,
@@ -163,12 +167,17 @@ impl App {
     }
 
     pub(in crate::island) fn schedule_autohide(&self) {
-        if self.autohide_ok() && self.state == State::Collapsed && !self.cursor_inside() {
+        if self.pill_motion.intro.is_none()
+            && self.autohide_ok()
+            && self.state == State::Collapsed
+            && !self.cursor_inside()
+        {
             self.set_timer(Timer::Autohide, AUTOHIDE_DELAY_MS);
         }
     }
 
     pub(in crate::island) fn hide(&mut self) {
+        self.cancel_pill_motion();
         if self.state != State::Collapsed {
             return;
         }

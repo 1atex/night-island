@@ -387,7 +387,7 @@ pub fn debug_timeline(pos: f32, len: f32) {
     }
 }
 
-#[cfg(feature = "demo")]
+#[cfg(any(feature = "demo", test))]
 pub fn debug_cover(side: u32, rgba: &[u8]) -> Option<Arc<Cover>> {
     if rgba.len() < (side * side * 4) as usize {
         return None;
