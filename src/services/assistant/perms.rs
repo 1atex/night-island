@@ -84,11 +84,12 @@ impl Default for Permissions {
 }
 
 impl Permissions {
-    pub fn level(&self, cap: Cap) -> Level {
-        if !self.enabled {
-            return Level::Off;
-        }
+    pub fn configured(&self, cap: Cap) -> Level {
         self.levels.iter().find(|(c, _)| *c == cap).map_or(cap.default_level(), |(_, l)| *l)
+    }
+
+    pub fn level(&self, cap: Cap) -> Level {
+        if self.enabled { self.configured(cap) } else { Level::Off }
     }
 
     pub fn set(&mut self, cap: Cap, level: Level) {

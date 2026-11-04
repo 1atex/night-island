@@ -416,6 +416,7 @@ pub struct Settings {
     pub update_check: bool,
     pub update_beta: bool,
     pub ai: AiSettings,
+    pub assistant: crate::services::assistant::Assistant,
     pub hidden_tabs: Vec<String>,
     pub notify: NotifySettings,
     pub spike_color: bool,
@@ -520,6 +521,7 @@ impl Default for Settings {
             update_check: true,
             update_beta: false,
             ai: AiSettings::default(),
+            assistant: crate::services::assistant::Assistant::default(),
             hidden_tabs: Vec::new(),
             notify: NotifySettings::default(),
             spike_color: true,
@@ -957,6 +959,7 @@ impl Settings {
         }
         self.hidden_tabs = seen;
         self.ai.sanitize();
+        self.assistant.sanitize();
         self.record_fps = self.record_fps.clamp(10, 60);
         self.pill_opacity = clamp_f(self.pill_opacity, 0.2, 1.0, 1.0);
         let valid = |v: Option<f64>, lim: f64| v.filter(|x| x.is_finite() && x.abs() <= lim);

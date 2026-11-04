@@ -107,6 +107,24 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
+const ASSISTANT: [(Sid, &str, Kind); 15] = [
+    (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
+    (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
+    (Sid::AsstSounds, "Sound cues", Kind::Toggle),
+    (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
+    (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
+    (Sid::AsstControls, "Mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
+    (Sid::AsstOpen, "Open programs and games", Kind::Cycle),
+    (Sid::AsstReminders, "Reminders and timers", Kind::Cycle),
+    (Sid::AsstMemory, "Remember things about you", Kind::Cycle),
+    (Sid::AsstWebSearch, "Search the internet", Kind::Cycle),
+    (Sid::AsstFilesRead, "Read and search files", Kind::Cycle),
+    (Sid::AsstFilesWrite, "Create and change files", Kind::Cycle),
+    (Sid::AsstShell, "Command line", Kind::Cycle),
+    (Sid::AsstBrowser, "Browser (open sites, read pages)", Kind::Cycle),
+    (Sid::AsstPower, "Shut down, restart, sleep", Kind::Cycle),
+];
+
 const ACTIVITY: [(Sid, &str, Kind); 1] = [(Sid::ActivityAi, "Sort unknown programs with AI", Kind::Toggle)];
 
 const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
@@ -135,9 +153,9 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
-    [(0, "Application"), (4, "Look and feel"), (8, "Monitoring"), (11, "Services"), (14, "Program")];
+    [(0, "Application"), (4, "Look and feel"), (8, "Monitoring"), (11, "Services"), (15, "Program")];
 
-pub const GROUPS: [Group; 15] = [
+pub const GROUPS: [Group; 16] = [
     Group {
         glyph: '\u{E713}',
         name: "General",
@@ -187,6 +205,13 @@ pub const GROUPS: [Group; 15] = [
     Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items), sections: &[] },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items), sections: &[] },
+    Group {
+        glyph: '\u{E720}',
+        name: "Assistant",
+        rows: &ASSISTANT,
+        custom: None,
+        sections: &[(0, "Voice"), (4, "What it may do")],
+    },
     Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items), sections: &[] },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items), sections: &[] },
 ];

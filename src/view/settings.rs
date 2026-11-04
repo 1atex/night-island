@@ -111,6 +111,43 @@ pub enum Sid {
     GhostOpacity,
     GhostThrough,
     GhostHold,
+    AsstEnabled,
+    AsstWake,
+    AsstSounds,
+    AsstSpeak,
+    AsstMedia,
+    AsstControls,
+    AsstOpen,
+    AsstReminders,
+    AsstMemory,
+    AsstWebSearch,
+    AsstFilesRead,
+    AsstFilesWrite,
+    AsstShell,
+    AsstBrowser,
+    AsstPower,
+}
+
+pub(in crate::view) fn asst_cap(id: Sid) -> Option<crate::services::assistant::Cap> {
+    use crate::services::assistant::Cap;
+    Some(match id {
+        Sid::AsstMedia => Cap::Media,
+        Sid::AsstControls => Cap::Controls,
+        Sid::AsstOpen => Cap::Open,
+        Sid::AsstReminders => Cap::Reminders,
+        Sid::AsstMemory => Cap::Memory,
+        Sid::AsstWebSearch => Cap::WebSearch,
+        Sid::AsstFilesRead => Cap::FilesRead,
+        Sid::AsstFilesWrite => Cap::FilesWrite,
+        Sid::AsstShell => Cap::Shell,
+        Sid::AsstBrowser => Cap::Browser,
+        Sid::AsstPower => Cap::Power,
+        _ => return None,
+    })
+}
+
+pub fn is_assistant_level(id: Sid) -> bool {
+    asst_cap(id).is_some()
 }
 
 #[derive(Clone, Copy)]
@@ -347,6 +384,10 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::AgyAuto => c.agy_auto,
         Sid::VoicePaste => c.voice_paste,
         Sid::VoiceSeparate => c.ai.voice_separate,
+        Sid::AsstEnabled => c.assistant.perms.enabled,
+        Sid::AsstWake => c.assistant.wake,
+        Sid::AsstSounds => c.assistant.sounds,
+        Sid::AsstSpeak => c.assistant.speak,
         Sid::RecSystem => c.record_system_audio,
         Sid::RecMic => c.record_mic,
         _ => false,
@@ -414,6 +455,10 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::AgyAuto => c.agy_auto = on,
         Sid::VoicePaste => c.voice_paste = on,
         Sid::VoiceSeparate => c.ai.voice_separate = on,
+        Sid::AsstEnabled => c.assistant.perms.enabled = on,
+        Sid::AsstWake => c.assistant.wake = on,
+        Sid::AsstSounds => c.assistant.sounds = on,
+        Sid::AsstSpeak => c.assistant.speak = on,
         Sid::RecSystem => c.record_system_audio = on,
         Sid::RecMic => c.record_mic = on,
         _ => {}
@@ -431,6 +476,10 @@ pub(in crate::view) fn segment_value(id: Sid, c: &Settings) -> usize {
 }
 
 pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
+    if let Some(cap) = asst_cap(id) {
+        let next = c.assistant.perms.configured(cap).step(forward);
+        return c.assistant.perms.set(cap, next);
+    }
     match id {
         Sid::NotificationTiles => {
             c.notification_tiles = match (c.notification_tiles, forward) {
@@ -461,6 +510,9 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
 }
 
 pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
+    if let Some(cap) = asst_cap(id) {
+        return c.assistant.perms.configured(cap).name();
+    }
     match id {
         Sid::NotificationTiles => match c.notification_tiles {
             1 => "1 tile",
@@ -490,6 +542,10 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
     fn all<T: Copy + PartialEq>(items: &[T], now: T, name: fn(T) -> &'static str) -> (Vec<&'static str>, usize) {
         (items.iter().map(|i| name(*i)).collect(), items.iter().position(|i| *i == now).unwrap_or(0))
     }
+    if let Some(cap) = asst_cap(id) {
+        let now = c.assistant.perms.configured(cap);
+        return all(&crate::services::assistant::Level::ALL, now, |v| v.name());
+    }
     match id {
         Sid::NotificationTiles => (
             vec!["1 tile", "2 tiles", "4 tiles"],
@@ -515,6 +571,10 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
 
 pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
     use crate::data::settings::*;
+    if let Some(cap) = asst_cap(id) {
+        let levels = crate::services::assistant::Level::ALL;
+        return c.assistant.perms.set(cap, levels[k.min(levels.len() - 1)]);
+    }
     match id {
         Sid::NotificationTiles => c.notification_tiles = [1, 2, 4][k.min(2)],
         Sid::Character => c.character = crate::ui::characters::Character::ALL[k.min(6)],

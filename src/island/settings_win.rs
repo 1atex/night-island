@@ -675,17 +675,19 @@ impl App {
     fn sw_row(&mut self, id: view::Sid, hit: view::SetHit, x: i32) {
         match hit {
             view::SetHit::Option(n) => {
-                if matches!(
-                    id,
-                    view::Sid::Character
-                        | view::Sid::Edge
-                        | view::Sid::PillBattery
-                        | view::Sid::AiProvider
-                        | view::Sid::CoverMode
-                        | view::Sid::TabAnimKind
-                        | view::Sid::AnimCurve
-                        | view::Sid::TextLayout
-                ) {
+                if view::is_assistant_level(id)
+                    || matches!(
+                        id,
+                        view::Sid::Character
+                            | view::Sid::Edge
+                            | view::Sid::PillBattery
+                            | view::Sid::AiProvider
+                            | view::Sid::CoverMode
+                            | view::Sid::TabAnimKind
+                            | view::Sid::AnimCurve
+                            | view::Sid::TextLayout
+                    )
+                {
                     view::cycle_set(id, &mut self.settings, n == 1);
                 } else {
                     view::segment_set(id, &mut self.settings, n);
