@@ -28,6 +28,47 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Create a pet from this photo" => "Создай питомца по этой фотографии",
+        "Preview ready. Apply your pet or describe another change below." => {
+            "Питомец готов. Нажми «Применить» или опиши, что ещё изменить."
+        }
+        "Building a preview. Your current pet stays with you." => {
+            "Готовлю предпросмотр. Текущий питомец пока остаётся с тобой."
+        }
+        "Pet studio" => "Питомец",
+        "Create or change your pet" => "Создать или изменить питомца",
+        "Create your pet" => "Создай питомца",
+        "Creating your pet…" => "Создаём питомца…",
+        "Apply pet" => "Применить",
+        "Applied" => "Применён",
+        "Pet photo" => "Фото",
+        "Text only" => "Без фото",
+        "Describe your pet…" => "Опиши питомца или изменения…",
+        "Your pet is ready. Describe another change below." => "Питомец готов. Ниже можно описать новые изменения.",
+        "Describe the shape, colors and details. Photos will not be sent." => {
+            "Опиши форму, цвета и детали. Фото не будет отправлено."
+        }
+        "Describe your pet or attach a photo. A model with vision is needed for photos." => {
+            "Опиши питомца или добавь фото. Для фото нужна модель с распознаванием изображений."
+        }
+        "Photo attached. Add your wishes below, then press Send." => {
+            "Фото добавлено. Напиши пожелания ниже и нажми отправить."
+        }
+        "Could not build this pet. Try a simpler description." => {
+            "Не удалось создать питомца. Попробуй описать его проще."
+        }
+        "This model did not accept the photo. Select Text only and describe your pet, or choose a vision model." => {
+            "Модель не приняла фото. Нажми «Без фото» и опиши питомца или выбери модель с распознаванием изображений."
+        }
+        "Choose a PNG, JPEG or WebP photo for your pet" => "Выбери фото питомца в PNG, JPEG или WebP",
+        "Bear" => "Медведь",
+        "Custom pet" => "Свой питомец",
+        "My pet" => "Мой питомец",
+        "Pet animation quality" => "Анимация питомца",
+        "Pet: reduced motion" => "Без движения",
+        "Pet: economical · up to 20 FPS" => "Экономно · до 20 FPS",
+        "Pet: balanced · up to 30 FPS" => "Баланс · до 30 FPS",
+        "Pet: smooth · up to 60 FPS" => "Плавно · до 60 FPS",
         "My Wave · Settings" => "Моя волна · Настроить",
         "Open My Wave settings" => "Открыть настройки Моей волны",
         "Open main player" => "К плееру",

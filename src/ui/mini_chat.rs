@@ -19,6 +19,18 @@ use crate::view::{self, CompanionChatHit as Hit, CompanionChatView};
 pub const WM_MINI_CHAT: u32 = WM_APP + 46;
 pub const SEND: usize = 1;
 pub const SETUP: usize = 3;
+pub const PET: usize = 4;
+pub const PET_APPLY: usize = 5;
+pub const PET_PHOTO: usize = 6;
+pub const PET_TEXT: usize = 7;
+
+fn pet_action(action: view::PetStudioHit) -> usize {
+    match action {
+        view::PetStudioHit::Apply => PET_APPLY,
+        view::PetStudioHit::Photo => PET_PHOTO,
+        view::PetStudioHit::TextOnly => PET_TEXT,
+    }
+}
 const CARET: usize = 1;
 const ANIMATE: usize = 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -42,6 +54,23 @@ struct State {
 impl State {
     fn layout(&self) -> view::CompanionChatLayout {
         view::companion_chat_layout((self.size.0 as f32, self.size.1 as f32), self.scale, self.ui.chat.input_h.get())
+    }
+
+    fn hit(&self, x: f32, y: f32) -> Option<Hit> {
+        let layout = self.layout();
+        if self.ui.chat.pet.enabled
+            && (x >= layout.history.0 && x < layout.history.2 && y >= layout.history.1 && y < layout.history.3)
+        {
+            return view::hit_pet_studio(layout.history, self.scale, (x, y), &self.ui.chat.pet).map(Hit::PetAction);
+        }
+        view::hit_companion_chat(&layout, x, y)
+    }
+
+    fn can_send(&self) -> bool {
+        !self.ui.chat.pending
+            && !self.ui.chat.pet.pending
+            && (!self.ui.chat.input.text().trim().is_empty()
+                || (self.ui.chat.pet.enabled && !self.ui.chat.pet.text_only && !self.ui.chat.pet.files.is_empty()))
     }
 
     fn input_layout(&self) -> Option<windows::Win32::Graphics::DirectWrite::IDWriteTextLayout> {
@@ -122,18 +151,27 @@ impl State {
             return;
         }
         if vk == VK_TAB.0 {
-            let order = [Hit::Input, Hit::Send, Hit::Setup, Hit::Close];
+            let mut order = vec![Hit::Input, Hit::Send, Hit::Pet, Hit::Setup, Hit::Close];
+            if self.ui.chat.pet.enabled {
+                order.extend([
+                    Hit::PetAction(view::PetStudioHit::Apply),
+                    Hit::PetAction(view::PetStudioHit::Photo),
+                    Hit::PetAction(view::PetStudioHit::TextOnly),
+                ]);
+            }
             let i = order.iter().position(|hit| *hit == self.ui.focus).unwrap_or(0);
-            self.ui.focus = order[if shift { (i + 3) % 4 } else { (i + 1) % 4 }];
+            self.ui.focus = order[if shift { (i + order.len() - 1) % order.len() } else { (i + 1) % order.len() }];
             return;
         }
         if vk == VK_RETURN.0 && self.ui.focus != Hit::Input {
             match self.ui.focus {
-                Hit::Send if !self.ui.chat.pending => {
+                Hit::Send if self.can_send() => {
                     self.ui.focus = Hit::Input;
                     self.notify(hwnd, SEND);
                 }
                 Hit::Setup => self.notify(hwnd, SETUP),
+                Hit::Pet => self.notify(hwnd, PET),
+                Hit::PetAction(action) => self.notify(hwnd, pet_action(action)),
                 Hit::Close => self.close(hwnd),
                 _ => {}
             }
@@ -155,7 +193,7 @@ impl State {
             return;
         }
         if vk == VK_RETURN.0 && !shift {
-            if !self.ui.chat.pending && !self.ui.chat.input.text().trim().is_empty() {
+            if self.can_send() {
                 self.notify(hwnd, SEND);
             }
             return;
@@ -284,7 +322,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 state.ui.active = true;
                 SetTimer(Some(hwnd), CARET, 500, None);
                 let (x, y) = point();
-                let hit = view::hit_companion_chat(&state.layout(), x, y);
+                let hit = state.hit(x, y);
                 state.pressed = hit;
                 match hit {
                     Some(Hit::Header | Hit::Resize) => {
@@ -372,7 +410,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 {
                     state.ui.chat.sel = Some((anchor, at));
                 }
-                let hover = view::hit_companion_chat(&state.layout(), x, y);
+                let hover = state.hit(x, y);
                 if hover != state.ui.hover || state.selecting || state.reading || state.drag.is_some() {
                     state.ui.hover = hover;
                     state.redraw(hwnd);
@@ -398,11 +436,13 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 state.reading = false;
                 let _ = ReleaseCapture();
                 let (x, y) = point();
-                if !dragged && pressed == view::hit_companion_chat(&state.layout(), x, y) {
+                if !dragged && pressed == state.hit(x, y) {
                     match pressed {
                         Some(Hit::Close) => state.close(hwnd),
                         Some(Hit::Setup) => state.notify(hwnd, SETUP),
-                        Some(Hit::Send) if !state.ui.chat.pending && !state.ui.chat.input.text().trim().is_empty() => {
+                        Some(Hit::Pet) => state.notify(hwnd, PET),
+                        Some(Hit::PetAction(action)) => state.notify(hwnd, pet_action(action)),
+                        Some(Hit::Send) if state.can_send() => {
                             state.ui.focus = Hit::Input;
                             state.notify(hwnd, SEND)
                         }
@@ -590,6 +630,23 @@ impl MiniChatWindow {
         state.redraw(self.hwnd);
     }
 
+    pub fn update_pet(
+        &mut self,
+        studio: &view::PetStudio,
+        current: &super::pet_design::PetDesign,
+        character: Character,
+    ) {
+        let mut state = self.state.borrow_mut();
+        if state.ui.chat.pet.enabled != studio.enabled {
+            state.ui.chat.sel = None;
+            state.ui.focus = Hit::Input;
+        }
+        state.ui.chat.pet = studio.clone();
+        state.ui.custom_pet = current.clone();
+        state.ui.character = character;
+        state.redraw(self.hwnd);
+    }
+
     pub fn set_capture_hidden(&self, hidden: bool) {
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
@@ -773,6 +830,56 @@ mod tests {
                 result
             })?;
             save(&dir.join("island-companion-redesign.png"), (750, 480), &combined.pixels());
+        }
+        let design = crate::ui::pet_design::PetDesign {
+            name: "Мишка".into(),
+            accessory: crate::ui::pet_design::PetAccessory::Scarf,
+            accent: [103, 156, 239],
+            ..Default::default()
+        };
+        let studio = view::PetStudio { enabled: true, draft: Some(design.clone()), ..Default::default() };
+        chat.update_pet(&studio, &design, Character::Custom);
+        chat.set_input("Добавь синий шарф");
+        for (size, scale) in [((416, 460), 1.0), ((360, 360), 1.0), ((624, 690), 1.5)] {
+            unsafe {
+                let _ =
+                    SetWindowPos(chat.hwnd(), None, 0, 0, size.0, size.1, SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+            }
+            let mut state = chat.state.borrow_mut();
+            state.scale = scale;
+            state.render(chat.hwnd())?;
+            let [apply, photo, text] = view::pet_studio_buttons(state.layout().history, scale);
+            for (rect, expected) in [
+                (apply, view::PetStudioHit::Apply),
+                (photo, view::PetStudioHit::Photo),
+                (text, view::PetStudioHit::TextOnly),
+            ] {
+                assert_eq!(state.hit((rect.0 + rect.2) / 2.0, (rect.1 + rect.3) / 2.0), Some(Hit::PetAction(expected)));
+            }
+            state.ui.focus = Hit::PetAction(view::PetStudioHit::Apply);
+            state.key(chat.hwnd(), VK_RETURN.0);
+            let mut message = MSG::default();
+            assert!(
+                unsafe { PeekMessageW(&mut message, Some(parent), WM_MINI_CHAT, WM_MINI_CHAT, PM_REMOVE) }.as_bool()
+            );
+            assert_eq!(message.wParam.0, PET_APPLY);
+            if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
+                save(
+                    &std::path::PathBuf::from(dir).join(format!("pet-studio-{}x{}.png", size.0, size.1)),
+                    (size.0 as u32, size.1 as u32),
+                    &state.surface.pixels(),
+                );
+            }
+        }
+        if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
+            let surface = PopupSurface::new((640, 410))?;
+            let mut ui = view::UiState::new();
+            ui.tab = view::Tab::Chat;
+            ui.chat.keyed = true;
+            ui.chat.pet = studio;
+            ui.chat.input.set_text("Добавь синий шарф");
+            surface.paint(&gpu, |p| view::paint_expanded(p, (0.0, 0.0, 640.0, 410.0), 1.0, &ui, &[]))?;
+            save(&std::path::PathBuf::from(dir).join("pet-studio-island.png"), (640, 410), &surface.pixels());
         }
         let hwnd = chat.hwnd();
         drop(chat);

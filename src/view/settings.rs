@@ -88,6 +88,7 @@ pub enum Sid {
     Spikes,
     Character,
     CharacterDetached,
+    PetPerformance,
     RecFormat,
     RecFps,
     RecSystem,
@@ -440,6 +441,7 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
             };
         }
         Sid::Character => c.character = c.character.step(forward),
+        Sid::PetPerformance => c.pet_performance = c.pet_performance.step(forward),
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
         Sid::PillWeatherSide => c.pill_weather_side = c.pill_weather_side.step(forward),
@@ -468,6 +470,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
             _ => "4 tiles",
         },
         Sid::Character => c.character.name(),
+        Sid::PetPerformance => c.pet_performance.name(),
         Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
@@ -495,6 +498,7 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
             vec!["1 tile", "2 tiles", "4 tiles"],
             [1, 2, 4].iter().position(|v| *v == c.notification_tiles).unwrap_or(2),
         ),
+        Sid::PetPerformance => all(&crate::ui::pet_motion::PetPerformance::ALL, c.pet_performance, |v| v.name()),
         Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
         Sid::AiProvider => all(&AiProvider::ALL, c.ai.provider, |v| v.name()),
         Sid::PillBattery => all(&BatteryStyle::ALL, c.pill_battery, |v| v.name()),
@@ -517,7 +521,10 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
     use crate::data::settings::*;
     match id {
         Sid::NotificationTiles => c.notification_tiles = [1, 2, 4][k.min(2)],
-        Sid::Character => c.character = crate::ui::characters::Character::ALL[k.min(6)],
+        Sid::Character => {
+            c.character = crate::ui::characters::Character::ALL[k.min(crate::ui::characters::Character::ALL.len() - 1)]
+        }
+        Sid::PetPerformance => c.pet_performance = crate::ui::pet_motion::PetPerformance::ALL[k.min(3)],
         Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
         Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],
         Sid::PillWeatherSide => c.pill_weather_side = WeatherSide::ALL[k.min(1)],

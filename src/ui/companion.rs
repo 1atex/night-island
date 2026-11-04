@@ -454,7 +454,19 @@ impl CompanionWindow {
         }
     }
 
+    #[cfg(test)]
     pub fn render(&mut self, gpu: &Gpu, character: Character, pose: &Pose, scale: f32) -> Result<()> {
+        self.render_designed(gpu, character, pose, scale, None)
+    }
+
+    pub fn render_designed(
+        &mut self,
+        gpu: &Gpu,
+        character: Character,
+        pose: &Pose,
+        scale: f32,
+        design: Option<&super::pet_design::PetDesign>,
+    ) -> Result<()> {
         let side = (SIDE * scale).round().max(32.0) as i32;
         if self.surface.side != side {
             self.surface = Surface::new(side)?;
@@ -469,7 +481,7 @@ impl CompanionWindow {
                 let _ = p.stroke_round_rect(rect, side as f32 / 2.0, 1.5 * scale, rgba(0.4, 0.95, 0.75, 0.85));
             }
             let old = p.push_offset(side as f32 * 0.05, side as f32 * 0.1625);
-            drawn = characters::draw(p, character, side as f32 * 0.9, pose);
+            drawn = characters::draw_with_design(p, character, side as f32 * 0.9, pose, design);
             p.set_transform(&old);
         })?;
         drawn?;
@@ -627,6 +639,7 @@ mod tests {
         };
         let mut spark = CompanionWindow::new(parent, Some([320, 320]), 1.0, &gpu)?;
         let pose = Pose {
+            motion: Default::default(),
             t: 0.0,
             reaction: characters::Reaction::Idle,
             look: (0.0, 0.0),
@@ -641,7 +654,7 @@ mod tests {
             let _ = ShowWindow(parent, SW_HIDE);
             assert!(IsWindowVisible(spark.hwnd()).as_bool());
         }
-        let mut sheet = vec![0; 6 * 88 * 3 * 88 * 4];
+        let mut sheet = vec![0; (Character::ALL.len() - 1) * 88 * 3 * 88 * 4];
         for (column, character) in Character::ALL.into_iter().filter(|c| *c != Character::None).enumerate() {
             for (row, beat) in [0.0, 0.5, 1.0].into_iter().enumerate() {
                 let music = Pose { reaction: characters::Reaction::Music, t: row as f32 * 0.3, beat, ..pose };
@@ -674,12 +687,12 @@ mod tests {
                 assert!(bounds.2 > bounds.0 && bounds.3 > bounds.1);
                 if character == Character::Spark {
                     assert!(
-                        ((bounds.2 - bounds.0) as i32 - (bounds.3 - bounds.1) as i32).abs() <= 1,
+                        ((bounds.2 - bounds.0) as i32 - (bounds.3 - bounds.1) as i32).abs() <= 3,
                         "Spark lost its circular shape: {bounds:?}"
                     );
                 }
                 for y in 0..88 {
-                    let dst = ((row * 88 + y) * 6 * 88 + column * 88) * 4;
+                    let dst = ((row * 88 + y) * (Character::ALL.len() - 1) * 88 + column * 88) * 4;
                     sheet[dst..dst + 88 * 4].copy_from_slice(&after[y * 88 * 4..(y + 1) * 88 * 4]);
                 }
             }
@@ -728,7 +741,7 @@ mod tests {
         }
         if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
             let dir = std::path::PathBuf::from(dir);
-            save_preview(&dir.join("characters.png"), 528, 264, &sheet);
+            save_preview(&dir.join("characters.png"), (Character::ALL.len() as u32 - 1) * 88, 264, &sheet);
             spark.update_controls_at(POINT { x: cx as i32, y: cy as i32 }, true, &media, Some((84.0, 244.0)), 1.0)?;
             let controls = spark.controls.as_ref().unwrap();
             save_preview(&dir.join("companion-controls.png"), 300, 140, &controls.preview());

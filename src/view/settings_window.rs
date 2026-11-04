@@ -23,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 13] = [
+const ISLAND: [(Sid, &str, Kind); 14] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -34,6 +34,7 @@ const ISLAND: [(Sid, &str, Kind); 13] = [
     (Sid::Style, "Shape", Kind::Segment(["Flat", "Liquid"])),
     (Sid::Character, "Character", Kind::Cycle),
     (Sid::CharacterDetached, "Let the character roam the desktop", Kind::Toggle),
+    (Sid::PetPerformance, "Pet animation quality", Kind::Cycle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
     (Sid::CloseDelay, "Close delay", Kind::Slider),
@@ -150,7 +151,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (11, "Open and close")],
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (12, "Open and close")],
     },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None, sections: &[] },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items), sections: &[] },

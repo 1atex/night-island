@@ -30,8 +30,9 @@ pub fn content_tip(pill: Rect, scale: f32, ui: &UiState, clips: usize, px: f32, 
             }
         }
         Tab::Chat => {
-            let (new, chats, attach) = chat_buttons(pill, scale);
+            let (new, chats, attach, pet) = chat_buttons(pill, scale);
             let (text, rect) = match hit_chat(pill, scale, px, py, ui)? {
+                ChatHit::Pet => ("Create or change your pet", pet),
                 ChatHit::New => ("New chat", new),
                 ChatHit::Chats => ("Saved chats", chats),
                 ChatHit::Attach => ("Attach a file", attach),

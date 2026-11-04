@@ -464,6 +464,13 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         crate::ui::mini_chat::WM_MINI_CHAT => {
             with_app(|a| a.on_mini_chat(wparam.0, lparam.0));
+            let mut dialog = false;
+            with_app(|a| dialog = std::mem::take(&mut a.want_chat_dialog));
+            if dialog {
+                with_app(|a| a.popup_open = true);
+                let picked = pick_file(hwnd);
+                with_app(|a| a.finish_chat_dialog(picked));
+            }
             LRESULT(0)
         }
         ai::WM_CHAT => {

@@ -50,6 +50,14 @@ Start your personal wave and adjust activity, variety, mood and language with th
 
 This integration uses the unofficial Yandex Music API and native Windows audio playback (MP3). An eligible subscription and region are required. Protocol behavior was researched in [yamusic-md3](https://github.com/yaskorinov/yamusic-md3); the implementation uses Night Island's native UI and workers. Account-specific playback has been confirmed by the user; automated checks cover device authorization endpoints, API requests, queue metadata, native audio and UI rendering.
 
+### Desktop pets
+
+Drag a character out of the collapsed island to release it; drag it back over the island to dock it. Pets breathe, follow the pointer smoothly, blink, react to gentle pointer strokes, stretch while carried and settle when released. Bear joins the character list. Music controls and the mini AI chat remain available beside every detached character, including custom pets.
+
+**Settings → Island → Pet animation quality** offers reduced motion, economical (up to 20 FPS), balanced (up to 30 FPS) and smooth (up to 60 FPS). The pet has its own frame budget, lowers its refresh rate at rest and while sleeping, and stops drawing in gaming mode.
+
+Open **Pet studio** in either AI chat. Describe a pet or select **Pet photo**, then send your request using your configured AI provider. The model produces a stylized animated character with editable colors, body, markings and accessories. Review the preview and select **Apply pet**; further messages revise that design. Photo input requires a vision-capable model. **Text only** excludes the attached photo and lets you describe the desired appearance instead. The chosen pet survives restarts; generated designs cannot contain code or external assets.
+
 ### Build
 
 Requires Windows, a recent stable Rust toolchain (edition 2024) and a C compiler (MSVC Build Tools or mingw-w64).
@@ -109,6 +117,14 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 Запусти свою волну и стрелками выбери занятие, характер, настроение и язык. Варианты загружаются из Яндекса. Новые настройки применяются после текущего трека; кнопка **Следующий** переключает сразу. Музыка играет и в свёрнутом острове: работают цвета обложки, прогресс, управление на главной и у персонажа. **Остановить** возвращает управление другим плеерам. Запуск волны вместе с островом включается отдельно.
 
 Используется неофициальный API Яндекс Музыки и встроенный аудиоплеер Windows (MP3). Нужны подходящая подписка и доступность сервиса в регионе. Связь с API изучена по [yamusic-md3](https://github.com/yaskorinov/yamusic-md3), интерфейс и обработчики написаны для Night Island. Пользователь подтвердил работу персональной волны после входа; автоматические проверки покрывают получение кода, запросы API, данные очереди, воспроизведение Windows и отрисовку вкладки.
+
+### Питомцы на рабочем столе
+
+Вытяни персонажа из свёрнутого острова, чтобы выпустить его; перетащи обратно на остров, чтобы вернуть. Питомцы дышат, плавно следят за курсором, моргают, реагируют на поглаживание курсором, тянутся при переносе и мягко успокаиваются после отпускания. В списке появился медведь. Управление музыкой и мини-чат с ИИ доступны рядом с любым отдельным персонажем, включая собственного.
+
+В **Настройки → Остров → Анимация питомца** доступны режимы без движения, экономный (до 20 FPS), сбалансированный (до 30 FPS) и плавный (до 60 FPS). Частота питомца настраивается отдельно от острова, снижается в покое и во сне. В игровом режиме отрисовка останавливается.
+
+Нажми **Питомец** в основном или мини-чате с ИИ. Опиши внешность или выбери **Фото** и отправь запрос настроенной модели. Получится стилизованный анимированный персонаж с выбранными цветами, формой, узором и аксессуарами. Проверь предпросмотр и нажми **Применить**; следующим сообщением можно изменить результат. Для фотографий нужна модель с поддержкой изображений. Кнопка **Без фото** исключает фотографию из запроса: вместо неё опиши внешность словами. Выбранный питомец сохраняется после перезапуска; результат модели не может содержать код или внешние ресурсы.
 
 ### Сборка
 

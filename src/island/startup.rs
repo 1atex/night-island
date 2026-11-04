@@ -361,6 +361,9 @@ impl App {
                 spectrum_scale: [0.0; audio::BANDS],
             },
             pet: Pet {
+                motion: Default::default(),
+                controls_at: Instant::now(),
+                cursor: None,
                 char_layer,
                 desktop: None,
                 chat: None,
@@ -372,6 +375,7 @@ impl App {
                 rng: 0x9E37_79B9,
                 reaction_until: None,
                 char_key: None,
+                frame: 0,
             },
             pointer: Pointer {
                 decoration_through: false,

@@ -678,6 +678,7 @@ impl App {
                 if matches!(
                     id,
                     view::Sid::Character
+                        | view::Sid::PetPerformance
                         | view::Sid::Edge
                         | view::Sid::PillBattery
                         | view::Sid::AiProvider

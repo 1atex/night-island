@@ -33,6 +33,7 @@ mod mixer;
 mod music_intro;
 mod note;
 mod notifications;
+mod pet_studio;
 mod pill;
 mod pill_vertical;
 mod privacy;
@@ -57,6 +58,7 @@ pub use self::{
     pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
     widgets::*, yandex::*,
 };
+pub use pet_studio::*;
 
 pub type Rect = (f32, f32, f32, f32);
 pub use wave_theme::{WaveColours, wave_colour};

@@ -319,6 +319,8 @@ impl App {
                 Some(view::ChatHit::RowDelete(i)) => Some(1240 + i),
                 Some(view::ChatHit::ChipRemove(i)) => Some(1260 + i),
                 Some(view::ChatHit::Setup) => Some(1210),
+                Some(view::ChatHit::Pet) => Some(1204),
+                Some(view::ChatHit::PetAction(_)) => Some(1280),
                 _ => None,
             }
         } else if self.ui.tab == view::Tab::Weather {

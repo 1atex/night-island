@@ -4,6 +4,9 @@ pub(in crate::island) const CHAR_INSET: f32 = 30.0;
 
 pub(in crate::island) struct Pet {
     pub(in crate::island) char_layer: Layer,
+    pub(in crate::island) motion: crate::ui::pet_motion::PetMotion,
+    pub(in crate::island) controls_at: Instant,
+    pub(in crate::island) cursor: Option<(i32, i32)>,
     pub(in crate::island) desktop: Option<crate::ui::companion::CompanionWindow>,
     pub(in crate::island) born: Instant,
     pub(in crate::island) beat: f32,
@@ -13,7 +16,8 @@ pub(in crate::island) struct Pet {
     pub(in crate::island) blink_until: Instant,
     pub(in crate::island) rng: u32,
     pub(in crate::island) reaction_until: Option<(Reaction, Instant)>,
-    pub(in crate::island) char_key: Option<(Reaction, i8, i8, bool, i32)>,
+    pub(in crate::island) frame: u64,
+    pub(in crate::island) char_key: Option<(Reaction, bool, [u8; 3], u64)>,
 }
 
 impl App {
@@ -190,6 +194,7 @@ impl App {
         }
         match crate::ui::companion::Action::from_id(id) {
             Some(crate::ui::companion::Action::Chat) => {
+                self.react(Reaction::Done, 700);
                 self.open_companion_chat();
             }
             Some(crate::ui::companion::Action::ToggleIsland) => self.toggle_island_from_character(),
@@ -204,6 +209,9 @@ impl App {
                     self.settings.character_pos = Some(window.position());
                     self.ui.cfg = self.settings.clone();
                     self.settings.save();
+                }
+                if action == crate::ui::companion::Action::Dropped {
+                    self.react(Reaction::Done, 650);
                 }
                 self.schedule_autohide();
                 if action == crate::ui::companion::Action::Dropped && self.state == State::Expanded && !self.ui.pinned {
@@ -251,6 +259,7 @@ impl App {
     pub(in crate::island) fn char_tick(&mut self) {
         let character = self.settings.character;
         if self.gaming {
+            self.pet.char_key = None;
             if let Some(desktop) = &mut self.pet.desktop {
                 desktop.hide();
             }
@@ -267,10 +276,11 @@ impl App {
         }
         let now = Instant::now();
         if now >= self.pet.next_blink {
-            self.pet.blink_until = now + Duration::from_millis(150);
+            self.pet.blink_until = now + Duration::from_millis(180);
             self.pet.next_blink = now + Duration::from_millis(2500 + u64::from(self.next_random() % 3500));
         }
-        let blink = now < self.pet.blink_until;
+        let lid = crate::ui::pet_motion::eyelid(self.pet.blink_until.saturating_duration_since(now).as_secs_f32());
+        let blink = lid > 0.92;
 
         let reaction = if self.ui.remind.alert.is_some() {
             Reaction::Attention
@@ -287,8 +297,9 @@ impl App {
         let mut pt = windows::Win32::Foundation::POINT::default();
         let mut rc = windows::Win32::Foundation::RECT::default();
         let (cw, ch) = self.char_size();
+        let cursor = unsafe { GetCursorPos(&mut pt) }.ok().map(|_| (pt.x, pt.y));
         let look = unsafe {
-            if GetCursorPos(&mut pt).is_ok() && GetWindowRect(self.hwnd, &mut rc).is_ok() {
+            if cursor.is_some() && GetWindowRect(self.hwnd, &mut rc).is_ok() {
                 let (x, y) = self.char_origin();
                 let (cx, cy) = self
                     .pet
@@ -302,12 +313,31 @@ impl App {
         };
 
         let t = now.duration_since(self.pet.born).as_secs_f32();
+        let dt = now.duration_since(self.pet.beat_at).as_secs_f32().min(0.25);
+        let near = look.0.abs() < 0.36 && look.1.abs() < 0.46;
+        let held = self.character_interacting();
+        let gaze = if held {
+            cursor.zip(self.pet.cursor).map_or((0.0, 0.0), |((x, y), (px, py))| {
+                (
+                    ((x - px) as f32 / (dt.max(0.001) * 900.0)).clamp(-1.0, 1.0),
+                    ((y - py) as f32 / (dt.max(0.001) * 900.0)).clamp(-1.0, 1.0),
+                )
+            })
+        } else if look.0.abs() > 0.95 || look.1.abs() > 0.95 {
+            ((t * 0.38).sin() * 0.22, (t * 0.21).sin() * 0.12)
+        } else {
+            look
+        };
+        let still = self.settings.pet_performance == crate::ui::pet_motion::PetPerformance::Still;
+        self.pet.cursor = cursor;
+        let mut motion = self.pet.motion.advance(gaze, dt, near, held, still);
+        motion.lid = if still { 0.0 } else { lid };
+        let look = self.pet.motion.look;
         let target = if detached || self.music.spectrum_running {
             (0..3).map(audio::level).sum::<f32>() / 3.0
         } else {
             0.5 + 0.5 * (t * 7.5).sin()
         };
-        let dt = now.duration_since(self.pet.beat_at).as_secs_f32().min(0.1);
         self.pet.beat_at = now;
         self.pet.beat += (target.clamp(0.0, 1.0) - self.pet.beat) * (1.0 - (-dt * 8.0).exp());
         let beat = self.pet.beat;
@@ -315,7 +345,12 @@ impl App {
             self.ui.media.accent.map_or((0.65, 0.7, 1.0), |(r, g, b)| {
                 (f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0)
             });
-        let pose = characters::Pose { t, reaction, look, blink, accent, beat };
+        let pose = characters::Pose { t, reaction, look, blink: blink && !still, accent, beat, motion };
+        let interval = self.settings.pet_performance.interval(
+            near || held || pose.lively() || motion.warmth > 0.0,
+            reaction == Reaction::Sleep,
+            detached,
+        );
 
         let docking =
             self.pet.desktop.as_ref().is_some_and(|desktop| desktop.dragging()) && self.companion_over_island();
@@ -324,37 +359,33 @@ impl App {
                 self.pet.char_key = None;
             }
             let available = self.ui.media.playing || !self.ui.media.title.is_empty() || self.ui.media.players > 0;
-            if let Err(error) = desktop.update_controls(available, &self.ui.media, media::progress(), self.scale) {
-                crate::log_warn!("could not draw companion music controls: {error}");
+            if now.duration_since(self.pet.controls_at) >= Duration::from_millis(80) {
+                self.pet.controls_at = now;
+                if let Err(error) = desktop.update_controls(available, &self.ui.media, media::progress(), self.scale) {
+                    crate::log_warn!("could not draw companion music controls: {error}");
+                }
             }
         }
 
-        let key = (
-            reaction,
-            (look.0 * 3.0).round() as i8,
-            (look.1 * 2.0).round() as i8,
-            blink,
-            if pose.lively() {
-                (t * 30.0) as i32
-            } else if detached {
-                (t * 12.0) as i32
-            } else {
-                0
-            },
-        );
+        if !still {
+            self.pet.frame = self.pet.frame.wrapping_add(1);
+        }
+        let color = [accent.0, accent.1, accent.2].map(|v| (v * 255.0).round() as u8);
+        let key = (reaction, pose.blink, color, if still { 0 } else { self.pet.frame });
         if self.pet.char_key != Some(key) {
-            self.pet.char_key = Some(key);
-            if let Some(desktop) = &mut self.pet.desktop {
-                if let Err(error) = desktop.render(&self.gpu, character, &pose, self.scale) {
-                    crate::log_warn!("could not draw desktop character: {error}");
-                }
+            let drawn = if let Some(desktop) = &mut self.pet.desktop {
+                desktop.render_designed(&self.gpu, character, &pose, self.scale, Some(&self.settings.custom_pet))
             } else {
-                let _ = self.pet.char_layer.paint(&self.gpu, |p| {
-                    let _ = characters::draw(p, character, cw, &pose);
-                });
+                self.pet.char_layer.paint(&self.gpu, |p| {
+                    let _ = characters::draw_with_design(p, character, cw, &pose, Some(&self.settings.custom_pet));
+                })
+            };
+            match drawn {
+                Ok(()) => self.pet.char_key = Some(key),
+                Err(error) => crate::log_warn!("could not draw character: {error}"),
             }
         }
-        self.set_timer(Timer::Char, if pose.lively() { self.frame_ms() } else { 80 });
+        self.set_timer(Timer::Char, interval);
         self.maybe_show_notification();
     }
 }

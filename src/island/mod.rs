@@ -82,6 +82,7 @@ mod input;
 mod liquid;
 mod lyric;
 mod motion;
+mod pet_studio;
 mod pill;
 mod pill_motion;
 mod settings_win;
