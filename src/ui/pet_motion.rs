@@ -136,6 +136,11 @@ impl PetMotion {
     }
 }
 
+pub fn pointer_gaze(offset: (f32, f32)) -> (f32, f32) {
+    let soften = |value: f32| value / value.hypot(1.0);
+    (soften(offset.0), soften(offset.1))
+}
+
 pub fn eyelid(remaining: f32) -> f32 {
     let progress = (1.0 - remaining / 0.18).clamp(0.0, 1.0);
     (std::f32::consts::PI * progress).sin().powi(2)
@@ -144,6 +149,34 @@ pub fn eyelid(remaining: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_tracking_continues_beyond_the_old_radius_and_across_monitors() {
+        let mut previous = 0.0;
+        for distance in [0.0, 100.0, 247.0, 260.0, 500.0, 1920.0, 7680.0, 20_000.0] {
+            let gaze = pointer_gaze((distance / 260.0, -distance / 200.0));
+            assert!(gaze.0 >= previous && gaze.0 < 1.0);
+            assert!(gaze.1 <= 0.0 && gaze.1 > -1.0);
+            let opposite = pointer_gaze((-distance / 260.0, distance / 200.0));
+            assert_eq!(opposite, (-gaze.0, -gaze.1));
+            previous = gaze.0;
+        }
+        for fps in [10, 30, 60] {
+            let mut motion = PetMotion::default();
+            for _ in 0..fps {
+                motion.advance(pointer_gaze((2.0, -2.0)), 1.0 / fps as f32, false, false, false);
+            }
+            let first = motion.look;
+            for _ in 0..fps {
+                motion.advance(pointer_gaze((6.0, -6.0)), 1.0 / fps as f32, false, false, false);
+            }
+            assert!(motion.look.0 > first.0 && motion.look.1 < first.1);
+            for _ in 0..fps {
+                motion.advance(pointer_gaze((-6.0, 6.0)), 1.0 / fps as f32, false, false, false);
+            }
+            assert!(motion.look.0 < -0.98 && motion.look.1 > 0.98);
+        }
+    }
 
     #[test]
     fn gaze_converges_without_fps_dependent_steps_or_overshoot() {

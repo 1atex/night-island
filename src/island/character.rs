@@ -312,7 +312,7 @@ impl App {
                     .desktop
                     .as_ref()
                     .map_or((rc.left as f32 + x + cw / 2.0, rc.top as f32 + y + ch / 2.0), |desktop| desktop.center());
-                (((pt.x as f32 - cx) / 260.0).clamp(-1.0, 1.0), ((pt.y as f32 - cy) / 200.0).clamp(-1.0, 1.0))
+                ((pt.x as f32 - cx) / 260.0, (pt.y as f32 - cy) / 200.0)
             } else {
                 (0.0, 0.0)
             }
@@ -378,14 +378,10 @@ impl App {
                     ((y - py) as f32 / (dt.max(0.001) * 900.0)).clamp(-1.0, 1.0),
                 )
             })
-        } else if let Some(frame) = &behavior
-            && frame.activity == crate::ui::pet_behavior::Activity::Walking
-        {
-            (frame.pose.facing * 0.65, 0.08)
-        } else if look.0.abs() > 0.95 || look.1.abs() > 0.95 {
-            ((t * 0.38).sin() * 0.22, (t * 0.21).sin() * 0.12)
+        } else if cursor.is_some() {
+            crate::ui::pet_motion::pointer_gaze(look)
         } else {
-            look
+            self.pet.motion.look
         };
         self.pet.cursor = cursor;
         let mut motion = self.pet.motion.advance(gaze, dt, near, held, still);
