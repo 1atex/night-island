@@ -1,4 +1,5 @@
 use crate::island::*;
+use crate::platform::{wake, wake_install};
 
 pub(in crate::island) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(in crate::island) const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -456,6 +457,14 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         dictation::WM_VOICE => {
             with_app(|a| a.on_voice());
+            LRESULT(0)
+        }
+        wake::WM_WAKE => {
+            with_app(|a| a.on_wake());
+            LRESULT(0)
+        }
+        wake_install::WM_WAKE_SETUP => {
+            with_app(|a| a.on_wake_setup());
             LRESULT(0)
         }
         ai::WM_TRANSCRIBED => {

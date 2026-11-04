@@ -351,6 +351,12 @@ pub fn rms(samples: &[f32]) -> f32 {
 
 pub fn start(hwnd: HWND, wake_words: Vec<String>) -> bool {
     let Some(root) = dir().filter(|d| installed_in(d)) else { return false };
+    for _ in 0..40 {
+        if !LISTENING.load(Ordering::SeqCst) || WANTED.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     if LISTENING.swap(true, Ordering::SeqCst) {
         return true;
     }

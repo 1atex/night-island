@@ -143,6 +143,7 @@ struct App {
     want_header_menu: bool,
     pending_power: Option<(voicecmd::Power, std::time::Instant)>,
     pending_ask: Option<(voicecmd::Command, std::time::Instant)>,
+    wake_session: bool,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
     notice_link: Option<std::path::PathBuf>,

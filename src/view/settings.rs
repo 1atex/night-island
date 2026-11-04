@@ -115,6 +115,7 @@ pub enum Sid {
     AsstWake,
     AsstSounds,
     AsstSpeak,
+    AsstInstall,
     AsstMedia,
     AsstControls,
     AsstOpen,

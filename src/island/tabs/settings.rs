@@ -89,6 +89,7 @@ impl App {
                     self.repaint_collapsed();
                 }
                 MetricsInterval => self.sync_metrics(),
+                AsstEnabled | AsstWake => self.sync_wake(),
                 AutoHide => {
                     if self.settings.auto_hide {
                         self.schedule_autohide();

@@ -1,5 +1,5 @@
 use crate::island::*;
-use crate::platform::{sounds, speech};
+use crate::platform::{sounds, speech, wake, wake_install};
 use crate::services::assistant::{Cap, Level, memory};
 
 impl App {
@@ -27,17 +27,11 @@ impl App {
             self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
             return;
         }
-        if !ai::can_transcribe(&self.settings.ai) {
-            return self.notify_for(
-                Notice::Error,
-                '\u{E783}',
-                "Dictation needs Gemini, an OpenAI-compatible service or a separate speech service",
-                4000,
-            );
+        if !self.speech_ready() {
+            return;
         }
-        if !ai::voice_ready(&self.settings.ai) {
-            return self.notify_for(Notice::Error, '\u{E783}', "Save a key for the speech service first", 3500);
-        }
+        wake::stop();
+        speech::stop();
         if dictation::start(self.hwnd) {
             self.cue(sounds::Cue::Heard);
             self.show_notice_for(
@@ -45,35 +39,110 @@ impl App {
                 "Listening… press the keys again",
                 (dictation::MAX_SECS as u32 + 5) * 1000,
             );
+        } else {
+            self.sync_wake();
+        }
+    }
+
+    pub(in crate::island) fn sync_wake(&mut self) {
+        let a = &self.settings.assistant;
+        let want = a.perms.enabled && a.wake && wake::installed() && !dictation::active() && !self.wake_session;
+        if want {
+            if !wake::listening() {
+                wake::start(self.hwnd, voicecmd::wake_words(&self.settings.ai.voice_wake));
+            }
+        } else if wake::listening() {
+            wake::stop();
+        }
+    }
+
+    pub(in crate::island) fn end_wake_session(&mut self) {
+        self.wake_session = false;
+        self.sync_wake();
+    }
+
+    pub(in crate::island) fn install_wake_runtime(&mut self) {
+        if wake_install::start(self.hwnd) {
+            self.show_notice_for('\u{E896}', "Downloading the wake-word model…", 120_000);
+        } else {
+            self.notify_for(Notice::Error, '\u{E783}', "The wake-word model is already being downloaded", 3000);
+        }
+    }
+
+    pub(in crate::island) fn on_wake_setup(&mut self) {
+        self.clear_notice();
+        match wake_install::state() {
+            wake_install::State::Ready => {
+                self.cue(sounds::Cue::Done);
+                self.show_notice_for('\u{E73E}', "Wake-word model installed", 2500);
+                self.sync_wake();
+            }
+            wake_install::State::Failed(why) => self.fail_by_voice(why),
+            _ => {}
+        }
+    }
+
+    fn speech_ready(&mut self) -> bool {
+        if !ai::can_transcribe(&self.settings.ai) {
+            self.notify_for(
+                Notice::Error,
+                '\u{E783}',
+                "Dictation needs Gemini, an OpenAI-compatible service or a separate speech service",
+                4000,
+            );
+            return false;
+        }
+        if !ai::voice_ready(&self.settings.ai) {
+            self.notify_for(Notice::Error, '\u{E783}', "Save a key for the speech service first", 3500);
+            return false;
+        }
+        true
+    }
+
+    pub(in crate::island) fn on_wake(&mut self) {
+        if !self.settings.assistant.perms.enabled || !self.speech_ready() {
+            return self.sync_wake();
+        }
+        self.wake_session = true;
+        speech::stop();
+        if dictation::start_auto(self.hwnd) {
+            self.cue(sounds::Cue::Heard);
+            self.show_notice_for('\u{E720}', "Listening…", (dictation::MAX_SECS as u32 + 5) * 1000);
+        } else {
+            self.end_wake_session();
         }
     }
 
     pub(in crate::island) fn on_voice(&mut self) {
         match dictation::take() {
             Some(Ok(wav)) => {
+                if self.wake_session {
+                    self.cue(sounds::Cue::Done);
+                }
                 if ai::transcribe(self.hwnd, wav) {
                     self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
                 } else {
                     self.clear_notice();
-                    self.notify_for(
-                        Notice::Error,
-                        '\u{E783}',
-                        "Another request is running, try again in a moment",
-                        3500,
-                    );
+                    self.fail_by_voice("Another request is running, try again in a moment");
+                    self.end_wake_session();
                 }
             }
             Some(Err(why)) => {
                 self.clear_notice();
-                self.notify_for(Notice::Error, '\u{E783}', why, 3500);
+                self.fail_by_voice(why);
+                self.end_wake_session();
             }
-            None => self.clear_notice(),
+            None => {
+                self.clear_notice();
+                self.end_wake_session();
+            }
         }
     }
 
     fn start_voice_command(&mut self, command: &str) {
         if command.is_empty() {
-            return self.show_notice_for('\u{E720}', "Say a command after the name", 2200);
+            self.show_notice_for('\u{E720}', "Say a command after the name", 2200);
+            return self.end_wake_session();
         }
         let perms = &self.settings.assistant.perms;
         let notes = if perms.command_level(Cap::Memory, false) == Level::Off {
@@ -85,7 +154,8 @@ impl App {
         if ai::ask_command(self.hwnd, command, system) {
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
         } else {
-            self.notify_for(Notice::Error, '\u{E783}', "Another request is running, try again in a moment", 3500);
+            self.fail_by_voice("Another request is running, try again in a moment");
+            self.end_wake_session();
         }
     }
 
@@ -114,10 +184,12 @@ impl App {
             Ok(reply) => reply,
             Err(why) => {
                 let short: String = why.chars().take(70).collect();
-                return self.notify_for(Notice::Error, '\u{E783}', &short, 4500);
+                self.fail_by_voice(&short);
+                return self.end_wake_session();
             }
         };
         self.handle_command(voicecmd::parse(&reply), false);
+        self.end_wake_session();
     }
 
     fn handle_command(&mut self, command: voicecmd::Command, confirmed: bool) {
@@ -236,6 +308,11 @@ impl App {
         let Some(answer) = ai::take_transcript() else { return };
         self.clear_notice();
         match answer {
+            Ok(text) if self.wake_session => {
+                let wakes = voicecmd::wake_words(&self.settings.ai.voice_wake);
+                let command = voicecmd::strip_wake(&text, &wakes).unwrap_or(text);
+                self.start_voice_command(&command);
+            }
             Ok(text) => {
                 let wakes = voicecmd::wake_words(&self.settings.ai.voice_wake);
                 if let Some(command) = voicecmd::strip_wake(&text, &wakes) {
@@ -251,7 +328,8 @@ impl App {
             }
             Err(why) => {
                 let short: String = why.chars().take(70).collect();
-                self.notify_for(Notice::Error, '\u{E783}', &short, 4500);
+                self.fail_by_voice(&short);
+                self.end_wake_session();
             }
         }
     }

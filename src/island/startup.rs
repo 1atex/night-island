@@ -153,6 +153,7 @@ impl App {
         }
         app.start_activity();
         app.sync_metrics();
+        app.sync_wake();
         app.ui.agents = agents::sessions();
         agents::watch(hwnd);
         app.init_steam();
@@ -305,6 +306,7 @@ impl App {
             want_header_menu: false,
             pending_power: None,
             pending_ask: None,
+            wake_session: false,
             reminders: Vec::new(),
             recording: None,
             notice_link: None,

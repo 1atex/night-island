@@ -708,6 +708,9 @@ impl App {
                 unsafe { SetCapture(self.settings_win.unwrap_or_default()) };
             }
             view::SetHit::Button => {
+                if id == view::Sid::AsstInstall {
+                    self.install_wake_runtime();
+                }
                 if id == view::Sid::WindowsNotificationsSettings {
                     cmd::shell_open("ms-settings:notifications", None);
                 }
