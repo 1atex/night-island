@@ -249,7 +249,7 @@ fn notify(raw: isize) {
 pub fn review(hwnd: HWND, command: String) {
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
-        let verdict = match crate::services::ai::complete(REVIEW_PROMPT, &command, 120) {
+        let verdict = match crate::services::ai::complete(REVIEW_PROMPT, &command, 1000) {
             Ok(reply) => parse_verdict(&reply),
             Err(_) => Verdict { safe: false, reason: "The review could not be done".into() },
         };
@@ -266,7 +266,7 @@ pub fn run_and_report(hwnd: HWND, request: String, command: String) {
                 return "Done, the command printed nothing".to_string();
             }
             let ask = format!("Request: {request}\nCommand: {command}\nOutput:\n{output}");
-            crate::services::ai::complete(SUMMARY_PROMPT, &ask, 160)
+            crate::services::ai::complete(SUMMARY_PROMPT, &ask, 1000)
                 .unwrap_or_else(|_| output.chars().take(200).collect())
         });
         publish(Outcome::Ran { result });

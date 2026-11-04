@@ -1,6 +1,7 @@
 use crate::island::*;
 use crate::platform::{sounds, speech, wake, wake_install};
 use crate::services::assistant::{Cap, Level, memory, shell};
+use crate::ui::i18n::tr;
 
 impl App {
     fn cue(&self, cue: sounds::Cue) {
@@ -30,7 +31,7 @@ impl App {
         if !self.speech_ready() {
             return;
         }
-        wake::stop();
+        wake::pause();
         speech::stop();
         if dictation::start(self.hwnd) {
             self.cue(sounds::Cue::Heard);
@@ -46,13 +47,27 @@ impl App {
 
     pub(in crate::island) fn sync_wake(&mut self) {
         let a = &self.settings.assistant;
-        let want = a.perms.enabled && a.wake && wake::installed() && !dictation::active() && !self.wake_session;
-        if want {
-            if !wake::listening() {
-                wake::start(self.hwnd, voicecmd::wake_words(&self.settings.ai.voice_wake));
+        let want = a.perms.enabled && a.wake && wake::installed();
+        if !want {
+            if wake::listening() {
+                wake::stop();
             }
-        } else if wake::listening() {
+            return;
+        }
+        if !wake::listening() {
+            wake::start(self.hwnd, voicecmd::wake_words(&self.settings.ai.voice_wake));
+        }
+        if self.wake_session || dictation::active() {
+            wake::pause();
+        } else {
+            wake::resume();
+        }
+    }
+
+    pub(in crate::island) fn restart_wake(&mut self) {
+        if wake::listening() {
             wake::stop();
+            self.sync_wake();
         }
     }
 
@@ -150,7 +165,7 @@ impl App {
         } else {
             memory::prompt_block(&memory::load(), 1500)
         };
-        let system = voicecmd::system_prompt(&perms.commands_offered(), &notes);
+        let system = voicecmd::system_prompt(&perms.commands_offered(), &notes, &self.facts());
         self.last_request = command.chars().take(300).collect();
         if ai::ask_command(self.hwnd, command, system) {
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
@@ -161,6 +176,10 @@ impl App {
     }
 
     fn open_by_voice(&mut self, name: &str) {
+        if let Some((title, launch)) = voicecmd::builtin_app(name) {
+            cmd::shell_open(launch, None);
+            return self.show_notice_for('\u{E71D}', title, 2500);
+        }
         let game = steam::find(name, 1).into_iter().next();
         let app = apps::find(name, 1).into_iter().next();
         let said = name.trim().to_lowercase();
@@ -189,14 +208,30 @@ impl App {
                 return self.end_wake_session();
             }
         };
-        self.handle_command(voicecmd::parse(&reply), false);
+        for command in voicecmd::parse_many(&reply) {
+            self.handle_command(command, false);
+            if self.pending_ask.is_some() {
+                break;
+            }
+        }
         self.end_wake_session();
+    }
+
+    fn facts(&self) -> String {
+        let now = chrono::Local::now();
+        let up = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() } / 1000;
+        format!(
+            "Local time: {}\nThe computer has been on for {} hours {} minutes since it started\n",
+            now.format("%A, %d %B %Y, %H:%M"),
+            up / 3600,
+            up % 3600 / 60
+        )
     }
 
     fn handle_shell(&mut self, command: String, reviewed: bool, confirmed: bool) {
         let level = self.settings.assistant.perms.command_level(Cap::Shell, false);
         if level == Level::Off {
-            let text = format!("{}: off in the Assistant settings", crate::ui::i18n::tr(Cap::Shell.title()));
+            let text = format!("{}: {}", tr(Cap::Shell.title()), tr("off in the Assistant settings"));
             return self.fail_by_voice(&text);
         }
         let class = shell::classify(&command);
@@ -208,7 +243,7 @@ impl App {
             return self.show_notice_for('\u{E9D9}', "Checking the command…", 60_000);
         }
         if level == Level::Ask && class == shell::Class::Change && !confirmed {
-            let text = format!("Run: {command}? Say the name and \"yes\"");
+            let text = format!("{} {command}? {}", tr("Run:"), tr("Say the name and \"yes\""));
             self.pending_ask = Some((voicecmd::Command::Shell(command), std::time::Instant::now()));
             return self.notify_for(Notice::Integrations, '\u{E756}', &text, (voicecmd::CONFIRM_SECS * 1000) as u32);
         }
@@ -241,11 +276,11 @@ impl App {
         if let Some(cap) = voicecmd::cap_of(&command) {
             match self.settings.assistant.perms.command_level(cap, false) {
                 Level::Off => {
-                    let text = format!("{}: off in the Assistant settings", crate::ui::i18n::tr(cap.title()));
+                    let text = format!("{}: {}", tr(cap.title()), tr("off in the Assistant settings"));
                     return self.fail_by_voice(&text);
                 }
                 Level::Ask if !confirmed && !matches!(command, voicecmd::Command::Power(_)) => {
-                    let text = format!("{}? Say the name and \"yes\"", crate::ui::i18n::tr(cap.title()));
+                    let text = format!("{}? {}", tr(cap.title()), tr("Say the name and \"yes\""));
                     self.pending_ask = Some((command, std::time::Instant::now()));
                     return self.notify_for(
                         Notice::Integrations,
@@ -271,7 +306,7 @@ impl App {
                 let mut notes = memory::load();
                 let dropped = memory::forget(&mut notes, &what);
                 if dropped > 0 && memory::save(&notes).is_ok() {
-                    self.show_notice_for('\u{E74D}', &format!("Forgot {dropped}"), 1800);
+                    self.show_notice_for('\u{E74D}', &format!("{} {dropped}", tr("Forgot")), 1800);
                 } else {
                     self.show_notice_for('\u{E711}', "Nothing like that in memory", 2200);
                 }
@@ -284,7 +319,17 @@ impl App {
                 });
                 self.show_notice_for('\u{E768}', "Done", 1500);
             }
-            voicecmd::Command::Control(what) => {
+            voicecmd::Command::Control(what, wanted) => {
+                let current = match what {
+                    voicecmd::Toggle::Mic => self.ui.mic_muted.map(|muted| !muted),
+                    voicecmd::Toggle::WiFi => self.ui.radios.wifi,
+                    voicecmd::Toggle::Bluetooth => self.ui.radios.bluetooth,
+                    voicecmd::Toggle::Theme => Some(self.ui.dark),
+                    voicecmd::Toggle::Lock => None,
+                };
+                if wanted.is_some() && wanted == current {
+                    return self.show_notice_for('\u{E73E}', "Already like that", 1800);
+                }
                 self.run_ctl(match what {
                     voicecmd::Toggle::Mic => view::Ctl::Mic,
                     voicecmd::Toggle::WiFi => view::Ctl::WiFi,

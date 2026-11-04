@@ -361,6 +361,7 @@ impl App {
             self.settings.save();
             self.ui.cfg = self.settings.clone();
             ai::configure(&self.settings.ai);
+            self.restart_wake();
         }
     }
 
@@ -372,6 +373,7 @@ impl App {
         self.settings.save();
         self.ui.cfg = self.settings.clone();
         ai::configure(&self.settings.ai);
+        self.restart_wake();
         self.sync_voice_fields();
         self.notify(Notice::Integrations, '\u{E73E}', "Command name saved");
     }

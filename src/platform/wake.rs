@@ -13,8 +13,8 @@ use crate::platform::dictation;
 pub const WM_WAKE: u32 = WM_APP + 80;
 
 pub const RUNTIME_VERSION: &str = "1.13.5";
-const SCORE: f32 = 2.8;
-const THRESHOLD: f32 = 0.12;
+const SCORE: f32 = 3.2;
+const THRESHOLD: f32 = 0.09;
 const GATE_RMS: f32 = 0.003;
 const HANGOVER_CHUNKS: u32 = 36;
 const SAMPLE_RATE: i32 = 16_000;
@@ -30,6 +30,7 @@ pub const FILES: [&str; 6] = [
 
 static LISTENING: AtomicBool = AtomicBool::new(false);
 static WANTED: AtomicBool = AtomicBool::new(false);
+static PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub fn dir() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("APPDATA")?).join("NightIsland").join("wake"))
@@ -121,6 +122,7 @@ pub fn keywords_text(wake_words: &[String], vocab: &HashMap<String, ()>) -> Stri
     for word in wake_words {
         for spoken in translit(word) {
             let Some(body) = tokenize(&spoken, vocab) else { continue };
+            lines.push(format!("{} :{SCORE} #{THRESHOLD} @{spoken}", body.join(" ")));
             for greeting in GREETINGS {
                 let Some(head) = tokenize(greeting, vocab) else { continue };
                 let label: String = format!("{greeting}_{spoken}").replace(' ', "_");
@@ -304,6 +306,11 @@ impl Detector {
         Some(Detector { api, spotter, stream, hangover: 0 })
     }
 
+    fn clear(&mut self) {
+        self.hangover = 0;
+        unsafe { (self.api.reset)(self.spotter, self.stream) };
+    }
+
     fn feed(&mut self, chunk: &[i16]) -> bool {
         let floats: Vec<f32> = chunk.iter().map(|&s| f32::from(s) / 32768.0).collect();
         if rms(&floats) >= GATE_RMS {
@@ -361,21 +368,31 @@ pub fn start(hwnd: HWND, wake_words: Vec<String>) -> bool {
         return true;
     }
     WANTED.store(true, Ordering::SeqCst);
+    PAUSED.store(false, Ordering::SeqCst);
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
         let vocab = std::fs::read_to_string(root.join("model/tokens.txt")).map(|t| load_vocab(&t)).unwrap_or_default();
         let keywords = keywords_text(&wake_words, &vocab);
         if let Some(mut detector) = Detector::new(&root, &keywords).filter(|_| !keywords.is_empty()) {
+            let mut was_paused = false;
             let _ = dictation::stream(|chunk| {
                 if !WANTED.load(Ordering::SeqCst) {
                     return false;
                 }
+                let paused = PAUSED.load(Ordering::SeqCst);
+                if paused {
+                    was_paused = true;
+                    return true;
+                }
+                if was_paused {
+                    was_paused = false;
+                    detector.clear();
+                }
                 if detector.feed(chunk) {
-                    WANTED.store(false, Ordering::SeqCst);
+                    PAUSED.store(true, Ordering::SeqCst);
                     unsafe {
                         let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_WAKE, WPARAM(0), LPARAM(0));
                     }
-                    return false;
                 }
                 true
             });
@@ -387,6 +404,14 @@ pub fn start(hwnd: HWND, wake_words: Vec<String>) -> bool {
 
 pub fn stop() {
     WANTED.store(false, Ordering::SeqCst);
+}
+
+pub fn pause() {
+    PAUSED.store(true, Ordering::SeqCst);
+}
+
+pub fn resume() {
+    PAUSED.store(false, Ordering::SeqCst);
 }
 
 #[cfg(test)]
@@ -420,7 +445,8 @@ mod tests {
         let v = vocab();
         let text = keywords_text(&["Island".to_string()], &v);
         assert!(text.lines().count() >= 2);
-        assert!(text.lines().all(|l| l.contains(" :2.8 #0.12 @")));
+        assert!(text.lines().all(|l| l.contains(&format!(" :{SCORE} #{THRESHOLD} @"))));
+        assert!(text.lines().any(|l| l.starts_with("▁а й ле н д ")), "the bare word is a call too");
         assert!(text.contains("▁х ей ▁а й ле н д"));
         assert!(text.contains("▁ис ла н д"));
         assert!(keywords_text(&["Жжж".to_string()], &v).is_empty());

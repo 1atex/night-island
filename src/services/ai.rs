@@ -28,7 +28,7 @@ const CHAT_TURNS: usize = 24;
 pub const WM_CHAT: u32 = WM_APP + 24;
 
 pub const WM_COMMAND: u32 = WM_APP + 30;
-const COMMAND_OUTPUT_TOKENS: u32 = 200;
+const COMMAND_OUTPUT_TOKENS: u32 = 1500;
 
 pub const WM_SORT: u32 = WM_APP + 31;
 pub const SORT_REQUESTS_PER_DAY: u32 = 5;
