@@ -51,7 +51,7 @@ fn moving_pets_and_custom_ears_fit_the_attached_canvas() -> Result<()> {
     );
     let mut clipped = Vec::new();
     for (character, design) in designs {
-        for frame in 0..12 {
+        for frame in 0..48 {
             let pose = Pose {
                 t: frame as f32 * 0.65,
                 look: ((frame as f32).sin(), (frame as f32).cos()),
@@ -67,6 +67,14 @@ fn moving_pets_and_custom_ears_fit_the_attached_canvas() -> Result<()> {
                 blink: false,
                 accent: (0.6, 0.7, 1.0),
                 motion: Motion {
+                    behavior: super::super::pet_behavior::BehaviorPose {
+                        walk: if frame / 12 == 1 { 1.0 } else { 0.0 },
+                        stride: frame as f32 * 0.6,
+                        facing: if frame % 2 == 0 { -1.0 } else { 1.0 },
+                        sit: if frame / 12 >= 2 { 1.0 } else { 0.0 },
+                        sleep: if frame / 12 == 3 { 1.0 } else { 0.0 },
+                    },
+                    mouth: if frame % 3 == 0 { 1.0 } else { 0.0 },
                     lean: if frame % 2 == 0 { 0.15 } else { -0.15 },
                     stretch: if frame % 2 == 0 { 0.1 } else { -0.08 },
                     ..Default::default()
@@ -95,6 +103,7 @@ fn moving_pets_and_custom_ears_fit_the_attached_canvas() -> Result<()> {
     }
     assert!(clipped.is_empty(), "{}", clipped.join("; "));
     if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
+        save_behavior_preview(&gpu, &std::path::PathBuf::from(&dir))?;
         let folder = std::path::PathBuf::from(dir).join("animation");
         std::fs::create_dir_all(&folder).unwrap();
         let frame_surface = PopupSurface::new((600, 154))?;
@@ -173,5 +182,101 @@ fn moving_pets_and_custom_ears_fit_the_attached_canvas() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn save_behavior_preview(gpu: &Gpu, folder: &std::path::Path) -> Result<()> {
+    use crate::ui::pet_behavior::{Activity, Environment, PetBehavior};
+    let folder = folder.join("behavior-animation");
+    std::fs::create_dir_all(&folder).unwrap();
+    let surface = PopupSurface::new((600, 150))?;
+    let mut pet = PetBehavior::new(42);
+    let mut env = Environment {
+        dt: 1.0 / 30.0,
+        enabled: true,
+        reduced_motion: false,
+        engaged: false,
+        held: false,
+        position: [70.0, 0.0],
+        bounds: [8.0, 0.0, 96.0, 0.0],
+        scale: 1.0,
+    };
+    let mut stage = 0;
+    let mut resting_frames = 0;
+    let mut sleeping_frames = 0;
+    let mut image = 0;
+    for tick in 0..5000 {
+        let frame = pet.advance(&env);
+        if let Some(position) = frame.position {
+            env.position = position;
+        }
+        if stage == 0 && frame.activity == Activity::Walking {
+            stage = 1;
+        }
+        if stage == 1 && frame.activity == Activity::Sitting {
+            stage = 2;
+        }
+        if stage == 2 {
+            resting_frames += 1;
+            if resting_frames > 45 {
+                stage = 3;
+            }
+        }
+        if stage == 3 && frame.activity == Activity::Sleeping {
+            stage = 4;
+        }
+        if stage == 4 {
+            sleeping_frames += 1;
+            if sleeping_frames > 60 {
+                break;
+            }
+        }
+        if !matches!(stage, 1 | 2 | 4) {
+            continue;
+        }
+        let pose = Pose {
+            t: tick as f32 / 30.0,
+            reaction: if stage == 4 { Reaction::Sleep } else { Reaction::Idle },
+            look: (frame.pose.facing * frame.pose.walk * 0.6, 0.0),
+            blink: false,
+            accent: (0.6, 0.7, 1.0),
+            beat: 0.0,
+            motion: Motion { behavior: frame.pose, ..Default::default() },
+        };
+        surface.paint(gpu, |p| {
+            p.fill_rect((0.0, 0.0, 600.0, 150.0), rgba(0.055, 0.059, 0.075, 1.0))?;
+            for (i, character) in [Character::Spark, Character::Cat, Character::Bear].into_iter().enumerate() {
+                let x = i as f32 * 200.0;
+                let old = p.push_offset(x + env.position[0], 18.0);
+                let result = draw_with_design(p, character, 96.0, &pose, None);
+                p.set_transform(&old);
+                result?;
+                p.text(
+                    match stage {
+                        1 => "Гуляет",
+                        2 => "Отдыхает",
+                        _ => "Спит",
+                    },
+                    (x, 110.0, x + 200.0, 138.0),
+                    13.0,
+                    DWRITE_FONT_WEIGHT_BOLD,
+                    DWRITE_TEXT_ALIGNMENT_CENTER,
+                    rgba(0.9, 0.9, 0.94, 1.0),
+                )?;
+            }
+            Ok(())
+        })?;
+        let mut rgba = surface.pixels();
+        for pixel in rgba.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        let mut encoder =
+            png::Encoder::new(std::fs::File::create(folder.join(format!("{image:03}.png"))).unwrap(), 600, 150);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
+        image += 1;
+    }
+    assert_eq!(sleeping_frames, 61);
     Ok(())
 }

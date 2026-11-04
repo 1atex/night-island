@@ -89,6 +89,7 @@ pub enum Sid {
     Character,
     CharacterDetached,
     PetPerformance,
+    PetAutonomy,
     RecFormat,
     RecFps,
     RecSystem,
@@ -307,6 +308,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::GhostThrough => c.ghost_click_through,
         Sid::GhostHold => c.ghost_hold,
         Sid::CharacterDetached => c.character_detached,
+        Sid::PetAutonomy => c.pet_autonomy,
         Sid::Spikes => c.edge_spikes,
         Sid::PillWeather => c.pill_weather,
         Sid::MusicEq => c.music_eq,
@@ -368,6 +370,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::GhostMode => c.ghost_mode = on,
         Sid::GhostThrough => c.ghost_click_through = on,
         Sid::GhostHold => c.ghost_hold = on,
+        Sid::PetAutonomy => c.pet_autonomy = on,
         Sid::CharacterDetached => {
             c.character_detached = on;
             if on && c.character == crate::ui::characters::Character::None {

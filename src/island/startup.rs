@@ -361,6 +361,14 @@ impl App {
                 spectrum_scale: [0.0; audio::BANDS],
             },
             pet: Pet {
+                behavior: crate::ui::pet_behavior::PetBehavior::new(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_nanos(),
+                ),
+                speech: Default::default(),
+                speech_cue: Default::default(),
                 motion: Default::default(),
                 controls_at: Instant::now(),
                 cursor: None,

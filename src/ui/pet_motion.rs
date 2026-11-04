@@ -68,6 +68,8 @@ impl PetPerformance {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Motion {
+    pub behavior: super::pet_behavior::BehaviorPose,
+    pub mouth: f32,
     pub lean: f32,
     pub stretch: f32,
     pub warmth: f32,

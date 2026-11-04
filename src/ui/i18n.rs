@@ -83,6 +83,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Custom pet" => "Свой питомец",
         "My pet" => "Мой питомец",
         "Pet animation quality" => "Анимация питомца",
+        "Pet walks, rests and sleeps on its own" => "Самостоятельные прогулки, отдых и сон",
         "Pet: reduced motion" => "Без движения",
         "Pet: economical · up to 20 FPS" => "Экономно · до 20 FPS",
         "Pet: balanced · up to 30 FPS" => "Баланс · до 30 FPS",
@@ -348,7 +349,10 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "Enter to send · Shift+Enter for a new line" => "Enter — отправить · Shift+Enter — новая строка",
         "Connect your AI provider in AI settings." => "Подключите нейросеть в настройках ИИ.",
-        "Let the character roam the desktop" => "Выпустить персонажа на рабочий стол",
+        "Release the pet from the island" => "Выпустить питомца на рабочий стол",
+        "Pets pause near the pointer and during chat. Reduced motion stops walking." => {
+            "Рядом с курсором и во время чата питомец останавливается. Режим «Без движения» отключает прогулки."
+        }
         "Release character" => "Выпустить персонажа",
         "Click or drag to release the character" => "Нажмите или потяните, чтобы выпустить персонажа",
         "Click for mini AI chat, right-click to hide/show the island. Drag to move." => {

@@ -116,6 +116,7 @@ impl App {
             return;
         }
         self.gaming = on;
+        self.pet.behavior.suspend();
         self.pet.char_key = None;
         self.sync_mixer();
         if on {

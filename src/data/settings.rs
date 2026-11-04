@@ -425,6 +425,7 @@ pub struct Settings {
     pub record_mic: bool,
     pub character: Character,
     pub pet_performance: crate::ui::pet_motion::PetPerformance,
+    pub pet_autonomy: bool,
     pub custom_pet: crate::ui::pet_design::PetDesign,
     #[serde(alias = "spark_detached")]
     pub character_detached: bool,
@@ -531,6 +532,7 @@ impl Default for Settings {
             record_mic: true,
             character: Character::Spark,
             pet_performance: Default::default(),
+            pet_autonomy: true,
             custom_pet: Default::default(),
             character_detached: false,
             character_pos: None,
@@ -1074,15 +1076,18 @@ mod tests {
         let legacy: Settings = serde_json::from_str(r#"{"character":"spark"}"#).unwrap();
         assert_eq!(legacy.character, Character::Spark);
         assert_eq!(legacy.pet_performance, PetPerformance::Balanced);
+        assert!(legacy.pet_autonomy);
         for performance in PetPerformance::ALL {
             let mut settings =
                 Settings { character: Character::Custom, pet_performance: performance, ..Default::default() };
+            settings.pet_autonomy = false;
             settings.custom_pet.name = "Мишка".into();
             settings.custom_pet.ear_size = 40.0;
             settings.sanitize();
             let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
             assert_eq!(restored.character, Character::Custom);
             assert_eq!(restored.pet_performance, performance);
+            assert!(!restored.pet_autonomy);
             assert_eq!(restored.custom_pet, settings.custom_pet);
             assert_eq!(restored.custom_pet.ear_size, 1.25);
         }

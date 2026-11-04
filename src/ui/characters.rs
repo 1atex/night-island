@@ -84,14 +84,19 @@ impl Pose {
 
     fn bob(&self) -> f32 {
         let t = self.t;
-        match self.reaction {
+        let gait = self.motion.behavior;
+        if gait.walk > 0.05 {
+            return -(gait.stride * 2.0).cos().abs() * 0.45 * gait.walk;
+        }
+        let bob = match self.reaction {
             Reaction::Idle => (t * 1.8).sin() * 0.15,
             Reaction::Music => -self.beat * 1.0 + (t * 9.0).sin() * 0.4,
             Reaction::Done => -(t * 5.0).sin().abs() * 1.1,
             Reaction::Attention => 0.0,
             Reaction::File => (t * 7.0).sin() * 1.0,
             Reaction::Sleep => (t * 1.0).sin() * 0.45,
-        }
+        };
+        bob * (1.0 - gait.sit * 0.7)
     }
 
     fn shake(&self) -> f32 {
@@ -141,6 +146,9 @@ fn shape(p: &Painter, s: f32, start: (f32, f32), curves: &[[(f32, f32); 3]], col
 }
 
 fn smile(p: &Painter, s: f32, pose: &Pose, x: f32, y: f32, width: f32, color: Rgb) -> Result<()> {
+    if pose.motion.mouth > 0.02 {
+        return lit(p, s, (x, y + 0.35, width * 0.7, 0.35 + pose.motion.mouth * 1.25), color);
+    }
     let joy = if pose.reaction == Reaction::Done { 1.0 } else { pose.motion.warmth };
     let depth = 0.45 + joy * 0.8;
     curve(
@@ -172,11 +180,23 @@ pub fn draw_with_design(
         pose.beat = 0.0;
         pose.look = (0.0, 0.0);
         pose.blink = false;
-        pose.motion = super::pet_motion::Motion { still: true, ..Default::default() };
+        pose.motion = super::pet_motion::Motion {
+            still: true,
+            behavior: super::pet_behavior::BehaviorPose {
+                sit: pose.motion.behavior.sit,
+                sleep: pose.motion.behavior.sleep,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
     }
+    let gait = pose.motion.behavior;
     let breathing = if pose.motion.still { 0.0 } else { (pose.t * 1.65).sin() * 0.015 };
-    let (sx, sy) = (1.0 + breathing - pose.motion.stretch * 0.45, 1.0 - breathing + pose.motion.stretch);
-    let angle = pose.motion.lean;
+    let (sx, sy) = (
+        1.0 + breathing - pose.motion.stretch * 0.45 + gait.sit * 0.035 + gait.sleep * 0.08,
+        1.0 - breathing + pose.motion.stretch - gait.sit * 0.13 - gait.sleep * 0.16,
+    );
+    let angle = pose.motion.lean + gait.facing * gait.walk * 0.035 - gait.sleep * 0.08;
     let (sin, cos) = angle.sin_cos();
     let (cx, cy) = (20.0 * s, 24.0 * s);
     let mut transform = windows_numerics::Matrix3x2 {
@@ -240,7 +260,7 @@ fn drawing_bounds(
             let radius = 11.6 + if pose.reaction == Reaction::Music { pose.beat * 0.9 } else { 0.0 };
             (cx - radius, cy - 2.0 - radius, cx + radius, cy - 2.0 + radius)
         }
-        Character::Cat => (cx - 11.5, cy - 14.0, cx + 11.5, cy + 10.1),
+        Character::Cat => (cx - 11.5, cy - 14.0, cx + 11.5, cy + 10.1 + pose.motion.behavior.walk * 1.4),
         Character::Robot => {
             let glow = if pose.reaction == Reaction::Music { 1.8 + pose.beat * 1.4 } else { 1.8 };
             (cx - 12.0, cy - 13.2 - glow, cx + 12.0, cy + 8.0)
@@ -258,7 +278,12 @@ fn drawing_bounds(
                 PetBody::Robot => cy - 10.6 - 0.35,
                 PetBody::Ghost => cy - 7.9,
             };
-            (cx - half, top, cx + half.max(if pet.tail { width + 5.9 } else { 0.0 }), cy + 14.1)
+            (
+                cx - half,
+                top,
+                cx + half.max(if pet.tail { width + 5.9 } else { 0.0 }),
+                cy + 14.1 + pose.motion.behavior.walk * 1.5,
+            )
         }
         _ => (5.0, 3.0 + pose.bob(), 35.0, 28.0 + pose.bob()),
     };
@@ -337,8 +362,11 @@ fn draw_pixel(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
     };
     let cell = 2.0 * s;
     let (ox, oy) = ((BOX_W - 22.0) / 2.0 * s + pose.shake() * s, (BOX_H - 16.0) / 2.0 * s + pose.bob() * s);
-    let moving = pose.lively();
-    let frame_b = moving && ((pose.t * 4.0) as i32) % 2 == 1;
+    let frame_b = if pose.motion.behavior.walk > 0.05 {
+        pose.motion.behavior.stride.sin() > 0.0
+    } else {
+        pose.lively() && ((pose.t * 4.0) as i32) % 2 == 1
+    };
     for (row, line) in BODY.iter().enumerate() {
         let line = if row == 7 && frame_b { LEGS_B } else { line };
         for (col, ch) in line.chars().enumerate() {
@@ -366,6 +394,10 @@ fn draw_pixel(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
             let (px, py) = (x + cell * 0.25 + pose.look.0 * cell * 0.3, y + cell * 0.25 + pose.look.1 * cell * 0.3);
             p.fill_rect((px, py, px + cell * 0.55, py + cell * 0.55), c(WHITE, 1.0))?;
         }
+    }
+    if pose.motion.mouth > 0.02 {
+        let (x, y) = (ox + 4.5 * cell, oy + 5.4 * cell);
+        p.fill_rect((x, y, x + 2.0 * cell, y + (0.4 + pose.motion.mouth) * cell), c(DARK, 1.0))?;
     }
     zzz(p, s, pose)
 }
@@ -404,7 +436,7 @@ fn draw_eyes(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
         if pose.reaction == Reaction::Sleep || pose.blink {
             curve(p, s, [(x - 3.6, cy), (x - 1.5, cy + 1.5), (x + 1.5, cy + 1.5), (x + 3.6, cy)], 1.4, WHITE, 0.9)?;
         } else {
-            let height = 6.4 * (1.0 - pose.motion.lid * 0.9);
+            let height = 6.4 * (1.0 - pose.motion.lid * 0.9 - pose.motion.mouth * 0.12);
             lit(p, s, (x, cy, 4.55, height), (0.94, 0.95, 0.99))?;
             let mut gaze = *pose;
             gaze.look.0 *= 1.25;
@@ -445,7 +477,13 @@ fn draw_cat(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
             pink,
             0.85,
         )?;
-        lit(p, s, (cx + sign * 6.4, cy + 8.4, 3.2, 1.6), fur)?;
+        let step = pose.motion.behavior.stride.sin() * pose.motion.behavior.walk * sign;
+        lit(
+            p,
+            s,
+            (cx + sign * (6.4 + pose.motion.behavior.sit * 0.4) + step * 0.8, cy + 8.4 + step * 1.4, 3.2, 1.6),
+            fur,
+        )?;
     }
     lit(p, s, (cx, cy, 11.5, 8.9), fur)?;
     lit(p, s, (cx, cy + 3.3, 5.9, 3.6), (0.98, 0.97, 0.97))?;
@@ -531,7 +569,13 @@ fn draw_robot(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
         }
     }
     for x in [-1.6, 0.0, 1.6] {
-        p.fill_ellipse((cx + x) * s, (cy + 4.0) * s, 0.32 * s, 0.32 * s, c(beam, 0.55))?;
+        p.fill_ellipse(
+            (cx + x) * s,
+            (cy + 4.0) * s,
+            0.32 * s,
+            (0.32 + pose.motion.mouth * (1.1 - x.abs() * 0.25)) * s,
+            c(beam, 0.55),
+        )?;
     }
     p.line((cx * s, (cy - 8.0) * s), (cx * s, (cy - 12.5) * s), 1.3 * s, c(metal, 1.0))?;
     let tip = if pose.reaction == Reaction::Music { pose.mood(WHITE) } else { (1.0, 0.72, 0.28) };
@@ -635,9 +679,18 @@ fn draw_designed(p: &Painter, s: f32, pose: &Pose, design: &super::pet_design::P
         lit(p, s, (cx, cy + 7.3, width * 0.78, 6.8 + breathe * 0.12), fur)?;
         lit(p, s, (cx, cy + 7.5, width * 0.48, 4.5), belly)?;
         for sign in [-1.0, 1.0] {
-            lit(p, s, (cx + sign * width * 0.58, cy + 12.0, 3.0, 1.9), fur)?;
-            p.fill_ellipse((cx + sign * width * 0.58) * s, (cy + 12.3) * s, 1.45 * s, 0.7 * s, c(belly, 0.30))?;
-            let paw = if pose.motion.warmth > 0.2 { (pose.t * 5.0).sin() * pose.motion.warmth } else { breathe * 0.15 };
+            let step = pose.motion.behavior.stride.sin() * pose.motion.behavior.walk * sign;
+            let foot_x = cx + sign * width * (0.58 + pose.motion.behavior.sit * 0.06) + step;
+            let foot_y = cy + 12.0 + step * 1.5;
+            lit(p, s, (foot_x, foot_y, 3.0, 1.9), fur)?;
+            p.fill_ellipse(foot_x * s, (foot_y + 0.3) * s, 1.45 * s, 0.7 * s, c(belly, 0.30))?;
+            let paw = if pose.motion.behavior.walk > 0.0 {
+                -step * 1.1
+            } else if pose.motion.warmth > 0.2 {
+                (pose.t * 5.0).sin() * pose.motion.warmth
+            } else {
+                breathe * 0.15
+            };
             p.fill_ellipse((cx + sign * width * 0.84) * s, (cy + 6.0 + paw) * s, 2.1 * s, 3.1 * s, c(fur, 1.0))?;
         }
     }
@@ -691,9 +744,19 @@ fn draw_designed(p: &Painter, s: f32, pose: &Pose, design: &super::pet_design::P
     eye(p, s, pose, cx - 3.9, cy - 0.65, 1.35, 1.9, eyes)?;
     eye(p, s, pose, cx + 3.9, cy - 0.65, 1.35, 1.9, eyes)?;
     if design.body == PetBody::Ghost {
-        p.fill_ellipse(cx * s, (cy + 4.0) * s, 1.3 * s, (1.2 + pose.motion.warmth * 0.4) * s, c(eyes, 0.9))?;
+        p.fill_ellipse(
+            cx * s,
+            (cy + 4.0) * s,
+            1.3 * s,
+            (1.2 + pose.motion.warmth * 0.4 + pose.motion.mouth) * s,
+            c(eyes, 0.9),
+        )?;
     } else if design.body == PetBody::Robot {
-        p.line(((cx - 2.0) * s, (cy + 3.4) * s), ((cx + 2.0) * s, (cy + 3.4) * s), s, c(accent, 1.0))?;
+        p.fill_round_rect(
+            ((cx - 2.0) * s, (cy + 3.0 - pose.motion.mouth) * s, (cx + 2.0) * s, (cy + 3.8 + pose.motion.mouth) * s),
+            0.4 * s,
+            c(accent, 1.0),
+        )?;
     } else {
         lit(p, s, (cx, cy + 2.65, 1.45, 0.9), eyes)?;
         p.fill_ellipse((cx - 0.35) * s, (cy + 2.3) * s, 0.45 * s, 0.18 * s, c(WHITE, 0.24))?;

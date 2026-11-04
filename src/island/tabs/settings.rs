@@ -114,7 +114,7 @@ impl App {
                     crate::ui::i18n::set_ru(self.settings.language == crate::data::settings::Language::Ru);
                     self.repaint_collapsed();
                 }
-                Character | CharacterDetached | PetPerformance => {
+                Character | CharacterDetached | PetPerformance | PetAutonomy => {
                     self.apply_character();
                     self.sync_pet_studio();
                 }

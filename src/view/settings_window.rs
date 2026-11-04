@@ -23,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 14] = [
+const ISLAND: [(Sid, &str, Kind); 15] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -33,8 +33,9 @@ const ISLAND: [(Sid, &str, Kind); 14] = [
     (Sid::Edge, "Edge", Kind::Cycle),
     (Sid::Style, "Shape", Kind::Segment(["Flat", "Liquid"])),
     (Sid::Character, "Character", Kind::Cycle),
-    (Sid::CharacterDetached, "Let the character roam the desktop", Kind::Toggle),
+    (Sid::CharacterDetached, "Release the pet from the island", Kind::Toggle),
     (Sid::PetPerformance, "Pet animation quality", Kind::Cycle),
+    (Sid::PetAutonomy, "Pet walks, rests and sleeps on its own", Kind::Toggle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
     (Sid::CloseDelay, "Close delay", Kind::Slider),
@@ -151,7 +152,7 @@ pub const GROUPS: [Group; 15] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (12, "Open and close")],
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (13, "Open and close")],
     },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None, sections: &[] },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items), sections: &[] },
@@ -848,6 +849,9 @@ fn rows_with_sections(group: &Group) -> Vec<Item> {
             out.push(Item::Section(title));
         }
         out.push(Item::Row(id, label, kind));
+        if id == Sid::PetAutonomy {
+            out.push(Item::Note("Pets pause near the pointer and during chat. Reduced motion stops walking."));
+        }
     }
     out
 }
@@ -1490,11 +1494,26 @@ mod tests {
         toggle_set(Sid::CharacterDetached, &mut ui.cfg, true);
         assert!(ui.cfg.character_detached);
         assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
-        ui.sw.search = "roam".into();
+        ui.sw.search = "release".into();
         assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::CharacterDetached, ..))));
         toggle_set(Sid::CharacterDetached, &mut ui.cfg, false);
         assert!(!ui.cfg.character_detached);
         assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
+    }
+
+    #[test]
+    fn pet_autonomy_can_be_disabled_without_docking_or_changing_the_pet() {
+        let mut ui = UiState::new();
+        ui.cfg.character_detached = true;
+        let character = ui.cfg.character;
+        toggle_set(Sid::PetAutonomy, &mut ui.cfg, false);
+        assert!(!toggle_get(Sid::PetAutonomy, &ui.cfg));
+        assert!(ui.cfg.character_detached);
+        assert_eq!(ui.cfg.character, character);
+        ui.sw.search = "sleeps".into();
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::PetAutonomy, ..))));
+        toggle_set(Sid::PetAutonomy, &mut ui.cfg, true);
+        assert!(toggle_get(Sid::PetAutonomy, &ui.cfg));
     }
 
     #[test]

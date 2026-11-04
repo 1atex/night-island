@@ -324,6 +324,58 @@ impl CompanionWindow {
         (x as f32 + self.surface.side as f32 / 2.0, y as f32 + self.surface.side as f32 / 2.0)
     }
 
+    pub fn walking_bounds(&self) -> [f32; 4] {
+        let [x, y] = self.position();
+        unsafe {
+            let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if GetMonitorInfoW(monitor, &mut info).as_bool() {
+                let work = info.rcWork;
+                return [
+                    work.left as f32,
+                    work.top as f32,
+                    (work.right - self.surface.side).max(work.left) as f32,
+                    (work.bottom - self.surface.side).max(work.top) as f32,
+                ];
+            }
+        }
+        [x as f32, y as f32, x as f32, y as f32]
+    }
+
+    pub fn controls_visible(&self) -> bool {
+        self.controls.as_ref().is_some_and(|controls| unsafe { IsWindowVisible(controls.hwnd()).as_bool() })
+    }
+
+    pub fn pointer_near(&self, cursor: (i32, i32)) -> bool {
+        let (cx, cy) = self.center();
+        let reach = self.surface.side as f32 * 0.8;
+        (cursor.0 as f32 - cx).abs() <= reach && (cursor.1 as f32 - cy).abs() <= reach
+    }
+
+    pub fn walk_to(&self, position: [f32; 2]) {
+        if self.grabbed() || self.controls_visible() {
+            return;
+        }
+        let bounds = self.walking_bounds();
+        let target = [
+            position[0].clamp(bounds[0], bounds[2]).round() as i32,
+            position[1].clamp(bounds[1], bounds[3]).round() as i32,
+        ];
+        if target != self.position() {
+            unsafe {
+                let _ = SetWindowPos(
+                    self.hwnd,
+                    None,
+                    target[0],
+                    target[1],
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER,
+                );
+            }
+        }
+    }
+
     pub fn begin_drag(&mut self, cursor: POINT, island: (f32, f32, f32, f32)) {
         let side = self.surface.side;
         let origin = POINT { x: cursor.x - side / 2, y: cursor.y - side / 2 };
@@ -727,8 +779,17 @@ mod tests {
             1.0,
         )?;
         assert!(unsafe { IsWindowVisible(panel) }.as_bool());
+        let before = spark.position();
+        spark.walk_to([before[0] as f32 + 40.0, before[1] as f32]);
+        assert_eq!(spark.position(), before, "An open player must keep its pet anchored");
         spark.update_controls_at(POINT::default(), false, &media, None, 1.0)?;
         assert!(!unsafe { IsWindowVisible(panel) }.as_bool());
+        let bounds = spark.walking_bounds();
+        let foreground = unsafe { GetForegroundWindow() };
+        spark.walk_to([bounds[2] + 200.0, bounds[3] + 200.0]);
+        assert_eq!(spark.position(), [bounds[2] as i32, bounds[3] as i32]);
+        assert_eq!(unsafe { GetForegroundWindow() }, foreground, "Walking must never steal focus");
+        spark.walk_to(before.map(|v| v as f32));
         for work in
             [RECT { left: 0, top: 0, right: 500, bottom: 500 }, RECT { left: -1920, top: 0, right: 0, bottom: 1040 }]
         {
@@ -772,6 +833,9 @@ mod tests {
         spark.begin_drag(POINT { x: 420, y: 380 }, (400.0, 363.0, 200.0, 34.0));
         assert!(spark.dragging());
         assert!(spark.grabbed());
+        let held_position = spark.position();
+        spark.walk_to([held_position[0] as f32 + 100.0, held_position[1] as f32]);
+        assert_eq!(spark.position(), held_position);
         assert!(!spark.can_dock());
         assert_eq!(spark.center(), (420.0, 380.0));
         assert_eq!(unsafe { GetCapture() }, spark.hwnd());
@@ -792,6 +856,9 @@ mod tests {
             GetWindowRect(spark.hwnd(), &mut rect)?;
         }
         assert_eq!(rect.right - rect.left, 110);
+        let (cx, cy) = spark.center();
+        assert!(spark.pointer_near((cx as i32 + 70, cy as i32)));
+        assert!(!spark.pointer_near((cx as i32 + 140, cy as i32)));
         let hwnd = spark.hwnd();
         drop(spark);
         assert!(!unsafe { IsWindow(Some(hwnd)) }.as_bool());
