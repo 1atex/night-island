@@ -12,11 +12,13 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE, OPEN_EXISTING, ReadFile, WriteFile,
 };
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
+use windows::Win32::System::Pipes::GetNamedPipeServerProcessId;
 use windows::Win32::System::Threading::{
-    CreateEventW, INFINITE, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
+    CreateEventW, INFINITE, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use crate::services::http::{self, pct};
 use crate::services::integrations;
@@ -54,6 +56,9 @@ pub struct State {
     pub members: Vec<Member>,
     pub self_mute: bool,
     pub self_deaf: bool,
+    pub voice_available: bool,
+    pub voice_error: Option<String>,
+    pub client_path: String,
     pub note: (String, String),
     pub note_seq: u32,
 }
@@ -64,6 +69,9 @@ static STATE: Mutex<State> = Mutex::new(State {
     members: Vec::new(),
     self_mute: false,
     self_deaf: false,
+    voice_available: false,
+    voice_error: None,
+    client_path: String::new(),
     note: (String::new(), String::new()),
     note_seq: 0,
 });
@@ -98,12 +106,31 @@ pub fn state() -> State {
 fn update(f: impl FnOnce(&mut State)) {
     if let Ok(mut g) = STATE.lock() {
         f(&mut g);
+        if g.status != Status::Connected {
+            g.voice_available = false;
+            g.voice_error = None;
+        }
     }
     let raw = HWND_RAW.load(Ordering::Relaxed);
     if raw != 0 {
         unsafe {
             let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_DISCORD, WPARAM(0), LPARAM(0));
         }
+    }
+}
+
+fn apply_voice_reply(state: &mut State, data: &Value, confirmed: bool) {
+    let mute = data["mute"].as_bool();
+    let deaf = data["deaf"].as_bool();
+    if let Some(mute) = mute {
+        state.self_mute = mute;
+    }
+    if let Some(deaf) = deaf {
+        state.self_deaf = deaf;
+    }
+    if confirmed {
+        state.voice_available = mute.is_some() && deaf.is_some();
+        state.voice_error = (!state.voice_available).then(|| "Discord did not return voice settings".into());
     }
 }
 
@@ -238,6 +265,23 @@ impl Drop for Link {
             }
         }
         CMD_EVENT.store(0, Ordering::Relaxed);
+        update(|s| {
+            s.voice_available = false;
+            s.client_path.clear();
+        });
+    }
+}
+
+fn pipe_server_path(pipe: HANDLE) -> Option<String> {
+    unsafe {
+        let mut pid = 0;
+        GetNamedPipeServerProcessId(pipe, &mut pid).ok()?;
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buffer = [0u16; 2048];
+        let mut length = buffer.len() as u32;
+        let result = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buffer.as_mut_ptr()), &mut length);
+        let _ = CloseHandle(process);
+        result.ok().map(|_| String::from_utf16_lossy(&buffer[..length as usize]))
     }
 }
 
@@ -338,7 +382,11 @@ impl Session {
 
     fn after_login(&mut self) {
         WANT_SIGN_IN.store(false, Ordering::Relaxed);
-        update(|s| s.status = Status::Connected);
+        update(|s| {
+            s.status = Status::Connected;
+            s.voice_available = false;
+            s.voice_error = None;
+        });
         self.cmd("SUBSCRIBE", Some("VOICE_CHANNEL_SELECT"), json!({}));
         self.cmd("SUBSCRIBE", Some("VOICE_SETTINGS_UPDATE"), json!({}));
         self.cmd("SUBSCRIBE", Some("NOTIFICATION_CREATE"), json!({}));
@@ -374,6 +422,10 @@ impl Session {
                     integrations::delete_secret(SECRET_NAME);
                     update(|s| s.status = Status::Error(message));
                 }
+                "GET_VOICE_SETTINGS" | "SET_VOICE_SETTINGS" => update(|s| {
+                    s.voice_available = false;
+                    s.voice_error = Some(message);
+                }),
                 _ => {}
             }
             return;
@@ -398,13 +450,8 @@ impl Session {
                 }
             }
             ("AUTHENTICATE", _) => self.after_login(),
-            ("GET_VOICE_SETTINGS", _) | (_, "VOICE_SETTINGS_UPDATE") => {
-                let (mute, deaf) = (data["mute"].as_bool().unwrap_or(false), data["deaf"].as_bool().unwrap_or(false));
-                update(|s| {
-                    s.self_mute = mute;
-                    s.self_deaf = deaf;
-                });
-            }
+            ("GET_VOICE_SETTINGS" | "SET_VOICE_SETTINGS", _) => update(|s| apply_voice_reply(s, data, true)),
+            (_, "VOICE_SETTINGS_UPDATE") => update(|s| apply_voice_reply(s, data, false)),
             ("GET_SELECTED_VOICE_CHANNEL", _) => {
                 let (name, members) = parse_channel(data, &self.speaking);
                 if name.is_empty() {
@@ -454,6 +501,7 @@ fn run_session(
     secret: String,
 ) -> Result<(), String> {
     CMD_EVENT.store(link.ev_cmd.0 as isize, Ordering::Relaxed);
+    update(|s| s.client_path = pipe_server_path(link.handle).unwrap_or_default());
     let mut session = Session {
         client_id: client_id.clone(),
         secret,
@@ -629,18 +677,118 @@ pub fn disconnect() {
 }
 
 pub fn set_mute(on: bool) {
-    update(|s| s.self_mute = on);
+    let state = state();
+    if state.status != Status::Connected || !state.voice_available {
+        return;
+    }
     send(1, json!({ "cmd": "SET_VOICE_SETTINGS", "args": { "mute": on }, "nonce": "mute" }).to_string());
 }
 
 pub fn set_deaf(on: bool) {
-    update(|s| s.self_deaf = on);
+    let state = state();
+    if state.status != Status::Connected || !state.voice_available {
+        return;
+    }
     send(1, json!({ "cmd": "SET_VOICE_SETTINGS", "args": { "deaf": on }, "nonce": "deaf" }).to_string());
+}
+
+fn voice_target_matches(state: &State, paths: &[String]) -> bool {
+    state.status == Status::Connected
+        && state.voice_available
+        && paths.iter().any(|path| path.eq_ignore_ascii_case(&state.client_path))
+}
+
+pub(crate) fn set_voice_for(paths: &[String], mute: Option<bool>, deaf: Option<bool>) {
+    let Ok(state) = STATE.lock() else { return };
+    if !voice_target_matches(&state, paths) {
+        return;
+    }
+    let mut args = json!({});
+    if let Some(mute) = mute {
+        args["mute"] = json!(mute);
+    }
+    if let Some(deaf) = deaf {
+        args["deaf"] = json!(deaf);
+    }
+    send(1, json!({ "cmd": "SET_VOICE_SETTINGS", "args": args, "nonce": "dock-voice" }).to_string());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discord_voice_controls_require_confirmed_settings_and_preserve_denials() {
+        let mut state = State { status: Status::Connected, ..Default::default() };
+        apply_voice_reply(&mut state, &json!({ "mute": true, "deaf": false }), false);
+        assert!(!state.voice_available);
+        assert!(state.self_mute);
+        apply_voice_reply(&mut state, &json!({ "mute": true, "deaf": false }), true);
+        assert!(state.voice_available);
+        assert!(state.voice_error.is_none());
+        state.voice_available = false;
+        state.voice_error = Some("Voice settings locked".into());
+        apply_voice_reply(&mut state, &json!({ "mute": false }), false);
+        assert!(!state.voice_available);
+        assert_eq!(state.voice_error.as_deref(), Some("Voice settings locked"));
+        apply_voice_reply(&mut state, &json!({ "deaf": true }), true);
+        assert!(!state.voice_available);
+        assert!(state.voice_error.is_some());
+    }
+
+    #[test]
+    fn discord_voice_controls_reject_a_different_rpc_client() {
+        let state = State {
+            status: Status::Connected,
+            voice_available: true,
+            client_path: "C:\\DiscordCanary\\DiscordCanary.exe".into(),
+            ..Default::default()
+        };
+        assert!(!voice_target_matches(&state, &["c:\\discord\\discord.exe".into()]));
+        assert!(voice_target_matches(&state, &["c:\\discordcanary\\discordcanary.exe".into()]));
+        let unavailable = State { voice_available: false, ..state };
+        assert!(!voice_target_matches(&unavailable, std::slice::from_ref(&unavailable.client_path)));
+    }
+
+    #[test]
+    fn native_discord_voice_controls_identify_pipe_server_from_client_handle() -> windows::core::Result<()> {
+        if std::env::var_os("NI_DOCK_ACTIONS_NATIVE").is_none() {
+            return Ok(());
+        }
+        use windows::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+        use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT};
+        let name = HSTRING::from(format!(r"\\.\pipe\night-island-voice-target-test-{}", std::process::id()));
+        unsafe {
+            let server = CreateNamedPipeW(
+                &name,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                1,
+                1024,
+                1024,
+                0,
+                None,
+            );
+            assert!(!server.is_invalid());
+            let client = CreateFileW(
+                &name,
+                (GENERIC_READ | GENERIC_WRITE).0,
+                FILE_SHARE_NONE,
+                None,
+                OPEN_EXISTING,
+                FILE_FLAG_OVERLAPPED,
+                None,
+            )?;
+            let path = pipe_server_path(client);
+            let _ = CloseHandle(client);
+            let _ = CloseHandle(server);
+            assert_eq!(
+                path.map(|p| p.to_lowercase()),
+                Some(std::env::current_exe().unwrap().to_string_lossy().to_lowercase())
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn frames_are_little_endian_with_length() {

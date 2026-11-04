@@ -25,3 +25,6 @@ pub mod vpn;
 pub mod winevent;
 
 pub mod desktop_dock;
+
+pub mod dock_actions;
+pub mod window_preview;

@@ -437,8 +437,15 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
             let mute = if ui.discord.self_mute { "Unmute the microphone" } else { "Mute the microphone" };
             let deaf = if ui.discord.self_deaf { "Undeafen" } else { "Deafen" };
             let overlay = if ui.cfg.discord_overlay { "Hide the call overlay" } else { "Show the call overlay" };
-            out.push(Item::Button(Act::DiscordMute, mute.into(), true));
-            out.push(Item::Button(Act::DiscordDeaf, deaf.into(), true));
+            out.push(Item::Button(Act::DiscordMute, mute.into(), ui.discord.voice_available));
+            out.push(Item::Button(Act::DiscordDeaf, deaf.into(), ui.discord.voice_available));
+            if !ui.discord.voice_available {
+                out.push(Item::Note(if ui.discord.voice_error.is_some() {
+                    "Discord voice controls unavailable"
+                } else {
+                    "Waiting for Discord voice settings"
+                }));
+            }
             out.push(Item::Button(Act::DiscordOverlay, overlay.into(), true));
             out.push(Item::Button(Act::DiscordMain, "Disconnect".into(), true));
         }
@@ -854,6 +861,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Section("Behaviour"),
         Item::Row(Sid::DockAutoHide, "Automatically hide the dock", Kind::Toggle),
         Item::Row(Sid::DockRunning, "Show running applications", Kind::Toggle),
+        Item::Row(Sid::DockPreview, "Window previews and controls on hover", Kind::Toggle),
         Item::Row(Sid::DockFullscreen, "Hide over fullscreen applications", Kind::Toggle),
         Item::Note("Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back."),
         Item::Row(Sid::DockEconomy, "Economy animations (30 fps)", Kind::Toggle),
@@ -1509,6 +1517,7 @@ mod tests {
             Sid::DockEnabled,
             Sid::DockAutoHide,
             Sid::DockRunning,
+            Sid::DockPreview,
             Sid::DockFullscreen,
             Sid::DockEconomy,
             Sid::DockIconSize,

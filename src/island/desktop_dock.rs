@@ -157,6 +157,7 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                             .glyph('\u{E8A7}'),
                     );
                     if !entry.windows.is_empty() {
+                        items.push(Entry::item(24, &tr("Window preview and controls")).glyph('\u{E714}'));
                         items.push(
                             Entry::item(18, &format!("{} ({})…", tr("Windows"), entry.windows.len())).glyph('\u{E737}'),
                         );
@@ -274,6 +275,14 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
     }
     if command == 2 {
         import_dock(hwnd);
+        return;
+    }
+    if command == 3 {
+        with_app(|a| {
+            if let Some(group) = view::GROUPS.iter().position(|g| g.name == "Integrations") {
+                a.open_settings_at(group);
+            }
+        });
         return;
     }
     let mut request = None;
@@ -398,6 +407,15 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                 Some(17) => {
                     if let Some(entry) = &entry {
                         cmd::shell_open(&entry.pin.target, Some("runas"));
+                    }
+                }
+                Some(24) => {
+                    if let Some(entry) = &entry {
+                        with_app(|a| {
+                            if let Some(dock) = &mut a.desktop_dock {
+                                dock.show_preview(entry);
+                            }
+                        });
                     }
                 }
                 Some(22) => import_dock(hwnd),

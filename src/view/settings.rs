@@ -5,6 +5,7 @@ pub enum Sid {
     DockEnabled,
     DockAutoHide,
     DockRunning,
+    DockPreview,
     DockFullscreen,
     DockEconomy,
     DockIconSize,
@@ -353,6 +354,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::DockPreview => c.desktop_dock.hover_preview,
         Sid::DockBlur => c.desktop_dock.blur,
         Sid::DockEnabled => c.desktop_dock.enabled,
         Sid::DockAutoHide => c.desktop_dock.auto_hide,
@@ -422,6 +424,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::DockPreview => c.desktop_dock.hover_preview = on,
         Sid::DockBlur => c.desktop_dock.blur = on,
         Sid::DockEnabled => c.desktop_dock.enabled = on,
         Sid::DockAutoHide => c.desktop_dock.auto_hide = on,

@@ -29,13 +29,14 @@ use crate::view::Rect;
 pub const WM_DESKTOP_DOCK: u32 = WM_APP + 70;
 const PULSE: usize = 1;
 const FRAME: usize = 2;
+const BACKDROP_REFRESH: usize = 3;
 
 #[derive(Clone)]
 pub struct Entry {
     pub pin: Pin,
     pub pinned: bool,
     pub windows: Vec<desktop::Window>,
-    icon: Option<Arc<apps::Icon>>,
+    pub(super) icon: Option<Arc<apps::Icon>>,
 }
 
 pub enum Request {
@@ -65,6 +66,7 @@ struct State {
     origin: (i32, i32),
     rects: Vec<(usize, Rect)>,
     panel: Rect,
+    region_shapes: Vec<[i32; 6]>,
     feedback: Feedback,
     pointer: Option<(f32, f32)>,
     hover: Option<usize>,
@@ -79,6 +81,9 @@ struct State {
     menu_open: bool,
     allowed_visible: bool,
     resumed: bool,
+    preview: Option<crate::ui::dock_preview::Preview>,
+    preview_candidate: Option<(String, Instant)>,
+    capture_hidden: std::cell::Cell<bool>,
 }
 
 pub struct Dock {
@@ -91,6 +96,18 @@ fn inside(rect: Rect, point: (f32, f32)) -> bool {
 
 pub fn capacity(width: f32, scale: f32, icon: f32, zoom: f32) -> usize {
     (((width / scale - 48.0 - icon * (zoom - 1.0) * 3.0) / (icon + 12.0)).floor() as usize).clamp(2, 64)
+}
+
+fn region_shape(rect: Rect, radius: f32, padding: f32) -> [i32; 6] {
+    let diameter = ((radius + padding) * 2.0).ceil() as i32;
+    [
+        (rect.0 - padding).floor() as i32,
+        (rect.1 - padding).floor() as i32,
+        (rect.2 + padding).ceil() as i32 + 1,
+        (rect.3 + padding).ceil() as i32 + 1,
+        diameter,
+        diameter,
+    ]
 }
 
 fn create_backdrop(
@@ -124,6 +141,29 @@ impl State {
             unsafe {
                 let _ = PostMessageW(Some(self.parent), WM_DESKTOP_DOCK, WPARAM(0), LPARAM(0));
             }
+        }
+    }
+
+    fn schedule_backdrop_refresh(&self) {
+        if self.config.blur && !self.suppressed && self.backdrop.is_some() {
+            unsafe {
+                SetTimer(Some(self.hwnd), BACKDROP_REFRESH, 120, None);
+            }
+        }
+    }
+
+    fn refresh_backdrop(&self) {
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), BACKDROP_REFRESH);
+        }
+        if !self.config.blur || self.suppressed {
+            return;
+        }
+        if let Some((backdrop, _)) = &self.backdrop {
+            let _ = backdrop
+                .Compositor()
+                .and_then(|compositor| compositor.CreateHostBackdropBrush())
+                .and_then(|brush| backdrop.SetBrush(&brush));
         }
     }
 
@@ -181,7 +221,19 @@ impl State {
             entries[pinned..]
                 .sort_by_key(|e| previous.iter().position(|k| *k == key(&e.pin.target)).unwrap_or(usize::MAX));
         }
+        if previous != entries.iter().map(|entry| key(&entry.pin.target)).collect::<Vec<_>>() {
+            self.hover = None;
+            self.pointer = None;
+            self.preview_candidate = None;
+        }
         self.entries = entries;
+        if let Some(preview) = &mut self.preview {
+            if let Some(entry) = self.entries.iter().find(|e| e.pin.target == preview.target()) {
+                preview.sync_entry(entry);
+            } else {
+                preview.hide();
+            }
+        }
         self.targets.retain(|target, _| self.config.pins.iter().any(|p| p.target == *target));
         self.offset = self.offset.min(self.entries.len().saturating_sub(1));
         self.layout();
@@ -222,6 +274,7 @@ impl State {
     fn set_suppressed(&mut self, suppressed: bool) {
         if suppressed != self.suppressed {
             self.suppressed = suppressed;
+            self.hide_preview();
             self.pointer = None;
             self.hover = None;
             self.pressed = None;
@@ -229,6 +282,7 @@ impl State {
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
                 if suppressed {
+                    let _ = KillTimer(Some(self.hwnd), BACKDROP_REFRESH);
                     let _ = PostMessageW(Some(self.hwnd), WM_APP + 72, WPARAM(0), LPARAM(0));
                 }
                 SetTimer(Some(self.hwnd), PULSE, if suppressed { 500 } else { 200 }, None);
@@ -240,6 +294,7 @@ impl State {
                 let _ = backdrop.SetIsVisible(!suppressed && self.config.blur);
             }
             if !suppressed {
+                self.schedule_backdrop_refresh();
                 self.resumed = true;
                 self.scanned_at = Instant::now() - Duration::from_secs(3);
                 self.leave_at = Instant::now();
@@ -335,39 +390,37 @@ impl State {
             let _ = geometry.SetCornerRadius(Vector2 { X: 22.0 * s, Y: 22.0 * s });
         }
         let _ = self.content.paint(&self.gpu, |p| self.paint_content(p, hide));
+        let padding = 1.0 + s * 0.5;
+        let mut shapes = vec![if hide > 0.99 {
+            region_shape((0.0, height - 4.0 * s, width, height), 0.0, 0.0)
+        } else {
+            region_shape(self.panel, 22.0 * s, padding)
+        }];
+        if hide <= 0.99 {
+            for (_, rect) in &self.rects {
+                shapes.push(region_shape(*rect, 6.0 * s, 3.0 * s));
+            }
+            if hint.is_some() {
+                shapes.push(region_shape(label, 6.0 * s, padding));
+            }
+        }
+        if shapes != self.region_shapes {
+            unsafe {
+                let [left, top, right, bottom, rx, ry] = shapes[0];
+                let region = CreateRoundRectRgn(left, top, right, bottom, rx, ry);
+                for &[left, top, right, bottom, rx, ry] in &shapes[1..] {
+                    let part = CreateRoundRectRgn(left, top, right, bottom, rx, ry);
+                    CombineRgn(Some(region), Some(part), Some(region), RGN_OR);
+                    let _ = DeleteObject(part.into());
+                }
+                if SetWindowRgn(self.hwnd, Some(region), true) == 0 {
+                    let _ = DeleteObject(region.into());
+                } else {
+                    self.region_shapes = shapes;
+                }
+            }
+        }
         unsafe {
-            let r = if hide > 0.99 { (0.0, height - 4.0 * s, width, height) } else { self.panel };
-            let region = CreateRoundRectRgn(
-                r.0 as i32,
-                r.1 as i32,
-                r.2.ceil() as i32,
-                r.3.ceil() as i32,
-                (44.0 * s) as i32,
-                (44.0 * s) as i32,
-            );
-            if hide <= 0.99 {
-                for (_, rect) in &self.rects {
-                    let part = CreateRoundRectRgn(
-                        (rect.0 - 3.0 * s) as i32,
-                        (rect.1 - 3.0 * s) as i32,
-                        (rect.2 + 3.0 * s).ceil() as i32,
-                        (rect.3 + 3.0 * s).ceil() as i32,
-                        (12.0 * s) as i32,
-                        (12.0 * s) as i32,
-                    );
-                    CombineRgn(Some(region), Some(part), Some(region), RGN_OR);
-                    let _ = DeleteObject(part.into());
-                }
-                if hint.is_some() {
-                    let part =
-                        CreateRoundRectRgn(label.0 as i32, label.1 as i32, label.2 as i32, label.3 as i32, 12, 12);
-                    CombineRgn(Some(region), Some(part), Some(region), RGN_OR);
-                    let _ = DeleteObject(part.into());
-                }
-            }
-            if SetWindowRgn(self.hwnd, Some(region), false) == 0 {
-                let _ = DeleteObject(region.into());
-            }
             if self.feedback.active() {
                 SetTimer(Some(self.hwnd), FRAME, if self.config.economy { 33 } else { 16 }, None);
             } else {
@@ -473,6 +526,7 @@ impl State {
         }
         if let Some(text) = &hint
             && hide < 0.01
+            && !self.preview.as_ref().is_some_and(|p| p.is_open())
         {
             let _ = p.fill_round_rect(label, 9.0 * s, rgba(0.06, 0.06, 0.07, 0.97));
             let _ = p.text(
@@ -495,6 +549,82 @@ impl State {
         }
     }
 
+    fn hide_preview(&mut self) {
+        if let Some(preview) = &mut self.preview {
+            preview.hide();
+        }
+        self.preview_candidate = None;
+    }
+
+    fn show_preview(&mut self, entry: &Entry) {
+        let Some((_, rect)) =
+            self.rects.iter().find(|(i, _)| self.entries.get(*i).is_some_and(|e| e.pin.target == entry.pin.target))
+        else {
+            return;
+        };
+        let anchor = (
+            rect.0 + self.origin.0 as f32,
+            rect.1 + self.origin.1 as f32,
+            rect.2 + self.origin.0 as f32,
+            rect.3 + self.origin.1 as f32,
+        );
+        if let Some(preview) = &mut self.preview {
+            preview.set_capture_hidden(self.capture_hidden.get());
+            preview.show(entry, anchor, self.monitor.work, self.scale);
+        } else {
+            self.preview = crate::ui::dock_preview::Preview::new(
+                self.parent,
+                &self.gpu,
+                entry,
+                anchor,
+                self.monitor.work,
+                self.scale,
+                self.capture_hidden.get(),
+            )
+            .ok();
+        }
+        if let Some(preview) = &self.preview {
+            preview.set_capture_hidden(self.capture_hidden.get());
+        }
+        self.render();
+    }
+
+    fn update_preview(&mut self, point: POINT) {
+        if self.suppressed || self.hidden || self.pressed.is_some() || self.menu_open || !self.allowed_visible {
+            self.hide_preview();
+            return;
+        }
+        let entry = self.hover.and_then(|i| self.entries.get(i)).filter(|e| !e.windows.is_empty()).cloned();
+        if let Some(preview) = &mut self.preview {
+            let was_open = preview.is_open();
+            preview.tick(point, entry.as_ref().is_some_and(|e| e.pin.target == preview.target()));
+            if was_open != preview.is_open() {
+                self.render();
+            }
+        }
+        let Some(entry) = entry else {
+            if !self.preview.as_ref().is_some_and(|p| p.contains(point)) {
+                self.preview_candidate = None;
+            }
+            return;
+        };
+        if !self.config.hover_preview {
+            return;
+        }
+        if self.preview_candidate.as_ref().is_none_or(|(target, _)| *target != entry.pin.target) {
+            self.preview_candidate = Some((entry.pin.target.clone(), Instant::now()));
+            if let Some(preview) = &mut self.preview {
+                preview.hide();
+                preview.allow_reopen();
+            }
+        }
+        if self.preview_candidate.as_ref().is_some_and(|(_, at)| at.elapsed() >= Duration::from_millis(400))
+            && !self.preview.as_ref().is_some_and(|p| p.target() == entry.pin.target && (p.is_open() || p.dismissed()))
+        {
+            self.show_preview(&entry);
+        }
+    }
+
     fn pulse(&mut self) {
         if self.update_suppression() {
             return;
@@ -511,16 +641,19 @@ impl State {
         unsafe {
             let _ = GetCursorPos(&mut pt);
         }
+        self.update_preview(pt);
+        let preview_open = self.preview.as_ref().is_some_and(|p| p.is_open());
         let point = ((pt.x - self.origin.0) as f32, (pt.y - self.origin.1) as f32);
         let near = inside(
             (0.0, self.panel.1.min(self.size.1 as f32 - 12.0 * self.scale), self.size.0 as f32, self.size.1 as f32),
             point,
         );
-        if near || self.menu_open || self.pressed.is_some() {
+        if near || preview_open || self.menu_open || self.pressed.is_some() {
             self.leave_at = Instant::now();
         }
         let hidden = self.config.auto_hide
             && !near
+            && !preview_open
             && !self.menu_open
             && self.pressed.is_none()
             && self.leave_at.elapsed() > Duration::from_millis(650);
@@ -557,6 +690,8 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                     state.render();
                 } else if wparam.0 == PULSE {
                     state.pulse();
+                } else if wparam.0 == BACKDROP_REFRESH {
+                    state.refresh_backdrop();
                 }
                 LRESULT(0)
             }
@@ -590,6 +725,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             WM_LBUTTONDOWN => {
                 let state = &mut *ptr;
                 let point = (lparam.0 as i16 as f32, (lparam.0 >> 16) as i16 as f32);
+                state.hide_preview();
                 state.pressed = state.hit(point).map(|i| (i, point.0));
                 state.dragging = false;
                 state.render();
@@ -637,12 +773,14 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 let state = &mut *ptr;
                 let point = (lparam.0 as i16 as f32, (lparam.0 >> 16) as i16 as f32);
                 let entry = state.hit(point).and_then(|i| state.entries.get(i)).cloned();
+                state.hide_preview();
                 state.menu_open = true;
                 state.post(Request::Menu(entry));
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {
                 let state = &mut *ptr;
+                state.hide_preview();
                 let down = ((wparam.0 >> 16) as i16) < 0;
                 let slots = capacity(
                     (state.monitor.work.right - state.monitor.work.left) as f32,
@@ -779,6 +917,7 @@ impl Dock {
             origin: (0, 0),
             rects: Vec::new(),
             panel: (0.0, 0.0, 1.0, 1.0),
+            region_shapes: Vec::new(),
             feedback: Feedback::default(),
             pointer: None,
             hover: None,
@@ -793,6 +932,9 @@ impl Dock {
             menu_open: false,
             allowed_visible: visible,
             resumed: false,
+            preview: None,
+            preview_candidate: None,
+            capture_hidden: std::cell::Cell::new(false),
         });
         state.feedback.set_enabled(motion_allowed());
         state.update_suppression();
@@ -815,6 +957,7 @@ impl Dock {
 
     pub fn update(&mut self, config: &DockSettings) {
         let rebuild = self.state.config.pins != config.pins || self.state.config.show_running != config.show_running;
+        self.state.hide_preview();
         self.state.config = config.clone();
         if self.state.update_suppression() {
             return;
@@ -832,10 +975,21 @@ impl Dock {
     pub fn refresh_windows(&mut self) {
         if !self.state.update_suppression() {
             self.state.refresh(false);
+            self.state.schedule_backdrop_refresh();
+        }
+    }
+
+    pub fn show_preview(&mut self, entry: &Entry) {
+        if !self.state.suppressed {
+            self.state.show_preview(entry);
         }
     }
 
     pub fn set_capture_hidden(&self, hidden: bool) {
+        self.state.capture_hidden.set(hidden);
+        if let Some(preview) = &self.state.preview {
+            preview.set_capture_hidden(hidden);
+        }
         unsafe {
             let _ = SetWindowDisplayAffinity(self.state.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
         }
@@ -862,9 +1016,11 @@ impl Dock {
 
 impl Drop for Dock {
     fn drop(&mut self) {
+        self.state.preview.take();
         unsafe {
             let _ = KillTimer(Some(self.state.hwnd), PULSE);
             let _ = KillTimer(Some(self.state.hwnd), FRAME);
+            let _ = KillTimer(Some(self.state.hwnd), BACKDROP_REFRESH);
             SetWindowLongPtrW(self.state.hwnd, GWLP_USERDATA, 0);
             let _ = DestroyWindow(self.state.hwnd);
         }
@@ -1000,6 +1156,92 @@ mod tests {
             encoder.set_depth(png::BitDepth::Eight);
             encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
         }
+        let foreground = unsafe {
+            CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                w!("STATIC"),
+                w!("Night Island moving backdrop fixture"),
+                WS_POPUP | WS_MINIMIZEBOX,
+                origin.0,
+                origin.1,
+                width,
+                height,
+                None,
+                None,
+                Some(GetModuleHandleW(None)?.into()),
+                None,
+            )?
+        };
+        struct Foreground(HWND);
+        impl Drop for Foreground {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                }
+            }
+        }
+        let _foreground = Foreground(foreground);
+        let settle = || {
+            let until = Instant::now() + Duration::from_millis(500);
+            while Instant::now() < until {
+                unsafe {
+                    let mut msg = MSG::default();
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    let _ = DwmFlush();
+                }
+                std::thread::sleep(Duration::from_millis(15));
+            }
+        };
+        let panel_sample =
+            ((dock.state.panel.0 + dock.state.panel.2) / 2.0, dock.state.panel.3 - 8.0 * dock.state.scale);
+        let sample = || unsafe {
+            let screen = GetDC(None);
+            let color = GetPixel(screen, origin.0 + panel_sample.0 as i32, origin.1 + panel_sample.1 as i32).0;
+            ReleaseDC(None, screen);
+            [color & 255, (color >> 8) & 255, (color >> 16) & 255]
+        };
+        let mut colors = Vec::new();
+        unsafe {
+            let _ = ShowWindow(foreground, SW_SHOWNOACTIVATE);
+            let _ =
+                SetWindowPos(dock.state.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+            let _ = KillTimer(Some(dock.state.hwnd), FRAME);
+        }
+        for color in [0x000000ff, 0x00ff0000] {
+            unsafe {
+                let dc = GetDC(Some(foreground));
+                let brush = CreateSolidBrush(COLORREF(color));
+                FillRect(dc, &RECT { left: 0, top: 0, right: width, bottom: height }, brush);
+                let _ = DeleteObject(brush.into());
+                ReleaseDC(Some(foreground), dc);
+                let _ = ValidateRect(Some(foreground), None);
+            }
+            settle();
+            colors.push(sample());
+        }
+        let previous_brush = dock.state.backdrop.as_ref().unwrap().0.Brush()?;
+        unsafe {
+            let _ = ShowWindow(foreground, SW_MINIMIZE);
+        }
+        dock.refresh_windows();
+        dock.refresh_windows();
+        settle();
+        colors.push(sample());
+        let refreshed_brush = dock.state.backdrop.as_ref().unwrap().0.Brush()?;
+        assert_ne!(
+            previous_brush.as_raw(),
+            refreshed_brush.as_raw(),
+            "Scene change must replace cached backdrop sample"
+        );
+        settle();
+        assert_eq!(
+            refreshed_brush.as_raw(),
+            dock.state.backdrop.as_ref().unwrap().0.Brush()?.as_raw(),
+            "Backdrop refresh must stop after one update"
+        );
         unsafe {
             let _ = ShowWindow(dock.state.hwnd, SW_HIDE);
             SetTimer(Some(dock.state.hwnd), PULSE, 200, None);
@@ -1008,6 +1250,9 @@ mod tests {
         dock.state.scale = old_scale;
         dock.state.layout();
         dock.state.render();
+        assert!(colors[0][0] > colors[0][2] + 80, "Red scene must reach live backdrop: {colors:?}");
+        assert!(colors[1][2] > colors[1][0] + 80, "Changed blue scene must refresh without dock drawing: {colors:?}");
+        assert!(colors[2][0].abs_diff(colors[2][2]) < 30, "Minimized scene must reveal neutral background: {colors:?}");
         assert!(energies[0] > 15.0, "Backdrop fixture must be visible: {energies:?}");
         assert!(energies[1] < energies[0] * 0.6, "Host backdrop must reduce stripe detail: {energies:?}");
         Ok(())
@@ -1068,7 +1313,7 @@ mod tests {
         }
         let mut dock = Dock::create(parent, &compositor, &gpu, &config, false)?;
         let hwnd = dock.state.hwnd;
-        for scale in [1.0, 1.5, 2.0] {
+        for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
             dock.state.scale = scale;
             dock.state.feedback.set_enabled(false);
             dock.state.layout();
@@ -1098,6 +1343,22 @@ mod tests {
                 assert!(
                     PtInRegion(region, ((panel.0 + panel.2) / 2.0) as i32, (panel.3 - 4.0 * scale) as i32).as_bool()
                 );
+                let surface = crate::ui::popup::PopupSurface::new(dock.state.size)?;
+                surface.paint(&gpu, |p| {
+                    dock.state.paint_content(p, 0.0);
+                    Ok(())
+                })?;
+                for (index, pixel) in surface.pixels().chunks_exact(4).enumerate() {
+                    if pixel[3] >= 8 {
+                        let x = index as i32 % dock.state.size.0;
+                        let y = index as i32 / dock.state.size.0;
+                        assert!(
+                            PtInRegion(region, x, y).as_bool(),
+                            "Native region clips visible edge at {x},{y}, scale={scale}, alpha={}",
+                            pixel[3]
+                        );
+                    }
+                }
                 let _ = DeleteObject(region.into());
             }
             let rect = dock.state.rects[0].1;

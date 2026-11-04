@@ -24,3 +24,5 @@ pub mod weather_icons;
 pub mod notification_card;
 
 pub mod desktop_dock;
+
+pub mod dock_preview;
