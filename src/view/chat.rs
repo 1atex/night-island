@@ -354,7 +354,13 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     }
 
     let (new, chats, attach, pet) = chat_buttons(pill, scale);
-    let title = if ui.chat.title.is_empty() { "Chat" } else { ui.chat.title.as_str() };
+    let title = if ui.chat.pet.enabled {
+        "Pet studio"
+    } else if ui.chat.title.is_empty() {
+        "Chat"
+    } else {
+        ui.chat.title.as_str()
+    };
     let title_right = pet.0 - 12.0 * scale;
     p.text(
         title,
@@ -373,7 +379,14 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         rgba(1.0, 1.0, 1.0, 0.5),
     )?;
     let hover = |id| ui.home.hover_act == Some(id);
-    header_button(p, pet, "Pet studio", hover(1204), ui.chat.pet.enabled, scale)?;
+    header_button(
+        p,
+        pet,
+        if ui.chat.pet.enabled { "Back to chat" } else { "Pet studio" },
+        hover(1204),
+        ui.chat.pet.enabled,
+        scale,
+    )?;
     header_button(p, new, "New", hover(1201), false, scale)?;
     header_button(p, chats, "Chats", hover(1202), ui.chat.list_open, scale)?;
     header_button(
@@ -381,7 +394,11 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         attach,
         "Attach",
         hover(1203),
-        if ui.chat.pet.enabled { !ui.chat.pet.files.is_empty() } else { !ui.chat.files.is_empty() },
+        if ui.chat.pet.enabled {
+            !ui.chat.pet.files.is_empty() && !ui.chat.pet.text_only
+        } else {
+            !ui.chat.files.is_empty()
+        },
         scale,
     )?;
 
@@ -390,7 +407,19 @@ pub(in crate::view) fn paint_chat(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     }
     let n = if ui.chat.pet.enabled { 0 } else { ui.chat.files.len() };
     if ui.chat.pet.enabled {
-        paint_pet_studio(p, chat_view(pill, scale, ui.chat.input_h.get(), 0), scale, &ui.chat.pet)?;
+        paint_pet_studio(
+            p,
+            chat_view(pill, scale, ui.chat.input_h.get(), 0),
+            scale,
+            &ui.chat.pet,
+            match ui.home.hover_act {
+                Some(1280) => Some(PetStudioHit::Apply),
+                Some(1281) => Some(PetStudioHit::Photo),
+                Some(1282) => Some(PetStudioHit::TextOnly),
+                _ => None,
+            },
+            None,
+        )?;
     } else if ui.chat.msgs.is_empty() && !ui.chat.pending {
         let view = chat_view(pill, scale, ui.chat.input_h.get(), n);
         p.text(

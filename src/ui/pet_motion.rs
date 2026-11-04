@@ -118,7 +118,7 @@ impl PetMotion {
         let stretch =
             if held { 0.10 } else { -(self.release * std::f32::consts::PI * 3.0).sin() * self.release * 0.10 };
         self.motion.stretch += (stretch - self.motion.stretch) * smoothing;
-        let warmth = self.greeting.max(self.stroke);
+        let warmth = (self.greeting * 0.42).max(self.stroke);
         self.motion.warmth += (warmth - self.motion.warmth) * (1.0 - (-dt * 9.0).exp());
         if warmth == 0.0 && self.motion.warmth < 0.005 {
             self.motion.warmth = 0.0;

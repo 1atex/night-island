@@ -80,6 +80,9 @@ impl App {
             let _ = self.set_geometry_now(Win::Big, false, hidden);
         }
         self.state = State::Expanded;
+        if self.ui.tab == view::Tab::Chat && self.ui.chat.pet.enabled {
+            self.sync_pet_studio();
+        }
         if let Some((x, y, w, h)) = notification_origin {
             let (wx, wy) = self.window_origin(Win::Big);
             let _ = self.geometry.SetOffset(windows_numerics::Vector2 { X: x - wx, Y: y - wy });

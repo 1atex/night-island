@@ -33,6 +33,7 @@ fn pet_action(action: view::PetStudioHit) -> usize {
 }
 const CARET: usize = 1;
 const ANIMATE: usize = 2;
+const PREVIEW: usize = 3;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
 struct State {
@@ -52,6 +53,20 @@ struct State {
 }
 
 impl State {
+    fn sync_preview_timer(&self, hwnd: HWND) {
+        unsafe {
+            if self.ui.active
+                && self.closing.is_none()
+                && IsWindowVisible(hwnd).as_bool()
+                && let Some(interval) = self.ui.chat.pet.preview_interval()
+            {
+                SetTimer(Some(hwnd), PREVIEW, interval, None);
+            } else {
+                let _ = KillTimer(Some(hwnd), PREVIEW);
+            }
+        }
+    }
+
     fn layout(&self) -> view::CompanionChatLayout {
         view::companion_chat_layout((self.size.0 as f32, self.size.1 as f32), self.scale, self.ui.chat.input_h.get())
     }
@@ -138,6 +153,7 @@ impl State {
 
     fn close(&mut self, hwnd: HWND) {
         self.closing = Some(Instant::now());
+        self.sync_preview_timer(hwnd);
         unsafe {
             SetTimer(Some(hwnd), ANIMATE, 16, None);
         }
@@ -269,16 +285,26 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 state.ui.active = true;
                 state.ui.caret_on = true;
                 SetTimer(Some(hwnd), CARET, 500, None);
+                state.sync_preview_timer(hwnd);
                 state.redraw(hwnd);
                 LRESULT(0)
             }
             WM_KILLFOCUS => {
                 state.ui.active = false;
+                state.sync_preview_timer(hwnd);
                 let _ = KillTimer(Some(hwnd), CARET);
                 state.redraw(hwnd);
                 LRESULT(0)
             }
             WM_TIMER => {
+                if wp.0 == PREVIEW
+                    && (!state.ui.active
+                        || state.ui.chat.pet.preview_interval().is_none()
+                        || !IsWindowVisible(hwnd).as_bool())
+                {
+                    state.sync_preview_timer(hwnd);
+                    return LRESULT(0);
+                }
                 if wp.0 == CARET {
                     state.ui.caret_on = !state.ui.caret_on;
                 }
@@ -603,6 +629,7 @@ impl MiniChatWindow {
             let _ = SetForegroundWindow(self.hwnd);
             let _ = SetFocus(Some(self.hwnd));
             SetTimer(Some(self.hwnd), CARET, 500, None);
+            state.sync_preview_timer(self.hwnd);
         }
     }
 
@@ -644,6 +671,7 @@ impl MiniChatWindow {
         state.ui.chat.pet = studio.clone();
         state.ui.custom_pet = current.clone();
         state.ui.character = character;
+        state.sync_preview_timer(self.hwnd);
         state.redraw(self.hwnd);
     }
 
@@ -663,6 +691,7 @@ impl Drop for MiniChatWindow {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), CARET);
             let _ = KillTimer(Some(self.hwnd), ANIMATE);
+            let _ = KillTimer(Some(self.hwnd), PREVIEW);
             let _ = DestroyWindow(self.hwnd);
         }
     }
@@ -837,7 +866,51 @@ mod tests {
             accent: [103, 156, 239],
             ..Default::default()
         };
-        let studio = view::PetStudio { enabled: true, draft: Some(design.clone()), ..Default::default() };
+        let reference_path =
+            std::env::temp_dir().join(format!("night-island-pet-reference-{}.png", std::process::id()));
+        let reference = PopupSurface::new((96, 96))?;
+        reference.paint(&gpu, |p| {
+            p.fill_rect((0.0, 0.0, 96.0, 96.0), crate::ui::gfx::rgba(0.3, 0.32, 0.4, 1.0))?;
+            let old = p.push_offset(6.0, 15.0);
+            let pose = crate::ui::characters::Pose {
+                t: 0.8,
+                reaction: crate::ui::characters::Reaction::Idle,
+                look: (0.0, 0.0),
+                blink: false,
+                accent: (0.6, 0.7, 1.0),
+                beat: 0.0,
+                motion: Default::default(),
+            };
+            let result = crate::ui::characters::draw(p, Character::Bear, 84.0, &pose);
+            p.set_transform(&old);
+            result
+        })?;
+        save(&reference_path, (96, 96), &reference.pixels());
+        let thumbnail = crate::platform::apps::thumbnail(&reference_path.to_string_lossy());
+        let attachment = crate::services::attach::load(&reference_path);
+        std::fs::remove_file(&reference_path).unwrap();
+        let thumbnail = thumbnail.expect("A selected PNG reference must have a Windows thumbnail");
+        assert!(thumbnail.side <= 96 && thumbnail.side > 0);
+        assert_eq!(thumbnail.bgra.len(), thumbnail.side as usize * thumbnail.side as usize * 4);
+        let mut studio = view::PetStudio {
+            enabled: true,
+            draft: Some(design.clone()),
+            reference: Some(thumbnail),
+            files: vec![attachment.unwrap()],
+            performance: crate::ui::pet_motion::PetPerformance::Still,
+            preview_started: Some(Instant::now() - Duration::from_secs(1)),
+            ..Default::default()
+        };
+        let preview = PopupSurface::new((400, 250))?;
+        preview.paint(&gpu, |p| view::paint_pet_studio(p, (8.0, 8.0, 392.0, 242.0), 1.0, &studio, None, None))?;
+        let still = preview.pixels();
+        studio.preview_started = Some(Instant::now() - Duration::from_secs(3));
+        preview.paint(&gpu, |p| view::paint_pet_studio(p, (8.0, 8.0, 392.0, 242.0), 1.0, &studio, None, None))?;
+        assert_eq!(still, preview.pixels(), "Reduced motion must also stop the studio portrait");
+        studio.performance = crate::ui::pet_motion::PetPerformance::Balanced;
+        preview.paint(&gpu, |p| view::paint_pet_studio(p, (8.0, 8.0, 392.0, 242.0), 1.0, &studio, None, None))?;
+        assert_ne!(still, preview.pixels(), "The studio portrait should come alive when animation is enabled");
+        studio.preview_started = None;
         chat.update_pet(&studio, &design, Character::Custom);
         chat.set_input("Добавь синий шарф");
         for (size, scale) in [((416, 460), 1.0), ((360, 360), 1.0), ((624, 690), 1.5)] {
@@ -876,10 +949,32 @@ mod tests {
             let mut ui = view::UiState::new();
             ui.tab = view::Tab::Chat;
             ui.chat.keyed = true;
-            ui.chat.pet = studio;
+            ui.chat.pet = studio.clone();
             ui.chat.input.set_text("Добавь синий шарф");
             surface.paint(&gpu, |p| view::paint_expanded(p, (0.0, 0.0, 640.0, 410.0), 1.0, &ui, &[]))?;
             save(&std::path::PathBuf::from(dir).join("pet-studio-island.png"), (640, 410), &surface.pixels());
+        }
+        for (name, pending, applied, text_only, error) in [
+            ("creating", true, false, false, None),
+            ("applied", false, true, false, None),
+            ("text-only", false, false, true, None),
+            ("error", false, false, false, Some("This model did not accept the photo. Select Text only and describe your pet, or choose a vision model.".to_string())),
+        ] {
+            studio.pending = pending;
+            studio.applied = applied;
+            studio.text_only = text_only;
+            studio.error = error;
+            let mut ui = CompanionChatView::default();
+            ui.chat.pet = studio.clone();
+            let surface = PopupSurface::new((360, 360))?;
+            surface.paint(&gpu, |p| view::paint_companion_chat(p, (360.0, 360.0), 1.0, &ui))?;
+            if let Some(dir) = std::env::var_os("NI_COMPANION_PREVIEW") {
+                save(
+                    &std::path::PathBuf::from(dir).join(format!("pet-studio-{name}.png")),
+                    (360, 360),
+                    &surface.pixels(),
+                );
+            }
         }
         let hwnd = chat.hwnd();
         drop(chat);

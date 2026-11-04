@@ -150,6 +150,9 @@ impl App {
     }
 
     fn show_window(&mut self) {
+        if self.ui.tab == view::Tab::Chat && self.ui.chat.pet.enabled {
+            self.sync_pet_studio();
+        }
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
         }

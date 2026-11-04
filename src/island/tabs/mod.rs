@@ -61,6 +61,7 @@ impl App {
         }
         if tab == view::Tab::Chat {
             self.refresh_chat();
+            self.sync_pet_studio();
         }
         if tab == view::Tab::Privacy {
             self.reload_uses();

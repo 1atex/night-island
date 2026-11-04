@@ -135,12 +135,21 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
     let drawn = characters::draw_with_design(p, ui.character, 40.0 * scale, &pose, Some(&ui.custom_pet));
     p.set_transform(&transform);
     drawn?;
-    p.text(
-        &format!(
+    let title = if ui.chat.pet.enabled {
+        crate::ui::i18n::tr("Pet studio").into_owned()
+    } else {
+        format!(
             "{} · {}",
-            if ui.character == Character::Custom { ui.custom_pet.name.as_str() } else { ui.character.name() },
+            if ui.character == Character::Custom {
+                ui.custom_pet.name.clone()
+            } else {
+                crate::ui::i18n::tr(ui.character.name()).into_owned()
+            },
             crate::ui::i18n::tr("Chat")
-        ),
+        )
+    };
+    p.text(
+        &title,
         (74.0 * scale, 26.0 * scale, layout.pet.0 - 8.0 * scale, 48.0 * scale),
         14.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
@@ -166,11 +175,40 @@ pub fn paint_companion_chat(p: &Painter, size: (f32, f32), scale: f32, ui: &Comp
     p.fill_round_rect(
         layout.pet,
         12.0 * scale,
-        if ui.chat.pet.enabled { acc(0.2) } else { rgba(1.0, 1.0, 1.0, 0.06) },
+        if ui.hover == Some(CompanionChatHit::Pet) {
+            rgba(1.0, 1.0, 1.0, 0.15)
+        } else if ui.chat.pet.enabled {
+            acc(0.14)
+        } else {
+            rgba(1.0, 1.0, 1.0, 0.06)
+        },
     )?;
-    p.text("Pet studio", layout.pet, 11.5 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
+    p.text(
+        if ui.chat.pet.enabled { "Back to chat" } else { "Pet studio" },
+        layout.pet,
+        11.5 * scale,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_TEXT_ALIGNMENT_CENTER,
+        WHITE,
+    )?;
+    if ui.active && ui.focus == CompanionChatHit::Pet {
+        p.stroke_round_rect(layout.pet, 12.0 * scale, 1.3 * scale, rgba(0.86, 0.9, 1.0, 0.9))?;
+    }
     if ui.chat.pet.enabled {
-        paint_pet_studio(p, layout.history, scale, &ui.chat.pet)?;
+        paint_pet_studio(
+            p,
+            layout.history,
+            scale,
+            &ui.chat.pet,
+            match ui.hover {
+                Some(CompanionChatHit::PetAction(action)) => Some(action),
+                _ => None,
+            },
+            match ui.focus {
+                CompanionChatHit::PetAction(action) => Some(action),
+                _ => None,
+            },
+        )?;
     } else if ui.chat.msgs.is_empty() && !ui.chat.pending {
         let (cx, cy) =
             ((layout.history.0 + layout.history.2) / 2.0, (layout.history.1 + layout.history.3) / 2.0 - 34.0 * scale);

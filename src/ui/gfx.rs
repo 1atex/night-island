@@ -990,6 +990,87 @@ impl Painter<'_> {
         Ok(())
     }
 
+    pub fn fill_ellipse_gradient(
+        &self,
+        oval: (f32, f32, f32, f32),
+        light: D2D1_COLOR_F,
+        shade: D2D1_COLOR_F,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
+        };
+        let (cx, cy, rx, ry) = oval;
+        let falloff = if shade.a == 0.0 { 1.0 } else { 1.35 };
+        let offset = if shade.a == 0.0 { (0.0, 0.0) } else { (-rx * 0.32, -ry * 0.38) };
+        unsafe {
+            let stops = self.dc.CreateGradientStopCollection(
+                &[
+                    D2D1_GRADIENT_STOP { position: 0.0, color: light },
+                    D2D1_GRADIENT_STOP { position: 1.0, color: shade },
+                ],
+                D2D1_GAMMA_2_2,
+                D2D1_EXTEND_MODE_CLAMP,
+            )?;
+            let brush = self.dc.CreateRadialGradientBrush(
+                &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                    center: windows_numerics::Vector2 { X: cx, Y: cy },
+                    gradientOriginOffset: windows_numerics::Vector2 { X: offset.0, Y: offset.1 },
+                    radiusX: rx * falloff,
+                    radiusY: ry * falloff,
+                },
+                None,
+                &stops,
+            )?;
+            self.dc.FillEllipse(
+                &D2D1_ELLIPSE { point: windows_numerics::Vector2 { X: cx, Y: cy }, radiusX: rx, radiusY: ry },
+                &brush,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn bezier(&self, points: [(f32, f32); 4], width: f32, color: D2D1_COLOR_F) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_FIGURE_END_OPEN;
+        unsafe {
+            let factory: ID2D1Factory = self.dc.GetFactory()?;
+            let path = factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            let pt = |p: (f32, f32)| windows_numerics::Vector2 { X: p.0, Y: p.1 };
+            sink.BeginFigure(pt(points[0]), D2D1_FIGURE_BEGIN_HOLLOW);
+            sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                point1: pt(points[1]),
+                point2: pt(points[2]),
+                point3: pt(points[3]),
+            });
+            sink.EndFigure(D2D1_FIGURE_END_OPEN);
+            sink.Close()?;
+            self.dc.DrawGeometry(&path, &self.dc.CreateSolidColorBrush(&color, None)?, width, None);
+        }
+        Ok(())
+    }
+
+    pub fn fill_curves(&self, start: (f32, f32), curves: &[[(f32, f32); 3]], color: D2D1_COLOR_F) -> Result<()> {
+        unsafe {
+            let factory: ID2D1Factory = self.dc.GetFactory()?;
+            let path = factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            let pt = |p: (f32, f32)| windows_numerics::Vector2 { X: p.0, Y: p.1 };
+            sink.BeginFigure(pt(start), D2D1_FIGURE_BEGIN_FILLED);
+            for curve in curves {
+                sink.AddBezier(&D2D1_BEZIER_SEGMENT {
+                    point1: pt(curve[0]),
+                    point2: pt(curve[1]),
+                    point3: pt(curve[2]),
+                });
+            }
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            sink.Close()?;
+            self.dc.FillGeometry(&path, &self.dc.CreateSolidColorBrush(&color, None)?, None);
+        }
+        Ok(())
+    }
+
     pub fn line(&self, from: (f32, f32), to: (f32, f32), width: f32, color: D2D1_COLOR_F) -> Result<()> {
         unsafe {
             let brush = self.dc.CreateSolidColorBrush(&color, None)?;

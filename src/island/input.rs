@@ -320,7 +320,9 @@ impl App {
                 Some(view::ChatHit::ChipRemove(i)) => Some(1260 + i),
                 Some(view::ChatHit::Setup) => Some(1210),
                 Some(view::ChatHit::Pet) => Some(1204),
-                Some(view::ChatHit::PetAction(_)) => Some(1280),
+                Some(view::ChatHit::PetAction(view::PetStudioHit::Apply)) => Some(1280),
+                Some(view::ChatHit::PetAction(view::PetStudioHit::Photo)) => Some(1281),
+                Some(view::ChatHit::PetAction(view::PetStudioHit::TextOnly)) => Some(1282),
                 _ => None,
             }
         } else if self.ui.tab == view::Tab::Weather {

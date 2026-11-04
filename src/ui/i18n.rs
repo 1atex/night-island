@@ -35,6 +35,24 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Building a preview. Your current pet stays with you." => {
             "Готовлю предпросмотр. Текущий питомец пока остаётся с тобой."
         }
+        "Shaping your pet…" => "Готовим новый образ…",
+        "Describe another change below." => "Опиши новые изменения ниже.",
+        "Apply your pet or describe a change." => "Примени или опиши изменения.",
+        "Describe your pet below." => "Опиши питомца ниже.",
+        "Describe your pet or add a photo." => "Опиши питомца или добавь фото.",
+        "Back to chat" => "К чату",
+        "Needs attention" => "Нужно уточнить",
+        "Creating…" => "Создаём образ",
+        "With you" => "Уже с тобой",
+        "Preview" => "Предпросмотр",
+        "Palette" => "Палитра",
+        "Your pet is taking shape. Your current companion stays with you." => {
+            "Готовим новый образ. Текущий питомец остаётся с тобой."
+        }
+        "Describe a look below or add a photo for a vision model." => {
+            "Опиши внешность ниже или добавь фото для модели с распознаванием изображений."
+        }
+        "Photo attached. Tell us what to keep or change." => "Фото добавлено. Напиши, что сохранить или изменить.",
         "Pet studio" => "Питомец",
         "Create or change your pet" => "Создать или изменить питомца",
         "Create your pet" => "Создай питомца",

@@ -240,8 +240,15 @@ impl App {
             again |= moving || self.ui.activity.animating();
         }
         self.repaint_expanded();
+        let preview = if !self.gaming && !self.pill_hidden && self.ui.tab == view::Tab::Chat {
+            self.ui.chat.pet.preview_interval()
+        } else {
+            None
+        };
         if again {
             self.set_timer(Timer::UiAnim, self.frame_ms());
+        } else if let Some(interval) = preview {
+            self.set_timer(Timer::UiAnim, interval);
         }
     }
 

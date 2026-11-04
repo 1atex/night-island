@@ -198,6 +198,7 @@ impl App {
             if let Some(path) = paths.first() {
                 match attach::load(path) {
                     Ok(file) if file.kind == attach::Kind::Image => {
+                        self.ui.chat.pet.reference = crate::platform::apps::thumbnail(&path.to_string_lossy());
                         self.ui.chat.pet.files = vec![file];
                         self.ui.chat.pet.text_only = false;
                         self.ui.chat.pet.error = None;

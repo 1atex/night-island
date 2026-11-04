@@ -12,7 +12,8 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree};
 use windows::Win32::UI::Shell::{
     BHID_EnumItems, IEnumShellItems, IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName,
-    SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+    SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_NORMALDISPLAY, SIIGBF, SIIGBF_BIGGERSIZEOK, SIIGBF_CROPTOSQUARE,
+    SIIGBF_ICONONLY, SIIGBF_THUMBNAILONLY,
 };
 use windows::core::{HSTRING, Interface, PWSTR, w};
 
@@ -58,11 +59,19 @@ pub fn icon_for_path(path: &str) -> Option<Arc<Icon>> {
     loaded
 }
 
+pub fn thumbnail(path: &str) -> Option<Arc<Icon>> {
+    shell_image(path, 96, SIIGBF_THUMBNAILONLY | SIIGBF_CROPTOSQUARE).map(Arc::new)
+}
+
 fn load_icon(target: &str) -> Option<Icon> {
+    shell_image(target, 48, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)
+}
+
+fn shell_image(target: &str, size: i32, flags: SIIGBF) -> Option<Icon> {
     unsafe {
         let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(target), None).ok()?;
         let factory: IShellItemImageFactory = item.cast().ok()?;
-        let bitmap = factory.GetImage(SIZE { cx: 48, cy: 48 }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
+        let bitmap = factory.GetImage(SIZE { cx: size, cy: size }, flags).ok()?;
         let mut info = BITMAP::default();
         GetObjectW(HGDIOBJ(bitmap.0), size_of::<BITMAP>() as i32, Some((&raw mut info).cast::<c_void>()));
         let (w, h) = (info.bmWidth, info.bmHeight);

@@ -119,6 +119,40 @@ fn c(rgb: Rgb, a: f32) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR
 const DARK: Rgb = (0.1, 0.11, 0.15);
 const WHITE: Rgb = (0.96, 0.96, 0.98);
 
+fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
+    (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t)
+}
+
+fn lit(p: &Painter, s: f32, oval: (f32, f32, f32, f32), color: Rgb) -> Result<()> {
+    p.fill_ellipse_gradient(
+        (oval.0 * s, oval.1 * s, oval.2 * s, oval.3 * s),
+        c(mix(color, WHITE, 0.24), 1.0),
+        c(mix(color, DARK, 0.24), 1.0),
+    )
+}
+
+fn curve(p: &Painter, s: f32, points: [(f32, f32); 4], width: f32, color: Rgb, alpha: f32) -> Result<()> {
+    p.bezier(points.map(|(x, y)| (x * s, y * s)), width * s, c(color, alpha))
+}
+
+fn shape(p: &Painter, s: f32, start: (f32, f32), curves: &[[(f32, f32); 3]], color: Rgb, alpha: f32) -> Result<()> {
+    let curves: Vec<_> = curves.iter().map(|segment| segment.map(|(x, y)| (x * s, y * s))).collect();
+    p.fill_curves((start.0 * s, start.1 * s), &curves, c(color, alpha))
+}
+
+fn smile(p: &Painter, s: f32, pose: &Pose, x: f32, y: f32, width: f32, color: Rgb) -> Result<()> {
+    let joy = if pose.reaction == Reaction::Done { 1.0 } else { pose.motion.warmth };
+    let depth = 0.45 + joy * 0.8;
+    curve(
+        p,
+        s,
+        [(x - width, y), (x - width * 0.6, y + depth), (x + width * 0.6, y + depth), (x + width, y)],
+        0.65,
+        color,
+        0.85,
+    )
+}
+
 #[cfg(test)]
 pub fn draw(p: &Painter, character: Character, w: f32, pose: &Pose) -> Result<()> {
     draw_with_design(p, character, w, pose, None)
@@ -179,12 +213,17 @@ pub fn draw_with_design(
     };
     p.set_transform(&old);
     result?;
-    if pose.motion.warmth > 0.015 && character != Character::None {
-        let alpha = pose.motion.warmth * 0.8;
+    if pose.motion.warmth > 0.4 && character != Character::None {
+        let alpha = ((pose.motion.warmth - 0.4) / 0.6) * 0.9;
         let (x, y) = (32.0 * s, (3.5 + (pose.t * 2.0).sin() * 0.6) * s);
-        p.fill_ellipse(x - s, y, 1.2 * s, 1.2 * s, rgba(1.0, 0.56, 0.62, alpha))?;
-        p.fill_ellipse(x + s, y, 1.2 * s, 1.2 * s, rgba(1.0, 0.56, 0.62, alpha))?;
-        p.fill_triangle((x - 2.0 * s, y), (x + 2.0 * s, y), (x, y + 2.8 * s), rgba(1.0, 0.56, 0.62, alpha))?;
+        p.fill_curves(
+            (x, y + 0.7 * s),
+            &[
+                [(x - 1.1 * s, y - 1.5 * s), (x - 3.6 * s, y + 0.1 * s), (x, y + 3.2 * s)],
+                [(x + 3.6 * s, y + 0.1 * s), (x + 1.1 * s, y - 1.5 * s), (x, y + 0.7 * s)],
+            ],
+            rgba(1.0, 0.59, 0.68, alpha),
+        )?;
     }
     Ok(())
 }
@@ -201,7 +240,7 @@ fn drawing_bounds(
             let radius = 11.6 + if pose.reaction == Reaction::Music { pose.beat * 0.9 } else { 0.0 };
             (cx - radius, cy - 2.0 - radius, cx + radius, cy - 2.0 + radius)
         }
-        Character::Cat => (cx - 11.5, cy - 14.0, cx + 11.5, cy + 9.2),
+        Character::Cat => (cx - 11.5, cy - 14.0, cx + 11.5, cy + 10.1),
         Character::Robot => {
             let glow = if pose.reaction == Reaction::Music { 1.8 + pose.beat * 1.4 } else { 1.8 };
             (cx - 12.0, cy - 13.2 - glow, cx + 12.0, cy + 8.0)
@@ -231,19 +270,36 @@ fn drawing_bounds(
 
 #[allow(clippy::too_many_arguments)]
 fn eye(p: &Painter, s: f32, pose: &Pose, x: f32, y: f32, rx: f32, ry: f32, color: Rgb) -> Result<()> {
-    let (lx, ly) = (pose.look.0 * 1.4, pose.look.1 * 1.0);
-    let ry = ry * (1.0 - pose.motion.lid * 0.94);
-    match pose.reaction {
-        Reaction::Sleep => p.line(((x - rx) * s, y * s), ((x + rx) * s, y * s), 1.6 * s, c(color, 0.9)),
-        Reaction::Done => {
-            let w = 1.7 * s;
-            p.line(((x - rx) * s, (y + ry * 0.5) * s), (x * s, (y - ry * 0.5) * s), w, c(color, 1.0))?;
-            p.line((x * s, (y - ry * 0.5) * s), ((x + rx) * s, (y + ry * 0.5) * s), w, c(color, 1.0))
-        }
-        _ if pose.blink => p.line(((x - rx) * s, y * s), ((x + rx) * s, y * s), 1.6 * s, c(color, 0.9)),
-        Reaction::Attention => p.fill_ellipse((x + lx) * s, (y + ly) * s, rx * 1.15 * s, ry * 1.3 * s, c(color, 1.0)),
-        _ => p.fill_ellipse((x + lx) * s, (y + ly) * s, rx * s, ry * s, c(color, 1.0)),
+    if matches!(pose.reaction, Reaction::Sleep | Reaction::Done) {
+        let arch = if pose.reaction == Reaction::Done { -ry * 0.85 } else { ry * 0.3 };
+        return curve(
+            p,
+            s,
+            [(x - rx, y), (x - rx * 0.45, y + arch), (x + rx * 0.45, y + arch), (x + rx, y)],
+            0.85,
+            color,
+            0.95,
+        );
     }
+    let openness = 1.0 - pose.motion.lid * 0.94;
+    let (x, y) = (x + pose.look.0 * 1.15, y + pose.look.1 * 0.8);
+    let height = if pose.blink { 0.25 } else { ry * openness * (1.0 - pose.motion.warmth * 0.12) };
+    let surprise = if pose.reaction == Reaction::Attention { 1.15 } else { 1.0 };
+    p.fill_ellipse_gradient(
+        (x * s, y * s, rx * s * surprise, height.max(0.25) * s * surprise),
+        c(mix(color, WHITE, 0.08), 1.0),
+        c(color, 1.0),
+    )?;
+    if !pose.blink && height > 0.7 {
+        p.fill_ellipse(
+            (x - rx * 0.23) * s,
+            (y - height * 0.33) * s,
+            rx * 0.28 * s,
+            height * 0.20 * s,
+            c(WHITE, 0.88 * openness),
+        )?;
+    }
+    Ok(())
 }
 
 fn zzz(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
@@ -288,7 +344,17 @@ fn draw_pixel(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
         for (col, ch) in line.chars().enumerate() {
             if ch == '#' {
                 let (x, y) = (ox + col as f32 * cell, oy + row as f32 * cell);
-                p.fill_rect((x, y, x + cell, y + cell), c(color, 1.0))?;
+                p.fill_rect(
+                    (x, y, x + cell, y + cell),
+                    c(
+                        mix(
+                            color,
+                            if row < 3 { WHITE } else { DARK },
+                            if row < 3 { 0.18 } else { (row as f32 - 2.0) * 0.025 },
+                        ),
+                        1.0,
+                    ),
+                )?;
             }
         }
     }
@@ -305,45 +371,44 @@ fn draw_pixel(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
 }
 
 fn draw_spark(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
-    let tint = pose.mood(WHITE);
-    let pulse = if pose.reaction == Reaction::Music { pose.beat * 0.9 } else { 0.0 };
-    let r = 8.6 + pulse;
+    let tint = pose.mood((0.72, 0.77, 0.95));
+    let pulse = if pose.reaction == Reaction::Music { pose.beat * 0.7 } else { 0.0 };
+    let r = 9.2 + pulse;
     let (cx, cy) = (20.0 + pose.shake(), 15.0 + pose.bob());
-    p.fill_ellipse(cx * s, cy * s, (r + 3.0) * s, (r + 3.0) * s, c(tint, 0.22))?;
-    let body = (0.55 + 0.45 * tint.0, 0.55 + 0.45 * tint.1, 0.55 + 0.45 * tint.2);
-    p.fill_ellipse(cx * s, cy * s, r * s, r * s, c(body, 1.0))?;
-    eye(p, s, pose, cx - 3.4, cy - 0.6, 1.5, 2.5, DARK)?;
-    eye(p, s, pose, cx + 3.4, cy - 0.6, 1.5, 2.5, DARK)?;
+    p.fill_ellipse_gradient((cx * s, cy * s, (r + 2.3) * s, (r + 2.3) * s), c(tint, 0.24), c(tint, 0.0))?;
+    p.fill_ellipse_gradient((cx * s, (cy + 10.0) * s, 6.0 * s, 1.0 * s), c(DARK, 0.24), c(DARK, 0.0))?;
+    p.fill_ellipse_gradient(
+        (cx * s, cy * s, r * s, r * s),
+        c(WHITE, 1.0),
+        c(mix(tint, (0.65, 0.68, 0.84), 0.45), 1.0),
+    )?;
+    p.fill_ellipse((cx - 3.5) * s, (cy - 5.2) * s, 3.0 * s, 1.35 * s, c(WHITE, 0.28))?;
+    for sign in [-1.0, 1.0] {
+        p.fill_ellipse(
+            (cx + sign * 5.6) * s,
+            (cy + 2.2) * s,
+            1.5 * s,
+            0.75 * s,
+            c((0.94, 0.58, 0.65), 0.12 + pose.motion.warmth * 0.26),
+        )?;
+        eye(p, s, pose, cx + sign * 3.2, cy - 0.4, 1.5, 2.45, (0.14, 0.16, 0.24))?;
+    }
+    smile(p, s, pose, cx, cy + 3.2, 1.35, (0.32, 0.34, 0.46))?;
     zzz(p, s, pose)
 }
 
 fn draw_eyes(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
-    let tint = if pose.reaction == Reaction::Attention { (1.0, 0.5, 0.45) } else { WHITE };
-    let squash = if pose.reaction == Reaction::Music { 1.0 - 0.35 * pose.beat } else { 1.0 };
-    let (cy, dx) = (15.0 + pose.bob() * 0.5, pose.shake());
-    for sign in [-1.0f32, 1.0] {
-        let x = 20.0 + sign * 7.0 + dx;
-        match pose.reaction {
-            Reaction::Sleep => p.line(((x - 3.0) * s, cy * s), ((x + 3.0) * s, cy * s), 1.8 * s, c(tint, 0.85))?,
-            Reaction::Done => {
-                p.line(((x - 3.2) * s, (cy + 2.0) * s), (x * s, (cy - 2.4) * s), 2.0 * s, c(tint, 1.0))?;
-                p.line((x * s, (cy - 2.4) * s), ((x + 3.2) * s, (cy + 2.0) * s), 2.0 * s, c(tint, 1.0))?;
-            }
-            _ => {
-                let h = if pose.blink {
-                    1.2
-                } else {
-                    12.0 * squash
-                        * (1.0 - pose.motion.lid * 0.94)
-                        * if pose.reaction == Reaction::Attention { 1.2 } else { 1.0 }
-                };
-                let (lx, ly) = (pose.look.0 * 2.4, pose.look.1 * 1.8);
-                p.fill_round_rect(
-                    ((x + lx - 3.0) * s, (cy + ly - h / 2.0) * s, (x + lx + 3.0) * s, (cy + ly + h / 2.0) * s),
-                    3.0 * s,
-                    c(tint, 1.0),
-                )?;
-            }
+    let (cy, dx) = (15.0 + pose.bob() * 0.35, pose.shake());
+    for sign in [-1.0, 1.0] {
+        let x = 20.0 + sign * 6.1 + dx;
+        if pose.reaction == Reaction::Sleep || pose.blink {
+            curve(p, s, [(x - 3.6, cy), (x - 1.5, cy + 1.5), (x + 1.5, cy + 1.5), (x + 3.6, cy)], 1.4, WHITE, 0.9)?;
+        } else {
+            let height = 6.4 * (1.0 - pose.motion.lid * 0.9);
+            lit(p, s, (x, cy, 4.55, height), (0.94, 0.95, 0.99))?;
+            let mut gaze = *pose;
+            gaze.look.0 *= 1.25;
+            eye(p, s, &gaze, x, cy + 0.4, 2.2, (height * 0.58).min(3.6), (0.12, 0.15, 0.22))?;
         }
     }
     zzz(p, s, pose)
@@ -351,64 +416,88 @@ fn draw_eyes(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
 
 fn draw_cat(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
     let (cx, cy) = (20.0 + pose.shake(), 17.0 + pose.bob());
-    let fur = (0.97, 0.97, 0.97);
-    let pink = (0.98, 0.66, 0.72);
-    let wiggle = (pose.t * 2.4).sin() * (0.25 + pose.motion.warmth * 0.55) + pose.look.0 * 0.3;
-    for sign in [-1.0f32, 1.0] {
-        let ear =
-            [(cx + sign * 10.5, cy - 5.0), (cx + sign * 8.5 + wiggle * sign, cy - 14.0), (cx + sign * 3.0, cy - 8.5)];
-        p.fill_triangle(
-            (ear[0].0 * s, ear[0].1 * s),
-            (ear[1].0 * s, ear[1].1 * s),
-            (ear[2].0 * s, ear[2].1 * s),
-            c(fur, 1.0),
+    let fur = (0.89, 0.91, 0.96);
+    let pink = (0.92, 0.62, 0.67);
+    let wiggle = (pose.t * 2.4).sin() * (0.18 + pose.motion.warmth * 0.4) + pose.look.0 * 0.22;
+    for sign in [-1.0, 1.0] {
+        let at = |x: f32, y: f32| (cx + sign * x, cy + y);
+        shape(
+            p,
+            s,
+            at(3.0, -7.0),
+            &[
+                [at(4.0, -10.2), at(7.0 + wiggle, -14.0), at(8.5 + wiggle, -13.1)],
+                [at(10.0, -11.5), at(11.0, -5.6), at(10.3, -3.7)],
+                [at(8.0, -3.7), at(5.0, -5.0), at(3.0, -7.0)],
+            ],
+            fur,
+            1.0,
         )?;
-        let inner = [
-            (cx + sign * 9.0, cy - 6.5),
-            (cx + sign * 8.0 + wiggle * sign * 0.6, cy - 11.5),
-            (cx + sign * 5.0, cy - 8.5),
-        ];
-        p.fill_triangle(
-            (inner[0].0 * s, inner[0].1 * s),
-            (inner[1].0 * s, inner[1].1 * s),
-            (inner[2].0 * s, inner[2].1 * s),
-            c(pink, 0.8),
+        shape(
+            p,
+            s,
+            at(5.1, -7.3),
+            &[
+                [at(6.0, -9.3), at(7.5 + wiggle, -11.3), at(8.0 + wiggle, -10.9)],
+                [at(8.8, -9.2), at(9.0, -7.0), at(8.9, -5.8)],
+                [at(7.0, -5.8), at(6.0, -6.0), at(5.1, -7.3)],
+            ],
+            pink,
+            0.85,
         )?;
+        lit(p, s, (cx + sign * 6.4, cy + 8.4, 3.2, 1.6), fur)?;
     }
-    p.fill_ellipse(cx * s, cy * s, 11.5 * s, 9.2 * s, c(fur, 1.0))?;
-    eye(p, s, pose, cx - 4.6, cy - 0.8, 1.5, 2.3, DARK)?;
-    eye(p, s, pose, cx + 4.6, cy - 0.8, 1.5, 2.3, DARK)?;
-    p.fill_triangle(
-        ((cx - 1.4) * s, (cy + 2.6) * s),
-        ((cx + 1.4) * s, (cy + 2.6) * s),
-        (cx * s, (cy + 4.0) * s),
-        c(pink, 1.0),
-    )?;
-    for sign in [-1.0f32, 1.0] {
-        p.line(
-            ((cx + sign * 5.0) * s, (cy + 3.4) * s),
-            ((cx + sign * 11.0) * s, (cy + 2.4) * s),
-            0.8 * s,
-            c((0.7, 0.7, 0.72), 0.8),
+    lit(p, s, (cx, cy, 11.5, 8.9), fur)?;
+    lit(p, s, (cx, cy + 3.3, 5.9, 3.6), (0.98, 0.97, 0.97))?;
+    for sign in [-1.0, 1.0] {
+        eye(p, s, pose, cx + sign * 4.3, cy - 0.7, 1.65, 2.25, (0.16, 0.18, 0.24))?;
+        p.fill_ellipse(
+            (cx + sign * 7.7) * s,
+            (cy + 2.0) * s,
+            2.0 * s,
+            0.85 * s,
+            c(pink, 0.25 + pose.motion.warmth * 0.2),
         )?;
-        p.line(
-            ((cx + sign * 5.0) * s, (cy + 4.4) * s),
-            ((cx + sign * 10.5) * s, (cy + 5.6) * s),
-            0.8 * s,
-            c((0.7, 0.7, 0.72), 0.8),
-        )?;
+        for offset in [0.0, 1.5] {
+            curve(
+                p,
+                s,
+                [
+                    (cx + sign * 6.1, cy + 2.8 + offset),
+                    (cx + sign * 7.6, cy + 2.9 + offset),
+                    (cx + sign * 9.1, cy + 2.0 + offset * 1.5),
+                    (cx + sign * 10.7, cy + 2.1 + offset * 1.5),
+                ],
+                0.42,
+                (0.46, 0.48, 0.56),
+                0.66,
+            )?;
+        }
     }
+    lit(p, s, (cx, cy + 2.1, 1.15, 0.75), pink)?;
+    smile(p, s, pose, cx, cy + 3.8, 1.75, (0.39, 0.34, 0.42))?;
     zzz(p, s, pose)
 }
 
 fn draw_robot(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
     let (cx, cy) = (20.0 + pose.shake(), 17.0 + pose.bob());
     let metal = (0.66, 0.69, 0.75);
-    p.fill_round_rect(((cx - 11.0) * s, (cy - 8.0) * s, (cx + 11.0) * s, (cy + 8.0) * s), 4.5 * s, c(metal, 1.0))?;
+    p.fill_round_gradient(
+        ((cx - 11.0) * s, (cy - 8.0) * s, (cx + 11.0) * s, (cy + 8.0) * s),
+        5.0 * s,
+        c((0.94, 0.95, 0.98), 1.0),
+        c((0.47, 0.52, 0.63), 1.0),
+    )?;
     p.fill_round_rect(
         ((cx - 8.6) * s, (cy - 5.6) * s, (cx + 8.6) * s, (cy + 5.6) * s),
         3.0 * s,
         c((0.14, 0.16, 0.21), 1.0),
+    )?;
+    p.fill_round_gradient(
+        ((cx - 8.0) * s, (cy - 5.2) * s, (cx + 8.0) * s, (cy - 1.0) * s),
+        2.5 * s,
+        c(WHITE, 0.12),
+        c(WHITE, 0.0),
     )?;
     for sign in [-1.0f32, 1.0] {
         p.fill_round_rect(
@@ -441,10 +530,13 @@ fn draw_robot(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
             )?;
         }
     }
+    for x in [-1.6, 0.0, 1.6] {
+        p.fill_ellipse((cx + x) * s, (cy + 4.0) * s, 0.32 * s, 0.32 * s, c(beam, 0.55))?;
+    }
     p.line((cx * s, (cy - 8.0) * s), (cx * s, (cy - 12.5) * s), 1.3 * s, c(metal, 1.0))?;
     let tip = if pose.reaction == Reaction::Music { pose.mood(WHITE) } else { (1.0, 0.72, 0.28) };
     let glow = if pose.reaction == Reaction::Music { 1.8 + pose.beat * 1.4 } else { 1.8 };
-    p.fill_ellipse(cx * s, (cy - 13.2) * s, glow * s, glow * s, c(tip, 1.0))
+    lit(p, s, (cx, cy - 13.2, glow, glow), tip)
 }
 
 fn draw_blob(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
@@ -457,14 +549,14 @@ fn draw_blob(p: &Painter, s: f32, pose: &Pose) -> Result<()> {
         Reaction::Sleep => (0.76, 0.62, 0.7),
         _ => (0.97, 0.63, 0.68),
     };
-    p.fill_ellipse(cx * s, cy * s, rx * s, ry * s, c(skin, 1.0))?;
-    p.fill_ellipse((cx - 4.5) * s, (cy - 4.2) * s, 3.6 * s, 2.0 * s, c(WHITE, 0.35))?;
+    lit(p, s, (cx, cy, rx, ry), skin)?;
+    p.fill_ellipse((cx - 4.5) * s, (cy - 4.6) * s, 3.0 * s, 1.1 * s, c(WHITE, 0.34))?;
     for sign in [-1.0f32, 1.0] {
         p.fill_ellipse((cx + sign * 7.0) * s, (cy + 3.2) * s, 2.3 * s, 1.5 * s, c((0.93, 0.4, 0.5), 0.55))?;
     }
     eye(p, s, pose, cx - 4.2, cy - 0.6, 1.5, 2.4, DARK)?;
     eye(p, s, pose, cx + 4.2, cy - 0.6, 1.5, 2.4, DARK)?;
-    p.fill_ellipse(cx * s, (cy + 3.6) * s, 1.3 * s, 0.9 * s, c((0.55, 0.2, 0.3), 0.9))?;
+    smile(p, s, pose, cx, cy + 3.3, 1.8, (0.48, 0.19, 0.29))?;
     zzz(p, s, pose)
 }
 
@@ -472,12 +564,20 @@ fn draw_designed(p: &Painter, s: f32, pose: &Pose, design: &super::pet_design::P
     use super::pet_design::{PetAccessory, PetBody, PetPattern};
     let rgb = |value: [u8; 3]| (value[0] as f32 / 255.0, value[1] as f32 / 255.0, value[2] as f32 / 255.0);
     let (fur, belly, eyes, accent) = (rgb(design.fur), rgb(design.belly), rgb(design.eyes), rgb(design.accent));
+    let lining = mix(belly, fur, 0.35);
+    let blush = mix(fur, (0.97, 0.56, 0.61), 0.5);
+    let luminance = |color: Rgb| color.0 * 0.2126 + color.1 * 0.7152 + color.2 * 0.0722;
+    let eyes = if (luminance(fur) - luminance(eyes)).abs() < 0.25 {
+        if luminance(fur) > 0.45 { DARK } else { WHITE }
+    } else {
+        eyes
+    };
     let (cx, cy) = (20.0 + pose.look.0 * 0.4, 13.6 + pose.bob() * 0.5);
     let width = 9.4 * design.width;
     let breathe = (pose.t * 1.65).sin();
     if design.tail {
         let wag = (pose.t * (3.5 + pose.motion.warmth * 3.0)).sin() * 1.2;
-        p.fill_ellipse((cx + width + 2.5) * s, (cy + 8.0 + wag) * s, 3.5 * s, 2.3 * s, c(fur, 1.0))?;
+        lit(p, s, (cx + width + 2.5, cy + 8.0 + wag, 3.5, 2.3), fur)?;
         p.fill_ellipse((cx + width + 4.4) * s, (cy + 7.4 + wag) * s, 1.5 * s, 1.5 * s, c(belly, 1.0))?;
     }
     for sign in [-1.0, 1.0] {
@@ -485,27 +585,33 @@ fn draw_designed(p: &Painter, s: f32, pose: &Pose, design: &super::pet_design::P
         let ey = cy - 6.8 + sign * pose.look.0 * 0.35;
         match design.body {
             PetBody::Bear => {
-                p.fill_ellipse(ex * s, ey * s, 4.1 * design.ear_size * s, 4.0 * design.ear_size * s, c(fur, 1.0))?;
-                p.fill_ellipse(ex * s, ey * s, 2.3 * design.ear_size * s, 2.2 * design.ear_size * s, c(accent, 0.8))?;
+                lit(p, s, (ex, ey, 4.1 * design.ear_size, 4.0 * design.ear_size), fur)?;
+                p.fill_ellipse(ex * s, ey * s, 2.3 * design.ear_size * s, 2.2 * design.ear_size * s, c(lining, 0.9))?;
             }
             PetBody::Cat | PetBody::Fox => {
                 let tip = (ey - 4.5 * design.ear_size).max(0.8);
-                p.fill_triangle(
-                    ((ex - 3.6) * s, (ey + 4.0) * s),
-                    ((ex + sign * 1.1) * s, tip * s),
-                    ((ex + 3.6) * s, (ey + 4.0) * s),
-                    c(fur, 1.0),
+                shape(
+                    p,
+                    s,
+                    (ex - 3.6, ey + 4.0),
+                    &[
+                        [(ex - 3.3, ey + 0.7), (ex + sign * 1.1 - 0.8, tip), (ex + sign * 1.1, tip)],
+                        [(ex + sign * 1.1 + 0.8, tip), (ex + 3.3, ey + 0.7), (ex + 3.6, ey + 4.0)],
+                        [(ex + 2.0, ey + 4.4), (ex - 2.0, ey + 4.4), (ex - 3.6, ey + 4.0)],
+                    ],
+                    fur,
+                    1.0,
                 )?;
                 p.fill_triangle(
                     ((ex - 2.0) * s, (ey + 2.3) * s),
                     ((ex + sign * 0.7) * s, (tip + 2.0) * s),
                     ((ex + 2.0) * s, (ey + 2.3) * s),
-                    c(accent, 0.85),
+                    c(lining, 0.9),
                 )?;
             }
             PetBody::Rabbit => {
-                p.fill_ellipse(ex * s, (ey - 0.8) * s, 2.3 * s, 5.0 * design.ear_size * s, c(fur, 1.0))?;
-                p.fill_ellipse(ex * s, (ey - 1.2) * s, 1.0 * s, 3.3 * design.ear_size * s, c(accent, 0.85))?;
+                lit(p, s, (ex, ey - 0.8, 2.3, 5.0 * design.ear_size), fur)?;
+                p.fill_ellipse(ex * s, (ey - 1.2) * s, 1.0 * s, 3.3 * design.ear_size * s, c(lining, 0.9))?;
             }
             PetBody::Robot => {
                 p.line((ex * s, ey * s), (ex * s, (ey - 2.0) * s), s, c(belly, 1.0))?;
@@ -526,18 +632,24 @@ fn draw_designed(p: &Painter, s: f32, pose: &Pose, design: &super::pet_design::P
             )?;
         }
     } else {
-        p.fill_ellipse(cx * s, (cy + 7.3) * s, (width * 0.78) * s, (6.8 + breathe * 0.12) * s, c(fur, 1.0))?;
-        p.fill_ellipse(cx * s, (cy + 7.5) * s, width * 0.48 * s, 4.5 * s, c(belly, 1.0))?;
+        lit(p, s, (cx, cy + 7.3, width * 0.78, 6.8 + breathe * 0.12), fur)?;
+        lit(p, s, (cx, cy + 7.5, width * 0.48, 4.5), belly)?;
         for sign in [-1.0, 1.0] {
-            p.fill_ellipse((cx + sign * width * 0.58) * s, (cy + 12.0) * s, 3.0 * s, 1.9 * s, c(fur, 1.0))?;
+            lit(p, s, (cx + sign * width * 0.58, cy + 12.0, 3.0, 1.9), fur)?;
+            p.fill_ellipse((cx + sign * width * 0.58) * s, (cy + 12.3) * s, 1.45 * s, 0.7 * s, c(belly, 0.30))?;
             let paw = if pose.motion.warmth > 0.2 { (pose.t * 5.0).sin() * pose.motion.warmth } else { breathe * 0.15 };
             p.fill_ellipse((cx + sign * width * 0.84) * s, (cy + 6.0 + paw) * s, 2.1 * s, 3.1 * s, c(fur, 1.0))?;
         }
     }
     if design.body == PetBody::Robot {
-        p.fill_round_rect(((cx - width) * s, (cy - 6.6) * s, (cx + width) * s, (cy + 5.6) * s), 3.0 * s, c(fur, 1.0))?;
+        p.fill_round_gradient(
+            ((cx - width) * s, (cy - 6.6) * s, (cx + width) * s, (cy + 5.6) * s),
+            3.6 * s,
+            c(mix(fur, WHITE, 0.25), 1.0),
+            c(mix(fur, DARK, 0.3), 1.0),
+        )?;
     } else {
-        p.fill_ellipse(cx * s, cy * s, width * s, 7.9 * s, c(fur, 1.0))?;
+        lit(p, s, (cx, cy, width, 7.9), fur)?;
     }
     match design.pattern {
         PetPattern::Patches => {
@@ -555,20 +667,37 @@ fn draw_designed(p: &Painter, s: f32, pose: &Pose, design: &super::pet_design::P
         }
         PetPattern::Solid => {}
     }
-    if !matches!(design.body, PetBody::Ghost | PetBody::Robot) {
-        p.fill_ellipse(cx * s, (cy + 3.5) * s, 4.5 * s, 3.0 * s, c(belly, 1.0))?;
+    if design.body == PetBody::Fox {
+        for sign in [-1.0, 1.0] {
+            shape(
+                p,
+                s,
+                (cx, cy + 4.8),
+                &[
+                    [
+                        (cx + sign * width * 0.4, cy + 0.1),
+                        (cx + sign * width * 0.82, cy - 0.9),
+                        (cx + sign * width * 0.92, cy - 2.7),
+                    ],
+                    [(cx + sign * width, cy + 1.6), (cx + sign * width * 0.6, cy + 6.8), (cx, cy + 4.8)],
+                ],
+                belly,
+                0.95,
+            )?;
+        }
+    } else if !matches!(design.body, PetBody::Ghost | PetBody::Robot) {
+        lit(p, s, (cx, cy + 3.5, 4.4, 2.85), belly)?;
     }
-    eye(p, s, pose, cx - 3.9, cy - 0.8, 1.05, 1.65, eyes)?;
-    eye(p, s, pose, cx + 3.9, cy - 0.8, 1.05, 1.65, eyes)?;
+    eye(p, s, pose, cx - 3.9, cy - 0.65, 1.35, 1.9, eyes)?;
+    eye(p, s, pose, cx + 3.9, cy - 0.65, 1.35, 1.9, eyes)?;
     if design.body == PetBody::Ghost {
         p.fill_ellipse(cx * s, (cy + 4.0) * s, 1.3 * s, (1.2 + pose.motion.warmth * 0.4) * s, c(eyes, 0.9))?;
     } else if design.body == PetBody::Robot {
         p.line(((cx - 2.0) * s, (cy + 3.4) * s), ((cx + 2.0) * s, (cy + 3.4) * s), s, c(accent, 1.0))?;
     } else {
-        p.fill_ellipse(cx * s, (cy + 2.8) * s, 1.55 * s, 1.0 * s, c(eyes, 1.0))?;
-        for sign in [-1.0, 1.0] {
-            p.line((cx * s, (cy + 3.5) * s), ((cx + sign * 1.5) * s, (cy + 4.4) * s), 0.65 * s, c(eyes, 0.8))?;
-        }
+        lit(p, s, (cx, cy + 2.65, 1.45, 0.9), eyes)?;
+        p.fill_ellipse((cx - 0.35) * s, (cy + 2.3) * s, 0.45 * s, 0.18 * s, c(WHITE, 0.24))?;
+        smile(p, s, pose, cx, cy + 4.05, 1.8, eyes)?;
     }
     for sign in [-1.0, 1.0] {
         p.fill_ellipse(
@@ -576,37 +705,41 @@ fn draw_designed(p: &Painter, s: f32, pose: &Pose, design: &super::pet_design::P
             (cy + 2.3) * s,
             1.8 * s,
             0.9 * s,
-            c(accent, 0.32 + pose.motion.warmth * 0.25),
+            c(blush, if design.body == PetBody::Robot { 0.0 } else { 0.18 + pose.motion.warmth * 0.22 }),
         )?;
     }
     match design.accessory {
         PetAccessory::Scarf => {
-            p.fill_round_rect(((cx - 6.5) * s, (cy + 5.8) * s, (cx + 6.5) * s, (cy + 8.0) * s), s, c(accent, 1.0))?;
-            p.fill_round_rect(((cx + 2.5) * s, (cy + 7.0) * s, (cx + 5.0) * s, (cy + 11.7) * s), s, c(accent, 1.0))?;
+            p.fill_round_gradient(
+                ((cx - 6.5) * s, (cy + 5.8) * s, (cx + 6.5) * s, (cy + 8.0) * s),
+                s,
+                c(mix(accent, WHITE, 0.18), 1.0),
+                c(mix(accent, DARK, 0.20), 1.0),
+            )?;
+            p.fill_round_gradient(
+                ((cx + 2.5) * s, (cy + 7.0) * s, (cx + 5.0) * s, (cy + 11.7) * s),
+                s,
+                c(accent, 1.0),
+                c(mix(accent, DARK, 0.2), 1.0),
+            )?;
+            p.line(((cx + 3.2) * s, (cy + 8.5) * s), ((cx + 3.2) * s, (cy + 10.4) * s), 0.35 * s, c(WHITE, 0.22))?;
         }
         PetAccessory::Bow => {
             for sign in [-1.0, 1.0] {
-                p.fill_triangle(
-                    (cx * s, (cy + 7.0) * s),
-                    ((cx + sign * 3.3) * s, (cy + 5.5) * s),
-                    ((cx + sign * 3.3) * s, (cy + 8.6) * s),
-                    c(accent, 1.0),
-                )?;
+                lit(p, s, (cx + sign * 2.1, cy + 7.0, 2.1, 1.65), accent)?;
             }
+            lit(p, s, (cx, cy + 7.0, 0.9, 1.1), mix(accent, DARK, 0.1))?;
         }
         PetAccessory::Star => {
-            p.fill_triangle(
-                (cx * s, (cy + 6.6) * s),
-                ((cx - 2.5) * s, (cy + 10.4) * s),
-                ((cx + 2.5) * s, (cy + 10.4) * s),
-                c(accent, 1.0),
-            )?;
-            p.fill_triangle(
-                ((cx - 2.5) * s, (cy + 7.9) * s),
-                ((cx + 2.5) * s, (cy + 7.9) * s),
-                (cx * s, (cy + 11.3) * s),
-                c(accent, 1.0),
-            )?;
+            let points: [(f32, f32); 10] = std::array::from_fn(|i| {
+                let angle = i as f32 * std::f32::consts::PI / 5.0 - std::f32::consts::FRAC_PI_2;
+                let radius = if i % 2 == 0 { 2.8 } else { 1.3 };
+                (cx + angle.cos() * radius, cy + 9.0 + angle.sin() * radius)
+            });
+            let edges: [[(f32, f32); 3]; 10] =
+                std::array::from_fn(|i| [points[i], points[(i + 1) % 10], points[(i + 1) % 10]]);
+            shape(p, s, points[0], &edges, accent, 1.0)?;
+            p.fill_ellipse((cx - 0.5) * s, (cy + 8.3) * s, 0.45 * s, 0.35 * s, c(WHITE, 0.38))?;
         }
         PetAccessory::None => {}
     }

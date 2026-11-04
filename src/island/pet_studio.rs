@@ -4,6 +4,16 @@ use crate::ui::pet_design::PetDesign;
 
 impl App {
     pub(in crate::island) fn sync_pet_studio(&mut self) {
+        self.ui.chat.pet.performance = self.settings.pet_performance;
+        if self.ui.chat.pet.enabled {
+            self.ui.chat.pet.preview_started.get_or_insert_with(Instant::now);
+        }
+        if self.state == State::Expanded
+            && self.ui.tab == view::Tab::Chat
+            && self.ui.chat.pet.preview_interval().is_some()
+        {
+            self.set_timer(Timer::UiAnim, 1);
+        }
         if let Some(chat) = &mut self.pet.chat {
             chat.window.update_pet(&self.ui.chat.pet, &self.settings.custom_pet, self.settings.character);
         }
