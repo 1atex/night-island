@@ -307,6 +307,7 @@ impl App {
             pending_power: None,
             pending_ask: None,
             wake_session: false,
+            last_request: String::new(),
             reminders: Vec::new(),
             recording: None,
             notice_link: None,

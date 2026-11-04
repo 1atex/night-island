@@ -116,6 +116,7 @@ pub enum Sid {
     AsstSounds,
     AsstSpeak,
     AsstInstall,
+    AsstReview,
     AsstMedia,
     AsstControls,
     AsstOpen,
@@ -389,6 +390,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::AsstWake => c.assistant.wake,
         Sid::AsstSounds => c.assistant.sounds,
         Sid::AsstSpeak => c.assistant.speak,
+        Sid::AsstReview => c.assistant.review,
         Sid::RecSystem => c.record_system_audio,
         Sid::RecMic => c.record_mic,
         _ => false,
@@ -460,6 +462,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::AsstWake => c.assistant.wake = on,
         Sid::AsstSounds => c.assistant.sounds = on,
         Sid::AsstSpeak => c.assistant.speak = on,
+        Sid::AsstReview => c.assistant.review = on,
         Sid::RecSystem => c.record_system_audio = on,
         Sid::RecMic => c.record_mic = on,
         _ => {}

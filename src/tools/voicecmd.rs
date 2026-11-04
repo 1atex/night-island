@@ -72,6 +72,13 @@ the third person>\"}  (only when the user asks to remember something)\n\
 {\"action\":\"forget\",\"text\":\"<a word or two that identify the note to drop>\"}\n",
         );
     }
+    if has(Cap::Shell) {
+        out.push_str(
+            "{\"action\":\"shell\",\"command\":\"<one Windows cmd.exe command line, no pipes or redirects unless truly \
+needed; prefer commands that only read and show information; never PowerShell>\"}  (only when the user asks for \
+something a command line does)\n",
+        );
+    }
     out.push_str(
         "{\"action\":\"confirm\"}  (the user says yes, confirm, do it)\n\
 {\"action\":\"cancel\"}  (the user says no, cancel, stop)\n\
@@ -99,6 +106,7 @@ pub fn cap_of(command: &Command) -> Option<Cap> {
         Command::Open(_) => Cap::Open,
         Command::Power(_) => Cap::Power,
         Command::Remember(_) | Command::Forget(_) => Cap::Memory,
+        Command::Shell(_) => Cap::Shell,
         Command::Confirm | Command::Cancel | Command::Answer(_) | Command::Unknown => return None,
     })
 }
@@ -136,6 +144,7 @@ pub enum Command {
     Power(Power),
     Remember(String),
     Forget(String),
+    Shell(String),
     Confirm,
     Cancel,
     Answer(String),
@@ -196,6 +205,9 @@ pub fn parse(reply: &str) -> Command {
             text("text", crate::services::assistant::memory::MAX_NOTE_CHARS).map_or(Command::Unknown, Command::Remember)
         }
         "forget" => text("text", MAX_NAME_CHARS).map_or(Command::Unknown, Command::Forget),
+        "shell" => text("command", crate::services::assistant::shell::MAX_COMMAND_CHARS)
+            .filter(|c| !c.contains('\n'))
+            .map_or(Command::Unknown, Command::Shell),
         "confirm" => Command::Confirm,
         "cancel" => Command::Cancel,
         "answer" => text("text", MAX_ANSWER_CHARS).map_or(Command::Unknown, Command::Answer),
@@ -299,6 +311,16 @@ mod tests {
         assert_eq!(cap_of(&Command::Remember("x".into())), Some(Cap::Memory));
         assert_eq!(cap_of(&Command::Power(Power::Sleep)), Some(Cap::Power));
         assert_eq!(cap_of(&Command::Answer("x".into())), None);
+    }
+
+    #[test]
+    fn shell_commands_are_read_gated_and_single_line() {
+        assert_eq!(parse(r#"{"action":"shell","command":" dir C:\\ "}"#), Command::Shell("dir C:\\".into()));
+        assert_eq!(parse(r#"{"action":"shell","command":"dir\nformat c:"}"#), Command::Unknown);
+        assert_eq!(parse(r#"{"action":"shell","command":""}"#), Command::Unknown);
+        assert_eq!(cap_of(&Command::Shell("dir".into())), Some(Cap::Shell));
+        assert!(system_prompt(&[Cap::Shell], "").contains("\"shell\""));
+        assert!(!system_prompt(&[Cap::Media], "").contains("\"shell\""));
     }
 
     #[test]

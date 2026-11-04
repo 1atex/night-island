@@ -550,6 +550,12 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
     true
 }
 
+pub fn complete(system: &str, user: &str, max_tokens: u32) -> Answer {
+    let settings = config();
+    let turn = ChatTurn::text(false, user);
+    run_with(&settings, |key| build(&settings, key, &[turn], system, max_tokens))
+}
+
 pub fn take_command_result() -> Option<Answer> {
     COMMAND_RESULT.lock().ok()?.take()
 }

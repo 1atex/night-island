@@ -1,6 +1,6 @@
 use crate::island::*;
 use crate::platform::{sounds, speech, wake, wake_install};
-use crate::services::assistant::{Cap, Level, memory};
+use crate::services::assistant::{Cap, Level, memory, shell};
 
 impl App {
     fn cue(&self, cue: sounds::Cue) {
@@ -151,6 +151,7 @@ impl App {
             memory::prompt_block(&memory::load(), 1500)
         };
         let system = voicecmd::system_prompt(&perms.commands_offered(), &notes);
+        self.last_request = command.chars().take(300).collect();
         if ai::ask_command(self.hwnd, command, system) {
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
         } else {
@@ -192,7 +193,51 @@ impl App {
         self.end_wake_session();
     }
 
+    fn handle_shell(&mut self, command: String, reviewed: bool, confirmed: bool) {
+        let level = self.settings.assistant.perms.command_level(Cap::Shell, false);
+        if level == Level::Off {
+            let text = format!("{}: off in the Assistant settings", crate::ui::i18n::tr(Cap::Shell.title()));
+            return self.fail_by_voice(&text);
+        }
+        let class = shell::classify(&command);
+        if class == shell::Class::Forbidden {
+            return self.fail_by_voice("That command is blocked");
+        }
+        if self.settings.assistant.review && !reviewed {
+            shell::review(self.hwnd, command);
+            return self.show_notice_for('\u{E9D9}', "Checking the command…", 60_000);
+        }
+        if level == Level::Ask && class == shell::Class::Change && !confirmed {
+            let text = format!("Run: {command}? Say the name and \"yes\"");
+            self.pending_ask = Some((voicecmd::Command::Shell(command), std::time::Instant::now()));
+            return self.notify_for(Notice::Integrations, '\u{E756}', &text, (voicecmd::CONFIRM_SECS * 1000) as u32);
+        }
+        self.show_notice_for('\u{E756}', "Running…", 30_000);
+        shell::run_and_report(self.hwnd, self.last_request.clone(), command);
+    }
+
+    pub(in crate::island) fn on_shell(&mut self) {
+        let Some(outcome) = shell::take_outcome() else { return };
+        self.clear_notice();
+        match outcome {
+            shell::Outcome::Reviewed { command, verdict } if verdict.safe => self.handle_shell(command, true, false),
+            shell::Outcome::Reviewed { verdict, .. } => {
+                let text = format!("Blocked by the check: {}", verdict.reason);
+                self.fail_by_voice(&text);
+            }
+            shell::Outcome::Ran { result: Ok(text), .. } => {
+                let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect();
+                self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);
+                speech::speak(&text, self.settings.assistant.voice_volume());
+            }
+            shell::Outcome::Ran { result: Err(why), .. } => self.fail_by_voice(&why),
+        }
+    }
+
     fn handle_command(&mut self, command: voicecmd::Command, confirmed: bool) {
+        if let voicecmd::Command::Shell(text) = command {
+            return self.handle_shell(text, confirmed, confirmed);
+        }
         if let Some(cap) = voicecmd::cap_of(&command) {
             match self.settings.assistant.perms.command_level(cap, false) {
                 Level::Off => {
@@ -213,6 +258,7 @@ impl App {
             }
         }
         match command {
+            voicecmd::Command::Shell(_) => {}
             voicecmd::Command::Remember(text) => {
                 let mut notes = memory::load();
                 if memory::add(&mut notes, &text) && memory::save(&notes).is_ok() {

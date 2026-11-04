@@ -107,12 +107,13 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
-const ASSISTANT: [(Sid, &str, Kind); 16] = [
+const ASSISTANT: [(Sid, &str, Kind); 17] = [
     (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
     (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
     (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
     (Sid::AsstSounds, "Sound cues", Kind::Toggle),
     (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
+    (Sid::AsstReview, "Check each command with a second model call", Kind::Toggle),
     (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
     (Sid::AsstControls, "Mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
     (Sid::AsstOpen, "Open programs and games", Kind::Cycle),
@@ -211,7 +212,7 @@ pub const GROUPS: [Group; 16] = [
         name: "Assistant",
         rows: &ASSISTANT,
         custom: None,
-        sections: &[(0, "Voice"), (5, "What it may do")],
+        sections: &[(0, "Voice"), (6, "What it may do")],
     },
     Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items), sections: &[] },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items), sections: &[] },
