@@ -25,4 +25,5 @@ pub mod system;
 pub mod volume;
 pub mod vpn;
 pub mod wake;
+pub mod wake_install;
 pub mod winevent;
