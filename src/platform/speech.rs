@@ -78,7 +78,7 @@ fn pick_voice(lang: Lang) -> Option<VoiceInformation> {
     if lang == Lang::Russian { None } else { fallback }
 }
 
-fn synthesize(text: &str) -> windows::core::Result<Vec<u8>> {
+pub fn synthesize(text: &str) -> windows::core::Result<Vec<u8>> {
     let synth = SpeechSynthesizer::new()?;
     if let Some(voice) = pick_voice(language_of(text)) {
         let _ = synth.SetVoice(&voice);
