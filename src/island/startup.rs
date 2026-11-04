@@ -106,6 +106,7 @@ pub fn run() -> Result<()> {
         demo::apply(hwnd);
         apps::start_indexing();
         media::start(hwnd);
+        crate::services::yandex::start(hwnd);
         downloads::start(hwnd);
         privacy::start(hwnd);
         update::start_background(hwnd);

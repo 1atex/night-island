@@ -46,6 +46,7 @@ mod text;
 mod tips;
 mod weather;
 mod widgets;
+mod yandex;
 
 pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
@@ -53,7 +54,7 @@ pub use self::{
     activity::*, agy::*, chat::*, clipboard::*, command::*, companion_popup::*, controls::*, discord::*, frame::*,
     home::*, integrations::*, metrics::*, mixer::*, music_intro::*, note::*, notifications::*, pill::*,
     pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
-    widgets::*,
+    widgets::*, yandex::*,
 };
 
 pub type Rect = (f32, f32, f32, f32);
@@ -75,10 +76,11 @@ pub enum Tab {
     Controls,
     Mixer,
     Notifications,
+    Yandex,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 16] = [
+pub const TABS: [(Tab, char, &str); 17] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Text, '\u{E8E9}', "Text"),
@@ -94,6 +96,7 @@ pub const TABS: [(Tab, char, &str); 16] = [
     (Tab::Controls, '\u{E9E9}', "Controls"),
     (Tab::Mixer, '\u{E9E9}', "App mixer"),
     (Tab::Notifications, '\u{E7F4}', "Notifications"),
+    (Tab::Yandex, '\u{E189}', "My Wave"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
 
@@ -155,6 +158,7 @@ pub struct UiState {
     pub media: Media,
     pub mixer: MixerUi,
     pub notifications: NotificationsUi,
+    pub yandex: YandexUi,
     pub lyric: LyricUi,
     pub update: crate::services::update::Status,
     pub notes: NotesUi,
@@ -212,6 +216,7 @@ impl UiState {
             home: HomeUi::default(),
             mixer: MixerUi::default(),
             notifications: NotificationsUi::default(),
+            yandex: YandexUi::default(),
             hover_tab: None,
             hover_sub: None,
             note: TextEdit::default(),

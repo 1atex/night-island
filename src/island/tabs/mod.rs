@@ -21,6 +21,7 @@ mod steam;
 mod tabbar;
 mod text;
 mod weather;
+mod yandex;
 
 pub(in crate::island) use self::clipboard::ClipboardState;
 

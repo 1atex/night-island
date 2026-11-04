@@ -51,6 +51,9 @@ static TIMELINE: Mutex<Option<(f32, f32, Instant, bool)>> = Mutex::new(None);
 static TIMELINE_START: Mutex<f32> = Mutex::new(0.0);
 
 pub fn progress() -> Option<(f32, f32)> {
+    if crate::services::yandex::active() {
+        return crate::services::yandex::progress();
+    }
     let (pos, len, at, playing) = (*TIMELINE.lock().ok()?)?;
     if len <= 0.0 {
         return None;
@@ -73,6 +76,9 @@ static COVER: Mutex<Option<CoverCache>> = Mutex::new(None);
 static COVER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 pub fn snapshot() -> Media {
+    if let Some(media) = crate::services::yandex::media() {
+        return media;
+    }
     SNAPSHOT.lock().ok().and_then(|g| g.clone()).unwrap_or_default()
 }
 
@@ -221,6 +227,10 @@ fn refresh(manager: &Manager) -> bool {
 }
 
 pub fn next_player() {
+    if crate::services::yandex::active() {
+        crate::services::yandex::send(crate::services::yandex::Command::Stop);
+        return;
+    }
     std::thread::spawn(|| {
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
@@ -308,6 +318,49 @@ fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
         60.0 * ((r - g) / d + 4.0)
     };
     ((h + 360.0) % 360.0, if max == 0.0 { 0.0 } else { d / max }, max)
+}
+
+pub fn cover_url(url: &str) -> Option<Arc<Cover>> {
+    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
+    let reply = crate::services::http::get_bytes(url, 3_000_000, None)?;
+    if reply.status != 200 {
+        return None;
+    }
+    let stream = InMemoryRandomAccessStream::new().ok()?;
+    let writer = DataWriter::CreateDataWriter(&stream).ok()?;
+    writer.WriteBytes(&reply.body).ok()?;
+    writer.StoreAsync().ok()?.join().ok()?;
+    stream.Seek(0).ok()?;
+    let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;
+    if decoder.PixelWidth().ok()? > 2048 || decoder.PixelHeight().ok()? > 2048 {
+        return None;
+    }
+    let transform = BitmapTransform::new().ok()?;
+    transform.SetScaledWidth(300).ok()?;
+    transform.SetScaledHeight(300).ok()?;
+    let bitmap = decoder
+        .GetSoftwareBitmapTransformedAsync(
+            BitmapPixelFormat::Bgra8,
+            BitmapAlphaMode::Premultiplied,
+            &transform,
+            ExifOrientationMode::IgnoreExifOrientation,
+            ColorManagementMode::DoNotColorManage,
+        )
+        .ok()?
+        .join()
+        .ok()?;
+    let buffer = Buffer::Create(300 * 300 * 4).ok()?;
+    bitmap.CopyToBuffer(&buffer).ok()?;
+    let mut bgra = vec![0; 300 * 300 * 4];
+    DataReader::FromBuffer(&buffer).ok()?.ReadBytes(&mut bgra).ok()?;
+    Some(Arc::new(Cover {
+        id: COVER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        size: 300,
+        full_w: 300,
+        full_h: 300,
+        full: bgra.clone(),
+        bgra,
+    }))
 }
 
 pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
@@ -405,6 +458,10 @@ pub fn debug_cover(side: u32, rgba: &[u8]) -> Option<Arc<Cover>> {
 }
 
 pub fn seek(secs: f32) {
+    if crate::services::yandex::active() {
+        crate::services::yandex::send(crate::services::yandex::Command::Seek(secs));
+        return;
+    }
     let start = TIMELINE_START.lock().map_or(0.0, |s| *s);
     if let Ok(mut g) = TIMELINE.lock()
         && let Some((_, len, _, playing)) = *g
@@ -422,6 +479,15 @@ pub fn seek(secs: f32) {
 }
 
 pub fn control(action: Control) {
+    if crate::services::yandex::active() {
+        use crate::services::yandex::{self, Command};
+        yandex::send(match action {
+            Control::Previous => Command::Previous,
+            Control::PlayPause => Command::Toggle,
+            Control::Next => Command::Next,
+        });
+        return;
+    }
     std::thread::spawn(move || {
         unsafe {
             let _ = RoInitialize(RO_INIT_MULTITHREADED);

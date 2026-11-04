@@ -34,6 +34,14 @@ The **Setup guide** inside Notifications explains all three steps: notification 
 
 Cards and history display the sender/chat image supplied by the system toast, with a small application badge. Images are matched to the complete notification text and read from local image files only, then cached in memory. Telegram deletes its temporary avatar files after about a minute, so old notifications whose files have already disappeared fall back to the app icon. No Telegram login or network image requests are used.
 
+### Yandex Music: My Wave
+
+Open **More → My Wave → Connect Yandex Music**, copy the code and confirm it at [ya.ru/device](https://ya.ru/device). The island never asks for your password. The access token is encrypted for your Windows account; **Sign out** stops playback and removes the local token.
+
+Start your personal wave and adjust activity, variety, mood and language with the arrows. Available choices come from Yandex. Changes apply after the current track; **Next** applies them immediately. Playback continues when the island is collapsed, with cover colors, progress and controls on Home and the desktop companion. **Stop wave** releases control to your other music apps. Automatic playback on application startup is opt-in.
+
+This integration uses the unofficial Yandex Music API and native Windows audio playback (MP3). An eligible subscription and region are required. Protocol behavior was researched in [yamusic-md3](https://github.com/yaskorinov/yamusic-md3); the implementation uses Night Island's native UI and workers. Live account-specific playback must be verified after signing in; automated checks cover device authorization endpoints, API requests, queue metadata, native audio and UI rendering.
+
 ### Build
 
 Requires Windows, a recent stable Rust toolchain (edition 2024) and a C compiler (MSVC Build Tools or mingw-w64).
@@ -77,6 +85,14 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 В уведомлениях есть вкладка **«Как настроить»**: доступ к уведомлениям, отключение баннеров Windows при сохранении записей в центре и включение **«Системного окна Windows» / «Использовать уведомления Windows»** в настройках Telegram. Собственные всплывающие окна Telegram не попадают в системный обработчик.
 
 Карточки и история показывают фото отправителя/чата из системного уведомления с маленьким значком приложения. Фото сопоставляется с полным текстом уведомления, читается только из локального файла и сохраняется в памяти. Telegram удаляет временные аватарки примерно через минуту: у старых уведомлений с уже удалённым файлом отображается значок приложения. Вход в Telegram и загрузка изображений по сети не используются.
+
+### Яндекс Музыка: Моя волна
+
+Открой **Ещё → Моя волна → Подключить Яндекс Музыку**, скопируй код и подтверди вход на [ya.ru/device](https://ya.ru/device). Остров не запрашивает пароль. Токен шифруется для текущего пользователя Windows; **Выйти** останавливает музыку и удаляет сохранённый токен.
+
+Запусти свою волну и стрелками выбери занятие, характер, настроение и язык. Варианты загружаются из Яндекса. Новые настройки применяются после текущего трека; кнопка **Следующий** переключает сразу. Музыка играет и в свёрнутом острове: работают цвета обложки, прогресс, управление на главной и у персонажа. **Остановить** возвращает управление другим плеерам. Запуск волны вместе с островом включается отдельно.
+
+Используется неофициальный API Яндекс Музыки и встроенный аудиоплеер Windows (MP3). Нужны подходящая подписка и доступность сервиса в регионе. Связь с API изучена по [yamusic-md3](https://github.com/yaskorinov/yamusic-md3), интерфейс и обработчики написаны для Night Island. Персональную волну нужно проверить после входа в аккаунт; автоматические проверки покрывают получение кода, запросы API, данные очереди, воспроизведение Windows и отрисовку вкладки.
 
 ### Сборка
 

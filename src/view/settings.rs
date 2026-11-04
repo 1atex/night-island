@@ -53,6 +53,7 @@ pub enum Sid {
     TabControls,
     TabMixer,
     TabNotifications,
+    TabYandex,
     SystemNotifications,
     WindowsNotificationsSettings,
     NotifyMic,
@@ -133,6 +134,7 @@ pub(in crate::view) fn tab_toggle_name(id: Sid) -> Option<&'static str> {
         Sid::TabControls => "Controls",
         Sid::TabMixer => "App mixer",
         Sid::TabNotifications => "Notifications",
+        Sid::TabYandex => "My Wave",
         _ => return None,
     })
 }

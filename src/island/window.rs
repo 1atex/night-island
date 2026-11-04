@@ -480,6 +480,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             }
             LRESULT(0)
         }
+        crate::services::yandex::WM_YANDEX => {
+            with_app(|a| a.on_yandex());
+            LRESULT(0)
+        }
         crate::platform::audio_mixer::WM_MIXER => {
             with_app(|a| a.on_mixer());
             LRESULT(0)

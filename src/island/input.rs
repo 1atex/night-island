@@ -215,6 +215,13 @@ impl App {
             }
             self.ui.hand = hover.is_some();
         }
+        if self.ui.tab == view::Tab::Yandex {
+            let hover = view::hit_yandex(pill, self.scale, &self.ui.yandex, fx, fy);
+            if hover != self.ui.yandex.hover {
+                self.ui.yandex.hover = hover;
+                self.repaint_expanded();
+            }
+        }
         if self.ui.tab == view::Tab::Notifications {
             let hover = view::hit_notifications(pill, self.scale, fx, fy);
             if hover != self.ui.notifications.hover {
@@ -356,6 +363,7 @@ impl App {
             || hover_text.is_some()
             || ((self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open))
                 && self.ui.mixer.hover.is_some())
+            || (self.ui.tab == view::Tab::Yandex && self.ui.yandex.hover.is_some())
             || (self.ui.tab == view::Tab::Notifications && self.ui.notifications.hover.is_some());
         let hover_sub = view::hit_subtab(self.pill_full(), self.scale, fx, fy, &self.ui);
         self.ui.hand |= hover_sub.is_some();
@@ -489,6 +497,7 @@ impl App {
         match self.ui.tab {
             view::Tab::Clipboard => self.click_clip(x, y),
             view::Tab::Controls => self.click_ctl(x, y),
+            view::Tab::Yandex => self.click_yandex(x, y),
             view::Tab::Mixer => self.click_mixer(x, y),
             view::Tab::Notifications => self.click_notifications(x, y),
             view::Tab::Note => self.click_note(x, y),

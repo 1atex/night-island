@@ -114,7 +114,7 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 13] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
     (Sid::TabNote, "Note", Kind::Toggle),
@@ -128,6 +128,7 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 13] = [
     (Sid::TabControls, "Controls", Kind::Toggle),
     (Sid::TabMixer, "App mixer", Kind::Toggle),
     (Sid::TabNotifications, "Notifications", Kind::Toggle),
+    (Sid::TabYandex, "My Wave", Kind::Toggle),
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
