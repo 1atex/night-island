@@ -3,8 +3,8 @@ use windows::core::{PCWSTR, PWSTR, w};
 
 use crate::platform::{apps, steam};
 
-pub const PROGRAMS_BUDGET: usize = 2000;
-pub const GAMES_BUDGET: usize = 500;
+pub const PROGRAMS_BUDGET: usize = 1400;
+pub const GAMES_BUDGET: usize = 300;
 
 pub fn default_browser() -> Option<String> {
     [w!("https"), w!(".html")].into_iter().find_map(|assoc| {

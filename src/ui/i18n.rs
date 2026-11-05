@@ -1021,6 +1021,9 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Смотреть на экран (превью, нужна модель с картинками)"
         }
         "The screen could not be captured" => "Не удалось снять экран",
+        "Island data: weather, music, Spotify, Discord, Steam, notes" => {
+            "Данные Острова: погода, музыка, Spotify, Discord, Steam, заметки"
+        }
         "Volume" => "Громкость",
         "Muted" => "Звук выключен",
         "Opened" => "Открыто",

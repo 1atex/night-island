@@ -107,7 +107,7 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
-const ASSISTANT: [(Sid, &str, Kind); 21] = [
+const ASSISTANT: [(Sid, &str, Kind); 24] = [
     (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
     (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
     (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
@@ -115,8 +115,10 @@ const ASSISTANT: [(Sid, &str, Kind); 21] = [
     (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
     (Sid::AsstNatural, "Natural voice from the speech service (paid, no load on the PC)", Kind::Toggle),
     (Sid::AsstFollowUp, "Keep listening after an answer", Kind::Toggle),
+    (Sid::AsstSteps, "Steps per request", Kind::Slider),
     (Sid::AsstReview, "Check commands with a second model call when asking first", Kind::Toggle),
     (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
+    (Sid::AsstInstructions, "Edit the assistant's own instructions", Kind::Button),
     (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
     (Sid::AsstControls, "Volume, mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
     (Sid::AsstOpen, "Open programs and games", Kind::Cycle),
@@ -129,6 +131,7 @@ const ASSISTANT: [(Sid, &str, Kind); 21] = [
     (Sid::AsstBrowser, "Browser (open sites, read pages)", Kind::Cycle),
     (Sid::AsstPower, "Shut down, restart, sleep", Kind::Cycle),
     (Sid::AsstScreen, "Look at the screen (preview, needs a model that sees images)", Kind::Cycle),
+    (Sid::AsstIsland, "Island data: weather, music, Spotify, Discord, Steam, notes", Kind::Cycle),
 ];
 
 const ACTIVITY: [(Sid, &str, Kind); 1] = [(Sid::ActivityAi, "Sort unknown programs with AI", Kind::Toggle)];
@@ -211,13 +214,7 @@ pub const GROUPS: [Group; 16] = [
     Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items), sections: &[] },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items), sections: &[] },
-    Group {
-        glyph: '\u{E720}',
-        name: "Assistant",
-        rows: &ASSISTANT,
-        custom: None,
-        sections: &[(0, "Voice"), (6, "What it may do")],
-    },
+    Group { glyph: '\u{E720}', name: "Assistant", rows: &ASSISTANT, custom: Some(assistant_items), sections: &[] },
     Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items), sections: &[] },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items), sections: &[] },
 ];
@@ -268,6 +265,8 @@ pub enum Field {
     VoiceKey,
     VoiceModel,
     VoiceBase,
+    TtsModel,
+    TtsVoice,
     WakeWord,
     GroupName,
     Search,
@@ -805,6 +804,31 @@ fn activity_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
+fn assistant_items(ui: &UiState) -> Vec<Item> {
+    let mut out = Vec::new();
+    for &(id, label, kind) in &ASSISTANT {
+        match id {
+            Sid::AsstEnabled => out.push(Item::Section("Voice")),
+            Sid::AsstSteps => out.push(Item::Section("How it works")),
+            Sid::AsstMedia => out.push(Item::Section("What it may do")),
+            _ => {}
+        }
+        out.push(Item::Row(id, label, kind));
+        if id == Sid::AsstNatural && ui.cfg.assistant.natural_voice {
+            out.push(Item::Field(Field::TtsModel, "Voice model", "gpt-4o-mini-tts"));
+            out.push(Item::Field(Field::TtsVoice, "Voice name", "nova"));
+            out.push(Item::Button(Act::VoiceSave, "Save the voice".into(), true));
+            out.push(Item::Note(
+                "Uses the speech service of the AI group (same key). OpenAI voices: alloy, ash, coral,",
+            ));
+            out.push(Item::Note(
+                "echo, fable, nova, onyx, sage, shimmer. Other servers (Kokoro, openedai-speech): their names.",
+            ));
+        }
+    }
+    out
+}
+
 fn ai_items(ui: &UiState) -> Vec<Item> {
     use crate::data::settings::AiProvider;
     let provider = ui.cfg.ai.provider;
@@ -1107,6 +1131,8 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::VoiceKey => &ui.int.voice_key,
         Field::VoiceModel => &ui.int.voice_model,
         Field::VoiceBase => &ui.int.voice_base,
+        Field::TtsModel => &ui.int.tts_model,
+        Field::TtsVoice => &ui.int.tts_voice,
         Field::WakeWord => &ui.int.wake,
         Field::GroupName => &ui.int.group_name,
         Field::Search => &ui.int.search,

@@ -285,6 +285,106 @@ fn api(method: &str, path: &str) -> Option<http::Response> {
     http::request(method, &url, Some(&access_token()?), None)
 }
 
+fn api_json(method: &str, path: &str, json: &str) -> Option<http::Response> {
+    let url = format!("https://api.spotify.com/v1{path}");
+    let reply = http::request_json(method, &url, &access_token()?, json)?;
+    if reply.status != 401 {
+        return Some(reply);
+    }
+    if let Ok(mut t) = TOKEN.lock()
+        && let Some(t) = t.as_mut()
+    {
+        t.expires = Instant::now();
+    }
+    http::request_json(method, &url, &access_token()?, json)
+}
+
+pub fn kind_of(word: &str) -> &'static str {
+    match word.trim().to_ascii_lowercase().as_str() {
+        "album" => "album",
+        "artist" => "artist",
+        "playlist" => "playlist",
+        _ => "track",
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Found {
+    pub uri: String,
+    pub name: String,
+    pub by: String,
+}
+
+pub fn pick_result(body: &str, kind: &str) -> Option<Found> {
+    let v = parse_json(body)?;
+    let item = v.pointer(&format!("/{kind}s/items/0")).filter(|i| i.is_object())?;
+    let uri = item.get("uri")?.as_str()?.to_string();
+    let valid = uri.starts_with("spotify:") && uri.bytes().all(|b| b.is_ascii_alphanumeric() || b == b':');
+    let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let by = item
+        .pointer("/artists/0/name")
+        .or_else(|| item.pointer("/owner/display_name"))
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string();
+    valid.then_some(Found { uri, name, by })
+}
+
+pub fn play_body(kind: &str, uri: &str) -> String {
+    if kind == "track" {
+        serde_json::json!({ "uris": [uri] }).to_string()
+    } else {
+        serde_json::json!({ "context_uri": uri }).to_string()
+    }
+}
+
+pub fn pick_device(body: &str) -> Option<String> {
+    let v = parse_json(body)?;
+    let devices = v.get("devices")?.as_array()?;
+    let usable = |d: &&serde_json::Value| d.get("is_restricted").and_then(|r| r.as_bool()) != Some(true);
+    let chosen = devices
+        .iter()
+        .filter(usable)
+        .find(|d| d.get("is_active").and_then(|a| a.as_bool()) == Some(true))
+        .or_else(|| devices.iter().filter(usable).find(|d| d.get("type").and_then(|t| t.as_str()) == Some("Computer")))
+        .or_else(|| devices.iter().find(usable))?;
+    let id = chosen.get("id")?.as_str()?;
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')).then(|| id.to_string())
+}
+
+pub fn play_search(query: &str, kind: &str) -> Result<String, String> {
+    let kind = kind_of(kind);
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("Say what to play".into());
+    }
+    if state().status != Status::Connected {
+        return Err("Spotify is not connected: connect it in the settings, Integrations".into());
+    }
+    let reply =
+        api("GET", &format!("/search?q={}&type={kind}&limit=1", pct(query))).ok_or("No connection to Spotify")?;
+    if reply.status != 200 {
+        return Err(format!("Spotify search answered with status {}", reply.status));
+    }
+    let found = pick_result(&reply.body, kind).ok_or("Nothing like that was found on Spotify")?;
+    let device = api("GET", "/me/player/devices").filter(|r| r.status == 200).and_then(|r| pick_device(&r.body));
+    let path = match &device {
+        Some(id) => format!("/me/player/play?device_id={id}"),
+        None => "/me/player/play".to_string(),
+    };
+    let reply = api_json("PUT", &path, &play_body(kind, &found.uri)).ok_or("No connection to Spotify")?;
+    match reply.status {
+        200..=299 => {
+            refresh();
+            let by = if found.by.is_empty() { String::new() } else { format!(" by {}", found.by) };
+            Ok(format!("Playing the {kind} {}{by}", found.name))
+        }
+        404 => Err("Spotify has no device to play on: open Spotify on this computer, then try again".into()),
+        403 => Err("Spotify refused: playback control needs Premium, or the device is restricted".into()),
+        other => Err(format!("Spotify answered with status {other}")),
+    }
+}
+
 fn contains(reply: Option<http::Response>) -> Option<bool> {
     let reply = reply.filter(|r| r.status == 200)?;
     parse_json(&reply.body)?.get(0)?.as_bool()
@@ -373,6 +473,51 @@ pub fn toggle_like() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_search_answer_gives_the_first_item_of_the_asked_kind() {
+        let tracks = r#"{"tracks":{"items":[{"uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC","name":"Never Gonna Give You Up","artists":[{"name":"Rick Astley"}]}]}}"#;
+        assert_eq!(
+            pick_result(tracks, "track"),
+            Some(Found {
+                uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
+                name: "Never Gonna Give You Up".into(),
+                by: "Rick Astley".into()
+            })
+        );
+        assert_eq!(pick_result(tracks, "album"), None);
+        let playlist = r#"{"playlists":{"items":[{"uri":"spotify:playlist:37i9dQZF1DX","name":"Chill","owner":{"display_name":"Spotify"}}]}}"#;
+        assert_eq!(pick_result(playlist, "playlist").map(|f| f.by), Some("Spotify".into()));
+        assert_eq!(pick_result(r#"{"tracks":{"items":[]}}"#, "track"), None);
+        assert_eq!(pick_result(r#"{"tracks":{"items":[null]}}"#, "track"), None);
+        assert_eq!(pick_result("not json", "track"), None);
+        let evil = r#"{"tracks":{"items":[{"uri":"spotify:track:x\"}; calc","name":"a"}]}}"#;
+        assert_eq!(pick_result(evil, "track"), None);
+    }
+
+    #[test]
+    fn a_track_plays_by_uri_and_everything_else_by_context() {
+        assert_eq!(play_body("track", "spotify:track:abc"), r#"{"uris":["spotify:track:abc"]}"#);
+        assert_eq!(play_body("album", "spotify:album:abc"), r#"{"context_uri":"spotify:album:abc"}"#);
+        assert_eq!(kind_of(" Album "), "album");
+        assert_eq!(kind_of("song"), "track");
+        assert_eq!(kind_of("PLAYLIST"), "playlist");
+    }
+
+    #[test]
+    fn the_device_is_the_active_one_then_a_computer_then_any() {
+        let list = |s: &str| format!(r#"{{"devices":[{s}]}}"#);
+        let phone = r#"{"id":"p1","type":"Smartphone","is_active":false}"#;
+        let pc = r#"{"id":"c1","type":"Computer","is_active":false}"#;
+        let live = r#"{"id":"a1","type":"Speaker","is_active":true}"#;
+        let locked = r#"{"id":"r1","type":"Computer","is_active":true,"is_restricted":true}"#;
+        assert_eq!(pick_device(&list(&format!("{phone},{pc},{live}"))).as_deref(), Some("a1"));
+        assert_eq!(pick_device(&list(&format!("{phone},{pc}"))).as_deref(), Some("c1"));
+        assert_eq!(pick_device(&list(phone)).as_deref(), Some("p1"));
+        assert_eq!(pick_device(&list(locked)), None);
+        assert_eq!(pick_device(&list("")), None);
+        assert_eq!(pick_device(&list(r#"{"id":"x y","is_active":true}"#)), None);
+    }
 
     #[test]
     fn pkce_challenge_matches_the_rfc_example() {

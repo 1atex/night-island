@@ -90,6 +90,7 @@ mod system_notifications;
 mod tabs;
 mod timers;
 mod voice;
+mod voice_info;
 mod window;
 
 use self::{

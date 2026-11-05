@@ -1,8 +1,13 @@
 use std::net::IpAddr;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
+use super::shell;
 use crate::services::http;
 
-pub const MAX_PAGE_CHARS: usize = 3500;
+pub const MAX_PAGE_CHARS: usize = 3000;
 const MAX_PAGE_BYTES: usize = 2_000_000;
 const MAX_HITS: usize = 8;
 const BROWSER_AGENT: &str =
@@ -183,8 +188,11 @@ fn page_text(body: &[u8]) -> String {
     if readable.chars().count() > MAX_PAGE_CHARS { format!("{cut}\n[cut]") } else { cut }
 }
 
-pub fn fetch(url: &str) -> Result<String, String> {
-    check_url(url)?;
+const THIN_PAGE_CHARS: usize = 250;
+const RENDER_TIMEOUT: Duration = Duration::from_secs(40);
+static PROFILES: AtomicU32 = AtomicU32::new(0);
+
+fn fetch_plain(url: &str) -> Result<String, String> {
     let reply = http::get_bytes(url.trim(), MAX_PAGE_BYTES, Some(BROWSER_AGENT))
         .ok_or("The page could not be loaded or is too large")?;
     if reply.status >= 400 {
@@ -192,6 +200,69 @@ pub fn fetch(url: &str) -> Result<String, String> {
     }
     let text = page_text(&reply.body);
     if text.is_empty() { Err("The page has no readable text".into()) } else { Ok(text) }
+}
+
+pub fn browser_candidates() -> Vec<PathBuf> {
+    let under = |var: &str, tail: &str| std::env::var_os(var).map(|base| PathBuf::from(base).join(tail));
+    [
+        under("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
+        under("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
+        under("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+        under("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
+        under("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+pub fn find_browser() -> Option<PathBuf> {
+    browser_candidates().into_iter().find(|p| p.is_file())
+}
+
+pub fn render_args(profile: &std::path::Path, url: &str) -> Vec<String> {
+    [
+        "--headless=new",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-extensions",
+        "--mute-audio",
+        "--hide-scrollbars",
+        "--virtual-time-budget=8000",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .chain([format!("--user-data-dir={}", profile.display()), "--dump-dom".to_string(), url.to_string()])
+    .collect()
+}
+
+pub fn render(url: &str) -> Result<String, String> {
+    check_url(url)?;
+    let url = url.trim();
+    if url.chars().any(|c| c.is_whitespace() || c == '"') {
+        return Err("That address is not allowed".into());
+    }
+    let exe = find_browser().ok_or("No Edge or Chrome was found to draw the page")?;
+    let profile = std::env::temp_dir().join(format!(
+        "night-island-page-{}-{}",
+        std::process::id(),
+        PROFILES.fetch_add(1, Ordering::SeqCst)
+    ));
+    let mut cmd = Command::new(exe);
+    cmd.args(render_args(&profile, url));
+    let done = shell::run_process(cmd, RENDER_TIMEOUT);
+    let _ = std::fs::remove_dir_all(&profile);
+    let text = page_text(done?.stdout.as_bytes());
+    if text.is_empty() { Err("The page has no readable text".into()) } else { Ok(text) }
+}
+
+pub fn fetch(url: &str) -> Result<String, String> {
+    check_url(url)?;
+    match fetch_plain(url) {
+        Ok(text) if text.chars().count() >= THIN_PAGE_CHARS => Ok(text),
+        thin => render(url).or(thin),
+    }
 }
 
 fn percent_decode(text: &str) -> String {
@@ -375,6 +446,24 @@ mod tests {
         assert_eq!(percent_decode("a%20b%D0%B0+c"), "a bа c");
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz"), "%zz");
+    }
+
+    #[test]
+    fn the_headless_browser_gets_a_private_profile_and_the_address_last() {
+        let args = render_args(std::path::Path::new("C:\\Temp\\p1"), "https://example.com/a?b=1");
+        assert_eq!(args.last().map(String::as_str), Some("https://example.com/a?b=1"));
+        assert!(args.contains(&"--headless=new".to_string()) && args.contains(&"--dump-dom".to_string()));
+        assert!(args.iter().any(|a| a == "--user-data-dir=C:\\Temp\\p1"));
+        assert!(!browser_candidates().is_empty());
+        assert!(render("http://127.0.0.1/").is_err());
+        assert!(render("https://example.com/a b").is_err());
+    }
+
+    #[test]
+    #[ignore = "needs Edge or Chrome and the internet"]
+    fn a_page_is_drawn_by_a_headless_browser() {
+        let text = render("https://example.com/").expect("a drawn page");
+        assert!(text.contains("documentation examples"), "{text}");
     }
 
     #[test]

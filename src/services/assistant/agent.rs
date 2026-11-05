@@ -9,6 +9,7 @@ pub const MAX_FOLLOW_UPS: usize = 5;
 pub const MAX_EXCHANGES: usize = 6;
 pub const EXCHANGE_LIFE: Duration = Duration::from_secs(15 * 60);
 const MAX_TURN_CHARS: usize = 3800;
+const SPENT_RESULT_CHARS: usize = 450;
 const MAX_REPLY_CHARS: usize = 700;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct Run {
     pub system: String,
     pub request: String,
     pub steps: usize,
+    pub max_steps: usize,
     pub tainted: bool,
     pub waiting: bool,
     pub phase: Phase,
@@ -55,6 +57,7 @@ impl Run {
             system,
             request: request.to_string(),
             steps: 0,
+            max_steps: MAX_STEPS,
             tainted: false,
             waiting: false,
             phase: Phase::Working,
@@ -101,6 +104,25 @@ impl Run {
         self.push(false, &text);
     }
 
+    pub fn turns_for_call(&self) -> Vec<ChatTurn> {
+        let last = self.turns.len().saturating_sub(1);
+        self.turns
+            .iter()
+            .enumerate()
+            .map(|(i, turn)| {
+                let spent = i < last
+                    && !turn.assistant
+                    && (turn.text.starts_with("RESULT of ") || turn.text.starts_with("FAILED "))
+                    && turn.text.chars().count() > SPENT_RESULT_CHARS;
+                if !spent {
+                    return turn.clone();
+                }
+                let head: String = turn.text.chars().take(SPENT_RESULT_CHARS).collect();
+                ChatTurn { text: format!("{head}\n[...shortened, you have already used it]"), ..turn.clone() }
+            })
+            .collect()
+    }
+
     pub fn saw(&mut self, note: &str, picture: Attachment) {
         self.push(false, note);
         if let Some(last) = self.turns.last_mut() {
@@ -109,7 +131,7 @@ impl Run {
     }
 
     pub fn out_of_steps(&self) -> bool {
-        self.steps >= MAX_STEPS
+        self.steps >= self.max_steps
     }
 
     pub fn repeated(&self, signature: &str) -> bool {
@@ -181,6 +203,10 @@ mod tests {
         assert!(!run.out_of_steps());
         run.steps = MAX_STEPS;
         assert!(run.out_of_steps());
+        run.max_steps = 15;
+        assert!(!run.out_of_steps());
+        run.steps = 15;
+        assert!(run.out_of_steps());
     }
 
     #[test]
@@ -217,6 +243,23 @@ mod tests {
         let mut many: Vec<Exchange> = (0..10).map(|_| kept.clone()).collect();
         fresh(&mut many);
         assert_eq!(many.len(), MAX_EXCHANGES);
+    }
+
+    #[test]
+    fn old_results_are_shortened_for_the_model_but_the_newest_turn_is_whole() {
+        let mut run = Run::new("sys".into(), "find big files", &[]);
+        run.said("{\"action\":\"powershell\"}");
+        run.result("powershell", &Ok("line\n".repeat(400)));
+        run.said("{\"action\":\"powershell\"}");
+        run.result("powershell", &Ok("fresh\n".repeat(400)));
+        let sent = run.turns_for_call();
+        assert_eq!(sent.len(), run.turns.len());
+        assert!(sent[2].text.chars().count() < 600 && sent[2].text.contains("shortened"));
+        assert!(sent[2].text.starts_with("RESULT of powershell"));
+        assert_eq!(sent[4].text, run.turns[4].text, "the newest result is sent whole");
+        assert_eq!(sent[0].text, "find big files");
+        assert_eq!(sent[1].text, run.turns[1].text, "what the model said is kept");
+        assert!(run.turns[2].text.chars().count() > 600, "the stored turn is not touched");
     }
 
     #[test]

@@ -66,6 +66,30 @@ pub fn request_as(
     Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
 }
 
+pub fn request_json(method: &str, url: &str, bearer: &str, json: &str) -> Option<Response> {
+    let verb = match method {
+        "POST" => HttpMethod::Post().ok()?,
+        "PUT" => HttpMethod::Put().ok()?,
+        _ => return None,
+    };
+    let client = HttpClient::new().ok()?;
+    let message = HttpRequestMessage::Create(&verb, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
+    let value =
+        HttpCredentialsHeaderValue::CreateFromSchemeWithToken(&HSTRING::from("Bearer"), &HSTRING::from(bearer)).ok()?;
+    message.Headers().ok()?.SetAuthorization(&value).ok()?;
+    let content = HttpStringContent::CreateFromStringWithEncodingAndMediaType(
+        &HSTRING::from(json),
+        UnicodeEncoding::Utf8,
+        &HSTRING::from("application/json"),
+    )
+    .ok()?;
+    message.SetContent(&content).ok()?;
+    let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
+    let status = reply.StatusCode().ok()?.0 as u16;
+    let body = reply.Content().ok()?.ReadAsStringAsync().ok()?.join().ok()?.to_string();
+    Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
+}
+
 pub struct BytesReply {
     pub status: u16,
     pub body: Vec<u8>,

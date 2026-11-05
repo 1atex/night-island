@@ -13,6 +13,8 @@ pub struct IntegrationsUi {
     pub voice_model: TextEdit,
     pub voice_base: TextEdit,
     pub voice_key_saved: bool,
+    pub tts_model: TextEdit,
+    pub tts_voice: TextEdit,
     pub voice_key_shared: bool,
     pub wake: TextEdit,
     pub group_name: TextEdit,

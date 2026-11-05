@@ -25,7 +25,10 @@ pub struct Assistant {
     pub natural_voice: bool,
     pub tts_model: String,
     pub tts_voice: String,
+    pub max_steps: u8,
 }
+
+pub const STEPS_RANGE: (u8, u8) = (3, 20);
 
 impl Default for Assistant {
     fn default() -> Self {
@@ -41,6 +44,7 @@ impl Default for Assistant {
             natural_voice: false,
             tts_model: "gpt-4o-mini-tts".into(),
             tts_voice: "nova".into(),
+            max_steps: 10,
         }
     }
 }
@@ -49,6 +53,7 @@ impl Assistant {
     pub fn sanitize(&mut self) {
         self.perms.sanitize();
         self.volume = self.volume.min(100);
+        self.max_steps = self.max_steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1);
         let defaults = Assistant::default();
         if !crate::services::ai::valid_model(&self.tts_model, crate::data::settings::AiProvider::OpenAi) {
             self.tts_model = defaults.tts_model;
@@ -103,6 +108,7 @@ impl Cap {
             Cap::Browser => "Browser (open sites, read pages)",
             Cap::Power => "Shut down, restart, sleep",
             Cap::Screen => "Look at the screen (preview, needs a model that sees images)",
+            Cap::Island => "Island data: weather, music, Spotify, Discord, Steam, notes",
         }
     }
 }
@@ -131,7 +137,12 @@ mod tests {
         ok.sanitize();
         assert_eq!((ok.tts_model.as_str(), ok.tts_voice.as_str()), ("tts-1", "alloy"));
         let old: Assistant = serde_json::from_str(r#"{"wake":true}"#).unwrap();
-        assert!(old.follow_up && old.tts_model == "gpt-4o-mini-tts");
+        assert!(old.follow_up && old.tts_model == "gpt-4o-mini-tts" && old.max_steps == 10);
+        for (given, kept) in [(0u8, 3u8), (2, 3), (7, 7), (200, 20)] {
+            let mut a = Assistant { max_steps: given, ..Assistant::default() };
+            a.sanitize();
+            assert_eq!(a.max_steps, kept);
+        }
     }
 
     #[test]

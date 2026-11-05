@@ -132,6 +132,9 @@ pub enum Sid {
     AsstBrowser,
     AsstPower,
     AsstScreen,
+    AsstIsland,
+    AsstSteps,
+    AsstInstructions,
 }
 
 pub(in crate::view) fn asst_cap(id: Sid) -> Option<crate::services::assistant::Cap> {
@@ -149,6 +152,7 @@ pub(in crate::view) fn asst_cap(id: Sid) -> Option<crate::services::assistant::C
         Sid::AsstBrowser => Cap::Browser,
         Sid::AsstPower => Cap::Power,
         Sid::AsstScreen => Cap::Screen,
+        Sid::AsstIsland => Cap::Island,
         _ => return None,
     })
 }
@@ -250,6 +254,7 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
         Sid::RecFps => (10.0, 60.0, 5.0),
         Sid::HidePillSecs => (5.0, 10.0, 1.0),
         Sid::MetricsInterval => (1.0, 10.0, 1.0),
+        Sid::AsstSteps => (3.0, 20.0, 1.0),
         Sid::GhostOpacity => (0.05, 1.0, 0.05),
         _ => (0.0, 1.0, 0.01),
     }
@@ -277,6 +282,7 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
         Sid::RecFps => c.record_fps as f32,
         Sid::HidePillSecs => c.hide_pill_secs as f32,
         Sid::MetricsInterval => c.metrics_secs as f32,
+        Sid::AsstSteps => f32::from(c.assistant.max_steps),
         Sid::GhostOpacity => c.ghost_opacity,
         _ => 0.0,
     }
@@ -296,6 +302,7 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
         Sid::OpenSpeed | Sid::CloseSpeed | Sid::TabAnimSpeed => format!("{v:.1}×"),
         Sid::RecFps => format!("{v:.0} fps"),
         Sid::HidePillSecs | Sid::MetricsInterval => format!("{v:.0} s"),
+        Sid::AsstSteps => format!("{v:.0}"),
         _ => String::new(),
     }
 }
@@ -325,6 +332,7 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
         Sid::RecFps => c.record_fps = v as u32,
         Sid::HidePillSecs => c.hide_pill_secs = v as u32,
         Sid::MetricsInterval => c.metrics_secs = v as u32,
+        Sid::AsstSteps => c.assistant.max_steps = v as u8,
         Sid::GhostOpacity => c.ghost_opacity = v,
         _ => {}
     }

@@ -1,6 +1,6 @@
 use crate::services::assistant::Cap;
 use crate::services::assistant::shell::MAX_COMMAND_CHARS;
-use crate::services::assistant::tools::{MAX_FILE_CHARS, Tool};
+use crate::services::assistant::tools::{MAX_FILE_CHARS, Tool, valid_script_name};
 use serde_json::Value;
 
 pub const MAX_WAKE_CHARS: usize = 24;
@@ -65,7 +65,21 @@ matters. Each object is one of:\n",
     );
     let has = |c: Cap| allowed.contains(&c);
     if has(Cap::Media) {
-        out.push_str("{\"action\":\"media\",\"do\":\"play_pause\"|\"next\"|\"previous\"}\n");
+        out.push_str(
+            "{\"action\":\"media\",\"do\":\"play_pause\"|\"next\"|\"previous\"}\n\
+{\"action\":\"spotify\",\"query\":\"<what to play, e.g. an album, a track, an artist>\",\"kind\":\"track\"|\"album\"|\
+\"artist\"|\"playlist\"}  (finds it on Spotify and plays it right away; Spotify must be running, open it first if the \
+RESULT says there is no device)\n",
+        );
+    }
+    if has(Cap::Island) {
+        out.push_str(
+            "{\"action\":\"island\",\"what\":\"weather\"|\"music\"|\"system\"|\"discord\"|\"steam\"|\"reminders\"|\
+\"notes\"|\"all\",\"name\":\"<a note title, only with notes>\"}  (reads Island's own live data and comes back as a \
+RESULT: weather now, by hour and by day including tomorrow; the playing track and Spotify state; volume, microphone \
+and computer load; the voice call; the running Steam game; reminders; notes. Use it instead of guessing)\n\
+{\"action\":\"note\",\"name\":\"<note title>\",\"text\":\"<text>\",\"append\":true|false}  (writes to a note of Island)\n",
+        );
     }
     if has(Cap::Controls) {
         out.push_str(
@@ -73,7 +87,9 @@ matters. Each object is one of:\n",
 \"dark\"|\"light\"}  (state is optional: use it when the user says on, off, enable, disable, mute, unmute, dark or \
 light, and leave it out only for a plain switch; for the mic \"off\" means muted; for theme use dark or light)\n\
 {\"action\":\"volume\",\"set\":<0 to 100>}  or  {\"action\":\"volume\",\"change\":<-100 to 100, percent points>}  or  \
-{\"action\":\"volume\",\"mute\":true|false}  (the system sound volume; use exactly one of set, change, mute)\n",
+{\"action\":\"volume\",\"mute\":true|false}  (the system sound volume; use exactly one of set, change, mute)\n\
+{\"action\":\"discord\",\"do\":\"mute\"|\"unmute\"|\"deafen\"|\"undeafen\"}  (the user's own microphone and \
+headphones in the Discord call)\n",
         );
     }
     if has(Cap::Reminders) {
@@ -110,13 +126,18 @@ prints comes back to you>\"}  (use it for anything with several files or folders
 files, creating many folders at once, listing installed programs, finding and starting programs)\n\
 {\"action\":\"shell\",\"command\":\"<one cmd.exe command line>\"}  (only for one simple command)\n\
 {\"action\":\"wsl\",\"script\":\"<a bash script run in the default WSL distribution>\"}  (for Linux tools; if WSL is \
-not installed the RESULT says so, then use powershell instead)\n",
+not installed the RESULT says so, then use powershell instead)\n\
+{\"action\":\"save_script\",\"name\":\"<letters, digits, - and _>\",\"description\":\"<one line>\",\"script\":\"<a \
+PowerShell script, may use param()>\"}  (keeps a script you wrote that the user will want again; tell the user its name)\n\
+{\"action\":\"run_script\",\"name\":\"<a saved script>\",\"args\":\"<PowerShell arguments, e.g. -Folder D:\\\\x>\"}  \
+(runs a saved script; its output comes back to you)\n",
         );
     }
     if has(Cap::Browser) {
         out.push_str(
-            "{\"action\":\"fetch\",\"url\":\"<an http or https address>\"}  (comes back as the plain text of the page, \
-its first part)\n",
+            "{\"action\":\"fetch\",\"url\":\"<an http or https address>\",\"render\":true|false}  (comes back as the \
+plain text of the page, its first part; a page that needs JavaScript is drawn by a hidden browser automatically, set \
+\"render\":true to force that)\n",
         );
     }
     if has(Cap::WebSearch) {
@@ -195,6 +216,16 @@ the user's Documents (get its real path first with [Environment]::GetFolderPath(
 answer with where it is.",
         );
     }
+    if has(Cap::Island) {
+        out.push_str(
+            "\nISLAND is the app you live in: a pill at the top of the screen that opens into panels: Home (player, \
+volume, quick actions, dock), Clipboard, Text tools, Notes and reminders, Weather, Record, AI chat, Controls, System. \
+Hotkeys: Ctrl+Alt+I open, Alt+Space command bar, Ctrl+Alt+V clipboard, Ctrl+Alt+M microphone, Ctrl+Alt+S screenshot, \
+Ctrl+Alt+R recording, Ctrl+Alt+D dictation. You see and control its data through the actions above, so never guess \
+with commands: weather and tomorrow's forecast, what plays, Spotify state, the call, the Steam game, reminders and \
+notes are \"island\"; playing something is \"spotify\"; the sound is \"volume\"; the call microphone is \"discord\".",
+        );
+    }
     let off: Vec<&str> =
         crate::services::assistant::perms::ALL.iter().filter(|c| !allowed.contains(c)).map(|c| c.title()).collect();
     if !off.is_empty() {
@@ -247,6 +278,8 @@ pub fn cap_of(command: &Command) -> Option<Cap> {
         Command::Remember(_) | Command::Forget(_) => Cap::Memory,
         Command::Tool(tool) => tool.cap(),
         Command::Screenshot => Cap::Screen,
+        Command::Island { .. } | Command::Note { .. } => Cap::Island,
+        Command::Discord(_) => Cap::Controls,
         Command::Confirm | Command::Cancel | Command::Answer(_) | Command::Ask(_) | Command::Unknown => return None,
     })
 }
@@ -272,6 +305,12 @@ pub enum Volume {
     Set(u8),
     Change(i8),
     Mute(bool),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiscordOp {
+    Mute(bool),
+    Deafen(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -314,6 +353,9 @@ pub enum Command {
     Forget(String),
     Tool(Tool),
     Screenshot,
+    Island { what: String, name: String },
+    Note { name: String, text: String, append: bool },
+    Discord(DiscordOp),
     Confirm,
     Cancel,
     Answer(String),
@@ -483,7 +525,56 @@ fn from_value(value: &Value) -> Command {
         "powershell" => text("script", MAX_COMMAND_CHARS)
             .or_else(|| text("command", MAX_COMMAND_CHARS))
             .map_or(Command::Unknown, |s| Command::Tool(Tool::PowerShell(s))),
-        "fetch" => text("url", MAX_URL_CHARS).map_or(Command::Unknown, |u| Command::Tool(Tool::Fetch(u))),
+        "fetch" => text("url", MAX_URL_CHARS).map_or(Command::Unknown, |u| {
+            Command::Tool(if value["render"].as_bool() == Some(true) { Tool::Render(u) } else { Tool::Fetch(u) })
+        }),
+        "island" => text("what", 20).map_or(Command::Unknown, |what| Command::Island {
+            what: what.to_ascii_lowercase(),
+            name: text("name", MAX_NAME_CHARS).unwrap_or_default(),
+        }),
+        "note" => {
+            let body: String = value["text"]
+                .as_str()
+                .unwrap_or("")
+                .chars()
+                .filter(|c| matches!(c, '\n' | '\t') || !c.is_control())
+                .take(MAX_FILE_CHARS)
+                .collect();
+            match text("name", MAX_NAME_CHARS) {
+                Some(name) if !body.trim().is_empty() => {
+                    Command::Note { name, text: body, append: value["append"].as_bool() != Some(false) }
+                }
+                _ => Command::Unknown,
+            }
+        }
+        "discord" => match what {
+            "mute" => Command::Discord(DiscordOp::Mute(true)),
+            "unmute" => Command::Discord(DiscordOp::Mute(false)),
+            "deafen" => Command::Discord(DiscordOp::Deafen(true)),
+            "undeafen" => Command::Discord(DiscordOp::Deafen(false)),
+            _ => Command::Unknown,
+        },
+        "spotify" => match text("query", MAX_PHRASE_CHARS).or_else(|| text("play", MAX_PHRASE_CHARS)) {
+            Some(query) => Command::Tool(Tool::Spotify { query, kind: text("kind", 12).unwrap_or_default() }),
+            None => Command::Unknown,
+        },
+        "save_script" => {
+            let body = text("script", MAX_COMMAND_CHARS).or_else(|| text("body", MAX_COMMAND_CHARS));
+            match (text("name", 40), body) {
+                (Some(name), Some(body)) if valid_script_name(&name) => Command::Tool(Tool::SaveScript {
+                    name,
+                    description: text("description", 90).unwrap_or_default(),
+                    body,
+                }),
+                _ => Command::Unknown,
+            }
+        }
+        "run_script" => match text("name", 40) {
+            Some(name) if valid_script_name(&name) => {
+                Command::Tool(Tool::RunScript { name, args: text("args", 400).unwrap_or_default() })
+            }
+            _ => Command::Unknown,
+        },
         "search" => text("query", MAX_PHRASE_CHARS).map_or(Command::Unknown, |q| Command::Tool(Tool::Search(q))),
         "read_file" => text("path", MAX_PATH_CHARS).map_or(Command::Unknown, |p| Command::Tool(Tool::ReadFile(p))),
         "write_file" => {
@@ -731,6 +822,77 @@ mod tests {
         assert!(!p.contains("you cannot do that"));
         let bare = system_prompt(&[Cap::Media], false, "", "");
         assert!(!bare.contains("YOU CONTROL THIS COMPUTER") && !bare.contains("\"action\":\"volume\""));
+    }
+
+    #[test]
+    fn island_spotify_discord_note_and_script_actions_are_read() {
+        assert_eq!(
+            parse(r#"{"action":"island","what":"Weather"}"#),
+            Command::Island { what: "weather".into(), name: String::new() }
+        );
+        assert_eq!(
+            parse(r#"{"action":"island","what":"notes","name":"Shopping"}"#),
+            Command::Island { what: "notes".into(), name: "Shopping".into() }
+        );
+        assert_eq!(parse(r#"{"action":"island"}"#), Command::Unknown);
+        assert_eq!(
+            parse(r#"{"action":"note","name":"Ideas","text":"buy milk"}"#),
+            Command::Note { name: "Ideas".into(), text: "buy milk".into(), append: true }
+        );
+        assert_eq!(
+            parse(r#"{"action":"note","name":"Ideas","text":"x","append":false}"#),
+            Command::Note { name: "Ideas".into(), text: "x".into(), append: false }
+        );
+        assert_eq!(parse(r#"{"action":"note","name":"Ideas","text":" "}"#), Command::Unknown);
+        assert_eq!(parse(r#"{"action":"discord","do":"mute"}"#), Command::Discord(DiscordOp::Mute(true)));
+        assert_eq!(parse(r#"{"action":"discord","do":"undeafen"}"#), Command::Discord(DiscordOp::Deafen(false)));
+        assert_eq!(parse(r#"{"action":"discord","do":"dance"}"#), Command::Unknown);
+        assert_eq!(
+            parse(r#"{"action":"spotify","query":"Dark Side of the Moon","kind":"album"}"#),
+            Command::Tool(Tool::Spotify { query: "Dark Side of the Moon".into(), kind: "album".into() })
+        );
+        assert_eq!(
+            parse(r#"{"action":"spotify","play":"Numb"}"#),
+            Command::Tool(Tool::Spotify { query: "Numb".into(), kind: String::new() })
+        );
+        assert_eq!(parse(r#"{"action":"spotify"}"#), Command::Unknown);
+        assert_eq!(
+            parse(
+                r#"{"action":"save_script","name":"clean-temp","description":"Empties temp","script":"Get-ChildItem $env:TEMP"}"#
+            ),
+            Command::Tool(Tool::SaveScript {
+                name: "clean-temp".into(),
+                description: "Empties temp".into(),
+                body: "Get-ChildItem $env:TEMP".into()
+            })
+        );
+        assert_eq!(parse(r#"{"action":"save_script","name":"bad name!","script":"ls"}"#), Command::Unknown);
+        assert_eq!(parse(r#"{"action":"save_script","name":"ok"}"#), Command::Unknown);
+        assert_eq!(
+            parse(r#"{"action":"run_script","name":"clean-temp","args":"-Days 3"}"#),
+            Command::Tool(Tool::RunScript { name: "clean-temp".into(), args: "-Days 3".into() })
+        );
+        assert_eq!(parse(r#"{"action":"run_script","name":"../evil"}"#), Command::Unknown);
+        assert_eq!(
+            parse(r#"{"action":"fetch","url":"https://a.b","render":true}"#),
+            Command::Tool(Tool::Render("https://a.b".into()))
+        );
+        assert_eq!(cap_of(&Command::Island { what: "all".into(), name: String::new() }), Some(Cap::Island));
+        assert_eq!(cap_of(&Command::Discord(DiscordOp::Mute(true))), Some(Cap::Controls));
+        assert_eq!(cap_of(&Command::Tool(Tool::Spotify { query: "x".into(), kind: String::new() })), Some(Cap::Media));
+    }
+
+    #[test]
+    fn the_prompt_offers_island_spotify_and_scripts_only_with_their_capabilities() {
+        let full = system_prompt(&crate::services::assistant::perms::ALL, true, "", "");
+        for action in ["island", "note", "discord", "spotify", "save_script", "run_script"] {
+            assert!(full.contains(&format!("\"action\":\"{action}\"")), "{action}");
+        }
+        assert!(full.contains("\"render\":true|false"));
+        let bare = system_prompt(&[Cap::Reminders], false, "", "");
+        for action in ["island", "note", "discord", "spotify", "save_script", "run_script"] {
+            assert!(!bare.contains(&format!("\"action\":\"{action}\"")), "{action}");
+        }
     }
 
     #[test]

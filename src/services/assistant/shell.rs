@@ -14,7 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 use super::tools::{self, Tool};
 
 pub const MAX_COMMAND_CHARS: usize = 4000;
-pub const MAX_OUTPUT_CHARS: usize = 3000;
+pub const MAX_OUTPUT_CHARS: usize = 2500;
 const TIMEOUT: Duration = Duration::from_secs(60);
 const PIPE_GRACE: Duration = Duration::from_millis(400);
 const MAX_PIPE_BYTES: usize = 256 * 1024;
@@ -159,7 +159,13 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-fn collect(mut command: Command) -> Result<String, String> {
+pub struct Finished {
+    pub stdout: String,
+    pub stderr: String,
+    pub code: Option<i32>,
+}
+
+pub fn run_process(mut command: Command, timeout: Duration) -> Result<Finished, String> {
     let home = std::env::var_os("USERPROFILE").unwrap_or_else(|| ".".into());
     let mut child = command
         .current_dir(home)
@@ -171,14 +177,14 @@ fn collect(mut command: Command) -> Result<String, String> {
         .map_err(|_| "The command line could not be started".to_string())?;
     let out = drain(child.stdout.take());
     let err = drain(child.stderr.take());
-    let deadline = Instant::now() + TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(40)),
             _ => {
                 kill_tree(&mut child);
-                return Err(format!("The command did not finish in {} seconds", TIMEOUT.as_secs()));
+                return Err(format!("The command did not finish in {} seconds", timeout.as_secs()));
             }
         }
     };
@@ -186,14 +192,18 @@ fn collect(mut command: Command) -> Result<String, String> {
     while !(out.done.load(Ordering::SeqCst) && err.done.load(Ordering::SeqCst)) && Instant::now() < grace {
         std::thread::sleep(Duration::from_millis(15));
     }
-    let mut text = out.text();
-    let errors = err.text();
-    if !errors.trim().is_empty() {
+    Ok(Finished { stdout: out.text(), stderr: err.text(), code: status.code() })
+}
+
+fn collect(command: Command) -> Result<String, String> {
+    let done = run_process(command, TIMEOUT)?;
+    let mut text = done.stdout;
+    if !done.stderr.trim().is_empty() {
         text.push('\n');
-        text.push_str(&errors);
+        text.push_str(&done.stderr);
     }
     let mut text = clip_output(&text);
-    if let Some(code) = status.code().filter(|c| *c != 0) {
+    if let Some(code) = done.code.filter(|c| *c != 0) {
         text.push_str(&format!("\n[exit code {code}]"));
     }
     Ok(text)

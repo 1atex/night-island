@@ -14,6 +14,7 @@ pub enum Cap {
     Browser,
     Power,
     Screen,
+    Island,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,7 +24,7 @@ pub enum Level {
     Auto,
 }
 
-pub const ALL: [Cap; 12] = [
+pub const ALL: [Cap; 13] = [
     Cap::Media,
     Cap::Controls,
     Cap::Open,
@@ -36,6 +37,7 @@ pub const ALL: [Cap; 12] = [
     Cap::Browser,
     Cap::Power,
     Cap::Screen,
+    Cap::Island,
 ];
 
 impl Cap {
@@ -54,12 +56,13 @@ impl Cap {
             Cap::Browser => "browser",
             Cap::Power => "power",
             Cap::Screen => "screen",
+            Cap::Island => "island",
         }
     }
 
     pub fn default_level(self) -> Level {
         match self {
-            Cap::Media | Cap::Controls | Cap::Open | Cap::Reminders | Cap::Memory => Level::Auto,
+            Cap::Media | Cap::Controls | Cap::Open | Cap::Reminders | Cap::Memory | Cap::Island => Level::Auto,
             Cap::WebSearch | Cap::Power => Level::Ask,
             Cap::FilesRead | Cap::FilesWrite | Cap::Shell | Cap::Browser | Cap::Screen => Level::Off,
         }

@@ -307,6 +307,8 @@ impl App {
             view::Field::VoiceKey => &mut self.ui.int.voice_key,
             view::Field::VoiceModel => &mut self.ui.int.voice_model,
             view::Field::VoiceBase => &mut self.ui.int.voice_base,
+            view::Field::TtsModel => &mut self.ui.int.tts_model,
+            view::Field::TtsVoice => &mut self.ui.int.tts_voice,
             view::Field::WakeWord => &mut self.ui.int.wake,
             view::Field::GroupName => &mut self.ui.int.group_name,
             view::Field::Search => &mut self.ui.int.search,
@@ -348,6 +350,8 @@ impl App {
         self.ui.int.voice_base.set_text(&self.settings.ai.voice_base);
         self.ui.int.voice_key.set_text("");
         self.ui.int.voice_key_saved = ai::has_voice_key();
+        self.ui.int.tts_model.set_text(&self.settings.assistant.tts_model);
+        self.ui.int.tts_voice.set_text(&self.settings.assistant.tts_voice);
         self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
         self.sync_ai_fields();
     }
@@ -391,8 +395,22 @@ impl App {
         let Some(base) = ai::clean_base(&self.ui.int.voice_base.text()) else {
             return self.notify(Notice::Error, '\u{E783}', "The server address must be https:// (or local http://)");
         };
+        let tts_model = self.ui.int.tts_model.text().trim().to_string();
+        let tts_model = if tts_model.is_empty() { self.settings.assistant.tts_model.clone() } else { tts_model };
+        if !ai::valid_model(&tts_model, crate::data::settings::AiProvider::OpenAi) {
+            return self.notify(Notice::Error, '\u{E783}', "That model name is not valid");
+        }
+        let tts_voice = self.ui.int.tts_voice.text().trim().to_string();
+        let tts_voice = if tts_voice.is_empty() { self.settings.assistant.tts_voice.clone() } else { tts_voice };
+        let voice_ok = tts_voice.len() <= 40
+            && tts_voice.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if !voice_ok {
+            return self.notify(Notice::Error, '\u{E783}', "That voice name is not valid");
+        }
         self.settings.ai.voice_model = model;
         self.settings.ai.voice_base = base;
+        self.settings.assistant.tts_model = tts_model;
+        self.settings.assistant.tts_voice = tts_voice;
         self.settings.save();
         self.ui.cfg = self.settings.clone();
         ai::configure(&self.settings.ai);
@@ -713,6 +731,11 @@ impl App {
                 if id == view::Sid::AsstInstall {
                     self.install_wake_runtime();
                 }
+                if id == view::Sid::AsstInstructions
+                    && let Some(file) = crate::services::assistant::memory::ensure_instructions_file()
+                {
+                    cmd::shell_open(&file.to_string_lossy(), None);
+                }
                 if id == view::Sid::WindowsNotificationsSettings {
                     cmd::shell_open("ms-settings:notifications", None);
                 }
@@ -824,7 +847,11 @@ impl App {
                 let act = match field {
                     view::Field::SpotifyId => view::Act::SpotifySaveId,
                     view::Field::AiKey | view::Field::AiModel | view::Field::AiBase => view::Act::AiSave,
-                    view::Field::VoiceKey | view::Field::VoiceModel | view::Field::VoiceBase => view::Act::VoiceSave,
+                    view::Field::VoiceKey
+                    | view::Field::VoiceModel
+                    | view::Field::VoiceBase
+                    | view::Field::TtsModel
+                    | view::Field::TtsVoice => view::Act::VoiceSave,
                     view::Field::WakeWord => view::Act::WakeSave,
                     view::Field::GroupName => view::Act::GroupAdd,
                     _ => view::Act::DiscordMain,

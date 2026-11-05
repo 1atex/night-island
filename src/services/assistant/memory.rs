@@ -89,6 +89,51 @@ pub fn save_to(file: &Path, notes: &[String]) -> std::io::Result<()> {
     std::fs::rename(&tmp, file)
 }
 
+const INSTRUCTIONS_TEMPLATE: &str = "# Standing instructions for the assistant. Write plain sentences, one per line.\n\
+# Lines that start with # are ignored. The assistant reads this file at every request.\n\
+# Examples (remove the # to use them):\n\
+# Always answer in Russian, in one or two sentences.\n\
+# \"Music\" means: start Spotify and play my Liked Songs.\n\
+# My work folder is D:\\Work. Save every report there.\n";
+
+const MAX_INSTRUCTIONS_BYTES: u64 = 16 * 1024;
+
+pub fn instructions_path() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("APPDATA")?).join("NightIsland").join("assistant").join("instructions.md"))
+}
+
+pub fn ensure_instructions_file() -> Option<PathBuf> {
+    let file = instructions_path()?;
+    if !file.exists() {
+        std::fs::create_dir_all(file.parent()?).ok()?;
+        std::fs::write(&file, INSTRUCTIONS_TEMPLATE).ok()?;
+    }
+    Some(file)
+}
+
+pub fn instructions_from(text: &str, budget_chars: usize) -> String {
+    let mut out = String::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let line: String = line.chars().filter(|c| !c.is_control()).collect();
+        if out.chars().count() + line.chars().count() + 1 > budget_chars {
+            break;
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+pub fn load_instructions(budget_chars: usize) -> String {
+    let Some(file) = instructions_path() else { return String::new() };
+    match std::fs::metadata(&file) {
+        Ok(m) if m.len() <= MAX_INSTRUCTIONS_BYTES => {
+            std::fs::read_to_string(&file).map(|t| instructions_from(&t, budget_chars)).unwrap_or_default()
+        }
+        _ => String::new(),
+    }
+}
+
 pub fn load() -> Vec<String> {
     path().map(|p| load_from(&p)).unwrap_or_default()
 }
@@ -147,6 +192,21 @@ mod tests {
         assert!(block.chars().count() <= 100 + 20);
         assert!(block.contains("note number 49"));
         assert!(!block.contains("note number 0\n"));
+    }
+
+    #[test]
+    fn the_template_gives_no_instructions_until_the_user_removes_a_hash() {
+        assert_eq!(instructions_from(INSTRUCTIONS_TEMPLATE, 1500), "");
+        let edited = INSTRUCTIONS_TEMPLATE.replace("# Always answer", "Always answer");
+        assert_eq!(instructions_from(&edited, 1500), "Always answer in Russian, in one or two sentences.\n");
+    }
+
+    #[test]
+    fn instructions_are_cut_at_the_budget_and_stripped_of_control_characters() {
+        let text = "first rule\n\n  second\u{7} rule  \n# a comment\nthird rule that does not fit\n";
+        assert_eq!(instructions_from(text, 30), "first rule\nsecond rule\n");
+        assert_eq!(instructions_from(text, 5), "");
+        assert_eq!(instructions_from("", 100), "");
     }
 
     #[test]

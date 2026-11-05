@@ -1,7 +1,7 @@
 use crate::island::*;
 use crate::platform::{sounds, speech, wake, wake_install};
 use crate::services::assistant::agent::{self, Phase, Run};
-use crate::services::assistant::tools::Tool;
+use crate::services::assistant::tools::{self, Tool};
 use crate::services::assistant::{Cap, Level, env, memory, recent, shell};
 use crate::services::attach::{self, Attachment};
 use crate::ui::i18n::tr;
@@ -205,7 +205,9 @@ impl App {
         let request: String = command.chars().take(600).collect();
         crate::log_info!("Assistant request: {}", brief(&request, 300));
         agent::fresh(&mut self.dialog);
-        self.agent = Some(Run::new(system, &request, &self.dialog));
+        let mut run = Run::new(system, &request, &self.dialog);
+        run.max_steps = usize::from(self.settings.assistant.max_steps);
+        self.agent = Some(run);
         self.call_agent();
     }
 
@@ -217,7 +219,7 @@ impl App {
             run.waiting = true;
             run.phase = Phase::Working;
         }
-        let (turns, system, step) = (run.turns.clone(), run.system.clone(), run.steps);
+        let (turns, system, step) = (run.turns_for_call(), run.system.clone(), run.steps);
         if exhausted {
             self.fail_by_voice("The assistant needed too many steps");
             return self.end_wake_session();
@@ -386,8 +388,19 @@ impl App {
         let now = chrono::Local::now();
         let up = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() } / 1000;
         let home = std::env::var("USERPROFILE").unwrap_or_default();
+        let mut extra = String::new();
+        let rules = memory::load_instructions(1500);
+        if !rules.is_empty() {
+            extra.push_str(&format!(
+                "The user's own standing instructions (written by the user, follow them):\n{rules}"
+            ));
+        }
+        let scripts = tools::scripts_prompt(700);
+        if !scripts.is_empty() {
+            extra.push_str(&format!("Saved scripts (run_script): {scripts}\n"));
+        }
         format!(
-            "Local time: {}\nThe computer has been on for {} hours {} minutes since it started\nUser folder: {home}\n{}",
+            "Local time: {}\nThe computer has been on for {} hours {} minutes since it started\nUser folder: {home}\n{}{extra}",
             now.format("%A, %d %B %Y, %H:%M"),
             up / 3600,
             up % 3600 / 60,
@@ -414,8 +427,10 @@ impl App {
             let detail: String =
                 tool.detail().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(100).collect();
             let verb = match tool {
-                Tool::Cmd(_) | Tool::PowerShell(_) | Tool::Wsl(_) => "Run:",
-                Tool::Fetch(_) => "Open the page:",
+                Tool::Cmd(_) | Tool::PowerShell(_) | Tool::Wsl(_) | Tool::RunScript { .. } => "Run:",
+                Tool::SaveScript { .. } => "Save the script:",
+                Tool::Spotify { .. } => "Play on Spotify:",
+                Tool::Fetch(_) | Tool::Render(_) => "Open the page:",
                 Tool::Search(_) => "Search the web:",
                 Tool::ReadFile(_) => "Read:",
                 Tool::WriteFile { .. } => "Write:",
@@ -581,6 +596,31 @@ impl App {
                 }
                 self.show_notice_for('\u{E774}', &url, 2500);
             }
+            voicecmd::Command::Island { what, name } => {
+                let result = self.island_info(&what, &name);
+                if let Some(run) = self.agent.as_mut() {
+                    run.result("island", &result);
+                }
+                self.call_agent();
+            }
+            voicecmd::Command::Note { name, text, append } => match self.write_note(&name, &text, append) {
+                Ok(done) => self.show_notice_for('\u{E70B}', &done, 2200),
+                Err(why) => self.fail_by_voice(&why),
+            },
+            voicecmd::Command::Discord(op) => {
+                let (on, glyph, text) = match op {
+                    voicecmd::DiscordOp::Mute(on) => {
+                        discord::set_mute(on);
+                        (on, '\u{E720}', if on { "Muted in Discord" } else { "Unmuted in Discord" })
+                    }
+                    voicecmd::DiscordOp::Deafen(on) => {
+                        discord::set_deaf(on);
+                        (on, '\u{E7F6}', if on { "Deafened in Discord" } else { "Undeafened in Discord" })
+                    }
+                };
+                crate::log_info!("Assistant: Discord {op:?}, on {on}");
+                self.show_notice_for(glyph, text, 1800);
+            }
             voicecmd::Command::Screenshot => {
                 let shot = capture::screen_png(self.hwnd, 1280);
                 let size = shot.as_ref().map_or(0, |png| png.len() / 1024);
@@ -730,6 +770,9 @@ fn action_label(command: &voicecmd::Command) -> Option<String> {
         C::Remember(_) => "remember".into(),
         C::Forget(_) => "forget".into(),
         C::Screenshot => "screenshot".into(),
+        C::Note { name, .. } => format!("note {name}"),
+        C::Discord(op) => format!("discord {op:?}").to_lowercase(),
+        C::Island { .. } => return None,
         C::Tool(_) | C::Confirm | C::Cancel | C::Answer(_) | C::Ask(_) | C::Unknown => return None,
     })
 }
