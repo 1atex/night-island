@@ -1017,6 +1017,20 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Живой голос от сервиса речи (платно, ПК не нагружает)"
         }
         "Keep listening after an answer" => "Слушать дальше после ответа",
+        "Local voice Piper (free, works offline, a little CPU while speaking)" => {
+            "Локальный голос Piper (бесплатно, без сети, чуть грузит процессор, пока говорит)"
+        }
+        "Download the local voice (up to 44 MB)" => "Скачать локальный голос (до 44 МБ)",
+        "Downloading the local voice…" => "Скачиваю локальный голос…",
+        "The local voice is already being downloaded" => "Локальный голос уже скачивается",
+        "The local voice is installed: turn it on in the settings" => {
+            "Локальный голос установлен: включите его в настройках"
+        }
+        "Could not download the voice" => "Не удалось скачать голос",
+        "The archive is not safe" => "Архив небезопасен",
+        "The archive has too many files" => "В архиве слишком много файлов",
+        "The archive is too large" => "Архив слишком большой",
+        "No profile folder" => "Нет папки профиля",
         "Look at the screen (preview, needs a model that sees images)" => {
             "Смотреть на экран (превью, нужна модель с картинками)"
         }

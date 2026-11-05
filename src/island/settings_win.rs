@@ -731,6 +731,9 @@ impl App {
                 if id == view::Sid::AsstInstall {
                     self.install_wake_runtime();
                 }
+                if id == view::Sid::AsstLocalInstall {
+                    self.install_local_voice();
+                }
                 if id == view::Sid::AsstInstructions
                     && let Some(file) = crate::services::assistant::memory::ensure_instructions_file()
                 {

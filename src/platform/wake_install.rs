@@ -105,7 +105,7 @@ pub fn extract(archive: impl Read, files: &[(&str, &str)], into: &Path) -> Resul
     Ok(done)
 }
 
-fn fetch(package: &Package) -> Result<Vec<u8>, &'static str> {
+pub(crate) fn fetch(package: &Package) -> Result<Vec<u8>, &'static str> {
     let reply = http::get_bytes(package.url, package.max_bytes, None).ok_or("Could not download the voice runtime")?;
     if reply.status != 200 {
         return Err("The download server refused the request");

@@ -229,7 +229,7 @@ struct Api {
     destroy_result: FnDestroyResult,
 }
 
-unsafe fn symbol<T: Copy>(module: windows::Win32::Foundation::HMODULE, name: &str) -> Option<T> {
+pub(crate) unsafe fn symbol<T: Copy>(module: windows::Win32::Foundation::HMODULE, name: &str) -> Option<T> {
     let c = CString::new(name).ok()?;
     let addr = unsafe { GetProcAddress(module, PCSTR(c.as_ptr().cast())) }?;
     Some(unsafe { std::mem::transmute_copy::<_, T>(&addr) })

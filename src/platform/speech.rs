@@ -177,15 +177,37 @@ fn natural_wav(text: &str, natural: &Natural) -> Option<Vec<u8>> {
     as_wav(reply.body)
 }
 
-pub fn speak(text: &str, volume_pct: u8, natural: Option<Natural>) {
-    start(text, volume_pct, None, natural);
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Voice {
+    pub local: bool,
+    pub natural: Option<Natural>,
 }
 
-pub fn speak_then_notify(text: &str, volume_pct: u8, hwnd: HWND, natural: Option<Natural>) {
-    start(text, volume_pct, Some(hwnd.0 as isize), natural);
+pub fn speak(text: &str, volume_pct: u8, voice: Voice) {
+    start(text, volume_pct, None, voice);
 }
 
-fn start(text: &str, volume_pct: u8, done: Option<isize>, natural: Option<Natural>) {
+pub fn speak_then_notify(text: &str, volume_pct: u8, hwnd: HWND, voice: Voice) {
+    start(text, volume_pct, Some(hwnd.0 as isize), voice);
+}
+
+fn render(text: &str, voice: &Voice) -> Option<Vec<u8>> {
+    if voice.local {
+        match crate::platform::localvoice::speak_wav(text) {
+            Some(wav) => return Some(wav),
+            None => crate::log_warn!("The local voice could not speak, trying the next one"),
+        }
+    }
+    if let Some(natural) = &voice.natural {
+        match natural_wav(text, natural) {
+            Some(wav) => return Some(wav),
+            None => crate::log_info!("The natural voice is not available, the system voice speaks"),
+        }
+    }
+    synthesize(text).ok()
+}
+
+fn start(text: &str, volume_pct: u8, done: Option<isize>, voice: Voice) {
     let text = clip(text);
     if text.is_empty() || volume_pct == 0 {
         if let Some(raw) = done {
@@ -201,11 +223,7 @@ fn start(text: &str, volume_pct: u8, done: Option<isize>, natural: Option<Natura
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-        let natural_wav = natural.as_ref().and_then(|n| natural_wav(&text, n));
-        if natural.is_some() && natural_wav.is_none() {
-            crate::log_info!("The natural voice is not available, the system voice speaks");
-        }
-        let wav = natural_wav.or_else(|| synthesize(&text).ok()).filter(|_| GENERATION.load(Ordering::SeqCst) == mine);
+        let wav = render(&text, &voice).filter(|_| GENERATION.load(Ordering::SeqCst) == mine);
         if let Some(mut wav) = wav {
             scale_wav(&mut wav, volume_pct);
             unsafe {
@@ -297,7 +315,7 @@ mod tests {
     fn speaks_aloud() {
         let wav = synthesize("Привет").expect("a voice synthesized the text");
         assert!(data_chunk(&wav).is_some());
-        speak("Привет, это остров", 60, None);
+        speak("Привет, это остров", 60, Voice::default());
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
 }

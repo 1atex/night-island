@@ -107,12 +107,14 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
-const ASSISTANT: [(Sid, &str, Kind); 24] = [
+const ASSISTANT: [(Sid, &str, Kind); 26] = [
     (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
     (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
     (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
     (Sid::AsstSounds, "Sound cues", Kind::Toggle),
     (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
+    (Sid::AsstLocal, "Local voice Piper (free, works offline, a little CPU while speaking)", Kind::Toggle),
+    (Sid::AsstLocalInstall, "Download the local voice (up to 44 MB)", Kind::Button),
     (Sid::AsstNatural, "Natural voice from the speech service (paid, no load on the PC)", Kind::Toggle),
     (Sid::AsstFollowUp, "Keep listening after an answer", Kind::Toggle),
     (Sid::AsstSteps, "Steps per request", Kind::Slider),

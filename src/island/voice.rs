@@ -1,5 +1,5 @@
 use crate::island::*;
-use crate::platform::{sounds, speech, wake, wake_install};
+use crate::platform::{localvoice, sounds, speech, wake, wake_install};
 use crate::services::assistant::agent::{self, Phase, Run};
 use crate::services::assistant::tools::{self, Tool};
 use crate::services::assistant::{Cap, Level, env, memory, recent, shell};
@@ -95,9 +95,34 @@ impl App {
         }
     }
 
-    fn natural(&self) -> Option<speech::Natural> {
+    fn voice_choice(&self) -> speech::Voice {
         let a = &self.settings.assistant;
-        a.natural_voice.then(|| speech::Natural { model: a.tts_model.clone(), voice: a.tts_voice.clone() })
+        speech::Voice {
+            local: a.local_voice && localvoice::ready(),
+            natural: a
+                .natural_voice
+                .then(|| speech::Natural { model: a.tts_model.clone(), voice: a.tts_voice.clone() }),
+        }
+    }
+
+    pub(in crate::island) fn install_local_voice(&mut self) {
+        if localvoice::install(self.hwnd) {
+            self.show_notice_for('\u{E896}', "Downloading the local voice…", 120_000);
+        } else {
+            self.notify_for(Notice::Error, '\u{E783}', "The local voice is already being downloaded", 3000);
+        }
+    }
+
+    pub(in crate::island) fn on_local_voice_setup(&mut self) {
+        self.clear_notice();
+        match localvoice::state() {
+            localvoice::State::Ready => {
+                self.cue(sounds::Cue::Done);
+                self.show_notice_for('\u{E73E}', "The local voice is installed: turn it on in the settings", 3500);
+            }
+            localvoice::State::Failed(why) => self.fail_by_voice(why),
+            _ => {}
+        }
     }
 
     fn quiet_or_fail(&mut self, why: &str) {
@@ -236,7 +261,7 @@ impl App {
     fn say(&mut self, text: &str) {
         let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
         self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);
-        let (volume, natural) = (self.settings.assistant.voice_volume(), self.natural());
+        let (volume, voice) = (self.settings.assistant.voice_volume(), self.voice_choice());
         let chat = self.agent.as_ref().is_some_and(|r| r.did.is_empty() && r.follow_ups < agent::MAX_FOLLOW_UPS);
         let follow = chat && self.settings.assistant.follow_up && self.settings.assistant.perms.enabled;
         if let Some(run) = self.agent.as_mut() {
@@ -250,9 +275,9 @@ impl App {
         if follow {
             self.wake_session = true;
             self.sync_wake();
-            speech::speak_then_notify(text, volume, self.hwnd, natural);
+            speech::speak_then_notify(text, volume, self.hwnd, voice);
         } else {
-            speech::speak(text, volume, natural);
+            speech::speak(text, volume, voice);
         }
     }
 
@@ -281,8 +306,8 @@ impl App {
         }
         self.wake_session = true;
         self.sync_wake();
-        let (volume, natural) = (self.settings.assistant.voice_volume(), self.natural());
-        speech::speak_then_notify(text, volume, self.hwnd, natural);
+        let (volume, voice) = (self.settings.assistant.voice_volume(), self.voice_choice());
+        speech::speak_then_notify(text, volume, self.hwnd, voice);
     }
 
     pub(in crate::island) fn on_spoken(&mut self) {
