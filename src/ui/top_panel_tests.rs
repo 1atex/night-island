@@ -183,6 +183,24 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         assert!(panel.left.state.visible && panel.right.state.visible);
         save(&panel.left, &format!("left-{scale:.1}"))?;
         save(&panel.right, &format!("right-{scale:.1}"))?;
+        let right_edge = panel.right.state.origin.0 + panel.right.state.size.0;
+        panel.set_tray_icons(crate::platform::system_tray::inline::preview_entries());
+        panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
+        panel.right.state.tray_frame();
+        assert_eq!(panel.right.state.origin.0 + panel.right.state.size.0, right_edge);
+        assert_eq!(panel.right.state.buttons.iter().filter(|b| matches!(b.hit, Hit::TrayIcon(_))).count(), 6);
+        save(&panel.right, &format!("inline-tray-{scale:.1}"))?;
+        click(&panel.right, Hit::TrayIcon(0));
+        assert!(matches!(panel.take_request(1), Some(Request::TrayAction(_, false, _))));
+        click(&panel.right, Hit::TrayPage);
+        panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
+        panel.right.state.tray_frame();
+        assert_eq!(panel.right.state.tray_page, 6);
+        panel.open(Block::Tray);
+        panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
+        panel.right.state.tray_frame();
+        assert_eq!(panel.right.state.tray_width, 0.0);
+        assert_eq!(panel.right.state.origin.0 + panel.right.state.size.0, right_edge);
         for block in [Block::Application, Block::Wifi, Block::Bluetooth, Block::Volume, Block::Battery] {
             panel.open(block);
             assert!(panel.card.state.visible);

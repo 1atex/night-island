@@ -642,11 +642,15 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             crate::island::desktop_dock::capture_result();
             LRESULT(0)
         }
-        crate::platform::system_tray::WM_TRAY_RESULT => {
-            if wparam.0 == 0 {
+        crate::platform::system_tray::inline::WM_RESULT => {
+            if let Some(result) = crate::platform::system_tray::inline::take() {
                 with_app(|a| {
                     if let Some(panel) = &mut a.top_panel {
-                        panel.tray_help();
+                        match result {
+                            Ok(entries) if wparam.0 == 0 => panel.set_tray_icons(entries),
+                            Err(()) => panel.tray_help(),
+                            _ => {}
+                        }
                     }
                 });
             }

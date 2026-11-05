@@ -29,6 +29,7 @@ use crate::view::Rect;
 pub const WM_TOP_PANEL: u32 = WM_APP + 90;
 const FRAME: usize = 1;
 const DISMISS: usize = 2;
+const TRAY_ANIMATION: usize = 3;
 const MARGIN: f32 = 10.0;
 const HEIGHT: f32 = 34.0;
 
@@ -56,6 +57,7 @@ pub struct Snapshot {
 pub enum Request {
     Settings,
     Tray((i32, i32)),
+    TrayAction(String, bool, (i32, i32)),
     Open(Block),
     WindowsSettings(Block),
     ToggleWifi,
@@ -81,6 +83,8 @@ enum Hit {
     Maximize,
     CloseWindow,
     TrayRetry,
+    TrayIcon(usize),
+    TrayPage,
     Window(usize),
 }
 
@@ -119,6 +123,12 @@ struct State {
     opening: bool,
     alpha: u8,
     dirty: bool,
+    tray_icons: Vec<crate::platform::system_tray::inline::Entry>,
+    tray_open: bool,
+    tray_page: usize,
+    tray_width: f32,
+    tray_from: f32,
+    tray_started: Instant,
 }
 
 struct Wing {
@@ -184,6 +194,71 @@ fn blocks(settings: &TopPanelSettings) -> Vec<Block> {
 }
 
 impl State {
+    fn tray_target(&self) -> f32 {
+        if self.tray_open {
+            (self.tray_icons.len().saturating_sub(self.tray_page).min(6) as f32
+                + if self.tray_icons.len() > 6 { 1.0 } else { 0.0 })
+                * 30.0
+        } else {
+            0.0
+        }
+    }
+
+    fn animate_tray(&mut self, open: bool) {
+        self.tray_open = open;
+        self.tray_from = self.tray_width;
+        self.tray_started = Instant::now();
+        unsafe {
+            SetTimer(Some(self.hwnd), TRAY_ANIMATION, 16, None);
+        }
+    }
+
+    fn tray_frame(&mut self) {
+        let t = if crate::ui::feedback::motion_allowed() {
+            (self.tray_started.elapsed().as_secs_f32() / 0.24).min(1.0)
+        } else {
+            1.0
+        };
+        self.tray_width = self.tray_from + (self.tray_target() - self.tray_from) * (1.0 - (1.0 - t).powi(3));
+        let width = (self.dimensions().0 * self.scale).ceil() as i32;
+        self.origin.0 += self.size.0 - width;
+        self.size.0 = width;
+        self.surface.take();
+        self.layout();
+        unsafe {
+            let _ = SetWindowPos(
+                self.hwnd,
+                None,
+                self.origin.0,
+                self.origin.1,
+                width,
+                self.size.1,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            if t >= 1.0 {
+                let _ = KillTimer(Some(self.hwnd), TRAY_ANIMATION);
+            }
+        }
+        self.render();
+    }
+
+    fn tray_action(&mut self, index: usize, context: bool) {
+        if let Some(entry) = self.tray_icons.get(index) {
+            let anchor = self
+                .buttons
+                .iter()
+                .find(|b| b.hit == Hit::TrayIcon(index))
+                .map(|b| {
+                    (
+                        self.origin.0 + ((b.rect.0 + b.rect.2) * 0.5 * self.scale) as i32,
+                        self.origin.1 + (44.0 * self.scale) as i32,
+                    )
+                })
+                .unwrap_or(self.origin);
+            self.post(Request::TrayAction(entry.name.clone(), context, anchor));
+        }
+    }
+
     fn post(&mut self, request: Request) {
         if matches!(request, Request::Volume(_)) {
             self.requests.retain(|r| !matches!(r, Request::Volume(_)));
@@ -200,7 +275,10 @@ impl State {
         match self.role {
             Role::Left => (214.0, HEIGHT + 2.0 * MARGIN),
             Role::Right => (
-                blocks(&self.settings).iter().copied().map(block_width).sum::<f32>() + 2.0 * MARGIN + 8.0,
+                blocks(&self.settings).iter().copied().map(block_width).sum::<f32>()
+                    + 2.0 * MARGIN
+                    + 8.0
+                    + self.tray_width,
                 HEIGHT + 2.0 * MARGIN,
             ),
             Role::Card(Block::Application) => (306.0, 210.0 + self.snapshot.windows.len().min(3) as f32 * 32.0),
@@ -212,12 +290,23 @@ impl State {
 
     fn layout(&mut self) {
         let (width, _) = self.dimensions();
+        let tray_target = self.tray_target();
         self.buttons.clear();
         let mut add = |rect, hit, enabled| self.buttons.push(Button { rect, hit, enabled });
         match self.role {
             Role::Left => add((10.0, 10.0, width - 10.0, 44.0), Hit::Block(Block::Application), true),
             Role::Right => {
                 let mut x = 14.0;
+                if self.tray_open && self.tray_width >= tray_target - 1.0 {
+                    for index in (self.tray_page..self.tray_icons.len()).take(6) {
+                        add((x, 12.0, x + 30.0, 42.0), Hit::TrayIcon(index), true);
+                        x += 30.0;
+                    }
+                    if self.tray_icons.len() > 6 {
+                        add((x, 12.0, x + 30.0, 42.0), Hit::TrayPage, true);
+                    }
+                }
+                x = 14.0 + self.tray_width;
                 for block in blocks(&self.settings) {
                     let next = x + block_width(block);
                     add((x, 12.0, next, 42.0), Hit::Block(block), true);
@@ -305,13 +394,40 @@ impl State {
                 glyph('\u{E70D}', (w - 34.0, 19.0, w - 18.0, 35.0), 9.0, 0.45)?;
             }
             Role::Right => {
+                let icon_width = (self.tray_icons.len().saturating_sub(self.tray_page).min(6) as f32
+                    + if self.tray_icons.len() > 6 { 1.0 } else { 0.0 })
+                    * 30.0;
+                for (offset, entry) in self.tray_icons.iter().skip(self.tray_page).take(6).enumerate() {
+                    let x = 14.0 + self.tray_width - icon_width + offset as f32 * 30.0;
+                    if x < 14.0 || x + 30.0 > 14.0 + self.tray_width {
+                        continue;
+                    }
+                    if let Some(icon) = &entry.icon {
+                        p.image(scaled((x + 6.0, 18.0, x + 24.0, 36.0), s), 0.0, icon.side, &icon.bgra)?;
+                    } else {
+                        let bluetooth = entry.name.to_lowercase().contains("bluetooth");
+                        glyph(
+                            if bluetooth { '\u{E702}' } else { '\u{E737}' },
+                            (x + 6.0, 18.0, x + 24.0, 36.0),
+                            15.0,
+                            0.8,
+                        )?;
+                    }
+                }
                 for button in &self.buttons {
+                    if matches!(button.hit, Hit::TrayIcon(_)) {
+                        continue;
+                    }
+                    if button.hit == Hit::TrayPage {
+                        glyph('\u{E712}', (button.rect.0 + 6.0, 18.0, button.rect.0 + 24.0, 36.0), 14.0, 0.8)?;
+                        continue;
+                    }
                     let Hit::Block(block) = button.hit else { continue };
                     let x = button.rect.0;
                     let (icon, value, active) = match block {
                         Block::Wifi => ('\u{E701}', String::new(), self.snapshot.radios.wifi == Some(true)),
                         Block::Bluetooth => ('\u{E702}', String::new(), self.snapshot.radios.bluetooth == Some(true)),
-                        Block::Tray => ('\u{E70D}', String::new(), true),
+                        Block::Tray => (if self.tray_open { '\u{E76C}' } else { '\u{E76B}' }, String::new(), true),
                         Block::Volume => (
                             if self.snapshot.muted { '\u{E74F}' } else { '\u{E767}' },
                             self.snapshot.volume.map(|v| v.to_string()).unwrap_or_else(|| "—".into()),
@@ -521,11 +637,20 @@ impl State {
     }
 
     fn hide(&mut self) {
+        if matches!(self.hover, Some(Hit::TrayIcon(_))) {
+            crate::ui::tip::hide();
+        }
+        self.hover = None;
         self.visible = false;
         self.pressed = None;
+        if matches!(self.role, Role::Right) {
+            self.tray_open = false;
+            self.tray_width = 0.0;
+        }
         unsafe {
             let _ = KillTimer(Some(self.hwnd), FRAME);
             let _ = KillTimer(Some(self.hwnd), DISMISS);
+            let _ = KillTimer(Some(self.hwnd), TRAY_ANIMATION);
             let _ = PostMessageW(Some(self.hwnd), WM_APP + 93, WPARAM(0), LPARAM(0));
             let _ = ShowWindow(self.hwnd, SW_HIDE);
         }
@@ -541,6 +666,11 @@ impl State {
 
     fn activate(&mut self, hit: Hit) {
         match hit {
+            Hit::TrayIcon(index) => self.tray_action(index, false),
+            Hit::TrayPage => {
+                self.tray_page = if self.tray_page + 6 >= self.tray_icons.len() { 0 } else { self.tray_page + 6 };
+                self.animate_tray(true);
+            }
             Hit::Block(block) => self.post(Request::Open(block)),
             Hit::Settings => {
                 self.post(Request::Settings);
@@ -636,12 +766,30 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                 let hover = state.buttons.iter().find(|b| b.enabled && inside(b.rect, point)).map(|b| b.hit);
                 if state.hover != hover {
                     state.hover = hover;
+                    if let Some(Hit::TrayIcon(index)) = hover {
+                        if let Some(entry) = state.tray_icons.get(index) {
+                            crate::ui::tip::show(
+                                &state.gpu,
+                                &entry.name,
+                                (
+                                    state.origin.0 + (point.0 * state.scale) as i32,
+                                    state.origin.1 + (54.0 * state.scale) as i32,
+                                ),
+                                state.scale,
+                            );
+                        }
+                    } else {
+                        crate::ui::tip::hide();
+                    }
                     state.render();
                 }
                 LRESULT(0)
             }
             WM_MOUSELEAVE => {
                 let state = &mut *ptr;
+                if matches!(state.hover, Some(Hit::TrayIcon(_))) {
+                    crate::ui::tip::hide();
+                }
                 if state.hover.take().is_some() {
                     state.render();
                 }
@@ -671,7 +819,15 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                 LRESULT(0)
             }
             WM_RBUTTONUP => {
-                (*ptr).post(Request::Settings);
+                let state = &mut *ptr;
+                let point = (l.0 as i16 as f32 / state.scale, (l.0 >> 16) as i16 as f32 / state.scale);
+                if let Some(Hit::TrayIcon(index)) =
+                    state.buttons.iter().find(|b| b.enabled && inside(b.rect, point)).map(|b| b.hit)
+                {
+                    state.tray_action(index, true);
+                } else {
+                    state.post(Request::Settings);
+                }
                 LRESULT(0)
             }
             WM_CAPTURECHANGED => {
@@ -686,7 +842,9 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
             }
             WM_TIMER => {
                 let state = &mut *ptr;
-                if w.0 == FRAME {
+                if w.0 == TRAY_ANIMATION {
+                    state.tray_frame();
+                } else if w.0 == FRAME {
                     let t = (state.fade.elapsed().as_secs_f32() / 0.16).clamp(0.0, 1.0);
                     state.alpha = ((1.0 - (1.0 - t).powi(3)) * 255.0).round() as u8;
                     state.render();
@@ -774,6 +932,12 @@ impl Wing {
             opening: false,
             alpha: 255,
             dirty: true,
+            tray_icons: Vec::new(),
+            tray_open: false,
+            tray_page: 0,
+            tray_width: 0.0,
+            tray_from: 0.0,
+            tray_started: Instant::now(),
         });
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&raw mut *state) as isize);
@@ -995,6 +1159,10 @@ impl TopPanel {
         }
         if block == Block::Tray {
             self.card.state.hide();
+            if self.right.state.tray_open {
+                self.right.state.animate_tray(false);
+                return;
+            }
             self.right.state.post(Request::Tray((
                 self.right.state.origin.0 + self.right.state.size.0,
                 self.top() as i32 + (52.0 * self.scale) as i32,
@@ -1015,6 +1183,12 @@ impl TopPanel {
         self.revealed = true;
         self.last_inside = Instant::now();
         self.show_card(Block::Tray);
+    }
+
+    pub fn set_tray_icons(&mut self, entries: Vec<crate::platform::system_tray::inline::Entry>) {
+        self.right.state.tray_icons = entries;
+        self.right.state.tray_page = 0;
+        self.right.state.animate_tray(true);
     }
 
     fn show_card(&mut self, block: Block) {

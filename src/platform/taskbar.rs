@@ -194,6 +194,7 @@ pub fn handle_cli() -> bool {
         taskbars.refresh();
         std::thread::sleep(Duration::from_millis(150));
     }
+    super::system_tray::inline::recover();
     true
 }
 

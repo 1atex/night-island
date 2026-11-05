@@ -90,7 +90,10 @@ impl App {
         }
         while let Some(request) = self.top_panel.as_mut().and_then(|panel| panel.take_request(id)) {
             match request {
-                Request::Tray(anchor) => crate::platform::system_tray::toggle(self.hwnd, anchor),
+                Request::Tray(anchor) => crate::platform::system_tray::inline::request(self.hwnd, anchor, None),
+                Request::TrayAction(name, context, anchor) => {
+                    crate::platform::system_tray::inline::request(self.hwnd, anchor, Some((name, context)))
+                }
                 Request::Settings => {
                     if let Some(group) = view::GROUPS.iter().position(|g| g.name == "Top panel") {
                         self.open_settings_at(group);

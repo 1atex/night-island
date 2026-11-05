@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, GetWindowRgn, HRGN, SetWindowRgn};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
@@ -10,8 +10,9 @@ use windows::Win32::UI::Accessibility::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Result, w};
 
-pub const WM_TRAY_RESULT: u32 = WM_APP + 94;
 static BUSY: AtomicBool = AtomicBool::new(false);
+
+pub mod inline;
 
 fn overflow() -> Option<HWND> {
     [w!("TopLevelWindowForOverflowXamlIsland"), w!("NotifyIconOverflowWindow")]
@@ -211,20 +212,6 @@ impl Drop for TrayAccess {
             let _ = RemovePropW(self.hwnd, w!("NightIsland.TrayAccess"));
         }
     }
-}
-
-pub fn toggle(parent: HWND, anchor: (i32, i32)) {
-    if BUSY.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    let parent = parent.0 as isize;
-    std::thread::spawn(move || {
-        let ok = show(anchor).is_ok();
-        BUSY.store(false, Ordering::Release);
-        unsafe {
-            let _ = PostMessageW(Some(HWND(parent as _)), WM_TRAY_RESULT, WPARAM(usize::from(ok)), LPARAM(0));
-        }
-    });
 }
 
 #[cfg(test)]
