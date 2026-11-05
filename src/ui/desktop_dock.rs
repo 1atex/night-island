@@ -13,7 +13,7 @@ use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetCapture, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+    GetCapture, GetKeyState, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_MENU,
 };
 use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -44,6 +44,7 @@ pub enum Request {
     Save,
     Launch(Entry),
     Menu(Option<Entry>),
+    Capture(Entry),
     Add,
 }
 
@@ -822,8 +823,14 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 let point = (lparam.0 as i16 as f32, (lparam.0 >> 16) as i16 as f32);
                 let entry = state.hit(point).and_then(|i| state.entries.get(i)).cloned();
                 state.hide_preview();
-                state.menu_open = true;
-                state.post(Request::Menu(entry));
+                if GetKeyState(VK_MENU.0 as i32) < 0 {
+                    if let Some(entry) = entry {
+                        state.post(Request::Capture(entry));
+                    }
+                } else {
+                    state.menu_open = true;
+                    state.post(Request::Menu(entry));
+                }
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {

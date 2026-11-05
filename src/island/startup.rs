@@ -291,6 +291,7 @@ impl App {
             dpi_scale,
             settings_win: None,
             desktop_dock: None,
+            windows_taskbar: None,
             top_panel: None,
             top_panel_poll: Instant::now(),
             top_panel_radios: Instant::now(),

@@ -63,7 +63,16 @@ impl App {
         if let Some(panel) = &mut self.top_panel {
             panel.update(snapshot, occupied, false);
         }
-        self.set_timer(Timer::TopPanel, if suppressed { 500 } else { 250 });
+        self.set_timer(
+            Timer::TopPanel,
+            if suppressed {
+                500
+            } else if self.settings.top_panel.auto_hide {
+                80
+            } else {
+                250
+            },
+        );
     }
 
     pub(in crate::island) fn top_panel_request(&mut self, id: usize) {
@@ -81,6 +90,7 @@ impl App {
         }
         while let Some(request) = self.top_panel.as_mut().and_then(|panel| panel.take_request(id)) {
             match request {
+                Request::Tray(anchor) => crate::platform::system_tray::toggle(self.hwnd, anchor),
                 Request::Settings => {
                     if let Some(group) = view::GROUPS.iter().position(|g| g.name == "Top panel") {
                         self.open_settings_at(group);
@@ -188,7 +198,11 @@ mod tests {
         let _window = Window(hwnd);
         let before = App::work_area();
         let settings = Settings {
-            top_panel: crate::data::top_panel::TopPanelSettings { enabled: true, ..Default::default() },
+            top_panel: crate::data::top_panel::TopPanelSettings {
+                enabled: true,
+                auto_hide: false,
+                ..Default::default()
+            },
             music_eq: false,
             edge_spikes: false,
             placement: Placement::Floating,

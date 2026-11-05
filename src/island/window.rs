@@ -634,8 +634,22 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             });
             LRESULT(0)
         }
-        WM_DISPLAYCHANGE => {
+        WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
             with_app(|a| a.top_panel_request(3));
+            LRESULT(0)
+        }
+        crate::platform::system_tray::WM_TRAY_RESULT => {
+            if wparam.0 == 0 {
+                with_app(|a| {
+                    a.show_notice_for(
+                        '\u{E783}',
+                        &crate::ui::i18n::tr(
+                            "Windows tray is unavailable. Enable the hidden icon menu in Windows taskbar settings.",
+                        ),
+                        5000,
+                    )
+                });
+            }
             LRESULT(0)
         }
         crate::ui::top_panel::WM_TOP_PANEL => {
@@ -655,6 +669,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.save_note();
                 a.top_panel.take();
                 a.desktop_dock.take();
+                a.windows_taskbar.take();
             });
             dnd::unregister(hwnd);
             clips::sys::unlisten(hwnd);

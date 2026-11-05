@@ -854,28 +854,35 @@ fn matches(label: &str, query: &str) -> bool {
     q.is_empty() || label.to_lowercase().contains(&q) || crate::ui::i18n::tr(label).to_lowercase().contains(&q)
 }
 
-fn top_panel_items(_: &UiState) -> Vec<Item> {
+fn top_panel_items(ui: &UiState) -> Vec<Item> {
     use crate::ui::i18n::tr;
-    vec![
+    let mut items = vec![
         Item::Row(Sid::TopEnabled, "Enable top panel", Kind::Toggle),
         Item::Text(
             tr("Companion blocks beside the island, on the main display. Colours follow the island theme.")
                 .into_owned(),
         ),
         Item::Section("Visible blocks"),
+        Item::Row(Sid::TopTray, "System tray", Kind::Toggle),
         Item::Row(Sid::TopApplication, "Active application and window actions", Kind::Toggle),
         Item::Row(Sid::TopWifi, "Wi-Fi", Kind::Toggle),
         Item::Row(Sid::TopBluetooth, "Bluetooth", Kind::Toggle),
         Item::Row(Sid::TopVolume, "System volume", Kind::Toggle),
         Item::Row(Sid::TopBattery, "Battery and power", Kind::Toggle),
         Item::Section("Behaviour"),
+        Item::Row(Sid::TopAutoHide, "Show top panel at the screen edge", Kind::Toggle),
+        Item::Text(tr("Autohide frees the top edge. Island visibility is configured separately.").into_owned()),
         Item::Row(Sid::TopFullscreen, "Hide top panel in fullscreen apps", Kind::Toggle),
         Item::Row(Sid::TopReserve, "Keep maximized windows below the top panel", Kind::Toggle),
         Item::Text(
             tr("Music, time and notifications stay in the island. Right-click a block to customize the panel.")
                 .into_owned(),
         ),
-    ]
+    ];
+    if ui.cfg.top_panel.auto_hide {
+        items.retain(|item| !matches!(item, Item::Row(Sid::TopReserve, _, _)));
+    }
+    items
 }
 
 fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
@@ -924,7 +931,8 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Note("Drop shortcuts onto the dock. Drag pinned icons to reorder."),
         Item::Note("Right-click for windows, pinning and settings. Scroll for more apps."),
         Item::Row(Sid::DockTaskbar, "Windows taskbar settings", Kind::Button),
-        Item::Note("To free the bottom edge, enable taskbar auto-hide in Windows."),
+        Item::Row(Sid::DockReplaceTaskbar, "Replace Windows taskbar while dock is enabled", Kind::Toggle),
+        Item::Note("The Windows taskbar returns when the dock or Island closes."),
     ];
     if !ui.sw.dock_status.is_empty() {
         let index = out.iter().position(|item| matches!(item, Item::Row(Sid::DockImport, ..))).unwrap_or(0);

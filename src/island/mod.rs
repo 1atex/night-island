@@ -135,6 +135,7 @@ struct App {
     backdrop: SpriteVisual,
     tint: SpriteVisual,
     settings_win: Option<HWND>,
+    windows_taskbar: Option<crate::platform::taskbar::TaskbarGuard>,
     desktop_dock: Option<crate::ui::desktop_dock::Dock>,
     top_panel: Option<crate::ui::top_panel::TopPanel>,
     top_panel_poll: Instant,

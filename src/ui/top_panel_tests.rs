@@ -80,6 +80,8 @@ fn top_panel_blocks_can_all_be_removed_and_persist_independently() {
     let mut settings = crate::data::settings::Settings::default();
     for id in [
         crate::view::Sid::TopEnabled,
+        crate::view::Sid::TopTray,
+        crate::view::Sid::TopAutoHide,
         crate::view::Sid::TopApplication,
         crate::view::Sid::TopWifi,
         crate::view::Sid::TopBluetooth,
@@ -98,10 +100,12 @@ fn top_panel_blocks_can_all_be_removed_and_persist_independently() {
     let encoded = serde_json::to_string(&settings).unwrap();
     let restored: crate::data::settings::Settings = serde_json::from_str(&encoded).unwrap();
     assert_eq!(restored.top_panel, settings.top_panel);
-    assert_eq!(blocks(&restored.top_panel), [Block::Wifi, Block::Volume]);
+    assert_eq!(blocks(&restored.top_panel), [Block::Tray, Block::Wifi, Block::Volume]);
     let old: crate::data::settings::Settings = serde_json::from_str("{}").unwrap();
     assert!(!old.top_panel.enabled);
+    assert!(old.top_panel.auto_hide && old.top_panel.tray && old.desktop_dock.replace_taskbar);
     let empty = TopPanelSettings {
+        tray: false,
         application: false,
         wifi: false,
         bluetooth: false,
@@ -144,8 +148,13 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
             None,
         )?
     });
-    let settings =
-        TopPanelSettings { enabled: true, reserve_space: false, hide_fullscreen: false, ..Default::default() };
+    let settings = TopPanelSettings {
+        enabled: true,
+        auto_hide: false,
+        reserve_space: false,
+        hide_fullscreen: false,
+        ..Default::default()
+    };
     let mut panel = TopPanel::new(parent.0, &gpu, &settings)?;
     let foreground = unsafe { GetForegroundWindow() };
     let window = desktop::Window {
@@ -213,7 +222,54 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         assert_eq!(unsafe { GetForegroundWindow() }, foreground);
     }
     let mut only_volume = settings.clone();
+    struct Cursor(POINT);
+    impl Drop for Cursor {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = SetCursorPos(self.0.x, self.0.y);
+            }
+        }
+    }
+    let mut point = POINT::default();
+    unsafe {
+        GetCursorPos(&mut point)?;
+    }
+    let _cursor = Cursor(point);
+    let mut auto = settings.clone();
+    auto.auto_hide = true;
+    panel.configure(&auto, 1.0);
+    let outside = (panel.monitor.bounds.left + 80, panel.monitor.bounds.top + 400);
+    unsafe {
+        SetCursorPos(outside.0, outside.1)?;
+    }
+    panel.update(snapshot.clone(), (-1000.0, -1000.0, -900.0, -900.0), false);
+    assert!(!panel.left.state.visible && !panel.right.state.visible);
+    unsafe {
+        SetCursorPos(panel.monitor.bounds.left + 400, panel.monitor.bounds.top + 1)?;
+    }
+    panel.update(snapshot.clone(), (-1000.0, -1000.0, -900.0, -900.0), false);
+    assert!(panel.left.state.visible && panel.right.state.visible);
+    unsafe {
+        SetCursorPos(panel.right.state.origin.0 + 40, panel.right.state.origin.1 + 25)?;
+    }
+    panel.last_inside = Instant::now() - std::time::Duration::from_secs(2);
+    panel.update(snapshot.clone(), (-1000.0, -1000.0, -900.0, -900.0), false);
+    assert!(panel.right.state.visible);
+    panel.open(Block::Volume);
+    unsafe {
+        SetCursorPos(panel.card.state.origin.0 + 40, panel.card.state.origin.1 + 60)?;
+    }
+    panel.last_inside = Instant::now() - std::time::Duration::from_secs(2);
+    panel.update(snapshot.clone(), (-1000.0, -1000.0, -900.0, -900.0), false);
+    assert!(panel.card.state.visible && panel.right.state.visible);
+    unsafe {
+        SetCursorPos(outside.0, outside.1)?;
+    }
+    panel.last_inside = Instant::now() - std::time::Duration::from_secs(2);
+    panel.update(snapshot.clone(), (-1000.0, -1000.0, -900.0, -900.0), false);
+    assert!(!panel.card.state.visible && !panel.right.state.visible);
     only_volume.application = false;
+    only_volume.tray = false;
     only_volume.wifi = false;
     only_volume.bluetooth = false;
     only_volume.battery = false;

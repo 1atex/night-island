@@ -32,6 +32,25 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Mixer" => "Микшер",
         "Minimize" => "Свернуть",
         "Maximize" => "Развернуть",
+        "Island is hidden from screen capture" => "Island скрыт от снимков и записи экрана",
+        "Island is visible in screen capture" => "Island снова виден при захвате экрана",
+        "Start the application before changing capture protection" => "Сначала запусти приложение",
+        "This application needs a capture integration. Protection was not enabled." => {
+            "Для этой программы нужен модуль защиты. Скрытие от захвата не включено."
+        }
+        "Toggle capture protection · Alt + right-click" => "Защита от захвата · Alt + ПКМ",
+        "System tray" => "Системный трей",
+        "Show top panel at the screen edge" => "Показывать при наведении к верхнему краю",
+        "Autohide frees the top edge. Island visibility is configured separately." => {
+            "Автоскрытие освобождает верх экрана. Видимость острова настраивается отдельно."
+        }
+        "Replace Windows taskbar while dock is enabled" => "Заменять панель задач Windows",
+        "The Windows taskbar returns when the dock or Island closes." => {
+            "Панель задач Windows возвращается при выключении дока или выходе из Island."
+        }
+        "Windows tray is unavailable. Enable the hidden icon menu in Windows taskbar settings." => {
+            "Трей недоступен. Включи меню скрытых значков в параметрах панели задач Windows."
+        }
         "Top panel" => "Верхняя панель",
         "Enable top panel" => "Включить верхнюю панель",
         "Companion blocks beside the island, on the main display. Colours follow the island theme." => {

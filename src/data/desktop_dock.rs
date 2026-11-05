@@ -22,6 +22,7 @@ impl Pin {
 #[serde(default)]
 pub struct DockSettings {
     pub enabled: bool,
+    pub replace_taskbar: bool,
     pub auto_hide: bool,
     pub show_running: bool,
     pub hover_preview: bool,
@@ -46,6 +47,7 @@ impl Default for DockSettings {
         let windows = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
         Self {
             enabled: false,
+            replace_taskbar: true,
             auto_hide: false,
             show_running: true,
             hover_preview: true,

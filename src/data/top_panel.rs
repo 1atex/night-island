@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct TopPanelSettings {
     pub enabled: bool,
     pub application: bool,
+    pub auto_hide: bool,
+    pub tray: bool,
     pub wifi: bool,
     pub bluetooth: bool,
     pub volume: bool,
@@ -18,6 +20,8 @@ impl Default for TopPanelSettings {
         Self {
             enabled: false,
             application: true,
+            auto_hide: true,
+            tray: true,
             wifi: true,
             bluetooth: true,
             volume: true,
@@ -30,6 +34,6 @@ impl Default for TopPanelSettings {
 
 impl TopPanelSettings {
     pub fn has_blocks(&self) -> bool {
-        self.application || self.wifi || self.bluetooth || self.volume || self.battery
+        self.application || self.tray || self.wifi || self.bluetooth || self.volume || self.battery
     }
 }

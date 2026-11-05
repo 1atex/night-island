@@ -3,6 +3,8 @@ use crate::view::*;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sid {
     TopEnabled,
+    TopAutoHide,
+    TopTray,
     TopApplication,
     TopWifi,
     TopBluetooth,
@@ -12,6 +14,7 @@ pub enum Sid {
     TopReserve,
 
     DockEnabled,
+    DockReplaceTaskbar,
     DockAutoHide,
     DockRunning,
     DockPreview,
@@ -363,6 +366,9 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::TopAutoHide => c.top_panel.auto_hide,
+        Sid::TopTray => c.top_panel.tray,
+        Sid::DockReplaceTaskbar => c.desktop_dock.replace_taskbar,
         Sid::TopEnabled => c.top_panel.enabled,
         Sid::TopApplication => c.top_panel.application,
         Sid::TopWifi => c.top_panel.wifi,
@@ -441,6 +447,9 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::TopAutoHide => c.top_panel.auto_hide = on,
+        Sid::TopTray => c.top_panel.tray = on,
+        Sid::DockReplaceTaskbar => c.desktop_dock.replace_taskbar = on,
         Sid::TopEnabled => c.top_panel.enabled = on,
         Sid::TopApplication => c.top_panel.application = on,
         Sid::TopWifi => c.top_panel.wifi = on,

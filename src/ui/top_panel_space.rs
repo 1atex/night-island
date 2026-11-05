@@ -137,7 +137,7 @@ impl TopPanel {
         if let Some(monitor) = desktop::monitors().into_iter().find(|m| m.primary) {
             self.monitor = monitor;
         }
-        if self.settings.reserve_space && self.settings.has_blocks() {
+        if self.settings.reserve_space && !self.settings.auto_hide && self.settings.has_blocks() {
             let height = (50.0 * self.scale).ceil() as i32;
             if let Some(reservation) = &mut self.reservation {
                 reservation.refresh(&self.monitor, height);

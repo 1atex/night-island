@@ -39,6 +39,7 @@ pub enum Block {
     Bluetooth,
     Volume,
     Battery,
+    Tray,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -54,6 +55,7 @@ pub struct Snapshot {
 
 pub enum Request {
     Settings,
+    Tray((i32, i32)),
     Open(Block),
     WindowsSettings(Block),
     ToggleWifi,
@@ -133,6 +135,8 @@ pub struct TopPanel {
     pub(super) scale: f32,
     snapshot: Snapshot,
     shown: bool,
+    last_inside: Instant,
+    revealed: bool,
 }
 
 fn inside(r: Rect, p: (f32, f32)) -> bool {
@@ -167,6 +171,7 @@ fn block_width(block: Block) -> f32 {
 
 fn blocks(settings: &TopPanelSettings) -> Vec<Block> {
     [
+        (settings.tray, Block::Tray),
         (settings.wifi, Block::Wifi),
         (settings.bluetooth, Block::Bluetooth),
         (settings.volume, Block::Volume),
@@ -247,6 +252,7 @@ impl State {
                         add((24.0, 66.0, width - 24.0, 108.0), Hit::Toggle, available.is_some());
                         add((24.0, 123.0, width - 24.0, 155.0), Hit::WindowsSettings, true);
                     }
+                    Block::Tray => {}
                     Block::Battery => add((24.0, 123.0, width - 24.0, 155.0), Hit::WindowsSettings, true),
                 }
             }
@@ -300,6 +306,7 @@ impl State {
                     let (icon, value, active) = match block {
                         Block::Wifi => ('\u{E701}', String::new(), self.snapshot.radios.wifi == Some(true)),
                         Block::Bluetooth => ('\u{E702}', String::new(), self.snapshot.radios.bluetooth == Some(true)),
+                        Block::Tray => ('\u{E70D}', String::new(), true),
                         Block::Volume => (
                             if self.snapshot.muted { '\u{E74F}' } else { '\u{E767}' },
                             self.snapshot.volume.map(|v| v.to_string()).unwrap_or_else(|| "—".into()),
@@ -326,6 +333,7 @@ impl State {
                     Block::Bluetooth => "Bluetooth".into(),
                     Block::Volume => tr("System volume").into_owned(),
                     Block::Battery => tr("Battery and power").into_owned(),
+                    Block::Tray => tr("System tray").into_owned(),
                 };
                 text(&title, (26.0, 20.0, w - 55.0, 46.0), 14.0, true, 0.96)?;
                 glyph('\u{E711}', (w - 43.0, 23.0, w - 23.0, 43.0), 11.0, 0.5)?;
@@ -453,6 +461,7 @@ impl State {
                         )?;
                         text(&tr("Open Windows settings"), (34.0, 123.0, w - 34.0, 155.0), 11.0, false, 0.6)?;
                     }
+                    Block::Tray => {}
                     Block::Battery => {
                         let (value, label) = match self.snapshot.battery {
                             Some((v, charging)) => (
@@ -828,6 +837,8 @@ impl TopPanel {
             scale: 1.0,
             snapshot: Default::default(),
             shown: false,
+            last_inside: Instant::now(),
+            revealed: false,
         })
     }
 
@@ -847,6 +858,8 @@ impl TopPanel {
     pub fn configure(&mut self, settings: &TopPanelSettings, scale: f32) {
         self.card.state.hide();
         self.settings = settings.clone();
+        self.revealed = !settings.auto_hide;
+        self.last_inside = Instant::now();
         self.scale = scale;
         self.reflow();
         for wing in [&mut self.left, &mut self.right, &mut self.card] {
@@ -866,7 +879,37 @@ impl TopPanel {
             self.card.state.hide();
         }
         self.snapshot = snapshot;
-        let suppressed = hidden || self.suppressed();
+        let fullscreen = self.suppressed();
+        let mut point = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut point);
+        }
+        let at_edge = point.x >= self.monitor.bounds.left
+            && point.x < self.monitor.bounds.right
+            && point.y >= self.monitor.bounds.top
+            && point.y <= self.monitor.bounds.top + 3;
+        let over_panel = [&self.left, &self.right, &self.card].iter().any(|wing| {
+            let state = &wing.state;
+            state.visible
+                && inside(
+                    (
+                        state.origin.0 as f32,
+                        state.origin.1 as f32,
+                        (state.origin.0 + state.size.0) as f32,
+                        (state.origin.1 + state.size.1) as f32,
+                    ),
+                    (point.x as f32, point.y as f32),
+                )
+        });
+        let interacting = self.card.state.pressed.is_some() || crate::platform::system_tray::is_open();
+        if !fullscreen && (at_edge || over_panel || interacting) {
+            self.last_inside = Instant::now();
+            self.revealed = true;
+        }
+        if self.last_inside.elapsed().as_millis() > 650 && !over_panel && !interacting {
+            self.revealed = false;
+        }
+        let suppressed = hidden || fullscreen || (self.settings.auto_hide && !self.revealed);
         self.shown = !suppressed;
         let icons_changed = self.icons.poll();
         let icon =
@@ -918,6 +961,14 @@ impl TopPanel {
 
     pub fn open(&mut self, block: Block) {
         if !self.shown {
+            return;
+        }
+        if block == Block::Tray {
+            self.card.state.hide();
+            self.right.state.post(Request::Tray((
+                self.right.state.origin.0 + self.right.state.size.0,
+                self.top() as i32 + (52.0 * self.scale) as i32,
+            )));
             return;
         }
         if matches!(self.card.state.role, Role::Card(current) if current == block) && self.card.state.visible {

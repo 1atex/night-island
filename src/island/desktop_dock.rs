@@ -8,6 +8,7 @@ impl App {
     pub(in crate::island) fn configure_desktop_dock(&mut self) {
         if !self.settings.desktop_dock.enabled {
             self.desktop_dock.take();
+            self.windows_taskbar.take();
             return;
         }
         if let Some(dock) = &mut self.desktop_dock {
@@ -25,6 +26,17 @@ impl App {
                     crate::log_error!("desktop dock: {error}");
                 }
             }
+        }
+        self.configure_taskbar_replacement();
+    }
+
+    fn configure_taskbar_replacement(&mut self) {
+        if self.desktop_dock.is_some() && self.settings.desktop_dock.replace_taskbar {
+            if self.windows_taskbar.is_none() {
+                self.windows_taskbar = crate::platform::taskbar::TaskbarGuard::start().ok();
+            }
+        } else {
+            self.windows_taskbar.take();
         }
     }
 
@@ -108,6 +120,38 @@ fn import_dock(hwnd: HWND) {
     });
 }
 
+fn capture_application(entry: &crate::ui::desktop_dock::Entry) {
+    let windows = current_windows(entry);
+    with_app(|a| {
+        if windows.iter().any(|w| w.island_settings) {
+            a.settings.capture_hidden = !a.settings.capture_hidden;
+            a.ui.cfg = a.settings.clone();
+            a.apply_capture();
+            a.settings.save();
+            a.show_notice_for(
+                '\u{E72E}',
+                &tr(if a.settings.capture_hidden {
+                    "Island is hidden from screen capture"
+                } else {
+                    "Island is visible in screen capture"
+                }),
+                3000,
+            );
+            a.render_settings_win();
+        } else {
+            a.show_notice_for(
+                '\u{E783}',
+                &tr(if windows.is_empty() {
+                    "Start the application before changing capture protection"
+                } else {
+                    "This application needs a capture integration. Protection was not enabled."
+                }),
+                6000,
+            );
+        }
+    });
+}
+
 fn menu_title(value: &str) -> String {
     let mut text: String = value.chars().take(90).collect();
     if value.chars().count() > 90 {
@@ -156,6 +200,11 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                         );
                     }
                     if !entry.windows.is_empty() {
+                        if own_settings {
+                            items.push(
+                                Entry::item(26, &tr("Toggle capture protection · Alt + right-click")).glyph('\u{E72E}'),
+                            );
+                        }
                         items.push(Entry::item(24, &tr("Window preview and controls")).glyph('\u{E714}'));
                         if entry.windows.len() > 1 {
                             items.push(
@@ -309,6 +358,7 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
             a.save_desktop_dock();
         }),
         Some(Request::Add) => add_file(hwnd),
+        Some(Request::Capture(entry)) => capture_application(&entry),
         Some(Request::Launch(entry)) => {
             let live: Vec<_> = desktop::windows()
                 .into_iter()
@@ -333,6 +383,11 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                 }
             });
             match chosen {
+                Some(26) => {
+                    if let Some(entry) = entry {
+                        capture_application(&entry);
+                    }
+                }
                 Some(1) => {
                     if let Some(entry) = entry {
                         if let Some(window) = entry.windows.iter().find(|w| w.island_settings) {
