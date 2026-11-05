@@ -238,6 +238,76 @@ fn match_icon(
         .map(|(_, icon)| icon.clone())
 }
 
+fn running_programs() -> Vec<String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+    };
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    };
+    let mut paths: Vec<String> = Vec::new();
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return paths };
+        let mut item = PROCESSENTRY32W { dwSize: size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        if Process32FirstW(snapshot, &mut item).is_ok() {
+            loop {
+                if let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, item.th32ProcessID) {
+                    let mut buffer = [0u16; 1024];
+                    let mut len = buffer.len() as u32;
+                    if QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buffer.as_mut_ptr()), &mut len)
+                        .is_ok()
+                    {
+                        let path = String::from_utf16_lossy(&buffer[..len as usize]);
+                        if !paths.contains(&path) {
+                            paths.push(path);
+                        }
+                    }
+                    let _ = CloseHandle(process);
+                }
+                if Process32NextW(snapshot, &mut item).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snapshot);
+    }
+    paths
+}
+
+fn best_program<'a>(name: &str, paths: &'a [String]) -> Option<&'a str> {
+    let name = name.trim().to_lowercase();
+    let words: Vec<&str> = name.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 4).collect();
+    paths
+        .iter()
+        .filter(|path| !path.to_lowercase().contains("\\windows\\"))
+        .filter_map(|path| {
+            let lower = path.to_lowercase();
+            let stem = std::path::Path::new(&lower).file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            let score = if stem.len() > 2 && name.contains(&stem) {
+                100 + stem.len()
+            } else {
+                words.iter().filter(|word| lower.contains(*word)).map(|word| word.len()).max().unwrap_or(0)
+            };
+            (score > 0).then_some((score, path.as_str()))
+        })
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, path)| path)
+}
+
+fn fallback_icon(name: &str, programs: &[String]) -> Option<Arc<crate::platform::apps::Icon>> {
+    if let Some(path) = best_program(name, programs)
+        && let Some(icon) = crate::platform::apps::icon_for_path(path)
+    {
+        return Some(icon);
+    }
+    let word = name.split(|c: char| !c.is_alphanumeric()).find(|w| w.chars().count() >= 4).unwrap_or(name);
+    [name, word]
+        .into_iter()
+        .find_map(|query| crate::platform::apps::find(query, 1).into_iter().next())
+        .and_then(crate::platform::apps::icon)
+}
+
 fn elements(automation: &IUIAutomation, hwnd: HWND) -> Result<Vec<IUIAutomationElement>> {
     unsafe {
         let root = automation.ElementFromHandle(hwnd)?;
@@ -250,7 +320,7 @@ fn elements(automation: &IUIAutomation, hwnd: HWND) -> Result<Vec<IUIAutomationE
             let class = item.CurrentClassName()?.to_string();
             if matches!(
                 class.as_str(),
-                "SystemTray.NotifyIconView" | "SystemTray.NormalButton" | "ToolbarWindow32" | "Button"
+                "" | "SystemTray.NotifyIconView" | "SystemTray.NormalButton" | "ToolbarWindow32" | "Button"
             ) {
                 result.push(item);
             }
@@ -334,13 +404,15 @@ fn collect(anchor: (i32, i32), action: Option<(&str, bool)>) -> Result<Vec<Entry
         return Ok(Vec::new());
     }
     let icons = registry_icons();
+    let mut programs: Option<Vec<String>> = None;
     let mut entries = Vec::new();
     for item in items {
         let name = unsafe { item.CurrentName()?.to_string() };
         if name.trim().is_empty() {
             continue;
         }
-        let icon = match_icon(&name, &icons);
+        let icon =
+            match_icon(&name, &icons).or_else(|| fallback_icon(&name, programs.get_or_insert_with(running_programs)));
         entries.push(Entry { name, icon });
     }
     if entries.is_empty() {

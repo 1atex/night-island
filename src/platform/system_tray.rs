@@ -12,6 +12,8 @@ use windows::core::{Result, w};
 
 static BUSY: AtomicBool = AtomicBool::new(false);
 
+const WIN10_CHEVRON_ID: &str = "1502";
+
 pub mod inline;
 
 fn overflow() -> Option<HWND> {
@@ -28,11 +30,20 @@ pub(super) fn chevron(automation: &IUIAutomation) -> Result<IUIAutomationElement
     unsafe {
         let taskbar = FindWindowW(w!("Shell_TrayWnd"), None)?;
         let root = automation.ElementFromHandle(taskbar)?;
-        for class in ["SystemTray.ChevronIconView", "TrayButton"] {
-            let condition = automation.CreatePropertyCondition(UIA_ClassNamePropertyId, &class.into())?;
-            if let Ok(element) = root.FindFirst(TreeScope_Descendants, &condition) {
-                return Ok(element);
-            }
+        let condition =
+            automation.CreatePropertyCondition(UIA_ClassNamePropertyId, &"SystemTray.ChevronIconView".into())?;
+        if let Ok(element) = root.FindFirst(TreeScope_Descendants, &condition) {
+            return Ok(element);
+        }
+        let condition = automation.CreatePropertyCondition(UIA_AutomationIdPropertyId, &WIN10_CHEVRON_ID.into())?;
+        if let Ok(element) = root.FindFirst(TreeScope_Descendants, &condition)
+            && element.CurrentClassName().is_ok_and(|c| c == "Button")
+        {
+            return Ok(element);
+        }
+        let condition = automation.CreatePropertyCondition(UIA_ClassNamePropertyId, &"TrayButton".into())?;
+        if let Ok(element) = root.FindFirst(TreeScope_Descendants, &condition) {
+            return Ok(element);
         }
         let condition =
             automation.CreatePropertyCondition(UIA_ClassNamePropertyId, &"SystemTray.NormalButton".into())?;
@@ -282,8 +293,10 @@ mod tests {
     fn native_tray_chevron_is_available() -> Result<()> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
-            let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
-            let result = chevron(&automation).map(|_| ());
+            let result = {
+                let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+                chevron(&automation).map(|_| ())
+            };
             CoUninitialize();
             result
         }
