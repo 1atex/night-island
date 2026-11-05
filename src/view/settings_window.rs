@@ -137,9 +137,9 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
-    [(0, "Application"), (5, "Look and feel"), (9, "Monitoring"), (12, "Services"), (15, "Program")];
+    [(0, "Application"), (6, "Look and feel"), (10, "Monitoring"), (13, "Services"), (16, "Program")];
 
-pub const GROUPS: [Group; 16] = [
+pub const GROUPS: [Group; 17] = [
     Group {
         glyph: '\u{E713}',
         name: "General",
@@ -155,6 +155,7 @@ pub const GROUPS: [Group; 16] = [
         sections: &[(0, "Ghost mode"), (5, "Placement and look"), (13, "Open and close")],
     },
     Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
+    Group { glyph: '\u{E8A9}', name: "Top panel", rows: &[], custom: Some(top_panel_items), sections: &[] },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None, sections: &[] },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items), sections: &[] },
     Group {
@@ -226,7 +227,7 @@ const ROW_H: f32 = 46.0;
 const SERVICE_H: f32 = 56.0;
 const NOTE_H: f32 = 19.0;
 const CTL_W: f32 = 300.0;
-const GROUP_H: f32 = 31.0;
+const GROUP_H: f32 = 29.0;
 const SIDE_SECTION_H: f32 = 26.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -851,6 +852,30 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
 fn matches(label: &str, query: &str) -> bool {
     let q = query.trim().to_lowercase();
     q.is_empty() || label.to_lowercase().contains(&q) || crate::ui::i18n::tr(label).to_lowercase().contains(&q)
+}
+
+fn top_panel_items(_: &UiState) -> Vec<Item> {
+    use crate::ui::i18n::tr;
+    vec![
+        Item::Row(Sid::TopEnabled, "Enable top panel", Kind::Toggle),
+        Item::Text(
+            tr("Companion blocks beside the island, on the main display. Colours follow the island theme.")
+                .into_owned(),
+        ),
+        Item::Section("Visible blocks"),
+        Item::Row(Sid::TopApplication, "Active application and window actions", Kind::Toggle),
+        Item::Row(Sid::TopWifi, "Wi-Fi", Kind::Toggle),
+        Item::Row(Sid::TopBluetooth, "Bluetooth", Kind::Toggle),
+        Item::Row(Sid::TopVolume, "System volume", Kind::Toggle),
+        Item::Row(Sid::TopBattery, "Battery and power", Kind::Toggle),
+        Item::Section("Behaviour"),
+        Item::Row(Sid::TopFullscreen, "Hide top panel in fullscreen apps", Kind::Toggle),
+        Item::Row(Sid::TopReserve, "Keep maximized windows below the top panel", Kind::Toggle),
+        Item::Text(
+            tr("Music, time and notifications stay in the island. Right-click a block to customize the panel.")
+                .into_owned(),
+        ),
+    ]
 }
 
 fn desktop_dock_items(ui: &UiState) -> Vec<Item> {

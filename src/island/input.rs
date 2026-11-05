@@ -131,7 +131,7 @@ impl App {
         }
         let s = self.scale;
         let (sw, sh) = Self::screen_size();
-        let (wl, wt, wr, wb) = Self::work_area();
+        let (wl, wt, wr, wb) = self.island_work_area();
         let (cw, ch) = if self.state == State::Expanded {
             (EXPANDED.0 * s, EXPANDED.1 * s)
         } else {

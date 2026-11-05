@@ -452,6 +452,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             winevent::acknowledge();
             with_app(|a| {
                 a.on_foreground_changed();
+                a.update_top_panel(true);
                 if let Some(dock) = &mut a.desktop_dock {
                     dock.refresh_windows();
                 }
@@ -620,6 +621,25 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         m if m != 0 && m == TASKBAR_CREATED.load(Ordering::Relaxed) => {
             tray::add(hwnd);
+            with_app(|a| a.top_panel_request(4));
+            LRESULT(0)
+        }
+        WM_DPICHANGED => {
+            with_app(|a| {
+                a.dpi_scale = (wparam.0 & 0xffff) as f32 / 96.0;
+                a.apply_layout();
+                if a.top_panel.is_some() {
+                    a.configure_top_panel();
+                }
+            });
+            LRESULT(0)
+        }
+        WM_DISPLAYCHANGE => {
+            with_app(|a| a.top_panel_request(3));
+            LRESULT(0)
+        }
+        crate::ui::top_panel::WM_TOP_PANEL => {
+            with_app(|a| a.top_panel_request(wparam.0));
             LRESULT(0)
         }
         crate::ui::desktop_dock::WM_DESKTOP_DOCK => {
@@ -633,6 +653,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         WM_DESTROY => {
             with_app(|a| {
                 a.save_note();
+                a.top_panel.take();
                 a.desktop_dock.take();
             });
             dnd::unregister(hwnd);

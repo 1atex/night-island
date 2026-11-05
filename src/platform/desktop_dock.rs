@@ -217,6 +217,7 @@ fn fullscreen_bounds(rect: RECT, monitor: RECT, captioned: bool) -> bool {
 #[derive(Clone, Copy)]
 pub enum WindowAction {
     Restore,
+    Maximize,
     Minimize,
     Close,
 }
@@ -236,6 +237,7 @@ pub fn change_window(window: &Window, action: WindowAction) -> bool {
         }
         match action {
             WindowAction::Restore => ShowWindowAsync(hwnd, SW_RESTORE).as_bool(),
+            WindowAction::Maximize => ShowWindowAsync(hwnd, SW_MAXIMIZE).as_bool(),
             WindowAction::Minimize => ShowWindowAsync(hwnd, SW_MINIMIZE).as_bool(),
             WindowAction::Close => {
                 PostMessageW(Some(hwnd), WM_CLOSE, windows::Win32::Foundation::WPARAM(0), LPARAM(0)).is_ok()

@@ -131,6 +131,11 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn island_work_area(&self) -> view::Rect {
+        let (left, top, right, bottom) = Self::work_area();
+        (left, self.top_panel.as_ref().map_or(top, |panel| panel.top()), right, bottom)
+    }
+
     pub(in crate::island) fn screen_size() -> (f32, f32) {
         unsafe { (GetSystemMetrics(SM_CXSCREEN) as f32, GetSystemMetrics(SM_CYSCREEN) as f32) }
     }
@@ -138,7 +143,7 @@ impl App {
     pub(in crate::island) fn pill_screen(&self, expanded: bool) -> (f32, f32, f32, f32) {
         let s = self.scale;
         let (sw, sh) = Self::screen_size();
-        let (wl, wt, wr, wb) = Self::work_area();
+        let (wl, wt, wr, wb) = self.island_work_area();
         let (cw, ch) = (self.collapsed().0 * s, self.collapsed().1 * s);
         let (ew, eh) = (EXPANDED.0 * s, EXPANDED.1 * s);
         let clamp = |v: f32, lo: f32, hi: f32| v.max(lo).min(hi.max(lo));
@@ -152,7 +157,7 @@ impl App {
         } else {
             match self.settings.float_pos {
                 Some([x, y]) => (clamp(x as f32 - cw / 2.0, 0.0, sw - cw), clamp(y as f32, 0.0, sh - ch)),
-                None => ((sw - cw) / 2.0, TOP_MARGIN * s),
+                None => ((sw - cw) / 2.0, self.top_panel.as_ref().map_or(0.0, |p| p.top()) + TOP_MARGIN * s),
             }
         };
         if !expanded {

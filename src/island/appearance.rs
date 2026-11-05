@@ -88,6 +88,9 @@ impl App {
         if let Some(chat) = &mut self.pet.chat {
             chat.repaint();
         }
+        if let Some(panel) = &mut self.top_panel {
+            panel.repaint();
+        }
     }
 
     pub(in crate::island) fn apply_accent(&self) {
@@ -188,6 +191,9 @@ impl App {
     }
 
     pub(in crate::island) fn apply_capture(&self) {
+        if let Some(panel) = &self.top_panel {
+            panel.set_capture_hidden(self.settings.capture_hidden);
+        }
         if let Some(dock) = &self.desktop_dock {
             dock.set_capture_hidden(self.settings.capture_hidden);
         }

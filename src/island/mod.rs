@@ -92,6 +92,7 @@ mod startup;
 mod system_notifications;
 mod tabs;
 mod timers;
+mod top_panel;
 mod voice;
 mod window;
 
@@ -135,6 +136,10 @@ struct App {
     tint: SpriteVisual,
     settings_win: Option<HWND>,
     desktop_dock: Option<crate::ui::desktop_dock::Dock>,
+    top_panel: Option<crate::ui::top_panel::TopPanel>,
+    top_panel_poll: Instant,
+    top_panel_radios: Instant,
+    top_panel_data: crate::ui::top_panel::Snapshot,
     power_last: Option<(u8, bool)>,
     lock_pending: Vec<u16>,
     ui: view::UiState,

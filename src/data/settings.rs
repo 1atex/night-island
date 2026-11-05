@@ -363,6 +363,7 @@ impl ProgressStyle {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    pub top_panel: crate::data::top_panel::TopPanelSettings,
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
     pub weather: bool,
@@ -471,6 +472,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            top_panel: Default::default(),
             desktop_dock: Default::default(),
             language: Language::Ru,
             weather: true,

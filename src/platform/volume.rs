@@ -11,6 +11,18 @@ fn endpoint() -> Result<IAudioEndpointVolume> {
     }
 }
 
+pub fn muted() -> Option<bool> {
+    unsafe { endpoint().ok()?.GetMute().ok().map(|v| v.as_bool()) }
+}
+
+pub fn set_muted(muted: bool) {
+    unsafe {
+        if let Ok(ep) = endpoint() {
+            let _ = ep.SetMute(muted, std::ptr::null());
+        }
+    }
+}
+
 pub fn get() -> Option<f32> {
     unsafe { endpoint().ok()?.GetMasterVolumeLevelScalar().ok() }
 }

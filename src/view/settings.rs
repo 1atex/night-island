@@ -2,6 +2,15 @@ use crate::view::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sid {
+    TopEnabled,
+    TopApplication,
+    TopWifi,
+    TopBluetooth,
+    TopVolume,
+    TopBattery,
+    TopFullscreen,
+    TopReserve,
+
     DockEnabled,
     DockAutoHide,
     DockRunning,
@@ -354,6 +363,14 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::TopEnabled => c.top_panel.enabled,
+        Sid::TopApplication => c.top_panel.application,
+        Sid::TopWifi => c.top_panel.wifi,
+        Sid::TopBluetooth => c.top_panel.bluetooth,
+        Sid::TopVolume => c.top_panel.volume,
+        Sid::TopBattery => c.top_panel.battery,
+        Sid::TopFullscreen => c.top_panel.hide_fullscreen,
+        Sid::TopReserve => c.top_panel.reserve_space,
         Sid::DockPreview => c.desktop_dock.hover_preview,
         Sid::DockBlur => c.desktop_dock.blur,
         Sid::DockEnabled => c.desktop_dock.enabled,
@@ -424,6 +441,14 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::TopEnabled => c.top_panel.enabled = on,
+        Sid::TopApplication => c.top_panel.application = on,
+        Sid::TopWifi => c.top_panel.wifi = on,
+        Sid::TopBluetooth => c.top_panel.bluetooth = on,
+        Sid::TopVolume => c.top_panel.volume = on,
+        Sid::TopBattery => c.top_panel.battery = on,
+        Sid::TopFullscreen => c.top_panel.hide_fullscreen = on,
+        Sid::TopReserve => c.top_panel.reserve_space = on,
         Sid::DockPreview => c.desktop_dock.hover_preview = on,
         Sid::DockBlur => c.desktop_dock.blur = on,
         Sid::DockEnabled => c.desktop_dock.enabled = on,

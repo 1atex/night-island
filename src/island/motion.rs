@@ -80,6 +80,7 @@ impl App {
             let _ = self.set_geometry_now(Win::Big, false, hidden);
         }
         self.state = State::Expanded;
+        self.update_top_panel(false);
         if self.ui.tab == view::Tab::Chat && self.ui.chat.pet.enabled {
             self.sync_pet_studio();
         }
@@ -129,6 +130,7 @@ impl App {
         self.finish_cover_motion();
         self.ui.home.track_transition.finish();
         self.state = State::Collapsed;
+        self.update_top_panel(false);
         self.set_blur(false);
         self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         self.place(Win::Small);

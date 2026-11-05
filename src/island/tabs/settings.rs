@@ -81,6 +81,8 @@ impl App {
                         let _ = self.tint.SetOpacity(self.settings.tint_open);
                     }
                 }
+                TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume | TopBattery | TopFullscreen
+                | TopReserve => self.configure_top_panel(),
                 DockEnabled | DockAutoHide | DockRunning | DockPreview | DockFullscreen | DockEconomy
                 | DockIconSize | DockZoom | DockOpacity | DockMargin | DockBlur | DockTintHue | DockTintSaturation
                 | DockTintBrightness => self.configure_desktop_dock(),

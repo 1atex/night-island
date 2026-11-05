@@ -28,6 +28,38 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Close" => "Закрыть",
+        "Mixer" => "Микшер",
+        "Minimize" => "Свернуть",
+        "Maximize" => "Развернуть",
+        "Top panel" => "Верхняя панель",
+        "Enable top panel" => "Включить верхнюю панель",
+        "Companion blocks beside the island, on the main display. Colours follow the island theme." => {
+            "Блоки рядом с островом на основном экране. Цвета соответствуют теме острова."
+        }
+        "Visible blocks" => "Отображаемые блоки",
+        "Active application and window actions" => "Активная программа и действия с окнами",
+        "System volume" => "Системная громкость",
+        "Battery and power" => "Батарея и питание",
+        "Hide top panel in fullscreen apps" => "Скрывать в полноэкранных приложениях",
+        "Keep maximized windows below the top panel" => "Оставлять место над развёрнутыми окнами",
+        "Music, time and notifications stay in the island. Right-click a block to customize the panel." => {
+            "Музыка, время и уведомления остаются в острове. ПКМ по блоку открывает настройки панели."
+        }
+        "Desktop" => "Рабочий стол",
+        "No active application" => "Нет активной программы",
+        "Radio unavailable" => "Адаптер недоступен",
+        "Enabled" => "Включено",
+        "Disabled" => "Выключено",
+        "Open Windows settings" => "Параметры Windows",
+        "Power connected" => "Питание от сети",
+        "Minimize window" => "Свернуть окно",
+        "Maximize window" => "Развернуть окно",
+        "Restore window" => "Восстановить окно",
+        "Window actions" => "Действия с окном",
+        "Open app mixer" => "Микшер приложений",
+        "Output device" => "Устройство вывода",
+
         "Window previews and controls on hover" => "Предпросмотр окон и управление при наведении",
         "Window preview and controls" => "Предпросмотр и управление",
         "Show application" => "Показать приложение",

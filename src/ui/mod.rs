@@ -26,3 +26,6 @@ pub mod notification_card;
 pub mod desktop_dock;
 
 pub mod dock_preview;
+
+pub mod top_panel;
+mod top_panel_space;
