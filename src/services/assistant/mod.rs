@@ -24,6 +24,7 @@ pub struct Assistant {
     pub follow_up: bool,
     pub natural_voice: bool,
     pub local_voice: bool,
+    pub tts_eleven: bool,
     pub tts_base: String,
     pub tts_model: String,
     pub tts_voice: String,
@@ -31,6 +32,9 @@ pub struct Assistant {
 }
 
 pub const STEPS_RANGE: (u8, u8) = (3, 20);
+pub const OPENAI_TTS: (&str, &str, &str) = ("https://api.openai.com/v1", "gpt-4o-mini-tts", "nova");
+pub const ELEVEN_TTS: (&str, &str, &str) =
+    ("https://api.elevenlabs.io", "eleven_multilingual_v2", "21m00Tcm4TlvDq8ikWAM");
 
 impl Default for Assistant {
     fn default() -> Self {
@@ -45,29 +49,41 @@ impl Default for Assistant {
             follow_up: true,
             natural_voice: false,
             local_voice: false,
-            tts_base: "https://api.openai.com/v1".into(),
-            tts_model: "gpt-4o-mini-tts".into(),
-            tts_voice: "nova".into(),
+            tts_eleven: false,
+            tts_base: OPENAI_TTS.0.into(),
+            tts_model: OPENAI_TTS.1.into(),
+            tts_voice: OPENAI_TTS.2.into(),
             max_steps: 10,
         }
     }
 }
 
 impl Assistant {
+    pub fn set_eleven(&mut self, eleven: bool) {
+        if self.tts_eleven == eleven {
+            return;
+        }
+        let (base, model, voice) = if eleven { ELEVEN_TTS } else { OPENAI_TTS };
+        self.tts_eleven = eleven;
+        self.tts_base = base.into();
+        self.tts_model = model.into();
+        self.tts_voice = voice.into();
+    }
+
     pub fn sanitize(&mut self) {
         self.perms.sanitize();
         self.volume = self.volume.min(100);
         self.max_steps = self.max_steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1);
-        let defaults = Assistant::default();
-        self.tts_base = crate::services::ai::clean_base(&self.tts_base).unwrap_or(defaults.tts_base.clone());
+        let (base, model, voice) = if self.tts_eleven { ELEVEN_TTS } else { OPENAI_TTS };
+        self.tts_base = crate::services::ai::clean_base(&self.tts_base).unwrap_or_else(|| base.to_string());
         if !crate::services::ai::valid_model(&self.tts_model, crate::data::settings::AiProvider::OpenAi) {
-            self.tts_model = defaults.tts_model;
+            self.tts_model = model.to_string();
         }
         let voice_ok = !self.tts_voice.is_empty()
             && self.tts_voice.len() <= 40
             && self.tts_voice.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
         if !voice_ok {
-            self.tts_voice = defaults.tts_voice;
+            self.tts_voice = voice.to_string();
         }
     }
 
@@ -147,6 +163,17 @@ mod tests {
         let mut local = Assistant { tts_base: "http://localhost:8880/v1/".into(), ..Assistant::default() };
         local.sanitize();
         assert_eq!(local.tts_base, "http://localhost:8880/v1");
+        let mut eleven = Assistant::default();
+        eleven.set_eleven(true);
+        assert_eq!(
+            (eleven.tts_base.as_str(), eleven.tts_model.as_str(), eleven.tts_voice.as_str()),
+            ("https://api.elevenlabs.io", "eleven_multilingual_v2", "21m00Tcm4TlvDq8ikWAM")
+        );
+        eleven.tts_voice = "bad voice!".into();
+        eleven.sanitize();
+        assert_eq!(eleven.tts_voice, "21m00Tcm4TlvDq8ikWAM", "a bad voice falls back to the provider's own");
+        eleven.set_eleven(false);
+        assert_eq!((eleven.tts_base.as_str(), eleven.tts_voice.as_str()), ("https://api.openai.com/v1", "nova"));
         let old: Assistant = serde_json::from_str(r#"{"wake":true}"#).unwrap();
         assert!(old.follow_up && old.tts_model == "gpt-4o-mini-tts" && old.max_steps == 10);
         for (given, kept) in [(0u8, 3u8), (2, 3), (7, 7), (200, 20)] {

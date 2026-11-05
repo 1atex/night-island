@@ -16,7 +16,7 @@ pub enum Tool {
     Search(String),
     ReadFile(String),
     WriteFile { path: String, text: String, append: bool },
-    Spotify { query: String, kind: String },
+    Spotify { query: String, kind: String, artist: String },
     SaveScript { name: String, description: String, body: String },
     RunScript { name: String, args: String },
 }
@@ -249,7 +249,7 @@ pub fn run(tool: &Tool) -> Result<String, String> {
         Tool::Wsl(script) => shell::run_wsl(script),
         Tool::Fetch(url) => web::fetch(url),
         Tool::Render(url) => web::render(url),
-        Tool::Spotify { query, kind } => crate::services::spotify::play_search(query, kind),
+        Tool::Spotify { query, kind, artist } => crate::services::spotify::play_search(query, kind, artist),
         Tool::SaveScript { name, description, body } => {
             let dir = scripts_dir().ok_or("There is no profile folder")?;
             save_script_in(&dir, name, description, body)

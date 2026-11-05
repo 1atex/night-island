@@ -67,9 +67,11 @@ matters. Each object is one of:\n",
     if has(Cap::Media) {
         out.push_str(
             "{\"action\":\"media\",\"do\":\"play_pause\"|\"next\"|\"previous\"}\n\
-{\"action\":\"spotify\",\"query\":\"<what to play, e.g. an album, a track, an artist>\",\"kind\":\"track\"|\"album\"|\
-\"artist\"|\"playlist\"}  (finds it on Spotify and plays it right away; Spotify must be running, open it first if the \
-RESULT says there is no device)\n",
+{\"action\":\"spotify\",\"query\":\"<the title or the name to play>\",\"kind\":\"track\"|\"album\"|\"artist\"|\
+\"playlist\",\"artist\":\"<the performer, optional but it makes a track or an album exact>\"}  (searches Spotify and \
+plays the best match; it refuses and lists the closest ones when nothing matches well. Leave kind out when you do not \
+know it. Dictation mishears names: try the Latin spelling, add the artist, or ask the user. Spotify must be running, \
+open it first if the RESULT says there is no device)\n",
         );
     }
     if has(Cap::Island) {
@@ -173,7 +175,9 @@ without any call word; ask only when you really need a choice or missing informa
         "{\"action\":\"confirm\"}  (the user says yes, confirm, do it)\n\
 {\"action\":\"cancel\"}  (the user says no, cancel, stop)\n\
 {\"action\":\"answer\",\"text\":\"<a short spoken answer in the language of the request, at most two sentences>\"}\n\
-{\"action\":\"unknown\"}  (only when the dictation is noise and means nothing)\n\
+{\"action\":\"unknown\"}  (reply with exactly this and nothing else when the dictation is empty, a lone filler such as \
+\"понял\" or \"ага\", a subtitle phrase like \"продолжение следует\", noise, or an echo of your own last words; never \
+answer such input with \"I am here\", \"Understood\" or \"I am waiting\")\n\
 A reminder is for a time of day or a later date, a timer for a length of time. Questions and chat are answered with \
 \"answer\", whatever the topic. Use the facts below for the time, date and how long the computer has been on.",
     );
@@ -197,6 +201,8 @@ PercentProcessorTime, IODataBytesPersec | Format-Table -AutoSize | Out-String\n\
 $_.CloseMainWindow() | Out-Null }; to kill it: Stop-Process -Name chrome -Force. The name is the process name without \
 .exe; if unsure, list the windows first: Get-Process | Where-Object MainWindowTitle | Select-Object Name, \
 MainWindowTitle | Out-String\n\
+- open a folder, a file or a site for the user: Start-Process 'C:\\path' (explorer.exe returns exit code 1 even when it \
+worked, so do not use it from cmd and do not read that code as a failure)\n\
 - what holds a port: Get-NetTCPConnection -LocalPort 8080 | Select-Object OwningProcess, State\n\
 - installed programs: winget list, or Get-StartApps",
         );
@@ -385,6 +391,86 @@ pub fn parse(reply: &str) -> Command {
 
 pub const MAX_BATCH: usize = 5;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Heard {
+    Fine,
+    Empty,
+    Hallucination,
+    Filler,
+    Echo,
+}
+
+const HALLUCINATIONS: [&str; 16] = [
+    "продолжение следует",
+    "субтитры сделал",
+    "субтитры создавал",
+    "субтитры подогнал",
+    "редактор субтитров",
+    "корректор а кулакова",
+    "спасибо за просмотр",
+    "спасибо за внимание",
+    "подписывайтесь на канал",
+    "ставьте лайки",
+    "до новых встреч",
+    "amara org",
+    "thanks for watching",
+    "thank you for watching",
+    "subtitles by",
+    "dimatorzok",
+];
+
+const FILLERS: [&str; 22] = [
+    "понял",
+    "поняла",
+    "ага",
+    "угу",
+    "да",
+    "нет",
+    "ну",
+    "э",
+    "эм",
+    "хм",
+    "окей",
+    "ок",
+    "так",
+    "ладно",
+    "хорошо",
+    "ясно",
+    "спасибо",
+    "алло",
+    "um",
+    "uh",
+    "ok",
+    "okay",
+];
+
+fn spoken_words(text: &str) -> Vec<String> {
+    let flat: String = text.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect();
+    flat.split_whitespace().map(str::to_string).collect()
+}
+
+pub fn judge(text: &str, own_words: &str, answering: bool) -> Heard {
+    let words = spoken_words(text);
+    if words.iter().map(|w| w.chars().count()).sum::<usize>() < 2 {
+        return Heard::Empty;
+    }
+    let joined = words.join(" ");
+    if HALLUCINATIONS.iter().any(|h| joined.contains(h)) {
+        return Heard::Hallucination;
+    }
+    if !answering && words.len() <= 3 && words.iter().all(|w| FILLERS.contains(&w.as_str())) {
+        return Heard::Filler;
+    }
+    let own = spoken_words(own_words);
+    if words.len() >= 3 && !own.is_empty() {
+        let shared = words.iter().filter(|w| own.contains(w)).count();
+        if shared * 10 >= words.len() * 7 {
+            return Heard::Echo;
+        }
+    }
+    Heard::Fine
+}
+
 pub fn is_web_address(url: &str) -> bool {
     let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"));
     rest.is_some_and(|r| {
@@ -554,10 +640,18 @@ fn from_value(value: &Value) -> Command {
             "undeafen" => Command::Discord(DiscordOp::Deafen(false)),
             _ => Command::Unknown,
         },
-        "spotify" => match text("query", MAX_PHRASE_CHARS).or_else(|| text("play", MAX_PHRASE_CHARS)) {
-            Some(query) => Command::Tool(Tool::Spotify { query, kind: text("kind", 12).unwrap_or_default() }),
-            None => Command::Unknown,
-        },
+        "spotify" => {
+            let artist = text("artist", MAX_NAME_CHARS).unwrap_or_default();
+            match text("query", MAX_PHRASE_CHARS)
+                .or_else(|| text("play", MAX_PHRASE_CHARS))
+                .or_else(|| (!artist.is_empty()).then(|| artist.clone()))
+            {
+                Some(query) => {
+                    Command::Tool(Tool::Spotify { query, kind: text("kind", 12).unwrap_or_default(), artist })
+                }
+                None => Command::Unknown,
+            }
+        }
         "save_script" => {
             let body = text("script", MAX_COMMAND_CHARS).or_else(|| text("body", MAX_COMMAND_CHARS));
             match (text("name", 40), body) {
@@ -825,6 +919,37 @@ mod tests {
     }
 
     #[test]
+    fn silence_and_subtitle_noise_are_not_a_request() {
+        assert_eq!(judge("", "", false), Heard::Empty);
+        assert_eq!(judge(" . ", "", false), Heard::Empty);
+        assert_eq!(judge("Продолжение следует...", "", false), Heard::Hallucination);
+        assert_eq!(judge("Субтитры сделал DimaTorzok", "", true), Heard::Hallucination);
+        assert_eq!(judge("Thanks for watching!", "", false), Heard::Hallucination);
+        assert_eq!(judge("Включи музыку", "", false), Heard::Fine);
+        assert_eq!(judge("Включи субтитры в плеере", "", false), Heard::Fine, "a real request may mention subtitles");
+    }
+
+    #[test]
+    fn a_lone_filler_is_ignored_unless_it_answers_a_question() {
+        for filler in ["Понял.", "Ага", "Да, понял", "Ну ладно", "ok"] {
+            assert_eq!(judge(filler, "", false), Heard::Filler, "{filler}");
+            assert_eq!(judge(filler, "", true), Heard::Fine, "{filler}: a yes can answer a question");
+        }
+        assert_eq!(judge("Да, включи следующий трек", "", false), Heard::Fine, "a filler with a command is a command");
+        assert_eq!(judge("да да да да", "", false), Heard::Fine, "four words are not a filler");
+    }
+
+    #[test]
+    fn the_assistant_hearing_its_own_words_is_an_echo() {
+        let said = "Какой исполнитель поёт Never Love?";
+        assert_eq!(judge("какой исполнитель поёт never love", said, true), Heard::Echo);
+        assert_eq!(judge("исполнитель поёт never", said, true), Heard::Echo);
+        assert_eq!(judge("Это Lidno, включай его треки", said, true), Heard::Fine);
+        assert_eq!(judge("поёт", said, true), Heard::Fine, "two words or fewer are never called an echo");
+        assert_eq!(judge("какой исполнитель", said, true), Heard::Fine);
+    }
+
+    #[test]
     fn island_spotify_discord_note_and_script_actions_are_read() {
         assert_eq!(
             parse(r#"{"action":"island","what":"Weather"}"#),
@@ -849,11 +974,15 @@ mod tests {
         assert_eq!(parse(r#"{"action":"discord","do":"dance"}"#), Command::Unknown);
         assert_eq!(
             parse(r#"{"action":"spotify","query":"Dark Side of the Moon","kind":"album"}"#),
-            Command::Tool(Tool::Spotify { query: "Dark Side of the Moon".into(), kind: "album".into() })
+            Command::Tool(Tool::Spotify {
+                query: "Dark Side of the Moon".into(),
+                kind: "album".into(),
+                artist: String::new()
+            })
         );
         assert_eq!(
             parse(r#"{"action":"spotify","play":"Numb"}"#),
-            Command::Tool(Tool::Spotify { query: "Numb".into(), kind: String::new() })
+            Command::Tool(Tool::Spotify { query: "Numb".into(), kind: String::new(), artist: String::new() })
         );
         assert_eq!(parse(r#"{"action":"spotify"}"#), Command::Unknown);
         assert_eq!(
@@ -879,7 +1008,10 @@ mod tests {
         );
         assert_eq!(cap_of(&Command::Island { what: "all".into(), name: String::new() }), Some(Cap::Island));
         assert_eq!(cap_of(&Command::Discord(DiscordOp::Mute(true))), Some(Cap::Controls));
-        assert_eq!(cap_of(&Command::Tool(Tool::Spotify { query: "x".into(), kind: String::new() })), Some(Cap::Media));
+        assert_eq!(
+            cap_of(&Command::Tool(Tool::Spotify { query: "x".into(), kind: String::new(), artist: String::new() })),
+            Some(Cap::Media)
+        );
     }
 
     #[test]

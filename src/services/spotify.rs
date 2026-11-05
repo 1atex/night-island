@@ -299,35 +299,133 @@ fn api_json(method: &str, path: &str, json: &str) -> Option<http::Response> {
     http::request_json(method, &url, &access_token()?, json)
 }
 
-pub fn kind_of(word: &str) -> &'static str {
+const ALL_KINDS: [&str; 4] = ["track", "artist", "album", "playlist"];
+const GOOD_MATCH: f32 = 0.6;
+const SEARCH_LIMIT: usize = 5;
+
+pub fn kinds_of(word: &str) -> Vec<&'static str> {
     match word.trim().to_ascii_lowercase().as_str() {
-        "album" => "album",
-        "artist" => "artist",
-        "playlist" => "playlist",
-        _ => "track",
+        "track" | "song" => vec!["track"],
+        "album" => vec!["album"],
+        "artist" => vec!["artist"],
+        "playlist" => vec!["playlist"],
+        _ => ALL_KINDS.to_vec(),
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Found {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub kind: &'static str,
     pub uri: String,
     pub name: String,
     pub by: String,
+    pub popularity: u32,
 }
 
-pub fn pick_result(body: &str, kind: &str) -> Option<Found> {
-    let v = parse_json(body)?;
-    let item = v.pointer(&format!("/{kind}s/items/0")).filter(|i| i.is_object())?;
-    let uri = item.get("uri")?.as_str()?.to_string();
-    let valid = uri.starts_with("spotify:") && uri.bytes().all(|b| b.is_ascii_alphanumeric() || b == b':');
-    let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-    let by = item
-        .pointer("/artists/0/name")
-        .or_else(|| item.pointer("/owner/display_name"))
-        .and_then(|n| n.as_str())
-        .unwrap_or("")
-        .to_string();
-    valid.then_some(Found { uri, name, by })
+impl Candidate {
+    pub fn describe(&self) -> String {
+        if self.by.is_empty() {
+            format!("{} ({})", self.name, self.kind)
+        } else {
+            format!("{} by {} ({})", self.name, self.by, self.kind)
+        }
+    }
+}
+
+pub fn candidates(body: &str) -> Vec<Candidate> {
+    let Some(v) = parse_json(body) else { return Vec::new() };
+    let mut out = Vec::new();
+    for kind in ALL_KINDS {
+        let Some(items) = v.pointer(&format!("/{kind}s/items")).and_then(|i| i.as_array()) else { continue };
+        for item in items.iter().filter(|i| i.is_object()) {
+            let Some(uri) = item.get("uri").and_then(|u| u.as_str()) else { continue };
+            let valid = uri.starts_with("spotify:") && uri.bytes().all(|b| b.is_ascii_alphanumeric() || b == b':');
+            if !valid {
+                continue;
+            }
+            let text = |p: &str| item.pointer(p).and_then(|n| n.as_str()).unwrap_or("").to_string();
+            let by = [text("/artists/0/name"), text("/owner/display_name")]
+                .into_iter()
+                .find(|s| !s.is_empty())
+                .unwrap_or_default();
+            out.push(Candidate {
+                kind,
+                uri: uri.to_string(),
+                name: text("/name"),
+                by,
+                popularity: item.get("popularity").and_then(|p| p.as_u64()).unwrap_or(0) as u32,
+            });
+        }
+    }
+    out
+}
+
+pub fn normalize(text: &str) -> String {
+    let lowered: String = text.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect();
+    lowered.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn edit_distance(a: &[char], b: &[char]) -> usize {
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, &x) in a.iter().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, &y) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (diagonal + usize::from(x != y)).min(row[j] + 1).min(above + 1);
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+pub fn similarity(a: &str, b: &str) -> f32 {
+    let (a, b) = (normalize(a), normalize(b));
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    if a == b {
+        return 1.0;
+    }
+    let (ca, cb): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let (short, long) = if ca.len() <= cb.len() { (&a, &b) } else { (&b, &a) };
+    let (shorter, longer) = (ca.len().min(cb.len()), ca.len().max(cb.len()));
+    let spaced = |s: &str| s.replace(' ', "");
+    if spaced(&a) == spaced(&b) {
+        return 0.97;
+    }
+    let contained = shorter >= 3 && long.contains(short.as_str());
+    let by_edits = 1.0 - edit_distance(&ca, &cb) as f32 / longer as f32;
+    if contained { by_edits.max(0.75 + 0.2 * shorter as f32 / longer as f32) } else { by_edits }
+}
+
+pub fn score(query: &str, artist: &str, c: &Candidate) -> f32 {
+    let name = similarity(query, &c.name);
+    let joined =
+        similarity(query, &format!("{} {}", c.name, c.by)).max(similarity(query, &format!("{} {}", c.by, c.name)));
+    let base = name.max(joined);
+    if artist.trim().is_empty() || c.by.is_empty() {
+        return base;
+    }
+    0.7 * base + 0.3 * similarity(artist, &c.by)
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Choice {
+    pub best: Option<Candidate>,
+    pub close: Vec<Candidate>,
+}
+
+pub fn choose(found: &[Candidate], query: &str, artist: &str, kinds: &[&str]) -> Choice {
+    let mut scored: Vec<(f32, &Candidate)> =
+        found.iter().filter(|c| kinds.contains(&c.kind)).map(|c| (score(query, artist, c), c)).collect();
+    scored.sort_by(|x, y| {
+        let (a, b) = (x.0, y.0);
+        if (a - b).abs() < 0.05 { y.1.popularity.cmp(&x.1.popularity) } else { b.total_cmp(&a) }
+    });
+    let best = scored.first().filter(|(s, _)| *s >= GOOD_MATCH).map(|(_, c)| (*c).clone());
+    let close = scored.iter().skip(usize::from(best.is_some())).take(3).map(|(_, c)| (*c).clone()).collect();
+    Choice { best, close }
 }
 
 pub fn play_body(kind: &str, uri: &str) -> String {
@@ -352,32 +450,55 @@ pub fn pick_device(body: &str) -> Option<String> {
     (!id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')).then(|| id.to_string())
 }
 
-pub fn play_search(query: &str, kind: &str) -> Result<String, String> {
-    let kind = kind_of(kind);
-    let query = query.trim();
+pub fn search_text(query: &str, artist: &str, kinds: &[&str]) -> String {
+    let artist: String = artist.chars().filter(|c| !matches!(c, '"' | '\\') && !c.is_control()).collect();
+    let artist = artist.trim();
+    let narrows =
+        !artist.is_empty() && !query.trim().is_empty() && kinds.iter().any(|k| matches!(*k, "track" | "album"));
+    if narrows {
+        format!("{} artist:\"{artist}\"", query.trim())
+    } else {
+        format!("{} {artist}", query.trim()).trim().to_string()
+    }
+}
+
+pub fn play_search(query: &str, kind: &str, artist: &str) -> Result<String, String> {
+    let kinds = kinds_of(kind);
+    let query = if query.trim().is_empty() { artist.trim() } else { query.trim() };
     if query.is_empty() {
         return Err("Say what to play".into());
     }
     if state().status != Status::Connected {
         return Err("Spotify is not connected: connect it in the settings, Integrations".into());
     }
-    let reply =
-        api("GET", &format!("/search?q={}&type={kind}&limit=1", pct(query))).ok_or("No connection to Spotify")?;
+    let q = search_text(query, artist, &kinds);
+    let reply = api("GET", &format!("/search?q={}&type={}&limit={SEARCH_LIMIT}", pct(&q), kinds.join(",")))
+        .ok_or("No connection to Spotify")?;
     if reply.status != 200 {
         return Err(format!("Spotify search answered with status {}", reply.status));
     }
-    let found = pick_result(&reply.body, kind).ok_or("Nothing like that was found on Spotify")?;
+    let found = candidates(&reply.body);
+    let choice = choose(&found, query, artist, &kinds);
+    let Some(best) = choice.best else {
+        let near: Vec<String> = choice.close.iter().map(Candidate::describe).collect();
+        let hint = if near.is_empty() { String::new() } else { format!(" The closest were: {}.", near.join("; ")) };
+        return Err(format!(
+            "Nothing on Spotify matches \"{query}\" well.{hint} Try the Latin spelling or the artist field, or ask the user which one."
+        ));
+    };
     let device = api("GET", "/me/player/devices").filter(|r| r.status == 200).and_then(|r| pick_device(&r.body));
     let path = match &device {
         Some(id) => format!("/me/player/play?device_id={id}"),
         None => "/me/player/play".to_string(),
     };
-    let reply = api_json("PUT", &path, &play_body(kind, &found.uri)).ok_or("No connection to Spotify")?;
+    let reply = api_json("PUT", &path, &play_body(best.kind, &best.uri)).ok_or("No connection to Spotify")?;
     match reply.status {
         200..=299 => {
             refresh();
-            let by = if found.by.is_empty() { String::new() } else { format!(" by {}", found.by) };
-            Ok(format!("Playing the {kind} {}{by}", found.name))
+            let others: Vec<String> = choice.close.iter().map(Candidate::describe).collect();
+            let more =
+                if others.is_empty() { String::new() } else { format!(" Other matches: {}.", others.join("; ")) };
+            Ok(format!("Playing {}.{more}", best.describe()))
         }
         404 => Err("Spotify has no device to play on: open Spotify on this computer, then try again".into()),
         403 => Err("Spotify refused: playback control needs Premium, or the device is restricted".into()),
@@ -474,34 +595,85 @@ pub fn toggle_like() {
 mod tests {
     use super::*;
 
+    fn cand(kind: &'static str, name: &str, by: &str, popularity: u32) -> Candidate {
+        Candidate { kind, uri: format!("spotify:{kind}:x"), name: name.into(), by: by.into(), popularity }
+    }
+
     #[test]
-    fn a_search_answer_gives_the_first_item_of_the_asked_kind() {
-        let tracks = r#"{"tracks":{"items":[{"uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC","name":"Never Gonna Give You Up","artists":[{"name":"Rick Astley"}]}]}}"#;
-        assert_eq!(
-            pick_result(tracks, "track"),
-            Some(Found {
-                uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
-                name: "Never Gonna Give You Up".into(),
-                by: "Rick Astley".into()
-            })
-        );
-        assert_eq!(pick_result(tracks, "album"), None);
-        let playlist = r#"{"playlists":{"items":[{"uri":"spotify:playlist:37i9dQZF1DX","name":"Chill","owner":{"display_name":"Spotify"}}]}}"#;
-        assert_eq!(pick_result(playlist, "playlist").map(|f| f.by), Some("Spotify".into()));
-        assert_eq!(pick_result(r#"{"tracks":{"items":[]}}"#, "track"), None);
-        assert_eq!(pick_result(r#"{"tracks":{"items":[null]}}"#, "track"), None);
-        assert_eq!(pick_result("not json", "track"), None);
+    fn a_search_answer_gives_every_kind_and_skips_junk() {
+        let body = r#"{"tracks":{"items":[{"uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC","name":"Never Gonna Give You Up","artists":[{"name":"Rick Astley"}],"popularity":80},null]},
+            "artists":{"items":[{"uri":"spotify:artist:abc","name":"Rick Astley","popularity":70}]},
+            "playlists":{"items":[{"uri":"spotify:playlist:37i9dQZF1DX","name":"Chill","owner":{"display_name":"Spotify"}},null]},
+            "albums":{"items":[]}}"#;
+        let found = candidates(body);
+        assert_eq!(found.len(), 3);
+        assert_eq!((found[0].kind, found[0].by.as_str(), found[0].popularity), ("track", "Rick Astley", 80));
+        assert_eq!(found[1].describe(), "Rick Astley (artist)");
+        assert_eq!(found[2].by, "Spotify", "a playlist is credited to its owner");
+        assert!(candidates("not json").is_empty() && candidates(r#"{"tracks":{"items":[null]}}"#).is_empty());
         let evil = r#"{"tracks":{"items":[{"uri":"spotify:track:x\"}; calc","name":"a"}]}}"#;
-        assert_eq!(pick_result(evil, "track"), None);
+        assert!(candidates(evil).is_empty());
     }
 
     #[test]
     fn a_track_plays_by_uri_and_everything_else_by_context() {
         assert_eq!(play_body("track", "spotify:track:abc"), r#"{"uris":["spotify:track:abc"]}"#);
         assert_eq!(play_body("album", "spotify:album:abc"), r#"{"context_uri":"spotify:album:abc"}"#);
-        assert_eq!(kind_of(" Album "), "album");
-        assert_eq!(kind_of("song"), "track");
-        assert_eq!(kind_of("PLAYLIST"), "playlist");
+        assert_eq!(kinds_of(" Album "), ["album"]);
+        assert_eq!(kinds_of("song"), ["track"]);
+        assert_eq!(kinds_of("PLAYLIST"), ["playlist"]);
+        assert_eq!(kinds_of(""), ALL_KINDS);
+        assert_eq!(kinds_of("anything"), ALL_KINDS);
+    }
+
+    #[test]
+    fn names_are_compared_the_way_a_person_would() {
+        assert_eq!(similarity("Never Love", "Neverlove"), 0.97);
+        assert!(similarity("Neverlow", "Neverlove") > 0.7);
+        assert!(similarity("Чёрство", "Черство") > 0.8, "e and yo are one letter to a listener");
+        assert!(similarity("Never Love", "Mockingbird") < 0.3);
+        assert!(similarity("сквозь баб", "ОЗЕРО В ЛЕСУ") < 0.3);
+        assert!(similarity("Lido", "Lido Remix Sunshine") >= 0.75);
+        assert_eq!(similarity("", "x"), 0.0);
+        assert_eq!(normalize("  Ain't No   Sunshine - Lido Remix! "), "ain t no sunshine lido remix");
+    }
+
+    #[test]
+    fn a_poor_match_is_refused_instead_of_playing_something_unrelated() {
+        let found = vec![
+            cand("track", "Mockingbird", "Eminem", 90),
+            cand("track", "Luv Ni Love Storys", "Yashika Sikka", 10),
+            cand("artist", "Lido", "", 60),
+        ];
+        let choice = choose(&found, "Never Love", "", &ALL_KINDS);
+        assert!(choice.best.is_none(), "{choice:?}");
+        assert_eq!(choice.close.len(), 3);
+    }
+
+    #[test]
+    fn the_closest_name_wins_and_popularity_breaks_a_tie() {
+        let found = vec![
+            cand("track", "Neverlove", "Other", 5),
+            cand("artist", "Neverlow", "", 55),
+            cand("track", "Yellow", "Neverlow", 40),
+        ];
+        let best = choose(&found, "Neverlow", "", &ALL_KINDS).best.expect("a match");
+        assert_eq!((best.kind, best.name.as_str()), ("artist", "Neverlow"));
+        let tie = vec![cand("track", "Numb", "Linkin Park", 90), cand("track", "Numb", "Cover Band", 3)];
+        assert_eq!(choose(&tie, "Numb", "", &["track"]).best.map(|c| c.by), Some("Linkin Park".into()));
+        let asked_for_albums = choose(&found, "Neverlow", "", &["album"]);
+        assert!(asked_for_albums.best.is_none() && asked_for_albums.close.is_empty());
+    }
+
+    #[test]
+    fn an_artist_narrows_a_track_and_decides_between_equal_titles() {
+        let found = vec![cand("track", "Numb", "Linkin Park", 90), cand("track", "Numb", "Cover Band", 95)];
+        let best = choose(&found, "Numb", "Cover Band", &["track"]).best.expect("a match");
+        assert_eq!(best.by, "Cover Band");
+        assert_eq!(search_text("Numb", "Linkin Park", &["track"]), "Numb artist:\"Linkin Park\"");
+        assert_eq!(search_text("Neverlow", "", &["artist"]), "Neverlow");
+        assert_eq!(search_text("Chill", "Spotify", &["playlist"]), "Chill Spotify");
+        assert_eq!(search_text("Numb", "Lin\"kin", &["track"]), "Numb artist:\"Linkin\"");
     }
 
     #[test]

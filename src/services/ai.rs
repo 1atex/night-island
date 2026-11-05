@@ -39,7 +39,7 @@ pub type Answer = Result<String, String>;
 static CONFIG: OnceLock<Mutex<AiSettings>> = OnceLock::new();
 static RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static CHAT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
-static COMMAND_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
+static COMMAND_RESULT: Mutex<Option<(u64, Answer)>> = Mutex::new(None);
 static SORT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static BUSY: AtomicBool = AtomicBool::new(false);
 
@@ -97,35 +97,42 @@ pub fn save_voice_key(key: &str) -> bool {
     has_voice_key()
 }
 
-const TTS_SECRET: &str = "ai_tts";
-
-pub fn has_tts_key() -> bool {
-    integrations::dir().is_some_and(|d| d.join(format!("{TTS_SECRET}.bin")).exists())
+fn tts_secret(eleven: bool) -> &'static str {
+    if eleven { "ai_tts_eleven" } else { "ai_tts" }
 }
 
-pub fn save_tts_key(key: &str) -> bool {
+pub fn has_tts_key(eleven: bool) -> bool {
+    integrations::dir().is_some_and(|d| d.join(format!("{}.bin", tts_secret(eleven))).exists())
+}
+
+pub fn save_tts_key(eleven: bool, key: &str) -> bool {
     if !valid_key(key) {
         return false;
     }
-    integrations::save_secret(TTS_SECRET, key.trim());
-    has_tts_key()
+    integrations::save_secret(tts_secret(eleven), key.trim());
+    has_tts_key(eleven)
 }
 
-pub fn remove_tts_key() {
-    integrations::delete_secret(TTS_SECRET);
+pub fn remove_tts_key(eleven: bool) {
+    integrations::delete_secret(tts_secret(eleven));
 }
 
-pub fn tts_credentials(base: &str) -> Option<(String, String)> {
+pub fn tts_credentials(base: &str, eleven: bool) -> Option<(String, String)> {
     let base = clean_base(base)?;
-    if let Some(key) = integrations::load_secret(TTS_SECRET) {
+    if let Some(key) = integrations::load_secret(tts_secret(eleven)) {
         return Some((base, key));
+    }
+    if eleven {
+        return None;
     }
     let (shared_base, key) = speech_credentials()?;
     (shared_base == base).then_some((base, key))
 }
 
-pub fn tts_key_is_shared(base: &str) -> bool {
-    !has_tts_key() && clean_base(base).is_some_and(|b| speech_credentials().is_some_and(|(shared, _)| shared == b))
+pub fn tts_key_is_shared(base: &str, eleven: bool) -> bool {
+    !eleven
+        && !has_tts_key(false)
+        && clean_base(base).is_some_and(|b| speech_credentials().is_some_and(|(shared, _)| shared == b))
 }
 
 pub fn remove_voice_key() {
@@ -617,21 +624,17 @@ pub fn complete(system: &str, user: &str, max_tokens: u32) -> Answer {
     run_with(&settings, |key| build(&settings, key, &[turn], system, max_tokens, true))
 }
 
-pub fn take_command_result() -> Option<Answer> {
+pub fn take_command_result() -> Option<(u64, Answer)> {
     COMMAND_RESULT.lock().ok()?.take()
 }
 
-pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String) -> bool {
-    if BUSY.swap(true, Ordering::SeqCst) {
-        return false;
-    }
+pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String, serial: u64) -> bool {
     let (raw, settings) = (hwnd.0 as isize, config());
     std::thread::spawn(move || {
         let answer = run_with(&settings, |key| build(&settings, key, &turns, &system, COMMAND_OUTPUT_TOKENS, true));
         if let Ok(mut r) = COMMAND_RESULT.lock() {
-            *r = Some(answer);
+            *r = Some((serial, answer));
         }
-        BUSY.store(false, Ordering::SeqCst);
         unsafe {
             let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_COMMAND, WPARAM(0), LPARAM(0));
         }

@@ -309,6 +309,8 @@ impl App {
             wake_session: false,
             agent: None,
             dialog: Vec::new(),
+            run_serial: 0,
+            last_spoken: String::new(),
             reminders: Vec::new(),
             recording: None,
             notice_link: None,

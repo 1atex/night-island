@@ -105,7 +105,7 @@ pub fn stop() {
 }
 
 pub const WM_SPOKEN: u32 = WM_APP + 83;
-const ECHO_PAUSE: Duration = Duration::from_millis(250);
+const ECHO_PAUSE: Duration = Duration::from_millis(600);
 
 fn post_spoken(raw: isize) {
     unsafe {
@@ -118,6 +118,7 @@ const NATURAL_RATE: u32 = 24_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Natural {
+    pub eleven: bool,
     pub base: String,
     pub model: String,
     pub voice: String,
@@ -162,21 +163,35 @@ fn natural_request(text: &str, natural: &Natural) -> String {
     body.to_string()
 }
 
+fn eleven_request(text: &str, natural: &Natural) -> String {
+    serde_json::json!({ "text": text, "model_id": natural.model }).to_string()
+}
+
+pub fn eleven_url(base: &str, voice: &str) -> String {
+    let base = base.trim_end_matches('/').trim_end_matches("/v1");
+    format!("{base}/v1/text-to-speech/{voice}?output_format=wav_24000")
+}
+
 fn natural_wav(text: &str, natural: &Natural) -> Option<Vec<u8>> {
-    let Some((base, key)) = crate::services::ai::tts_credentials(&natural.base) else {
+    let Some((base, key)) = crate::services::ai::tts_credentials(&natural.base, natural.eleven) else {
         crate::log_warn!("The natural voice has no key or a wrong address: see the voice service settings");
         return None;
     };
-    let auth = format!("Bearer {key}");
+    let (url, header, body) = if natural.eleven {
+        (eleven_url(&base, &natural.voice), ("xi-api-key", key), eleven_request(text, natural))
+    } else {
+        (format!("{base}/audio/speech"), ("Authorization", format!("Bearer {key}")), natural_request(text, natural))
+    };
     let reply = crate::services::http::post_json_for_bytes(
-        &format!("{base}/audio/speech"),
-        &[("Authorization", auth.as_str())],
-        &natural_request(text, natural),
+        &url,
+        &[(header.0, header.1.as_str())],
+        &body,
         MAX_SPEECH_BYTES,
         Some("NightIsland/0.1"),
     )?;
     if reply.status != 200 {
-        crate::log_warn!("The natural voice answered with status {}", reply.status);
+        let why: String = String::from_utf8_lossy(&reply.body).chars().filter(|c| !c.is_control()).take(160).collect();
+        crate::log_warn!("The natural voice answered with status {}: {why}", reply.status);
         return None;
     }
     as_wav(reply.body)
@@ -370,6 +385,28 @@ mod tests {
     }
 
     #[test]
+    fn the_elevenlabs_request_follows_its_documented_shape() {
+        let natural = Natural {
+            eleven: true,
+            base: "https://api.elevenlabs.io".into(),
+            model: "eleven_multilingual_v2".into(),
+            voice: "21m00Tcm4TlvDq8ikWAM".into(),
+        };
+        let body: serde_json::Value = serde_json::from_str(&eleven_request("Привет", &natural)).unwrap();
+        assert_eq!(body["text"], "Привет");
+        assert_eq!(body["model_id"], "eleven_multilingual_v2");
+        assert_eq!(
+            eleven_url("https://api.elevenlabs.io", "21m00Tcm4TlvDq8ikWAM"),
+            "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM?output_format=wav_24000"
+        );
+        assert_eq!(
+            eleven_url("https://api.us.elevenlabs.io/v1/", "abc"),
+            "https://api.us.elevenlabs.io/v1/text-to-speech/abc?output_format=wav_24000",
+            "a base typed with /v1 does not double it"
+        );
+    }
+
+    #[test]
     fn the_first_sentence_goes_alone_so_the_sound_starts_early() {
         let text = "Привет, я тут. Сегодня в Иваново облачно, около трёх градусов. Завтра снег! К выходным потеплеет.";
         let parts = chunks(text, 80);
@@ -428,14 +465,23 @@ mod tests {
 
     #[test]
     fn the_natural_voice_request_is_plain_json_and_only_new_models_get_instructions() {
-        let new =
-            Natural { base: "https://api.openai.com/v1".into(), model: "gpt-4o-mini-tts".into(), voice: "nova".into() };
+        let new = Natural {
+            eleven: false,
+            base: "https://api.openai.com/v1".into(),
+            model: "gpt-4o-mini-tts".into(),
+            voice: "nova".into(),
+        };
         let body: serde_json::Value = serde_json::from_str(&natural_request("Привет", &new)).unwrap();
         assert_eq!(body["input"], "Привет");
         assert_eq!(body["voice"], "nova");
         assert_eq!(body["response_format"], "pcm");
         assert!(body["instructions"].is_string());
-        let old = Natural { base: "https://api.openai.com/v1".into(), model: "tts-1".into(), voice: "alloy".into() };
+        let old = Natural {
+            eleven: false,
+            base: "https://api.openai.com/v1".into(),
+            model: "tts-1".into(),
+            voice: "alloy".into(),
+        };
         let body: serde_json::Value = serde_json::from_str(&natural_request("Hi", &old)).unwrap();
         assert!(body.get("instructions").is_none());
     }

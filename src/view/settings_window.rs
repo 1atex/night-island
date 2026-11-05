@@ -822,6 +822,12 @@ fn assistant_items(ui: &UiState) -> Vec<Item> {
         out.push(Item::Row(id, label, kind));
         if id == Sid::AsstNatural && ui.cfg.assistant.natural_voice {
             let (saved, shared) = (ui.int.tts_key_saved, ui.int.tts_key_shared);
+            let eleven = ui.cfg.assistant.tts_eleven;
+            out.push(Item::Row(
+                Sid::AsstTtsProvider,
+                "Cloud voice service",
+                Kind::Segment(["OpenAI-compatible", "ElevenLabs"]),
+            ));
             out.push(Item::Field(
                 Field::TtsKey,
                 "Voice API key",
@@ -833,21 +839,38 @@ fn assistant_items(ui: &UiState) -> Vec<Item> {
                     "Paste the key here"
                 },
             ));
-            out.push(Item::Field(Field::TtsBase, "Voice server address", "https://api.openai.com/v1"));
-            out.push(Item::Field(Field::TtsModel, "Voice model", "gpt-4o-mini-tts"));
-            out.push(Item::Field(Field::TtsVoice, "Voice name", "nova"));
+            let (base_hint, model_hint, voice_hint) = if eleven {
+                ("https://api.elevenlabs.io", "eleven_multilingual_v2", "21m00Tcm4TlvDq8ikWAM")
+            } else {
+                ("https://api.openai.com/v1", "gpt-4o-mini-tts", "nova")
+            };
+            out.push(Item::Field(Field::TtsBase, "Voice server address", base_hint));
+            out.push(Item::Field(Field::TtsModel, "Voice model", model_hint));
+            out.push(Item::Field(Field::TtsVoice, if eleven { "Voice ID" } else { "Voice name" }, voice_hint));
             out.push(Item::Button(Act::TtsSave, "Save the voice service".into(), true));
             if saved {
                 out.push(Item::Button(Act::TtsRemoveKey, "Remove the voice key".into(), true));
             }
-            out.push(Item::Note("Any OpenAI-compatible server with /audio/speech. The address is where requests go:"));
-            out.push(Item::Note(
-                "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own",
-            ));
-            out.push(Item::Note(
-                "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key.",
-            ));
-            out.push(Item::Note("OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."));
+            if eleven {
+                out.push(Item::Note(
+                    "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota).",
+                ));
+                out.push(Item::Note(
+                    "The voice ID is under Voices, the ID of a voice you added; the default is a stock voice.",
+                ));
+                out.push(Item::Note("Models: eleven_multilingual_v2 (speaks Russian), eleven_flash_v2_5 (faster)."));
+            } else {
+                out.push(Item::Note(
+                    "Any OpenAI-compatible server with /audio/speech. The address is where requests go:",
+                ));
+                out.push(Item::Note(
+                    "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own",
+                ));
+                out.push(Item::Note(
+                    "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key.",
+                ));
+                out.push(Item::Note("OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."));
+            }
             out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
         }
     }

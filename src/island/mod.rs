@@ -148,6 +148,8 @@ struct App {
     wake_session: bool,
     agent: Option<crate::services::assistant::agent::Run>,
     dialog: Vec<crate::services::assistant::agent::Exchange>,
+    run_serial: u64,
+    last_spoken: String,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
     notice_link: Option<std::path::PathBuf>,

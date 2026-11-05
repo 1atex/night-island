@@ -5,7 +5,7 @@ use crate::services::attach::Attachment;
 
 pub const MAX_STEPS: usize = 10;
 pub const MAX_RETRIES: usize = 2;
-pub const MAX_FOLLOW_UPS: usize = 5;
+pub const MAX_FOLLOW_UPS: usize = 3;
 pub const MAX_EXCHANGES: usize = 6;
 pub const EXCHANGE_LIFE: Duration = Duration::from_secs(15 * 60);
 const MAX_TURN_CHARS: usize = 3800;
@@ -28,6 +28,7 @@ pub struct Exchange {
 
 #[derive(Clone, Debug)]
 pub struct Run {
+    pub id: u64,
     pub turns: Vec<ChatTurn>,
     pub system: String,
     pub request: String,
@@ -53,6 +54,7 @@ pub fn fresh(exchanges: &mut Vec<Exchange>) {
 impl Run {
     pub fn new(system: String, request: &str, earlier: &[Exchange]) -> Self {
         let mut run = Self {
+            id: 0,
             turns: Vec::new(),
             system,
             request: request.to_string(),

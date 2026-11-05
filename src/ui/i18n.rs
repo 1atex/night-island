@@ -1017,6 +1017,18 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Живой голос от сервиса речи (платно, ПК не нагружает)"
         }
         "Keep listening after an answer" => "Слушать дальше после ответа",
+        "Did not catch that" => "Не расслышал",
+        "Cloud voice service" => "Облачный сервис голоса",
+        "Voice ID" => "ID голоса",
+        "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota)." => {
+            "ElevenLabs: ключ на elevenlabs.io, профиль, API keys (после бесплатной квоты платно)."
+        }
+        "The voice ID is under Voices, the ID of a voice you added; the default is a stock voice." => {
+            "ID голоса смотрите в разделе Voices; по умолчанию стоит стандартный голос."
+        }
+        "Models: eleven_multilingual_v2 (speaks Russian), eleven_flash_v2_5 (faster)." => {
+            "Модели: eleven_multilingual_v2 (говорит по-русски), eleven_flash_v2_5 (быстрее)."
+        }
         "Voice API key" => "Ключ API голоса",
         "Voice server address" => "Адрес сервера голоса",
         "Voice model" => "Модель голоса",

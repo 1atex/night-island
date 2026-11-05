@@ -101,6 +101,7 @@ impl App {
         speech::Voice {
             local: a.local_voice && localvoice::ready(),
             natural: a.natural_voice.then(|| speech::Natural {
+                eleven: a.tts_eleven,
                 base: a.tts_base.clone(),
                 model: a.tts_model.clone(),
                 voice: a.tts_voice.clone(),
@@ -179,6 +180,13 @@ impl App {
             return self.sync_wake();
         }
         speech::stop();
+        if self.settings.assistant.local_voice {
+            localvoice::warm_up();
+        }
+        if self.agent.as_ref().is_some_and(|r| r.phase == Phase::Working) {
+            crate::log_info!("Assistant: the call word cancelled the request that was still running");
+            self.agent = None;
+        }
         let interrupted = self.agent.as_ref().is_some_and(|r| r.phase == Phase::Speaking);
         if interrupted && let Some(run) = self.agent.as_mut() {
             crate::log_info!("Assistant: interrupted by the call word while speaking");
@@ -241,6 +249,8 @@ impl App {
         agent::fresh(&mut self.dialog);
         let mut run = Run::new(system, &request, &self.dialog);
         run.max_steps = usize::from(self.settings.assistant.max_steps);
+        self.run_serial += 1;
+        run.id = self.run_serial;
         self.agent = Some(run);
         self.call_agent();
     }
@@ -253,13 +263,16 @@ impl App {
             run.waiting = true;
             run.phase = Phase::Working;
         }
-        let (turns, system, step) = (run.turns_for_call(), run.system.clone(), run.steps);
+        let (turns, system, step, id) = (run.turns_for_call(), run.system.clone(), run.steps, run.id);
         if exhausted {
             self.fail_by_voice("The assistant needed too many steps");
             return self.end_wake_session();
         }
+        if step == 1 && self.settings.assistant.local_voice {
+            localvoice::warm_up();
+        }
         crate::log_info!("Assistant step {step}: asking the model ({} turns)", turns.len());
-        if ai::ask_agent(self.hwnd, turns, system) {
+        if ai::ask_agent(self.hwnd, turns, system, id) {
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
         } else {
             self.fail_by_voice("Another request is running, try again in a moment");
@@ -267,7 +280,18 @@ impl App {
         }
     }
 
+    fn noise_in(&self, heard: &str) -> Option<voicecmd::Heard> {
+        let wakes = voicecmd::wake_words(&self.settings.ai.voice_wake);
+        let command = voicecmd::strip_wake(heard, &wakes).unwrap_or_else(|| heard.to_string());
+        let answering = self.agent.as_ref().is_some_and(|r| r.phase == Phase::Listening && !r.following);
+        match voicecmd::judge(&command, &self.last_spoken, answering) {
+            voicecmd::Heard::Fine => None,
+            noise => Some(noise),
+        }
+    }
+
     fn say(&mut self, text: &str) {
+        self.last_spoken = text.to_string();
         let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
         self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);
         let (volume, voice) = (self.settings.assistant.voice_volume(), self.voice_choice());
@@ -305,6 +329,7 @@ impl App {
     }
 
     fn ask_user(&mut self, glyph: char, text: &str) {
+        self.last_spoken = text.to_string();
         self.notify_for(Notice::Integrations, glyph, text, (voicecmd::CONFIRM_SECS * 1000) as u32);
         if !self.settings.assistant.perms.enabled || self.agent.is_none() {
             return;
@@ -376,7 +401,11 @@ impl App {
     }
 
     pub(in crate::island) fn on_voice_command(&mut self) {
-        let Some(answer) = ai::take_command_result() else { return };
+        let Some((serial, answer)) = ai::take_command_result() else { return };
+        if self.agent.as_ref().is_none_or(|run| run.id != serial) {
+            crate::log_info!("Assistant: dropped the model's answer to a request that is no longer running");
+            return;
+        }
         self.clear_notice();
         let reply = match answer {
             Ok(reply) => reply,
@@ -454,7 +483,7 @@ impl App {
         let asks = level == Level::Ask && !confirmed && !tool.looks_only();
         if asks && tool.script() && self.settings.assistant.review && !reviewed {
             self.wait_for_result();
-            shell::review(self.hwnd, tool);
+            shell::review(self.hwnd, tool, self.agent.as_ref().map_or(0, |run| run.id));
             return self.show_notice_for('\u{E9D9}', "Checking the command…", 60_000);
         }
         if asks {
@@ -483,20 +512,27 @@ impl App {
         }
         self.wait_for_result();
         self.show_notice_for('\u{E756}', "Running…", 60_000);
-        shell::execute(self.hwnd, tool);
+        shell::execute(self.hwnd, tool, self.agent.as_ref().map_or(0, |run| run.id));
     }
 
     pub(in crate::island) fn on_shell(&mut self) {
         let Some(outcome) = shell::take_outcome() else { return };
+        let (serial, name) = match &outcome {
+            shell::Outcome::Reviewed { run, tool, .. } | shell::Outcome::Ran { run, tool, .. } => (*run, tool.name()),
+        };
+        if self.agent.as_ref().is_none_or(|run| run.id != serial) {
+            crate::log_info!("Assistant: dropped the result of {name} for a request that is no longer running");
+            return;
+        }
         self.clear_notice();
         match outcome {
-            shell::Outcome::Reviewed { tool, verdict } if verdict.safe => self.handle_tool(tool, true, false),
+            shell::Outcome::Reviewed { tool, verdict, .. } if verdict.safe => self.handle_tool(tool, true, false),
             shell::Outcome::Reviewed { verdict, .. } => {
                 let text = format!("Blocked by the check: {}", verdict.reason);
                 self.fail_by_voice(&text);
                 self.end_wake_session();
             }
-            shell::Outcome::Ran { tool, result } => {
+            shell::Outcome::Ran { tool, result, .. } => {
                 match &result {
                     Ok(text) if matches!(tool, Tool::ReadFile(_)) => {
                         crate::log_info!(
@@ -729,7 +765,10 @@ impl App {
                 self.ask_user('\u{E8F2}', &text);
             }
             voicecmd::Command::Ask(text) => self.say(&text),
-            voicecmd::Command::Unknown => self.fail_by_voice("That command is not something I can do by voice"),
+            voicecmd::Command::Unknown => {
+                crate::log_info!("Assistant: the model took the input for noise and stayed silent");
+                self.show_notice_for('\u{E711}', "Did not catch that", 1800);
+            }
         }
     }
 
@@ -739,6 +778,10 @@ impl App {
         match &answer {
             Ok(text) if self.wake_session || self.agent.is_some() => {
                 crate::log_info!("Assistant heard: {}", brief(text, 300));
+                if let Some(why) = self.noise_in(text) {
+                    crate::log_info!("Assistant: ignored what it heard, it was {why:?}");
+                    return self.end_wake_session();
+                }
             }
             Err(why) => crate::log_warn!("Speech recognition failed: {}", brief(why, 200)),
             Ok(_) => {}

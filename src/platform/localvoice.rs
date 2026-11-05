@@ -27,8 +27,12 @@ const MODEL_FILE: &str = "ru_RU-irina-medium.onnx";
 const MAX_UNPACKED_BYTES: u64 = 120 << 20;
 const MAX_UNPACKED_FILE: u64 = 64 << 20;
 const MAX_FILES: usize = 1500;
-const IDLE_UNLOAD: Duration = Duration::from_secs(20);
-const THREADS: i32 = 2;
+const IDLE_UNLOAD: Duration = Duration::from_secs(90);
+
+pub fn thread_count() -> i32 {
+    let cores = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    (cores / 2).clamp(2, 4) as i32
+}
 const MAX_SPOKEN_CHARS: usize = 600;
 
 #[repr(C)]
@@ -208,9 +212,9 @@ impl Engine {
         cfg.model.vits.noise_scale = 0.667;
         cfg.model.vits.noise_scale_w = 0.8;
         cfg.model.vits.length_scale = 1.0;
-        cfg.model.num_threads = THREADS;
+        cfg.model.num_threads = thread_count();
         cfg.model.provider = provider.as_ptr();
-        cfg.max_num_sentences = 2;
+        cfg.max_num_sentences = 1;
         cfg.silence_scale = 0.2;
         let tts = unsafe { (api.create)(&cfg) };
         (!tts.is_null()).then_some(Engine { api, tts })
@@ -349,6 +353,16 @@ fn unload_later() {
         {
             *guard = None;
         }
+    });
+}
+
+pub fn warm_up() {
+    let running = HELPER.lock().map_or(true, |guard| guard.is_some());
+    if running || !ready() {
+        return;
+    }
+    std::thread::spawn(|| {
+        let _ = speak_wav("Да.");
     });
 }
 
@@ -601,6 +615,12 @@ mod tests {
         let into = scratch("broken");
         assert!(extract_tree(vec![7u8; 2048].as_slice(), &into).is_err());
         let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn the_engine_uses_a_few_threads_and_the_helper_stays_for_a_while() {
+        assert!((2..=4).contains(&thread_count()));
+        assert!(IDLE_UNLOAD >= Duration::from_secs(60), "a cold start takes seconds, so do not unload too early");
     }
 
     #[test]

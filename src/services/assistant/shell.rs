@@ -285,8 +285,8 @@ pub fn parse_verdict(reply: &str) -> Verdict {
 
 #[derive(Clone, Debug)]
 pub enum Outcome {
-    Reviewed { tool: Tool, verdict: Verdict },
-    Ran { tool: Tool, result: Result<String, String> },
+    Reviewed { run: u64, tool: Tool, verdict: Verdict },
+    Ran { run: u64, tool: Tool, result: Result<String, String> },
 }
 
 pub const WM_SHELL: u32 = WM_APP + 82;
@@ -297,23 +297,23 @@ fn notify(raw: isize) {
     }
 }
 
-pub fn review(hwnd: HWND, tool: Tool) {
+pub fn review(hwnd: HWND, tool: Tool, run: u64) {
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
         let verdict = match crate::services::ai::complete(REVIEW_PROMPT, tool.detail(), 1000) {
             Ok(reply) => parse_verdict(&reply),
             Err(_) => Verdict { safe: false, reason: "The review could not be done".into() },
         };
-        publish(Outcome::Reviewed { tool, verdict });
+        publish(Outcome::Reviewed { run, tool, verdict });
         notify(raw);
     });
 }
 
-pub fn execute(hwnd: HWND, tool: Tool) {
+pub fn execute(hwnd: HWND, tool: Tool, run: u64) {
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
         let result = tools::run(&tool).map(|text| if text.is_empty() { "(no output)".to_string() } else { text });
-        publish(Outcome::Ran { tool, result });
+        publish(Outcome::Ran { run, tool, result });
         notify(raw);
     });
 }

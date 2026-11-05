@@ -137,6 +137,7 @@ pub enum Sid {
     AsstInstructions,
     AsstLocal,
     AsstLocalInstall,
+    AsstTtsProvider,
 }
 
 pub(in crate::view) fn asst_cap(id: Sid) -> Option<crate::services::assistant::Cap> {
@@ -498,6 +499,7 @@ pub(in crate::view) fn segment_value(id: Sid, c: &Settings) -> usize {
         Sid::Placement => usize::from(c.placement == Placement::Docked),
         Sid::Style => usize::from(c.style == Style::Liquid),
         Sid::RecFormat => usize::from(c.record_format == RecordFormat::Gif),
+        Sid::AsstTtsProvider => usize::from(c.assistant.tts_eleven),
         _ => 0,
     }
 }
@@ -631,6 +633,7 @@ pub fn segment_set(id: Sid, c: &mut Settings, option: usize) {
         Sid::Placement => c.placement = if option == 1 { Placement::Docked } else { Placement::Floating },
         Sid::Style => c.style = if option == 1 { Style::Liquid } else { Style::Flat },
         Sid::RecFormat => c.record_format = if option == 1 { RecordFormat::Gif } else { RecordFormat::Mp4 },
+        Sid::AsstTtsProvider => c.assistant.set_eleven(option == 1),
         _ => {}
     }
 }
