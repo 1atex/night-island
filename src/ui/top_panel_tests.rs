@@ -64,6 +64,19 @@ fn pump() {
     }
 }
 
+#[test]
+fn island_panel_corridor_covers_diagonal_crossings_without_covering_the_desktop() {
+    let island = (500.0, 8.0, 1100.0, 408.0);
+    let right = (1120.0, -2.0, 1400.0, 52.0);
+    let left = (200.0, -2.0, 480.0, 52.0);
+    for point in [(1110.0, 30.0), (1110.0, 200.0), (1110.0, 400.0)] {
+        assert!(across_gap(island, right, point, 12.0));
+    }
+    assert!(across_gap(island, left, (490.0, 250.0), 12.0));
+    assert!(!across_gap(island, right, (1250.0, 250.0), 12.0));
+    assert!(!across_gap(island, right, (1110.0, 450.0), 12.0));
+}
+
 fn click(wing: &Wing, target: Hit) {
     let button = wing.state.buttons.iter().find(|b| b.hit == target).unwrap();
     let x = (((button.rect.0 + button.rect.2) * 0.5) * wing.state.scale) as u16;
@@ -206,6 +219,15 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         );
         save(&panel.left, &format!("left-{scale:.1}"))?;
         save(&panel.right, &format!("right-{scale:.1}"))?;
+        let mut frame_times = Vec::new();
+        for _ in 0..40 {
+            let started = Instant::now();
+            panel.left.state.render();
+            panel.right.state.render();
+            frame_times.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+        frame_times.sort_by(f64::total_cmp);
+        println!("Two panel frames at scale {scale}: median {:.2}ms, p95 {:.2}ms", frame_times[20], frame_times[38]);
         let right_edge = panel.right.state.origin.0 + panel.right.state.size.0;
         let buffer = panel.right.state.surface.borrow().as_ref().unwrap().storage_id();
         let wifi_x = {
@@ -347,6 +369,24 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
                 }
             }
             if entrance == PanelEntrance::Island {
+                let original = panel.right.state.destination;
+                panel.right.place((original.0 + 40, original.1), scale, true);
+                assert!((panel.right.state.origin.0 - original.0).abs() <= 1);
+                assert!(panel.animating());
+                panel.right.state.relocation.seek(400);
+                panel.right.state.motion_frame();
+                assert_eq!(panel.right.state.origin.0, original.0 + 40);
+                panel.right.place(original, scale, true);
+                panel.right.state.relocation.seek(400);
+                panel.right.state.motion_frame();
+                assert_eq!(panel.right.state.origin, original);
+                let tray = &panel.right.state;
+                let button_point = (tray.origin.0 as f32 + 25.0 * scale, tray.origin.1 as f32 + 25.0 * scale);
+                assert!(panel.interacting_at(island, button_point));
+                assert!(panel.interacting_at(island, (island.2 + 5.0 * scale, island.1 + 20.0 * scale)));
+                panel.set_ghost(0.2, true);
+                assert!(!panel.interacting_at(island, button_point));
+                panel.set_ghost(1.0, false);
                 assert!(
                     (panel.left.state.origin.0 as f32 + panel.left.state.size.0 as f32
                         - (island.0 - config.island_gap as f32 * scale))

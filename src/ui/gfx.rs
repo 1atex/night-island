@@ -161,6 +161,10 @@ impl Gpu {
         size: (i32, i32),
         f: impl FnOnce(&Painter),
     ) -> Result<()> {
+        self.paint_dc_target(&self.create_dc_target()?, hdc, size, f)
+    }
+
+    pub(super) fn create_dc_target(&self) -> Result<windows::Win32::Graphics::Direct2D::ID2D1DCRenderTarget> {
         use windows::Win32::Graphics::Direct2D::Common::{D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT};
         use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
         unsafe {
@@ -175,13 +179,24 @@ impl Gpu {
                 usage: D2D1_RENDER_TARGET_USAGE_NONE,
                 minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
             };
-            let dc_target = self.factory.CreateDCRenderTarget(&props)?;
+            self.factory.CreateDCRenderTarget(&props)
+        }
+    }
+
+    pub(super) fn paint_dc_target(
+        &self,
+        dc_target: &windows::Win32::Graphics::Direct2D::ID2D1DCRenderTarget,
+        hdc: windows::Win32::Graphics::Gdi::HDC,
+        size: (i32, i32),
+        f: impl FnOnce(&Painter),
+    ) -> Result<()> {
+        unsafe {
             let rect = windows::Win32::Foundation::RECT { left: 0, top: 0, right: size.0, bottom: size.1 };
             dc_target.BindDC(hdc, &rect)?;
+            let target: ID2D1RenderTarget = dc_target.cast()?;
             dc_target.BeginDraw();
             dc_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             dc_target.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
-            let target: ID2D1RenderTarget = dc_target.cast()?;
             f(&Painter { dc: &target, dwrite: self.dwrite(), icons: self.icons(), weather: &self.weather });
             dc_target.EndDraw(None, None)
         }

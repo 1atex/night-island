@@ -3,6 +3,16 @@ use crate::platform::desktop_dock as desktop;
 use crate::ui::top_panel::{Block, Request, TopPanel};
 
 impl App {
+    pub(in crate::island) fn interacting_with_top_panel(&self) -> bool {
+        let Some(panel) = &self.top_panel else { return false };
+        let mut cursor = windows::Win32::Foundation::POINT::default();
+        if unsafe { GetCursorPos(&mut cursor) }.is_err() {
+            return false;
+        }
+        let (x, y, w, h) = self.pill_screen(true);
+        panel.interacting_at((x, y, x + w, y + h), (cursor.x as f32, cursor.y as f32))
+    }
+
     pub(in crate::island) fn configure_top_panel(&mut self) {
         if !self.settings.top_panel.enabled || !self.settings.top_panel.has_blocks() {
             self.top_panel.take();
@@ -38,8 +48,9 @@ impl App {
             return;
         }
         let suppressed = self.top_panel.as_ref().is_some_and(|panel| panel.suppressed());
+        let animating = self.top_panel.as_ref().is_some_and(|panel| panel.animating());
         let mut snapshot = self.top_panel_data.clone();
-        if !suppressed && (force || self.top_panel_poll.elapsed() >= Duration::from_secs(1)) {
+        if !suppressed && !animating && (force || self.top_panel_poll.elapsed() >= Duration::from_secs(1)) {
             self.top_panel_poll = Instant::now();
             let windows = desktop::cached_windows();
             snapshot.active = windows.iter().find(|w| w.active).cloned();

@@ -237,7 +237,13 @@ impl App {
             Timer::Expand if self.character_interacting() => {}
             Timer::Expand if matches!(self.state, State::Hidden | State::Hiding) => self.reveal(),
             Timer::Expand => self.expand(),
-            Timer::Collapse => self.collapse(),
+            Timer::Collapse => {
+                if self.interacting_with_top_panel() {
+                    self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(80));
+                } else {
+                    self.collapse();
+                }
+            }
             Timer::Shrink => self.shrink_window(),
             Timer::Autohide => self.hide(),
             Timer::HideDone => self.hide_done(),

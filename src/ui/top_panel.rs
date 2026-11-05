@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::sync::Once;
@@ -132,7 +132,10 @@ struct State {
     requests: VecDeque<Request>,
     visible: bool,
     opening: bool,
+    frame_timer: Cell<bool>,
     travel: motion::Travel,
+    relocation: motion::Travel,
+    displacement: (f32, f32),
     destination: (i32, i32),
     departure: (i32, i32),
     boundary: Option<(f32, bool)>,
@@ -179,6 +182,18 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 }
 fn scaled(r: Rect, s: f32) -> Rect {
     (r.0 * s, r.1 * s, r.2 * s, r.3 * s)
+}
+
+fn across_gap(island: Rect, panel: Rect, point: (f32, f32), padding: f32) -> bool {
+    let top = panel.1.min(island.1) - padding;
+    let bottom = panel.3.max(island.3) + padding;
+    if panel.0 >= island.2 {
+        inside((island.2 - padding, top, panel.0 + padding, bottom), point)
+    } else if panel.2 <= island.0 {
+        inside((panel.2 - padding, top, island.0 + padding, bottom), point)
+    } else {
+        false
+    }
 }
 
 fn app_name(snapshot: &Snapshot) -> String {
@@ -253,16 +268,38 @@ fn liquid_panel(
 }
 
 impl State {
+    fn start_frames(&self) {
+        if !self.frame_timer.get() {
+            self.frame_timer.set(unsafe { SetTimer(Some(self.hwnd), FRAME, 16, None) } != 0);
+        }
+    }
+
+    fn stop_frames(&self) {
+        if self.frame_timer.replace(false) {
+            unsafe {
+                let _ = KillTimer(Some(self.hwnd), FRAME);
+            }
+        }
+    }
+
     fn motion_frame(&mut self) {
-        let progress = self.travel.value(Instant::now());
+        let now = Instant::now();
+        let progress = self.travel.value(now);
+        let remaining = 1.0 - self.relocation.value(now);
         if !matches!(self.role, Role::Card(_)) {
             self.origin = (
-                (self.departure.0 as f32 + (self.destination.0 - self.departure.0) as f32 * progress).round() as i32,
-                (self.departure.1 as f32 + (self.destination.1 - self.departure.1) as f32 * progress).round() as i32,
+                (self.departure.0 as f32
+                    + (self.destination.0 - self.departure.0) as f32 * progress
+                    + self.displacement.0 * remaining)
+                    .round() as i32,
+                (self.departure.1 as f32
+                    + (self.destination.1 - self.departure.1) as f32 * progress
+                    + self.displacement.1 * remaining)
+                    .round() as i32,
             );
         }
         self.alpha = (progress * 255.0).round() as u8;
-        self.opening = self.travel.active(Instant::now());
+        self.opening = self.travel.active(now) || self.relocation.active(now);
     }
 
     fn fit_tray(&mut self, available: f32) {
@@ -874,9 +911,7 @@ impl State {
             );
         }
         if self.feedback.active() {
-            unsafe {
-                SetTimer(Some(self.hwnd), FRAME, 16, None);
-            }
+            self.start_frames();
         }
     }
 
@@ -888,13 +923,13 @@ impl State {
         self.visible = false;
         self.travel.show(false, 0, Instant::now());
         self.pressed = None;
+        self.stop_frames();
         if matches!(self.role, Role::Right) {
             self.tray_open = false;
             self.tray_requested = false;
             self.tray_width = 0.0;
         }
         unsafe {
-            let _ = KillTimer(Some(self.hwnd), FRAME);
             let _ = KillTimer(Some(self.hwnd), DISMISS);
             let _ = KillTimer(Some(self.hwnd), TRAY_ANIMATION);
             let _ = PostMessageW(Some(self.hwnd), WM_APP + 93, WPARAM(0), LPARAM(0));
@@ -1145,7 +1180,7 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                     }
                     state.render();
                     if !state.opening && !state.feedback.active() {
-                        let _ = KillTimer(Some(hwnd), FRAME);
+                        state.stop_frames();
                     }
                 } else if w.0 == DISMISS {
                     let mut point = POINT::default();
@@ -1225,6 +1260,9 @@ impl Wing {
             visible: false,
             opening: false,
             travel: Default::default(),
+            relocation: Default::default(),
+            displacement: (0.0, 0.0),
+            frame_timer: Cell::new(false),
             destination: (0, 0),
             departure: (0, 0),
             boundary: None,
@@ -1257,9 +1295,7 @@ impl Wing {
             if self.state.visible {
                 self.state.travel.show(false, ms, now);
                 if self.state.travel.active(now) {
-                    unsafe {
-                        SetTimer(Some(self.state.hwnd), FRAME, 16, None);
-                    }
+                    self.state.start_frames();
                 } else {
                     self.state.hide();
                 }
@@ -1279,6 +1315,17 @@ impl Wing {
             self.state.departure = origin;
         }
         self.state.travel.show(true, ms, now);
+        if fresh || (moved && !matches!(self.state.role, Role::Card(_))) {
+            self.state.displacement = (0.0, 0.0);
+            self.state.relocation.show(true, 0, now);
+            self.state.motion_frame();
+            if !fresh && ms > 0 {
+                self.state.displacement =
+                    ((old_origin.0 - self.state.origin.0) as f32, (old_origin.1 - self.state.origin.1) as f32);
+                self.state.relocation.show(false, 0, now);
+                self.state.relocation.show(true, ms.min(280), now);
+            }
+        }
         self.state.motion_frame();
         self.state.visible = true;
         self.state.layout();
@@ -1287,7 +1334,7 @@ impl Wing {
                 SetTimer(Some(self.state.hwnd), DISMISS, 50, None);
             }
             if self.state.opening {
-                SetTimer(Some(self.state.hwnd), FRAME, 16, None);
+                self.state.start_frames();
             }
             if fresh || moved || old_origin != self.state.origin || self.state.dirty {
                 self.state.render();
@@ -1314,6 +1361,42 @@ impl Drop for Wing {
 }
 
 impl TopPanel {
+    pub fn animating(&self) -> bool {
+        let now = Instant::now();
+        [&self.left, &self.right, &self.card]
+            .iter()
+            .any(|wing| wing.state.visible && (wing.state.travel.active(now) || wing.state.relocation.active(now)))
+            || (self.right.state.tray_width - self.right.state.tray_target()).abs() > 0.1
+    }
+
+    pub fn interacting_at(&self, island: Rect, point: (f32, f32)) -> bool {
+        if !self.shown {
+            return false;
+        }
+        let wings = [&self.left, &self.right, &self.card];
+        let interactive = |state: &State| state.visible && state.travel.shown() && !state.click_through;
+        if wings.iter().any(|wing| interactive(&wing.state)) && crate::platform::system_tray::is_open() {
+            return true;
+        }
+        wings.iter().any(|wing| {
+            let state = &wing.state;
+            if !interactive(state) {
+                return false;
+            }
+            let bounds = (
+                state.origin.0 as f32,
+                state.origin.1 as f32,
+                (state.origin.0 + state.size.0) as f32,
+                (state.origin.1 + state.size.1) as f32,
+            );
+            state.pressed.is_some()
+                || inside(bounds, point)
+                || (self.settings.entrance == PanelEntrance::Island
+                    && !matches!(state.role, Role::Card(_))
+                    && across_gap(island, bounds, point, 12.0 * self.scale))
+        })
+    }
+
     pub(super) fn parent(&self) -> HWND {
         self.left.state.parent
     }
@@ -1401,6 +1484,7 @@ impl TopPanel {
             || (self.card.state.visible && matches!(self.card.state.role, Role::Card(Block::Tray)));
         let over_island =
             self.settings.entrance == PanelEntrance::Island && inside(island, (point.x as f32, point.y as f32));
+        let over_panel = over_panel || self.interacting_at(island, (point.x as f32, point.y as f32));
         if !fullscreen && (at_edge || over_panel || over_island || interacting) {
             self.last_inside = Instant::now();
             self.revealed = true;

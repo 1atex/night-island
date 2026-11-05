@@ -22,6 +22,7 @@ pub struct PopupSurface {
     dc: HDC,
     bitmap: HBITMAP,
     size: (i32, i32),
+    target: std::cell::RefCell<Option<windows::Win32::Graphics::Direct2D::ID2D1DCRenderTarget>>,
 }
 
 impl PopupSurface {
@@ -54,7 +55,7 @@ impl PopupSurface {
                 }
             };
             SelectObject(dc, bitmap.into());
-            Ok(Self { dc, bitmap, size })
+            Ok(Self { dc, bitmap, size, target: Default::default() })
         }
     }
 
@@ -71,7 +72,14 @@ impl PopupSurface {
             return Err(Error::empty());
         }
         let mut result = Ok(());
-        gpu.paint_dc(self.dc, size, |p| result = draw(p))?;
+        let mut target = self.target.borrow_mut();
+        if target.is_none() {
+            *target = Some(gpu.create_dc_target()?);
+        }
+        if let Err(error) = gpu.paint_dc_target(target.as_ref().unwrap(), self.dc, size, |p| result = draw(p)) {
+            target.take();
+            return Err(error);
+        }
         result
     }
 
@@ -121,6 +129,7 @@ impl PopupSurface {
 
 impl Drop for PopupSurface {
     fn drop(&mut self) {
+        self.target.get_mut().take();
         unsafe {
             let _ = DeleteDC(self.dc);
             let _ = DeleteObject(self.bitmap.into());
