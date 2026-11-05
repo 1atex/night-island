@@ -1343,6 +1343,9 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "Edit the assistant's own instructions" => "Свои инструкции ассистенту",
         "Steps per request" => "Шагов на запрос",
+        "Model answer limit per step" => "Лимит ответа модели на шаг",
+        "Time limit of one command" => "Лимит времени одной команды",
+        "Command output kept for the model" => "Сколько вывода команды видит модель",
         "How it works" => "Как работает",
         "Local voice Piper (free, works offline, a little CPU while speaking)" => {
             "Локальный голос Piper (бесплатно, без сети, чуть грузит процессор, пока говорит)"

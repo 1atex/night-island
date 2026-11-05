@@ -109,7 +109,7 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
-const ASSISTANT: [(Sid, &str, Kind); 26] = [
+const ASSISTANT: [(Sid, &str, Kind); 29] = [
     (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
     (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
     (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
@@ -120,6 +120,9 @@ const ASSISTANT: [(Sid, &str, Kind); 26] = [
     (Sid::AsstNatural, "Natural voice from the speech service (paid, no load on the PC)", Kind::Toggle),
     (Sid::AsstFollowUp, "Keep listening after an answer", Kind::Toggle),
     (Sid::AsstSteps, "Steps per request", Kind::Slider),
+    (Sid::AsstTokens, "Model answer limit per step", Kind::Slider),
+    (Sid::AsstSeconds, "Time limit of one command", Kind::Slider),
+    (Sid::AsstOutput, "Command output kept for the model", Kind::Slider),
     (Sid::AsstReview, "Check commands with a second model call when asking first", Kind::Toggle),
     (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
     (Sid::AsstInstructions, "Edit the assistant's own instructions", Kind::Button),

@@ -155,6 +155,7 @@ impl App {
         }
         app.start_activity();
         app.sync_metrics();
+        app.settings.assistant.apply();
         app.sync_wake();
         app.ui.agents = agents::sessions();
         agents::watch(hwnd);

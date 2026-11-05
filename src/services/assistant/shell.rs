@@ -15,7 +15,19 @@ use super::tools::{self, Tool};
 
 pub const MAX_COMMAND_CHARS: usize = 4000;
 pub const MAX_OUTPUT_CHARS: usize = 2500;
-const TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_TIMEOUT_SECS: u64 = 60;
+
+static OUTPUT_CHARS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(MAX_OUTPUT_CHARS);
+static TIMEOUT_SECS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(DEFAULT_TIMEOUT_SECS);
+
+pub fn configure(timeout_secs: u64, output_chars: usize) {
+    TIMEOUT_SECS.store(timeout_secs, std::sync::atomic::Ordering::Relaxed);
+    OUTPUT_CHARS.store(output_chars, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn timeout() -> Duration {
+    Duration::from_secs(TIMEOUT_SECS.load(std::sync::atomic::Ordering::Relaxed))
+}
 const PIPE_GRACE: Duration = Duration::from_millis(400);
 const MAX_PIPE_BYTES: usize = 256 * 1024;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -97,10 +109,11 @@ pub fn classify(command: &str) -> Class {
 pub fn clip_output(raw: &str) -> String {
     let text: String = raw.chars().filter(|c| *c == '\n' || *c == '\t' || !c.is_control()).collect();
     let text = text.trim();
-    if text.chars().count() <= MAX_OUTPUT_CHARS {
+    let limit = OUTPUT_CHARS.load(std::sync::atomic::Ordering::Relaxed);
+    if text.chars().count() <= limit {
         return text.to_string();
     }
-    let cut: String = text.chars().take(MAX_OUTPUT_CHARS).collect();
+    let cut: String = text.chars().take(limit).collect();
     format!("{cut}\n[cut]")
 }
 
@@ -196,7 +209,7 @@ pub fn run_process(mut command: Command, timeout: Duration) -> Result<Finished, 
 }
 
 fn collect(command: Command) -> Result<String, String> {
-    let done = run_process(command, TIMEOUT)?;
+    let done = run_process(command, timeout())?;
     let mut text = done.stdout;
     if !done.stderr.trim().is_empty() {
         text.push('\n');
@@ -452,6 +465,6 @@ mod tests {
         let started = Instant::now();
         let result = run("ping -n 100 127.0.0.1");
         assert!(result.is_err());
-        assert!(started.elapsed() < TIMEOUT + Duration::from_secs(10));
+        assert!(started.elapsed() < timeout() + Duration::from_secs(10));
     }
 }

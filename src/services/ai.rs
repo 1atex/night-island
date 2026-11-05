@@ -30,6 +30,11 @@ pub const WM_CHAT: u32 = WM_APP + 24;
 
 pub const WM_COMMAND: u32 = WM_APP + 30;
 const COMMAND_OUTPUT_TOKENS: u32 = 3000;
+static REPLY_TOKENS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(COMMAND_OUTPUT_TOKENS);
+
+pub fn set_reply_tokens(tokens: u32) {
+    REPLY_TOKENS.store(tokens, std::sync::atomic::Ordering::Relaxed);
+}
 
 pub const WM_SORT: u32 = WM_APP + 31;
 pub const SORT_REQUESTS_PER_DAY: u32 = 5;
@@ -635,7 +640,7 @@ const GROWN_TOKENS_CAP: u32 = 16_000;
 fn run_growing(settings: &AiSettings, turns: &[ChatTurn], system: &str, tokens: u32) -> Answer {
     let first = run_with(settings, |key| build(settings, key, turns, system, tokens, true));
     if first.as_ref().err().is_some_and(|why| why == CUT_OFF) {
-        let more = (tokens.saturating_mul(4)).min(GROWN_TOKENS_CAP);
+        let more = (tokens.saturating_mul(4)).min(GROWN_TOKENS_CAP.max(tokens));
         crate::log_info!("AI: the limit of {tokens} tokens ran out, asking again with {more}");
         return run_with(settings, |key| build(settings, key, turns, system, more, true));
     }
@@ -655,7 +660,7 @@ pub fn take_command_result() -> Option<(u64, Answer)> {
 pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String, serial: u64) -> bool {
     let (raw, settings) = (hwnd.0 as isize, config());
     std::thread::spawn(move || {
-        let answer = run_growing(&settings, &turns, &system, COMMAND_OUTPUT_TOKENS);
+        let answer = run_growing(&settings, &turns, &system, REPLY_TOKENS.load(std::sync::atomic::Ordering::Relaxed));
         if let Ok(mut r) = COMMAND_RESULT.lock() {
             *r = Some((serial, answer));
         }

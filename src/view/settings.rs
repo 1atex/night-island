@@ -176,6 +176,9 @@ pub enum Sid {
     AsstScreen,
     AsstIsland,
     AsstSteps,
+    AsstTokens,
+    AsstSeconds,
+    AsstOutput,
     AsstInstructions,
     AsstLocal,
     AsstLocalInstall,
@@ -307,6 +310,9 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
         Sid::HidePillSecs => (5.0, 10.0, 1.0),
         Sid::MetricsInterval => (1.0, 10.0, 1.0),
         Sid::AsstSteps => (3.0, 20.0, 1.0),
+        Sid::AsstTokens => (500.0, 16_000.0, 100.0),
+        Sid::AsstSeconds => (5.0, 180.0, 5.0),
+        Sid::AsstOutput => (500.0, 20_000.0, 500.0),
         Sid::GhostOpacity => (0.05, 1.0, 0.05),
         _ => (0.0, 1.0, 0.01),
     }
@@ -348,6 +354,9 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
         Sid::HidePillSecs => c.hide_pill_secs as f32,
         Sid::MetricsInterval => c.metrics_secs as f32,
         Sid::AsstSteps => f32::from(c.assistant.max_steps),
+        Sid::AsstTokens => f32::from(c.assistant.reply_tokens),
+        Sid::AsstSeconds => f32::from(c.assistant.command_secs),
+        Sid::AsstOutput => f32::from(c.assistant.output_chars),
         Sid::GhostOpacity => c.ghost_opacity,
         _ => 0.0,
     }
@@ -372,6 +381,9 @@ pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
         Sid::RecFps => format!("{v:.0} fps"),
         Sid::HidePillSecs | Sid::MetricsInterval => format!("{v:.0} s"),
         Sid::AsstSteps => format!("{v:.0}"),
+        Sid::AsstTokens => format!("{v:.0} tok"),
+        Sid::AsstSeconds => format!("{v:.0} s"),
+        Sid::AsstOutput => format!("{v:.0} ch"),
         _ => String::new(),
     }
 }
@@ -415,6 +427,9 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
         Sid::HidePillSecs => c.hide_pill_secs = v as u32,
         Sid::MetricsInterval => c.metrics_secs = v as u32,
         Sid::AsstSteps => c.assistant.max_steps = v as u8,
+        Sid::AsstTokens => c.assistant.reply_tokens = v as u16,
+        Sid::AsstSeconds => c.assistant.command_secs = v as u8,
+        Sid::AsstOutput => c.assistant.output_chars = v as u16,
         Sid::GhostOpacity => c.ghost_opacity = v,
         _ => {}
     }
