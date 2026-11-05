@@ -122,9 +122,12 @@ struct State {
     fade: Instant,
     opening: bool,
     alpha: u8,
+    ghost_alpha: u8,
+    click_through: bool,
     dirty: bool,
     tray_icons: Vec<crate::platform::system_tray::inline::Entry>,
     tray_open: bool,
+    tray_requested: bool,
     tray_page: usize,
     tray_width: f32,
     tray_from: f32,
@@ -632,7 +635,7 @@ impl State {
         if let Some(surface) = &*surface
             && surface.paint(&self.gpu, |p| self.draw(p)).is_ok()
         {
-            let _ = surface.present(self.hwnd, None, self.alpha);
+            let _ = surface.present(self.hwnd, None, (u16::from(self.alpha) * u16::from(self.ghost_alpha) / 255) as u8);
         }
     }
 
@@ -645,6 +648,7 @@ impl State {
         self.pressed = None;
         if matches!(self.role, Role::Right) {
             self.tray_open = false;
+            self.tray_requested = false;
             self.tray_width = 0.0;
         }
         unsafe {
@@ -743,6 +747,9 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
             }
             WM_NCHITTEST => {
                 let state = &*ptr;
+                if state.click_through {
+                    return LRESULT(HTTRANSPARENT as isize);
+                }
                 let point = (
                     (l.0 as i16 as i32 - state.origin.0) as f32 / state.scale,
                     ((l.0 >> 16) as i16 as i32 - state.origin.1) as f32 / state.scale,
@@ -931,9 +938,12 @@ impl Wing {
             fade: Instant::now(),
             opening: false,
             alpha: 255,
+            ghost_alpha: 255,
+            click_through: false,
             dirty: true,
             tray_icons: Vec::new(),
             tray_open: false,
+            tray_requested: false,
             tray_page: 0,
             tray_width: 0.0,
             tray_from: 0.0,
@@ -1122,7 +1132,8 @@ impl TopPanel {
         }
         let left_x = self.monitor.work.left + (6.0 * scale) as i32;
         let right_w = self.right.state.dimensions().0 * scale;
-        let right_x = self.monitor.work.right - right_w.ceil() as i32 - (6.0 * scale) as i32;
+        let controls = if self.settings.clear_window_controls { 144.0 * scale } else { 0.0 };
+        let right_x = self.monitor.work.right - right_w.ceil() as i32 - ((6.0 * scale) + controls) as i32;
         let collision = |x: i32, width: f32| {
             overlaps(
                 (x as f32, y as f32, x as f32 + width * scale, y as f32 + 54.0 * scale),
@@ -1159,10 +1170,14 @@ impl TopPanel {
         }
         if block == Block::Tray {
             self.card.state.hide();
-            if self.right.state.tray_open {
+            if self.right.state.tray_requested {
+                self.right.state.tray_requested = false;
                 self.right.state.animate_tray(false);
                 return;
             }
+            self.right.state.tray_requested = true;
+            self.right.state.tray_page = 0;
+            self.right.state.animate_tray(true);
             self.right.state.post(Request::Tray((
                 self.right.state.origin.0 + self.right.state.size.0,
                 self.top() as i32 + (52.0 * self.scale) as i32,
@@ -1185,10 +1200,20 @@ impl TopPanel {
         self.show_card(Block::Tray);
     }
 
+    pub fn tray_failed(&mut self) {
+        if self.right.state.tray_requested {
+            self.tray_help();
+        }
+    }
+
     pub fn set_tray_icons(&mut self, entries: Vec<crate::platform::system_tray::inline::Entry>) {
         self.right.state.tray_icons = entries;
-        self.right.state.tray_page = 0;
-        self.right.state.animate_tray(true);
+        if self.right.state.tray_page >= self.right.state.tray_icons.len() {
+            self.right.state.tray_page = 0;
+        }
+        if self.right.state.tray_requested {
+            self.right.state.animate_tray(true);
+        }
     }
 
     fn show_card(&mut self, block: Block) {
@@ -1213,6 +1238,40 @@ impl TopPanel {
             1 => self.right.state.requests.pop_front(),
             2 => self.card.state.requests.pop_front(),
             _ => None,
+        }
+    }
+
+    pub fn set_ghost(&mut self, opacity: f32, through: bool) {
+        for wing in [&mut self.left, &mut self.right, &mut self.card] {
+            let state = &mut wing.state;
+            let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+            if state.ghost_alpha == alpha && state.click_through == through {
+                continue;
+            }
+            state.ghost_alpha = alpha;
+            state.click_through = through;
+            if through {
+                state.pressed = None;
+                if unsafe { GetCapture() } == state.hwnd {
+                    unsafe {
+                        let _ = ReleaseCapture();
+                    }
+                }
+            }
+            unsafe {
+                let style = GetWindowLongPtrW(state.hwnd, GWL_EXSTYLE);
+                let next = if through {
+                    style | WS_EX_TRANSPARENT.0 as isize
+                } else {
+                    style & !(WS_EX_TRANSPARENT.0 as isize)
+                };
+                if style != next {
+                    SetWindowLongPtrW(state.hwnd, GWL_EXSTYLE, next);
+                }
+            }
+            if state.visible {
+                state.render();
+            }
         }
     }
 

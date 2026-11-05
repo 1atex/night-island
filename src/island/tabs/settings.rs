@@ -82,7 +82,7 @@ impl App {
                     }
                 }
                 TopAutoHide | TopTray | TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume
-                | TopBattery | TopFullscreen | TopReserve => self.configure_top_panel(),
+                | TopBattery | TopFullscreen | TopReserve | TopClearControls => self.configure_top_panel(),
                 DockExperimentalCapture
                 | DockReplaceTaskbar
                 | DockEnabled

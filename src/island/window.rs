@@ -648,7 +648,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                     if let Some(panel) = &mut a.top_panel {
                         match result {
                             Ok(entries) if wparam.0 == 0 => panel.set_tray_icons(entries),
-                            Err(()) => panel.tray_help(),
+                            Err(()) => panel.tray_failed(),
                             _ => {}
                         }
                     }

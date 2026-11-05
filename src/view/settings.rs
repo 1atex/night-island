@@ -12,6 +12,7 @@ pub enum Sid {
     TopBattery,
     TopFullscreen,
     TopReserve,
+    TopClearControls,
 
     DockEnabled,
     DockReplaceTaskbar,
@@ -379,6 +380,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::TopBattery => c.top_panel.battery,
         Sid::TopFullscreen => c.top_panel.hide_fullscreen,
         Sid::TopReserve => c.top_panel.reserve_space,
+        Sid::TopClearControls => c.top_panel.clear_window_controls,
         Sid::DockPreview => c.desktop_dock.hover_preview,
         Sid::DockBlur => c.desktop_dock.blur,
         Sid::DockEnabled => c.desktop_dock.enabled,
@@ -461,6 +463,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::TopBattery => c.top_panel.battery = on,
         Sid::TopFullscreen => c.top_panel.hide_fullscreen = on,
         Sid::TopReserve => c.top_panel.reserve_space = on,
+        Sid::TopClearControls => c.top_panel.clear_window_controls = on,
         Sid::DockPreview => c.desktop_dock.hover_preview = on,
         Sid::DockBlur => c.desktop_dock.blur = on,
         Sid::DockEnabled => c.desktop_dock.enabled = on,

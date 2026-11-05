@@ -7,6 +7,8 @@ use windows::core::{HSTRING, Interface, PWSTR};
 
 pub const WM_RESULT: u32 = WM_APP + 96;
 static RESULT: Mutex<Option<std::result::Result<Vec<Entry>, ()>>> = Mutex::new(None);
+type IconRecords = Vec<(String, String, Arc<crate::platform::apps::Icon>)>;
+static ICON_CACHE: Mutex<Option<(std::time::Instant, IconRecords)>> = Mutex::new(None);
 
 #[derive(Clone)]
 pub struct Entry {
@@ -82,9 +84,6 @@ impl Drop for HiddenPopup {
     fn drop(&mut self) {
         unsafe {
             if !self.hwnd.0.is_null() {
-                if overflow().is_some() {
-                    let _ = show((0, 0));
-                }
                 let _ = ShowWindow(self.hwnd, SW_HIDE);
                 if SetWindowRgn(self.hwnd, self.region, false) != 0 {
                     self.region = None;
@@ -98,7 +97,21 @@ impl Drop for HiddenPopup {
     }
 }
 
-fn registry_icons() -> Vec<(String, String, Arc<crate::platform::apps::Icon>)> {
+fn registry_icons() -> IconRecords {
+    if let Ok(cache) = ICON_CACHE.lock()
+        && let Some((time, icons)) = &*cache
+        && time.elapsed() < Duration::from_secs(60)
+    {
+        return icons.clone();
+    }
+    let icons = load_registry_icons();
+    if let Ok(mut cache) = ICON_CACHE.lock() {
+        *cache = Some((std::time::Instant::now(), icons.clone()));
+    }
+    icons
+}
+
+fn load_registry_icons() -> IconRecords {
     unsafe {
         let mut key = HKEY::default();
         if RegOpenKeyExW(HKEY_CURRENT_USER, w!("Control Panel\\NotifyIconSettings"), None, KEY_READ, &mut key).is_err()
@@ -246,6 +259,27 @@ fn elements(automation: &IUIAutomation, hwnd: HWND) -> Result<Vec<IUIAutomationE
     }
 }
 
+fn menu_open() -> bool {
+    unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> windows::core::BOOL {
+        unsafe {
+            if IsWindowVisible(hwnd).as_bool() {
+                let mut class = [0u16; 16];
+                let len = GetClassNameW(hwnd, &mut class) as usize;
+                if class[..len] == [35, 51, 50, 55, 54, 56] {
+                    *(data.0 as *mut bool) = true;
+                    return windows::core::BOOL(0);
+                }
+            }
+            windows::core::BOOL(1)
+        }
+    }
+    let mut open = false;
+    unsafe {
+        let _ = EnumWindows(Some(visit), LPARAM((&raw mut open) as isize));
+    }
+    open
+}
+
 fn collect(anchor: (i32, i32), action: Option<(&str, bool)>) -> Result<Vec<Entry>> {
     unsafe {
         CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
@@ -259,24 +293,24 @@ fn collect(anchor: (i32, i32), action: Option<(&str, bool)>) -> Result<Vec<Entry
         }
     }
     let _apartment = Apartment;
-    let hidden = HiddenPopup::new()?;
-    if overflow().is_some() {
-        show(anchor)?;
-    }
-    show(anchor)?;
     let automation: IUIAutomation = unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)? };
-    let items = elements(&automation, hidden.hwnd)?;
+    let hidden = HiddenPopup::new()?;
+    let hwnd = hidden.hwnd;
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+    let items = elements(&automation, hwnd)?;
     if let Some((name, context)) = action {
-        let item = items
-            .iter()
-            .find(|item| unsafe { item.CurrentName().is_ok_and(|n| n == name) })
-            .ok_or_else(windows::core::Error::empty)?;
+        let item =
+            items.iter().find(|item| unsafe { item.CurrentName().is_ok_and(|n| n == name) }).ok_or_else(|| {
+                windows::core::Error::new(windows::core::HRESULT(0x80004005u32 as i32), "Tray item unavailable")
+            })?;
         unsafe {
             let rect = item.CurrentBoundingRectangle()?;
             let mut popup = RECT::default();
-            GetWindowRect(hidden.hwnd, &mut popup)?;
+            GetWindowRect(hwnd, &mut popup)?;
             SetWindowPos(
-                hidden.hwnd,
+                hwnd,
                 None,
                 popup.left + anchor.0 - (rect.left + rect.right) / 2,
                 popup.top + anchor.1 - rect.bottom,
@@ -286,6 +320,13 @@ fn collect(anchor: (i32, i32), action: Option<(&str, bool)>) -> Result<Vec<Entry
             )?;
             if context {
                 item.cast::<IUIAutomationElement3>()?.ShowContextMenu()?;
+                let start = std::time::Instant::now();
+                while !menu_open() && start.elapsed() < Duration::from_millis(150) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                while menu_open() {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
             } else {
                 item.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)?.Invoke()?;
             }
@@ -352,9 +393,19 @@ mod tests {
                         }
                         WM_RBUTTONUP | WM_CONTEXTMENU => {
                             CLICKS.fetch_or(2, Ordering::Release);
+                            let menu = CreatePopupMenu().unwrap();
+                            AppendMenuW(menu, MF_STRING, 1, w!("Fixture action")).unwrap();
+                            let _ = SetForegroundWindow(hwnd);
+                            SetTimer(Some(hwnd), 1, 3000, None);
+                            let _ = TrackPopupMenu(menu, TPM_RETURNCMD, 1200, 100, None, hwnd, None);
+                            let _ = KillTimer(Some(hwnd), 1);
+                            let _ = DestroyMenu(menu);
                         }
                         _ => {}
                     }
+                }
+                if msg == WM_TIMER {
+                    let _ = EndMenu();
                 }
                 if msg == WM_CLOSE {
                     let _ = DestroyWindow(hwnd);
@@ -405,7 +456,30 @@ mod tests {
         collect((1400, 60), Some(("Island tray fixture", false)))?;
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(CLICKS.load(Ordering::Acquire) & 1, 1);
+        let fixture = _fixture.0;
+        let observer = std::thread::spawn(move || unsafe {
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            let owner = HWND(fixture as _);
+            let thread = GetWindowThreadProcessId(owner, None);
+            let menu = loop {
+                if let Ok(menu) = FindWindowW(w!("#32768"), None)
+                    && GetWindowThreadProcessId(menu, None) == thread
+                    && IsWindowVisible(menu).as_bool()
+                {
+                    break Some(menu);
+                }
+                if std::time::Instant::now() >= deadline {
+                    break None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            std::thread::sleep(Duration::from_millis(500));
+            let stayed_open = menu.is_some_and(|menu| IsWindowVisible(menu).as_bool());
+            let _ = PostMessageW(Some(owner), WM_CANCELMODE, WPARAM(0), LPARAM(0));
+            stayed_open
+        });
         collect((1400, 60), Some(("Island tray fixture", true)))?;
+        assert!(observer.join().unwrap(), "The actual context menu must stay open after the bridge returns");
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(CLICKS.load(Ordering::Acquire) & 2, 2);
         Ok(())

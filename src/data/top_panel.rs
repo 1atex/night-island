@@ -13,6 +13,7 @@ pub struct TopPanelSettings {
     pub battery: bool,
     pub hide_fullscreen: bool,
     pub reserve_space: bool,
+    pub clear_window_controls: bool,
 }
 
 impl Default for TopPanelSettings {
@@ -28,6 +29,7 @@ impl Default for TopPanelSettings {
             battery: true,
             hide_fullscreen: true,
             reserve_space: true,
+            clear_window_controls: true,
         }
     }
 }

@@ -270,6 +270,9 @@ impl App {
 
     fn apply_ghost(&mut self, on: bool) {
         let target = if on { self.settings.ghost_opacity } else { 1.0 };
+        if let Some(panel) = &mut self.top_panel {
+            panel.set_ghost(target, on && self.settings.ghost_click_through);
+        }
         if let Ok(fade) = self.compositor.CreateScalarKeyFrameAnimation() {
             let _ = fade.InsertKeyFrame(1.0, target);
             let _ = fade.SetDuration(Duration::from_millis(180).into());

@@ -181,9 +181,13 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
             (center - 100.0 * scale, panel.top() + 8.0 * scale, center + 100.0 * scale, panel.top() + 42.0 * scale);
         panel.update(snapshot.clone(), island, false);
         assert!(panel.left.state.visible && panel.right.state.visible);
+        assert!(
+            panel.right.state.origin.0 + panel.right.state.size.0 <= panel.monitor.work.right - (144.0 * scale) as i32
+        );
         save(&panel.left, &format!("left-{scale:.1}"))?;
         save(&panel.right, &format!("right-{scale:.1}"))?;
         let right_edge = panel.right.state.origin.0 + panel.right.state.size.0;
+        panel.right.state.tray_requested = true;
         panel.set_tray_icons(crate::platform::system_tray::inline::preview_entries());
         panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
         panel.right.state.tray_frame();
@@ -201,6 +205,14 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         panel.right.state.tray_frame();
         assert_eq!(panel.right.state.tray_width, 0.0);
         assert_eq!(panel.right.state.origin.0 + panel.right.state.size.0, right_edge);
+        panel.open(Block::Tray);
+        assert!(panel.right.state.tray_open);
+        assert!(matches!(panel.take_request(1), Some(Request::Tray(_))));
+        panel.open(Block::Tray);
+        panel.set_tray_icons(crate::platform::system_tray::inline::preview_entries());
+        assert!(!panel.right.state.tray_open && !panel.right.state.tray_requested);
+        panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
+        panel.right.state.tray_frame();
         for block in [Block::Application, Block::Wifi, Block::Bluetooth, Block::Volume, Block::Battery] {
             panel.open(block);
             assert!(panel.card.state.visible);
@@ -229,6 +241,21 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         click(&panel.card, Hit::Volume);
         assert!(matches!(panel.take_request(2), Some(Request::Volume(_))));
         assert_ne!(unsafe { GetCapture() }, panel.card.state.hwnd);
+        panel.set_ghost(0.2, true);
+        for wing in [&panel.left, &panel.right, &panel.card] {
+            assert!(wing.state.click_through);
+            assert_eq!(wing.state.ghost_alpha, 51);
+            assert_ne!(unsafe { GetWindowLongPtrW(wing.state.hwnd, GWL_EXSTYLE) } & WS_EX_TRANSPARENT.0 as isize, 0);
+            assert_eq!(
+                unsafe { SendMessageW(wing.state.hwnd, WM_NCHITTEST, None, Some(LPARAM(0))) }.0,
+                HTTRANSPARENT as isize
+            );
+        }
+        panel.set_ghost(1.0, false);
+        for wing in [&panel.left, &panel.right, &panel.card] {
+            assert_eq!(wing.state.ghost_alpha, 255);
+            assert_eq!(unsafe { GetWindowLongPtrW(wing.state.hwnd, GWL_EXSTYLE) } & WS_EX_TRANSPARENT.0 as isize, 0);
+        }
         panel.set_capture_hidden(true);
         for wing in [&panel.left, &panel.right, &panel.card] {
             let mut affinity = 0;

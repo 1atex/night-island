@@ -95,6 +95,7 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Панель задач Windows возвращается при выключении дока или выходе из Island."
         }
         "Top panel" => "Верхняя панель",
+        "Keep window buttons accessible" => "Оставлять место для кнопок окна",
         "Enable top panel" => "Включить верхнюю панель",
         "Companion blocks beside the island, on the main display. Colours follow the island theme." => {
             "Блоки рядом с островом на основном экране. Цвета соответствуют теме острова."

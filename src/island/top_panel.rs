@@ -10,7 +10,8 @@ impl App {
             self.apply_layout();
             return;
         }
-        if self.top_panel.is_none() {
+        let fresh = self.top_panel.is_none();
+        if fresh {
             match TopPanel::new(self.hwnd, &self.gpu, &self.settings.top_panel) {
                 Ok(panel) => self.top_panel = Some(panel),
                 Err(error) => {
@@ -27,6 +28,9 @@ impl App {
         system::radios_async(self.hwnd, None);
         self.apply_layout();
         self.update_top_panel(true);
+        if fresh && self.settings.top_panel.tray {
+            crate::platform::system_tray::inline::request(self.hwnd, (0, 0), None);
+        }
     }
 
     pub(in crate::island) fn update_top_panel(&mut self, force: bool) {
@@ -61,6 +65,10 @@ impl App {
             occupied = (occupied.0.min(nx), occupied.1.min(ny), occupied.2.max(nx + nw), occupied.3.max(ny + nh));
         }
         if let Some(panel) = &mut self.top_panel {
+            panel.set_ghost(
+                if self.ghosted { self.settings.ghost_opacity } else { 1.0 },
+                self.ghosted && self.settings.ghost_click_through,
+            );
             panel.update(snapshot, occupied, false);
         }
         self.set_timer(
@@ -100,7 +108,9 @@ impl App {
                     }
                 }
                 Request::Open(block) => {
-                    self.update_top_panel(true);
+                    if block != Block::Tray {
+                        self.update_top_panel(true);
+                    }
                     if let Some(panel) = &mut self.top_panel {
                         panel.open(block);
                     }

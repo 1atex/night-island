@@ -876,6 +876,7 @@ fn top_panel_items(ui: &UiState) -> Vec<Item> {
         Item::Text(tr("Autohide frees the top edge. Island visibility is configured separately.").into_owned()),
         Item::Row(Sid::TopFullscreen, "Hide top panel in fullscreen apps", Kind::Toggle),
         Item::Row(Sid::TopReserve, "Keep maximized windows below the top panel", Kind::Toggle),
+        Item::Row(Sid::TopClearControls, "Keep window buttons accessible", Kind::Toggle),
         Item::Text(
             tr("Music, time and notifications stay in the island. Right-click a block to customize the panel.")
                 .into_owned(),
