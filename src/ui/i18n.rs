@@ -693,6 +693,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Too many requests, try again later" => "Слишком много запросов, попробуйте позже",
         "The reply was not understood" => "Ответ не удалось разобрать",
         "The answer was empty" => "Ответ пустой",
+        "The model ran out of its limit before it began to answer" => "Модель исчерпала лимит, не начав отвечать",
         "No key is saved for this service" => "Для этого сервиса не сохранён ключ",
         "The model or the server address in the settings is not valid" => {
             "Модель или адрес сервера в настройках недопустимы"
