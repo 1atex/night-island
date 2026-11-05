@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::sync::Once;
+use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -98,7 +98,9 @@ struct State {
     gpu: Gpu,
     surface: RefCell<Option<((i32, i32), crate::ui::popup::PopupSurface)>>,
     entry: Entry,
-    actions: Client,
+    actions: Arc<Client>,
+    settings: crate::data::desktop_dock::DockSettings,
+    backdrop: Option<crate::ui::popup::PopupBackdrop>,
     snapshot: Snapshot,
     thumbnail: Option<Thumbnail>,
     thumbnail_visible: bool,
@@ -117,6 +119,12 @@ struct State {
     dismissed: bool,
     thumbnail_attempt: Instant,
     error: Option<(&'static str, Instant)>,
+}
+
+pub struct Options {
+    pub capture_hidden: bool,
+    pub settings: crate::data::desktop_dock::DockSettings,
+    pub actions: Arc<Client>,
 }
 
 pub struct Preview {
@@ -334,6 +342,9 @@ impl State {
                 SWP_NOACTIVATE,
             );
         }
+        if let Some(backdrop) = &self.backdrop {
+            backdrop.show(self.origin, size, self.scale, self.visible && self.settings.blur);
+        }
         self.update_thumbnail();
         self.invalidate();
     }
@@ -371,7 +382,15 @@ impl State {
                 rgba(1.0, 1.0, 1.0, if muted { 0.5 } else { 0.96 }),
             )
         };
-        crate::view::paint_popup_panel(p, (l.width * s, l.height * s), s)?;
+        crate::view::paint_popup_shadow(p, (l.width * s, l.height * s), s)?;
+        let margin = crate::ui::popup::POPUP_MARGIN * s;
+        crate::ui::desktop_dock::paint_material(
+            p,
+            (margin, margin, l.width * s - margin, l.height * s - margin),
+            28.0 * s,
+            s,
+            &self.settings,
+        )?;
         if let Some(icon) = &self.entry.icon {
             p.image(scaled((24.0, 21.0, 44.0, 41.0), s), 0.0, icon.side, &icon.bgra)?;
         } else {
@@ -611,6 +630,9 @@ impl State {
 
     fn hide(&mut self) {
         self.visible = false;
+        if let Some(backdrop) = &self.backdrop {
+            backdrop.hide();
+        }
         self.pressed = None;
         unsafe {
             let _ = PostMessageW(Some(self.hwnd), WM_APP + 88, WPARAM(0), LPARAM(0));
@@ -813,7 +835,7 @@ impl Preview {
         anchor: Rect,
         work: RECT,
         scale: f32,
-        capture_hidden: bool,
+        options: Options,
     ) -> Result<Self> {
         static CLASS: Once = Once::new();
         let instance = unsafe { GetModuleHandleW(None)? };
@@ -842,13 +864,17 @@ impl Preview {
                 None,
             )?
         };
+        let backdrop =
+            gpu.compositor().ok().and_then(|compositor| crate::ui::popup::PopupBackdrop::new(hwnd, &compositor).ok());
         let state = Box::new(State {
             hwnd,
             parent,
             gpu: gpu.popup(),
             surface: RefCell::new(None),
             entry: entry.clone(),
-            actions: Client::new(),
+            actions: options.actions,
+            settings: options.settings,
+            backdrop,
             snapshot: Snapshot::default(),
             thumbnail: None,
             thumbnail_visible: false,
@@ -872,13 +898,15 @@ impl Preview {
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&raw mut *preview.state) as isize);
         }
-        preview.set_capture_hidden(capture_hidden);
+        preview.set_capture_hidden(options.capture_hidden);
         preview.show(entry, anchor, work, scale);
         Ok(preview)
     }
 
     pub fn show(&mut self, entry: &Entry, anchor: Rect, work: RECT, scale: f32) {
-        self.state.hide();
+        if self.state.visible {
+            self.state.hide();
+        }
         self.state.entry = entry.clone();
         self.state.window_index = entry.windows.iter().position(|w| w.active).unwrap_or(0);
         self.state.media_id = None;
@@ -897,10 +925,40 @@ impl Preview {
             .map(|w| w.path.clone())
             .unwrap_or_else(|| desktop::resolved_target(&entry.pin.target));
         self.state.actions.request(&target, &entry.windows.iter().map(|w| w.handle).collect::<Vec<_>>());
+        self.state.snapshot = self.state.actions.snapshot();
         self.state.arrange();
         self.state.rebuild_thumbnail();
         unsafe {
             let _ = ShowWindow(self.state.hwnd, SW_SHOWNOACTIVATE);
+        }
+        self.state.arrange();
+        self.refresh_backdrop();
+    }
+
+    pub fn set_material(&mut self, settings: &crate::data::desktop_dock::DockSettings) {
+        self.state.settings = settings.clone();
+    }
+
+    pub fn refresh_backdrop(&self) {
+        if self.state.visible
+            && self.state.settings.blur
+            && let Some(backdrop) = &self.state.backdrop
+        {
+            backdrop.refresh();
+        }
+    }
+
+    pub fn refresh_actions(&mut self) {
+        if !self.state.visible {
+            return;
+        }
+        let mut snapshot = self.state.actions.snapshot();
+        if self.state.pressed.and_then(|i| self.state.buttons.get(i)).is_some_and(|b| b.action == Action::Volume) {
+            snapshot.audio = self.state.snapshot.audio.clone();
+        }
+        if snapshot != self.state.snapshot {
+            self.state.snapshot = snapshot;
+            self.state.arrange();
         }
     }
 
@@ -969,11 +1027,7 @@ impl Preview {
             self.state.hide();
             return;
         }
-        let snapshot = self.state.actions.snapshot();
-        if snapshot != self.state.snapshot {
-            self.state.snapshot = snapshot;
-            self.state.arrange();
-        }
+        self.refresh_actions();
         if self.state.thumbnail.is_none() && self.state.thumbnail_attempt.elapsed() >= Duration::from_secs(1) {
             self.state.rebuild_thumbnail();
         }
@@ -989,6 +1043,9 @@ impl Preview {
     }
 
     pub fn set_capture_hidden(&self, hidden: bool) {
+        if let Some(backdrop) = &self.state.backdrop {
+            backdrop.set_capture_hidden(hidden);
+        }
         unsafe {
             let _ = SetWindowDisplayAffinity(self.state.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
         }
@@ -998,6 +1055,7 @@ impl Preview {
 impl Drop for Preview {
     fn drop(&mut self) {
         self.state.thumbnail.take();
+        self.state.backdrop.take();
         unsafe {
             SetWindowLongPtrW(self.state.hwnd, GWLP_USERDATA, 0);
             let _ = DestroyWindow(self.state.hwnd);

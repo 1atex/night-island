@@ -1,8 +1,10 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session, GlobalSystemMediaTransportControlsSessionManager as Manager,
+    GlobalSystemMediaTransportControlsSessionMediaProperties as MediaProperties,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
 use windows::Win32::Foundation::{CloseHandle, HWND, PROPERTYKEY};
@@ -15,6 +17,9 @@ use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUnini
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
 use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 use windows::core::{GUID, PWSTR};
+use windows_future::{AsyncStatus, IAsyncOperation};
+
+pub const WM_ACTIONS_READY: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 89;
 
 #[derive(Clone, Default, PartialEq)]
 pub struct Snapshot {
@@ -72,6 +77,9 @@ struct Shared {
     target: Target,
     generation: u64,
     snapshot: Snapshot,
+    cache: VecDeque<(Target, Snapshot, Instant)>,
+    notify: isize,
+    pending_volume: Option<f32>,
 }
 
 enum Action {
@@ -106,12 +114,30 @@ impl Client {
             if shared.target == target {
                 return;
             }
+            if shared.snapshot.ready && !shared.target.path.is_empty() {
+                let previous = (shared.target.clone(), shared.snapshot.clone(), Instant::now());
+                shared.cache.retain(|(key, _, at)| *key != previous.0 && at.elapsed() < Duration::from_secs(3));
+                shared.cache.push_front(previous);
+                shared.cache.truncate(8);
+            }
             shared.generation = shared.generation.wrapping_add(1);
-            shared.snapshot = Snapshot { target: target.path.clone(), ..Default::default() };
+            shared.pending_volume = None;
+            shared.snapshot = shared
+                .cache
+                .iter()
+                .find(|(key, _, at)| *key == target && at.elapsed() < Duration::from_secs(3))
+                .map(|(_, snapshot, _)| snapshot.clone())
+                .unwrap_or_else(|| Snapshot { target: target.path.clone(), ..Default::default() });
             shared.target = target;
             if matches!(self.tx.try_send((shared.generation, Action::Wake)), Err(mpsc::TrySendError::Disconnected(_))) {
                 shared.snapshot.ready = true;
             }
+        }
+    }
+
+    pub fn set_notify(&self, hwnd: HWND) {
+        if let Ok(mut shared) = self.shared.lock() {
+            shared.notify = hwnd.0 as isize;
         }
     }
 
@@ -134,8 +160,11 @@ impl Client {
     }
 
     pub fn set_volume(&self, volume: f32) {
-        if volume.is_finite() {
-            self.send(Action::Volume(volume.clamp(0.0, 1.0)));
+        if volume.is_finite()
+            && let Ok(mut shared) = self.shared.lock()
+        {
+            shared.pending_volume = Some(volume.clamp(0.0, 1.0));
+            let _ = self.tx.try_send((shared.generation, Action::Wake));
         }
     }
 
@@ -265,25 +294,40 @@ fn identity(target: &Target) -> Identity {
     result
 }
 
-macro_rules! wait_operation {
-    ($operation:expr) => {{
-        $operation.ok().and_then(|operation| {
-            let deadline = Instant::now() + Duration::from_millis(600);
-            while operation.Status().is_ok_and(|status| status.0 == 0) {
-                if Instant::now() >= deadline {
-                    let _ = operation.Cancel();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            operation.GetResults().ok()
-        })
-    }};
+struct Pending<T: windows::core::RuntimeType + 'static> {
+    operation: IAsyncOperation<T>,
+    started: Instant,
+}
+
+impl<T: windows::core::RuntimeType + 'static> Pending<T> {
+    fn new(operation: windows::core::Result<IAsyncOperation<T>>) -> Option<Self> {
+        operation.ok().map(|operation| Self { operation, started: Instant::now() })
+    }
+
+    fn poll(&self) -> Option<Option<T>> {
+        match self.operation.Status() {
+            Ok(AsyncStatus::Started) if self.started.elapsed() < Duration::from_millis(600) => None,
+            Ok(AsyncStatus::Completed) => Some(self.operation.GetResults().ok()),
+            _ => Some(None),
+        }
+    }
+}
+
+impl<T: windows::core::RuntimeType + 'static> Drop for Pending<T> {
+    fn drop(&mut self) {
+        if self.operation.Status().ok() == Some(AsyncStatus::Started) {
+            let _ = self.operation.Cancel();
+        }
+    }
 }
 
 struct Tracked {
     id: u64,
     session: Session,
+    properties: Option<Pending<MediaProperties>>,
+    refreshed: Instant,
+    title: String,
+    artist: String,
 }
 
 fn matching_sessions(manager: &Manager, identity: &Identity) -> Vec<Session> {
@@ -302,15 +346,28 @@ fn matching_sessions(manager: &Manager, identity: &Identity) -> Vec<Session> {
         .unwrap_or_default()
 }
 
-fn media_snapshot(tracked: &Tracked) -> Option<MediaSession> {
+fn media_snapshot(tracked: &mut Tracked) -> Option<MediaSession> {
     let info = tracked.session.GetPlaybackInfo().ok()?;
     let controls = info.Controls().ok()?;
     let playing = info.PlaybackStatus().ok() == Some(Status::Playing);
-    let properties = wait_operation!(tracked.session.TryGetMediaPropertiesAsync())?;
+    if let Some(result) = tracked.properties.as_ref().and_then(Pending::poll) {
+        if let Some(properties) = result {
+            tracked.title =
+                properties.Title().map(|value| value.to_string().chars().take(240).collect()).unwrap_or_default();
+            tracked.artist =
+                properties.Artist().map(|value| value.to_string().chars().take(240).collect()).unwrap_or_default();
+        }
+        tracked.properties = None;
+        tracked.refreshed = Instant::now();
+    }
+    if tracked.properties.is_none() && tracked.refreshed.elapsed() >= Duration::from_millis(350) {
+        tracked.properties = Pending::new(tracked.session.TryGetMediaPropertiesAsync());
+        tracked.refreshed = Instant::now();
+    }
     Some(MediaSession {
         id: tracked.id,
-        title: properties.Title().map(|value| value.to_string().chars().take(240).collect()).unwrap_or_default(),
-        artist: properties.Artist().map(|value| value.to_string().chars().take(240).collect()).unwrap_or_default(),
+        title: tracked.title.clone(),
+        artist: tracked.artist.clone(),
         source: tracked.session.SourceAppUserModelId().map(|value| value.to_string()).unwrap_or_default(),
         playing,
         can_previous: controls.IsPreviousEnabled().unwrap_or(false),
@@ -324,31 +381,28 @@ fn media_snapshot(tracked: &Tracked) -> Option<MediaSession> {
     })
 }
 
-fn execute_media(session: &Session, action: MediaAction) {
-    let Ok(info) = session.GetPlaybackInfo() else { return };
-    let Ok(controls) = info.Controls() else { return };
-    match action {
-        MediaAction::Previous if controls.IsPreviousEnabled().unwrap_or(false) => {
-            wait_operation!(session.TrySkipPreviousAsync());
-        }
-        MediaAction::Next if controls.IsNextEnabled().unwrap_or(false) => {
-            wait_operation!(session.TrySkipNextAsync());
-        }
+fn execute_media(session: &Session, action: MediaAction) -> Option<Pending<bool>> {
+    let info = session.GetPlaybackInfo().ok()?;
+    let controls = info.Controls().ok()?;
+    let operation = match action {
+        MediaAction::Previous if controls.IsPreviousEnabled().unwrap_or(false) => session.TrySkipPreviousAsync(),
+        MediaAction::Next if controls.IsNextEnabled().unwrap_or(false) => session.TrySkipNextAsync(),
         MediaAction::PlayPause if controls.IsPlayPauseToggleEnabled().unwrap_or(false) => {
-            wait_operation!(session.TryTogglePlayPauseAsync());
+            session.TryTogglePlayPauseAsync()
         }
         MediaAction::PlayPause
             if info.PlaybackStatus().ok() == Some(Status::Playing) && controls.IsPauseEnabled().unwrap_or(false) =>
         {
-            wait_operation!(session.TryPauseAsync());
+            session.TryPauseAsync()
         }
         MediaAction::PlayPause
             if info.PlaybackStatus().ok() != Some(Status::Playing) && controls.IsPlayEnabled().unwrap_or(false) =>
         {
-            wait_operation!(session.TryPlayAsync());
+            session.TryPlayAsync()
         }
-        _ => {}
-    }
+        _ => return None,
+    };
+    Pending::new(operation)
 }
 
 fn discord_voice(identity: &Identity) -> Option<DiscordVoice> {
@@ -381,13 +435,20 @@ fn run(shared: Arc<Mutex<Shared>>, rx: mpsc::Receiver<(u64, Action)>) {
         return;
     }
     let mut manager = None;
+    let mut manager_request = Pending::new(Manager::RequestAsync());
+    let mut media_actions: Vec<Pending<bool>> = Vec::new();
     let mut tracked: Vec<Tracked> = Vec::new();
     let mut next_id = 1u64;
-    let mut last_generation = 0;
+    let mut last_generation = u64::MAX;
+    let mut current_identity = Identity::default();
+    let mut identity_at = Instant::now();
+    let mut audio_at = Instant::now();
+    let mut audio = None;
+
     loop {
         let active = shared.lock().is_ok_and(|s| !s.target.path.is_empty());
         let command = if active {
-            rx.recv_timeout(Duration::from_millis(700))
+            rx.recv_timeout(Duration::from_millis(80))
         } else {
             rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected)
         };
@@ -397,54 +458,88 @@ fn run(shared: Arc<Mutex<Shared>>, rx: mpsc::Receiver<(u64, Action)>) {
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         commands.extend(rx.try_iter().take(16));
-        let Ok((target, generation)) = shared.lock().map(|s| (s.target.clone(), s.generation)) else { break };
-        if generation != last_generation {
-            tracked.clear();
-            last_generation = generation;
+        let Ok((target, generation, volume)) =
+            shared.lock().map(|mut s| (s.target.clone(), s.generation, s.pending_volume.take()))
+        else {
+            break;
+        };
+        if let Some(volume) = volume {
+            commands.push((generation, Action::Volume(volume)));
         }
         if target.path.is_empty() {
+            media_actions.clear();
+            for entry in &mut tracked {
+                entry.properties = None;
+            }
             continue;
         }
-        let identity = identity(&target);
+        let changed = generation != last_generation;
+        let acting = commands.iter().any(|(g, action)| *g == generation && !matches!(action, Action::Wake));
+        if changed || acting || identity_at.elapsed() >= Duration::from_millis(500) {
+            current_identity = identity(&target);
+            identity_at = Instant::now();
+            last_generation = generation;
+        }
+        let identity = &current_identity;
         let mut snapshot = Snapshot { target: target.path.clone(), ready: true, ..Default::default() };
         if identity.valid {
-            if manager.is_none() {
-                manager = wait_operation!(Manager::RequestAsync());
+            if let Some(result) = manager_request.as_ref().and_then(Pending::poll) {
+                manager = result;
+                manager_request = None;
             }
-            let current = manager.as_ref().map(|m| matching_sessions(m, &identity)).unwrap_or_default();
-            tracked.retain(|entry| current.contains(&entry.session));
-            for session in current {
-                if !tracked.iter().any(|entry| entry.session == session) {
-                    tracked.push(Tracked { id: next_id, session });
+            if manager.is_none() && manager_request.is_none() {
+                manager_request = Pending::new(Manager::RequestAsync());
+            }
+            let current = manager.as_ref().map(|m| matching_sessions(m, identity)).unwrap_or_default();
+            let all = manager.as_ref().and_then(|m| m.GetSessions().ok());
+            tracked
+                .retain(|entry| all.as_ref().is_some_and(|sessions| sessions.into_iter().any(|s| s == entry.session)));
+            for session in &current {
+                if !tracked.iter().any(|entry| entry.session == *session) {
+                    tracked.push(Tracked {
+                        id: next_id,
+                        session: session.clone(),
+                        properties: None,
+                        refreshed: Instant::now() - Duration::from_secs(1),
+                        title: String::new(),
+                        artist: String::new(),
+                    });
                     next_id = next_id.wrapping_add(1).max(1);
                 }
             }
-            for (command_generation, action) in commands {
+            media_actions.retain(|operation| operation.poll().is_none());
+            let last_volume = commands.iter().rposition(|(_, action)| matches!(action, Action::Volume(_)));
+            for (command_index, (command_generation, action)) in commands.into_iter().enumerate() {
                 if command_generation != generation || !shared.lock().is_ok_and(|s| s.generation == generation) {
                     continue;
                 }
                 match action {
                     Action::Media(id, action) => {
-                        if let Some(entry) = tracked.iter().find(|entry| entry.id == id) {
-                            execute_media(&entry.session, action);
+                        if media_actions.len() < 8
+                            && let Some(entry) =
+                                tracked.iter_mut().find(|entry| entry.id == id && current.contains(&entry.session))
+                            && let Some(operation) = execute_media(&entry.session, action)
+                        {
+                            media_actions.push(operation);
+                            entry.refreshed = Instant::now() - Duration::from_secs(1);
                         }
                     }
-                    Action::Volume(volume) => {
+                    Action::Volume(volume) if Some(command_index) == last_volume => {
                         super::audio_mixer::target_audio(&identity.audio_keys, Some(volume), None);
                     }
                     Action::Mute(muted) => {
                         super::audio_mixer::target_audio(&identity.audio_keys, None, Some(muted));
                     }
-                    Action::DiscordMute(muted) if discord_voice(&identity).is_some_and(|voice| voice.available) => {
+                    Action::DiscordMute(muted) if discord_voice(identity).is_some_and(|voice| voice.available) => {
                         crate::services::discord::set_voice_for(&identity.audio_keys, Some(muted), None)
                     }
-                    Action::DiscordDeaf(deaf) if discord_voice(&identity).is_some_and(|voice| voice.available) => {
+                    Action::DiscordDeaf(deaf) if discord_voice(identity).is_some_and(|voice| voice.available) => {
                         crate::services::discord::set_voice_for(&identity.audio_keys, None, Some(deaf))
                     }
                     _ => {}
                 }
             }
-            for entry in &tracked {
+            for entry in tracked.iter_mut().filter(|entry| current.contains(&entry.session)) {
                 if !shared.lock().is_ok_and(|s| s.generation == generation) {
                     break;
                 }
@@ -455,16 +550,33 @@ fn run(shared: Arc<Mutex<Shared>>, rx: mpsc::Receiver<(u64, Action)>) {
             snapshot
                 .media
                 .sort_by(|a, b| (!a.playing, &a.source, &a.title, a.id).cmp(&(!b.playing, &b.source, &b.title, b.id)));
-            snapshot.audio = super::audio_mixer::target_audio(&identity.audio_keys, None, None)
-                .map(|(volume, muted)| AppAudio { volume, muted });
-            snapshot.discord = discord_voice(&identity);
+            if changed || acting || audio_at.elapsed() >= Duration::from_millis(240) {
+                audio = super::audio_mixer::target_audio(&identity.audio_keys, None, None)
+                    .map(|(volume, muted)| AppAudio { volume, muted });
+                audio_at = Instant::now();
+            }
+            snapshot.audio = audio.clone();
+            snapshot.discord = discord_voice(identity);
         }
         if let Ok(mut shared) = shared.lock()
             && shared.generation == generation
+            && shared.snapshot != snapshot
         {
             shared.snapshot = snapshot;
+            if shared.notify != 0 {
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                        Some(HWND(shared.notify as *mut _)),
+                        WM_ACTIONS_READY,
+                        windows::Win32::Foundation::WPARAM(0),
+                        windows::Win32::Foundation::LPARAM(0),
+                    );
+                }
+            }
         }
     }
+    drop(media_actions);
+    drop(manager_request);
     drop(tracked);
     drop(manager);
     unsafe {
@@ -511,10 +623,59 @@ mod tests {
         for _ in 0..100 {
             client.control(5, MediaAction::Next);
         }
+        client.set_volume(0.2);
+        client.set_volume(0.8);
+        assert_eq!(shared.lock().unwrap().pending_volume, Some(0.8));
         assert_eq!(rx.try_iter().count(), 16);
         client.clear();
+        assert!(shared.lock().unwrap().pending_volume.is_none());
         assert_eq!(client.snapshot().target, "");
         assert!(client.snapshot().media.is_empty());
+    }
+
+    #[test]
+    fn dock_actions_cached_snapshots_are_isolated_and_expire() {
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        let (tx, _rx) = mpsc::sync_channel(16);
+        let client = Client { shared: shared.clone(), tx };
+        client.request("C:/Apps/player.exe", &[10]);
+        {
+            let mut state = shared.lock().unwrap();
+            state.snapshot.ready = true;
+            state.snapshot.audio = Some(AppAudio { volume: 0.42, muted: false });
+        }
+        client.clear();
+        client.request("C:/Apps/player.exe", &[10]);
+        assert_eq!(client.snapshot().audio.unwrap().volume, 0.42);
+        client.request("C:/Apps/player.exe", &[20]);
+        assert!(client.snapshot().audio.is_none());
+        client.request("C:/Other/player.exe", &[10]);
+        assert!(client.snapshot().audio.is_none());
+        {
+            let mut state = shared.lock().unwrap();
+            for (_, _, at) in &mut state.cache {
+                *at = Instant::now() - Duration::from_secs(4);
+            }
+        }
+        client.request("C:/Apps/player.exe", &[10]);
+        assert!(client.snapshot().audio.is_none());
+    }
+
+    #[test]
+    fn dock_actions_pending_media_never_waits_and_expires_on_timeout() {
+        let (tx, rx) = mpsc::channel();
+        let operation = IAsyncOperation::<bool>::spawn(move || Ok(rx.recv_timeout(Duration::from_secs(2)).is_ok()));
+        let mut pending = Pending::new(Ok(operation.clone())).unwrap();
+        let start = Instant::now();
+        assert!(pending.poll().is_none());
+        assert!(start.elapsed() < Duration::from_millis(100));
+        pending.started = Instant::now() - Duration::from_secs(1);
+        assert_eq!(pending.poll(), Some(None));
+        drop(pending);
+        tx.send(()).unwrap();
+        assert!(operation.join().unwrap());
+        let ready = Pending::new(Ok(IAsyncOperation::<bool>::ready(Ok(true)))).unwrap();
+        assert_eq!(ready.poll(), Some(Some(true)));
     }
 
     #[test]
@@ -684,6 +845,11 @@ mod tests {
             assert!(Instant::now() < deadline, "both fixture media sessions and app audio were not discovered");
             std::thread::sleep(Duration::from_millis(40));
         };
+        client.clear();
+        client.request(&path, &[hwnd.0 as isize]);
+        let cached = client.snapshot();
+        assert_eq!(cached.media.len(), snapshot.media.len());
+        assert!(cached.audio == snapshot.audio);
         let session = snapshot.media.iter().find(|session| session.title == "Dock fixture 1").unwrap();
         assert!(session.can_next);
         assert!(!session.can_previous);

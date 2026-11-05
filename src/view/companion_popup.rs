@@ -5,7 +5,7 @@ pub const COMPANION_CHAT_SIZE: (f32, f32) = (416.0, 460.0);
 pub const COMPANION_PLAYER_SIZE: (f32, f32) = (300.0, 140.0);
 pub const POPUP_MARGIN: f32 = crate::ui::popup::POPUP_MARGIN;
 
-pub fn paint_popup_panel(p: &Painter, size: (f32, f32), scale: f32) -> Result<()> {
+pub fn paint_popup_shadow(p: &Painter, size: (f32, f32), scale: f32) -> Result<()> {
     let m = POPUP_MARGIN * scale;
     let rect = (m, m, size.0 - m, size.1 - m);
     for i in (1..=8).rev() {
@@ -16,6 +16,13 @@ pub fn paint_popup_panel(p: &Painter, size: (f32, f32), scale: f32) -> Result<()
             rgba(0.0, 0.0, 0.0, 0.025),
         )?;
     }
+    Ok(())
+}
+
+pub fn paint_popup_panel(p: &Painter, size: (f32, f32), scale: f32) -> Result<()> {
+    paint_popup_shadow(p, size, scale)?;
+    let m = POPUP_MARGIN * scale;
+    let rect = (m, m, size.0 - m, size.1 - m);
     let (r, g, b) = crate::ui::theme::panel();
     p.fill_round_rect(rect, 28.0 * scale, rgba(r, g, b, 0.98))?;
     p.stroke_round_rect(rect, 28.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.07))

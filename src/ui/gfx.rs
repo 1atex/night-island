@@ -89,6 +89,10 @@ pub struct Gpu {
 }
 
 impl Gpu {
+    pub fn compositor(&self) -> Result<Compositor> {
+        self.gfx.Compositor()
+    }
+
     pub fn popup(&self) -> Self {
         Self {
             gfx: self.gfx.clone(),

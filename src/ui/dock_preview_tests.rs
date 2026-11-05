@@ -49,6 +49,13 @@ unsafe extern "system" fn source_proc(hwnd: HWND, message: u32, w: WPARAM, l: LP
             let _ = GetClientRect(hwnd, &mut rect);
             FillRect(dc, &rect, brush);
             let _ = DeleteObject(brush.into());
+            if GetWindowLongPtrW(hwnd, GWLP_USERDATA) == 0 {
+                let white = CreateSolidBrush(COLORREF(0x00ffffff));
+                for x in (0..rect.right).step_by(8) {
+                    FillRect(dc, &RECT { left: x, top: 0, right: x + 4, bottom: rect.bottom }, white);
+                }
+                let _ = DeleteObject(white.into());
+            }
             let _ = EndPaint(hwnd, &ps);
             return LRESULT(0);
         }
@@ -183,6 +190,92 @@ fn screenshot(preview: &Preview, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn verify_preview_material(preview: &mut Preview, work: RECT) -> Result<()> {
+    assert!(preview.state.backdrop.is_some());
+    let saved = preview.state.settings.clone();
+    let size = (
+        (preview.state.layout.width * preview.state.scale) as i32,
+        (preview.state.layout.height * preview.state.scale) as i32,
+    );
+    let origin = preview.state.origin;
+    let background = unsafe {
+        CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            w!("NightIsland.DockPreviewFixture"),
+            w!("Preview material fixture"),
+            WS_POPUP,
+            work.left,
+            work.top,
+            work.right - work.left,
+            work.bottom - work.top,
+            None,
+            None,
+            Some(GetModuleHandleW(None)?.into()),
+            None,
+        )?
+    };
+    let _background = Sources(vec![background]);
+    unsafe {
+        let _ = ShowWindow(background, SW_SHOWNOACTIVATE);
+    }
+    let sample = || -> Vec<[u8; 3]> {
+        unsafe {
+            let dc = GetDC(None);
+            let result = (60..size.0 - 60)
+                .map(|x| {
+                    let pixel = GetPixel(dc, origin.0 + x, origin.1 + size.1 - 19).0;
+                    [pixel as u8, (pixel >> 8) as u8, (pixel >> 16) as u8]
+                })
+                .collect();
+            ReleaseDC(None, dc);
+            result
+        }
+    };
+    let settle = || {
+        for _ in 0..12 {
+            pump();
+        }
+    };
+    let mut energy = Vec::new();
+    for blur in [false, true] {
+        preview.state.settings.blur = blur;
+        preview.state.settings.opacity = 0.2;
+        preview.state.settings.blur_opacity = 0.2;
+        preview.state.arrange();
+        preview.refresh_backdrop();
+        settle();
+        let pixels = sample();
+        energy.push(pixels.windows(2).map(|p| p[0][0].abs_diff(p[1][0]) as f32).sum::<f32>());
+        screenshot(preview, if blur { "material-blur-on" } else { "material-blur-off" })?;
+        assert!(preview.state.thumbnail_visible);
+    }
+    assert!(energy[0] > 1000.0 && energy[1] < energy[0] * 0.6, "Preview must blur the live background: {energy:?}");
+    let mut means = Vec::new();
+    for color in [0x000000ff, 0x00ff0000] {
+        unsafe {
+            SetWindowLongPtrW(background, GWLP_USERDATA, color);
+            let _ = InvalidateRect(Some(background), None, false);
+        }
+        preview.refresh_backdrop();
+        settle();
+        let pixels = sample();
+        means
+            .push([0, 1, 2].map(|channel| pixels.iter().map(|p| p[channel] as u32).sum::<u32>() / pixels.len() as u32));
+    }
+    assert!(means[0][0] > means[0][2] + 80 && means[1][2] > means[1][0] + 80, "Live scene must update: {means:?}");
+    preview.state.settings.blur_opacity = 1.0;
+    preview.state.settings.tint_hue = 120.0;
+    preview.state.settings.tint_saturation = 1.0;
+    preview.state.settings.tint_brightness = 0.3;
+    preview.state.arrange();
+    settle();
+    let pixels = sample();
+    assert!(pixels.iter().all(|p| p[1] > p[0] + 30 && p[1] > p[2] + 30));
+    preview.state.settings = saved;
+    preview.state.arrange();
+    Ok(())
+}
+
 #[test]
 #[ignore = "Shows synthetic source windows and the live dock hover popup without activating user apps"]
 fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
@@ -256,7 +349,15 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
     };
     let center = (work.left + work.right) as f32 * 0.5;
     let anchor = (center - 24.0, work.bottom as f32 - 30.0, center + 24.0, work.bottom as f32);
-    let mut preview = Preview::new(sources.0[0], &gpu, &entry, anchor, work, 1.0, false)?;
+    let mut preview = Preview::new(
+        sources.0[0],
+        &gpu,
+        &entry,
+        anchor,
+        work,
+        1.0,
+        Options { capture_hidden: false, settings: Default::default(), actions: Arc::new(Client::new()) },
+    )?;
     for scale in [1.0, 1.5, 2.0] {
         preview.show(&entry, anchor, work, scale);
         assert!(preview.is_open());
@@ -347,11 +448,15 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
         assert!(preview.dismissed());
         assert!(preview.state.thumbnail.is_none());
         assert!(!unsafe { IsWindowVisible(preview.state.hwnd).as_bool() });
+        if let Some(backdrop) = &preview.state.backdrop {
+            assert!(!unsafe { IsWindowVisible(backdrop.window()).as_bool() });
+        }
         let foreground = unsafe { GetForegroundWindow() };
         assert_ne!(foreground, preview.state.hwnd);
         assert!(!sources.0.contains(&foreground));
     }
     preview.show(&entry, anchor, work, 1.0);
+    verify_preview_material(&mut preview, work)?;
     click(&preview, Action::NextWindow);
     click(&preview, Action::CloseWindow);
     assert!(!unsafe { IsWindow(Some(sources.0[1])).as_bool() });

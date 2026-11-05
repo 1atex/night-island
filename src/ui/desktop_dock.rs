@@ -30,6 +30,7 @@ pub const WM_DESKTOP_DOCK: u32 = WM_APP + 70;
 const PULSE: usize = 1;
 const FRAME: usize = 2;
 const BACKDROP_REFRESH: usize = 3;
+const PREVIEW_HOVER: usize = 4;
 
 #[derive(Clone)]
 pub struct Entry {
@@ -82,6 +83,7 @@ struct State {
     allowed_visible: bool,
     resumed: bool,
     preview: Option<crate::ui::dock_preview::Preview>,
+    actions: Arc<crate::platform::dock_actions::Client>,
     preview_candidate: Option<(String, Instant)>,
     capture_hidden: std::cell::Cell<bool>,
 }
@@ -110,7 +112,7 @@ fn region_shape(rect: Rect, radius: f32, padding: f32) -> [i32; 6] {
     ]
 }
 
-fn create_backdrop(
+pub(super) fn create_backdrop(
     hwnd: HWND,
     compositor: &Compositor,
     root: &ContainerVisual,
@@ -132,6 +134,30 @@ fn create_backdrop(
     sprite.SetClip(&compositor.CreateGeometricClipWithGeometry(&geometry).ok()?).ok()?;
     root.Children().ok()?.InsertAtBottom(&sprite).ok()?;
     Some((sprite, geometry))
+}
+
+pub(super) fn paint_material(
+    p: &crate::ui::gfx::Painter,
+    panel: Rect,
+    radius: f32,
+    s: f32,
+    config: &DockSettings,
+) -> Result<()> {
+    let (r, g, b) = crate::ui::theme::hsv(config.tint_hue, config.tint_saturation, config.tint_brightness);
+    let alpha = if config.blur { config.blur_opacity } else { config.opacity };
+    p.fill_round_gradient(
+        panel,
+        radius,
+        rgba((r + 0.045).min(1.0), (g + 0.045).min(1.0), (b + 0.05).min(1.0), alpha),
+        rgba(r, g, b, alpha),
+    )?;
+    p.stroke_round_rect(panel, radius, s, rgba(1.0, 1.0, 1.0, 0.19))?;
+    p.stroke_round_rect(
+        (panel.0 + s, panel.1 + s, panel.2 - s, panel.3 - s),
+        (radius - s).max(0.0),
+        s,
+        rgba(0.0, 0.0, 0.0, 0.12),
+    )
 }
 
 impl State {
@@ -465,18 +491,7 @@ impl State {
             );
             return;
         }
-        let (r, g, b) =
-            crate::ui::theme::hsv(self.config.tint_hue, self.config.tint_saturation, self.config.tint_brightness);
-        let alpha = if self.config.blur { self.config.blur_opacity } else { self.config.opacity };
-        let _ = p.fill_round_gradient(
-            self.panel,
-            22.0 * s,
-            rgba((r + 0.045).min(1.0), (g + 0.045).min(1.0), (b + 0.05).min(1.0), alpha),
-            rgba(r, g, b, alpha),
-        );
-        let _ = p.stroke_round_rect(self.panel, 22.0 * s, s, rgba(1.0, 1.0, 1.0, 0.19));
-        let inner = (self.panel.0 + s, self.panel.1 + s, self.panel.2 - s, self.panel.3 - s);
-        let _ = p.stroke_round_rect(inner, 21.0 * s, s, rgba(0.0, 0.0, 0.0, 0.12));
+        let _ = paint_material(p, self.panel, 22.0 * s, s, &self.config);
         for &(i, rect) in &self.rects {
             let active = self.entries.get(i).is_some_and(|e| e.windows.iter().any(|w| w.active));
             if self.hover == Some(i) || active {
@@ -550,6 +565,10 @@ impl State {
     }
 
     fn hide_preview(&mut self) {
+        self.actions.clear();
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), PREVIEW_HOVER);
+        }
         if let Some(preview) = &mut self.preview {
             preview.hide();
         }
@@ -570,6 +589,7 @@ impl State {
         );
         if let Some(preview) = &mut self.preview {
             preview.set_capture_hidden(self.capture_hidden.get());
+            preview.set_material(&self.config);
             preview.show(entry, anchor, self.monitor.work, self.scale);
         } else {
             self.preview = crate::ui::dock_preview::Preview::new(
@@ -579,7 +599,11 @@ impl State {
                 anchor,
                 self.monitor.work,
                 self.scale,
-                self.capture_hidden.get(),
+                crate::ui::dock_preview::Options {
+                    capture_hidden: self.capture_hidden.get(),
+                    settings: self.config.clone(),
+                    actions: self.actions.clone(),
+                },
             )
             .ok();
         }
@@ -605,6 +629,9 @@ impl State {
         let Some(entry) = entry else {
             if !self.preview.as_ref().is_some_and(|p| p.contains(point)) {
                 self.preview_candidate = None;
+                if !self.preview.as_ref().is_some_and(|p| p.is_open()) {
+                    self.actions.clear();
+                }
             }
             return;
         };
@@ -617,8 +644,14 @@ impl State {
                 preview.hide();
                 preview.allow_reopen();
             }
+            if let Some(window) = entry.windows.first() {
+                self.actions.request(&window.path, &entry.windows.iter().map(|w| w.handle).collect::<Vec<_>>());
+            }
+            unsafe {
+                SetTimer(Some(self.hwnd), PREVIEW_HOVER, 220, None);
+            }
         }
-        if self.preview_candidate.as_ref().is_some_and(|(_, at)| at.elapsed() >= Duration::from_millis(400))
+        if self.preview_candidate.as_ref().is_some_and(|(_, at)| at.elapsed() >= Duration::from_millis(200))
             && !self.preview.as_ref().is_some_and(|p| p.target() == entry.pin.target && (p.is_open() || p.dismissed()))
         {
             self.show_preview(&entry);
@@ -682,6 +715,12 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 }
                 LRESULT(0)
             }
+            m if m == crate::platform::dock_actions::WM_ACTIONS_READY => {
+                if let Some(preview) = &mut (*ptr).preview {
+                    preview.refresh_actions();
+                }
+                LRESULT(0)
+            }
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
             WM_ERASEBKGND => LRESULT(1),
             WM_TIMER => {
@@ -692,6 +731,14 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                     state.pulse();
                 } else if wparam.0 == BACKDROP_REFRESH {
                     state.refresh_backdrop();
+                    if let Some(preview) = &state.preview {
+                        preview.refresh_backdrop();
+                    }
+                } else if wparam.0 == PREVIEW_HOVER {
+                    let _ = KillTimer(Some(hwnd), PREVIEW_HOVER);
+                    let mut point = POINT::default();
+                    let _ = GetCursorPos(&mut point);
+                    state.update_preview(point);
                 }
                 LRESULT(0)
             }
@@ -711,6 +758,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                     hwndTrack: hwnd,
                     dwHoverTime: 0,
                 });
+                state.update_preview(POINT { x: state.origin.0 + point.0 as i32, y: state.origin.1 + point.1 as i32 });
                 state.render();
                 LRESULT(0)
             }
@@ -933,9 +981,11 @@ impl Dock {
             allowed_visible: visible,
             resumed: false,
             preview: None,
+            actions: Arc::new(crate::platform::dock_actions::Client::new()),
             preview_candidate: None,
             capture_hidden: std::cell::Cell::new(false),
         });
+        state.actions.set_notify(hwnd);
         state.feedback.set_enabled(motion_allowed());
         state.update_suppression();
         if state.suppressed {
@@ -1016,11 +1066,14 @@ impl Dock {
 
 impl Drop for Dock {
     fn drop(&mut self) {
+        self.state.actions.set_notify(HWND::default());
+        self.state.actions.clear();
         self.state.preview.take();
         unsafe {
             let _ = KillTimer(Some(self.state.hwnd), PULSE);
             let _ = KillTimer(Some(self.state.hwnd), FRAME);
             let _ = KillTimer(Some(self.state.hwnd), BACKDROP_REFRESH);
+            let _ = KillTimer(Some(self.state.hwnd), PREVIEW_HOVER);
             SetWindowLongPtrW(self.state.hwnd, GWLP_USERDATA, 0);
             let _ = DestroyWindow(self.state.hwnd);
         }
