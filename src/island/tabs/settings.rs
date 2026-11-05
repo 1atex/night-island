@@ -82,7 +82,8 @@ impl App {
                     }
                 }
                 TopAutoHide | TopTray | TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume
-                | TopBattery | TopFullscreen | TopReserve | TopClearControls => self.configure_top_panel(),
+                | TopBattery | TopFullscreen | TopReserve | TopClearControls | TopMicrophone | TopKeyboard
+                | TopWorkspaces | TopAnimations => self.configure_top_panel(),
                 DockExperimentalCapture
                 | DockReplaceTaskbar
                 | DockEnabled
@@ -91,6 +92,9 @@ impl App {
                 | DockPreview
                 | DockFullscreen
                 | DockEconomy
+                | DockAnimations
+                | DockSeparator
+                | DockLockPins
                 | DockIconSize
                 | DockZoom
                 | DockOpacity

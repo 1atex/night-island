@@ -89,6 +89,10 @@ fn top_panel_blocks_can_all_be_removed_and_persist_independently() {
         crate::view::Sid::TopBattery,
         crate::view::Sid::TopFullscreen,
         crate::view::Sid::TopReserve,
+        crate::view::Sid::TopMicrophone,
+        crate::view::Sid::TopKeyboard,
+        crate::view::Sid::TopWorkspaces,
+        crate::view::Sid::TopAnimations,
     ] {
         crate::view::toggle_set(id, &mut settings, false);
         assert!(!crate::view::toggle_get(id, &settings));
@@ -173,6 +177,8 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         muted: false,
         device: "Динамики · USB Audio".into(),
         battery: Some((76, true)),
+        microphone_muted: Some(false),
+        keyboard_layout: "RU".into(),
     };
     for scale in [1.0, 1.5, 2.0] {
         panel.configure(&settings, scale);
@@ -354,9 +360,30 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
     only_volume.bluetooth = false;
     only_volume.battery = false;
     panel.configure(&only_volume, 1.0);
-    panel.update(snapshot, (-1000.0, -1000.0, -900.0, -900.0), false);
+    panel.update(snapshot.clone(), (-1000.0, -1000.0, -900.0, -900.0), false);
     assert!(!panel.left.state.visible && panel.right.state.visible);
     assert_eq!(panel.right.state.buttons.len(), 1);
+    let mut extra = only_volume.clone();
+    extra.auto_hide = false;
+    extra.volume = false;
+    extra.microphone = true;
+    extra.keyboard = true;
+    extra.workspaces = true;
+    panel.configure(&extra, 1.0);
+    panel.update(snapshot.clone(), (-1000.0, -1000.0, -900.0, -900.0), false);
+    assert!(panel.left.state.visible && !panel.right.state.visible);
+    save(&panel.left, "extra-controls")?;
+    click(&panel.left, Hit::Block(Block::Microphone));
+    assert!(matches!(panel.take_request(0), Some(Request::Microphone)));
+    click(&panel.left, Hit::Block(Block::Keyboard));
+    assert!(matches!(panel.take_request(0), Some(Request::Keyboard)));
+    click(&panel.left, Hit::Block(Block::Workspaces));
+    assert!(matches!(panel.take_request(0), Some(Request::Workspaces)));
+    let mut unavailable = snapshot;
+    unavailable.microphone_muted = None;
+    panel.update(unavailable, (-1000.0, -1000.0, -900.0, -900.0), false);
+    click(&panel.left, Hit::Block(Block::Microphone));
+    assert!(panel.take_request(0).is_none());
     let windows = [panel.left.state.hwnd, panel.right.state.hwnd, panel.card.state.hwnd];
     drop(panel);
     pump();

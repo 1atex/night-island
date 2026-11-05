@@ -14,6 +14,10 @@ pub struct TopPanelSettings {
     pub hide_fullscreen: bool,
     pub reserve_space: bool,
     pub clear_window_controls: bool,
+    pub microphone: bool,
+    pub keyboard: bool,
+    pub workspaces: bool,
+    pub animations: bool,
 }
 
 impl Default for TopPanelSettings {
@@ -30,12 +34,24 @@ impl Default for TopPanelSettings {
             hide_fullscreen: true,
             reserve_space: true,
             clear_window_controls: true,
+            microphone: false,
+            keyboard: false,
+            workspaces: false,
+            animations: true,
         }
     }
 }
 
 impl TopPanelSettings {
     pub fn has_blocks(&self) -> bool {
-        self.application || self.tray || self.wifi || self.bluetooth || self.volume || self.battery
+        self.application
+            || self.tray
+            || self.wifi
+            || self.bluetooth
+            || self.volume
+            || self.battery
+            || self.microphone
+            || self.keyboard
+            || self.workspaces
     }
 }

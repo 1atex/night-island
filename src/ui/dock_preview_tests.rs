@@ -330,7 +330,7 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
     }
     let path = std::env::current_exe().unwrap().to_string_lossy().into_owned();
     let mut entry = Entry {
-        pin: Pin { name: "Preview fixture".into(), target: path.clone() },
+        pin: Pin { name: "Preview fixture".into(), target: path.clone(), icon: String::new() },
         pinned: true,
         windows: sources
             .0

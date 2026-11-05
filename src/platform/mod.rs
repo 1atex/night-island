@@ -15,6 +15,7 @@ mod notification_activation;
 mod notification_images;
 mod notification_payload;
 pub mod notifications;
+pub mod panel_controls;
 pub mod privacy;
 pub mod recognize;
 pub mod recorder;

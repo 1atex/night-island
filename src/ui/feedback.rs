@@ -19,15 +19,20 @@ impl Value {
 pub struct Feedback {
     enabled: Cell<bool>,
     values: RefCell<Vec<Value>>,
+    limit: usize,
 }
 
 impl Default for Feedback {
     fn default() -> Self {
-        Self { enabled: Cell::new(true), values: RefCell::new(Vec::new()) }
+        Self::with_capacity(256)
     }
 }
 
 impl Feedback {
+    pub fn with_capacity(limit: usize) -> Self {
+        Self { enabled: Cell::new(true), values: RefCell::new(Vec::new()), limit: limit.clamp(1, 1024) }
+    }
+
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.set(enabled);
         if !enabled {
@@ -44,12 +49,6 @@ impl Feedback {
             return target;
         }
         let mut values = self.values.borrow_mut();
-        if values.len() >= 256 {
-            values.retain(|v| now.saturating_duration_since(v.start) < Duration::from_secs(2));
-            if values.len() >= 256 {
-                values.remove(0);
-            }
-        }
         if let Some(value) = values.iter_mut().find(|v| v.key == key) {
             if value.target != target {
                 value.from = value.at(now);
@@ -59,6 +58,12 @@ impl Feedback {
             }
             value.at(now)
         } else {
+            if values.len() >= self.limit {
+                values.retain(|v| now.saturating_duration_since(v.start) < Duration::from_secs(2));
+                if values.len() >= self.limit {
+                    values.remove(0);
+                }
+            }
             values.push(Value { key, from: initial, target, start: now, duration: Duration::from_millis(ms.max(1)) });
             initial
         }
@@ -94,6 +99,19 @@ pub fn motion_allowed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dense_dock_animation_channels_settle_without_restarting() {
+        let feedback = Feedback::with_capacity(512);
+        let now = Instant::now();
+        for key in 0..384 {
+            assert_eq!(feedback.sample_at(key, 1.0, 0.0, 180, now), 0.0);
+        }
+        for key in 0..384 {
+            assert_eq!(feedback.sample_at(key, 1.0, 0.0, 180, now + Duration::from_secs(3)), 1.0);
+        }
+        assert_eq!(feedback.values.borrow().len(), 384);
+    }
 
     #[test]
     fn reversing_midway_continues_from_the_visible_value_and_stops() {

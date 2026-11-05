@@ -1208,6 +1208,7 @@ impl Painter<'_> {
         rect: (f32, f32, f32, f32),
         icon: &std::sync::Arc<crate::platform::apps::Icon>,
         cache: &mut IconBitmapCache,
+        opacity: f32,
     ) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::{
             D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
@@ -1254,9 +1255,22 @@ impl Painter<'_> {
             D2D_RECT_F { left: rect.0.round(), top: rect.1.round(), right: rect.2.round(), bottom: rect.3.round() };
         unsafe {
             if let Some(context) = context {
-                context.DrawBitmap(bitmap, Some(&dest), 1.0, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, None, None);
+                context.DrawBitmap(
+                    bitmap,
+                    Some(&dest),
+                    opacity.clamp(0.0, 1.0),
+                    D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+                    None,
+                    None,
+                );
             } else {
-                self.dc.DrawBitmap(bitmap, Some(&dest), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+                self.dc.DrawBitmap(
+                    bitmap,
+                    Some(&dest),
+                    opacity.clamp(0.0, 1.0),
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    None,
+                );
             }
         }
         Ok(())

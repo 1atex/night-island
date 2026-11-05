@@ -27,5 +27,6 @@ pub mod desktop_dock;
 
 pub mod dock_preview;
 
+pub mod shortcut_editor;
 pub mod top_panel;
 mod top_panel_space;

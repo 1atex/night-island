@@ -275,6 +275,7 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                         .glyph('\u{E718}'),
                     );
                     items.push(Entry::item(20, &tr("Dock behavior…")).glyph('\u{E713}'));
+                    items.push(Entry::item(27, &tr("Edit dock shortcut")).glyph('\u{E70F}'));
                 }
                 2 => {
                     if let Some(i) = config.pins.iter().position(|p| key(&p.target) == key(&entry.pin.target)) {
@@ -501,6 +502,31 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                 Some(25) => {
                     if let Some(window) = entry.as_ref().and_then(|e| e.windows.first()) {
                         desktop::activate(window, false);
+                    }
+                }
+                Some(27) => {
+                    if let Some(entry) = &entry
+                        && let Some(gpu) = with_app_value(|a| a.gpu.popup())
+                        && let Ok(Some(pin)) = crate::ui::shortcut_editor::show(hwnd, &gpu, &entry.pin, pick_file)
+                    {
+                        with_app(|a| {
+                            let pins = &mut a.settings.desktop_dock.pins;
+                            let old = pins.iter().position(|p| key(&p.target) == key(&entry.pin.target));
+                            if pins
+                                .iter()
+                                .enumerate()
+                                .any(|(i, p)| Some(i) != old && key(&p.target) == key(&pin.target))
+                            {
+                                a.show_notice_for('\u{E783}', &tr("Already pinned or dock is full (32)"), 3500);
+                                return;
+                            }
+                            if let Some(i) = old {
+                                pins[i] = pin;
+                            } else {
+                                a.settings.desktop_dock.add(pin);
+                            }
+                            a.save_desktop_dock();
+                        });
                     }
                 }
                 Some(24) => {

@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::sync::Once;
 use std::time::Instant;
 
@@ -33,7 +34,7 @@ const TRAY_ANIMATION: usize = 3;
 const MARGIN: f32 = 10.0;
 const HEIGHT: f32 = 34.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Block {
     Application,
     Wifi,
@@ -41,6 +42,9 @@ pub enum Block {
     Volume,
     Battery,
     Tray,
+    Microphone,
+    Keyboard,
+    Workspaces,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -52,12 +56,17 @@ pub struct Snapshot {
     pub muted: bool,
     pub device: String,
     pub battery: Option<(u8, bool)>,
+    pub microphone_muted: Option<bool>,
+    pub keyboard_layout: String,
 }
 
 pub enum Request {
     Settings,
     Tray((i32, i32)),
     TrayAction(String, bool, (i32, i32)),
+    Microphone,
+    Keyboard,
+    Workspaces,
     Open(Block),
     WindowsSettings(Block),
     ToggleWifi,
@@ -69,7 +78,7 @@ pub enum Request {
     Activate(desktop::Window),
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Hit {
     Block(Block),
     Settings,
@@ -125,6 +134,7 @@ struct State {
     ghost_alpha: u8,
     click_through: bool,
     dirty: bool,
+    feedback: crate::ui::feedback::Feedback,
     tray_icons: Vec<crate::platform::system_tray::inline::Entry>,
     tray_open: bool,
     tray_requested: bool,
@@ -181,6 +191,7 @@ fn app_name(snapshot: &Snapshot) -> String {
 fn block_width(block: Block) -> f32 {
     match block {
         Block::Volume | Block::Battery => 68.0,
+        Block::Keyboard => 50.0,
         _ => 42.0,
     }
 }
@@ -192,6 +203,17 @@ fn blocks(settings: &TopPanelSettings) -> Vec<Block> {
         (settings.bluetooth, Block::Bluetooth),
         (settings.volume, Block::Volume),
         (settings.battery, Block::Battery),
+    ]
+    .into_iter()
+    .filter_map(|(on, block)| on.then_some(block))
+    .collect()
+}
+
+fn left_blocks(settings: &TopPanelSettings) -> Vec<Block> {
+    [
+        (settings.microphone, Block::Microphone),
+        (settings.keyboard, Block::Keyboard),
+        (settings.workspaces, Block::Workspaces),
     ]
     .into_iter()
     .filter_map(|(on, block)| on.then_some(block))
@@ -242,7 +264,7 @@ impl State {
     }
 
     fn tray_frame(&mut self) {
-        let t = if crate::ui::feedback::motion_allowed() {
+        let t = if self.settings.animations && crate::ui::feedback::motion_allowed() {
             (self.tray_started.elapsed().as_secs_f32() / 0.24).min(1.0)
         } else {
             1.0
@@ -291,7 +313,11 @@ impl State {
 
     fn dimensions(&self) -> (f32, f32) {
         match self.role {
-            Role::Left => (214.0, HEIGHT + 2.0 * MARGIN),
+            Role::Left => (
+                (if self.settings.application { 214.0 } else { 28.0 })
+                    + left_blocks(&self.settings).into_iter().map(block_width).sum::<f32>(),
+                HEIGHT + 2.0 * MARGIN,
+            ),
             Role::Right => (
                 blocks(&self.settings).iter().copied().map(block_width).sum::<f32>()
                     + 2.0 * MARGIN
@@ -312,7 +338,21 @@ impl State {
         self.buttons.clear();
         let mut add = |rect, hit, enabled| self.buttons.push(Button { rect, hit, enabled });
         match self.role {
-            Role::Left => add((10.0, 10.0, width - 10.0, 44.0), Hit::Block(Block::Application), true),
+            Role::Left => {
+                if self.settings.application {
+                    add((10.0, 10.0, 204.0, 44.0), Hit::Block(Block::Application), true);
+                }
+                let mut x = if self.settings.application { 214.0 } else { 14.0 };
+                for block in left_blocks(&self.settings) {
+                    let next = x + block_width(block);
+                    add(
+                        (x, 12.0, next, 42.0),
+                        Hit::Block(block),
+                        block != Block::Microphone || self.snapshot.microphone_muted.is_some(),
+                    );
+                    x = next;
+                }
+            }
             Role::Right => {
                 let mut x = 14.0;
                 if self.tray_open && self.tray_width >= tray_target - 1.0 {
@@ -366,6 +406,7 @@ impl State {
                         add((24.0, 264.0, width - 24.0, 296.0), Hit::TrayRetry, true);
                     }
                     Block::Battery => add((24.0, 123.0, width - 24.0, 155.0), Hit::WindowsSettings, true),
+                    Block::Microphone | Block::Keyboard | Block::Workspaces => {}
                 }
             }
         }
@@ -397,19 +438,66 @@ impl State {
             }
         }
         for button in &self.buttons {
-            if self.hover == Some(button.hit) && button.enabled {
-                p.fill_round_rect(scaled(button.rect, s), 12.0 * s, rgba(1.0, 1.0, 1.0, 0.085))?;
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            button.hit.hash(&mut hasher);
+            let target = if !button.enabled {
+                0.0
+            } else if self.pressed == Some(button.hit) {
+                1.6
+            } else if self.hover == Some(button.hit) {
+                1.0
+            } else {
+                0.0
+            };
+            let glow = self.feedback.sample(hasher.finish(), target, 0.0, 140);
+            if glow > 0.001 {
+                p.fill_round_rect(scaled(button.rect, s), 12.0 * s, rgba(1.0, 1.0, 1.0, 0.085 * glow))?;
             }
         }
         match self.role {
             Role::Left => {
-                if let Some(icon) = &self.icon {
-                    p.image(scaled((22.0, 19.0, 38.0, 35.0), s), 0.0, icon.side, &icon.bgra)?;
-                } else {
-                    glyph('\u{E737}', (22.0, 18.0, 40.0, 36.0), 15.0, 0.7)?;
+                if self.settings.application {
+                    if let Some(icon) = &self.icon {
+                        p.image(scaled((22.0, 19.0, 38.0, 35.0), s), 0.0, icon.side, &icon.bgra)?;
+                    } else {
+                        glyph('\u{E737}', (22.0, 18.0, 40.0, 36.0), 15.0, 0.7)?;
+                    }
+                    text(&app_name(&self.snapshot), (48.0, 14.0, 174.0, 40.0), 12.0, true, 0.92)?;
+                    glyph('\u{E70D}', (180.0, 19.0, 196.0, 35.0), 9.0, 0.45)?;
                 }
-                text(&app_name(&self.snapshot), (48.0, 14.0, w - 40.0, 40.0), 12.0, true, 0.92)?;
-                glyph('\u{E70D}', (w - 34.0, 19.0, w - 18.0, 35.0), 9.0, 0.45)?;
+                for button in &self.buttons {
+                    let Hit::Block(block) = button.hit else {
+                        continue;
+                    };
+                    let x = button.rect.0;
+                    match block {
+                        Block::Keyboard => text(
+                            &self.snapshot.keyboard_layout,
+                            (x + 7.0, 14.0, button.rect.2 - 4.0, 40.0),
+                            12.0,
+                            true,
+                            0.85,
+                        )?,
+                        Block::Workspaces => glyph('\u{E7C4}', (x + 12.0, 18.0, x + 30.0, 36.0), 15.0, 0.85)?,
+                        Block::Microphone => {
+                            glyph(
+                                '\u{E720}',
+                                (x + 12.0, 18.0, x + 30.0, 36.0),
+                                15.0,
+                                if self.snapshot.microphone_muted.is_some() { 0.9 } else { 0.3 },
+                            )?;
+                            if self.snapshot.microphone_muted == Some(true) {
+                                p.line(
+                                    ((x + 13.0) * s, 34.0 * s),
+                                    ((x + 30.0) * s, 18.0 * s),
+                                    1.6 * s,
+                                    rgba(1.0, 0.4, 0.42, 1.0),
+                                )?;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             Role::Right => {
                 let icon_width = (self.tray_icons.len().saturating_sub(self.tray_page).min(self.tray_capacity) as f32
@@ -442,10 +530,38 @@ impl State {
                     }
                     let Hit::Block(block) = button.hit else { continue };
                     let x = button.rect.0;
+                    if block == Block::Keyboard {
+                        text(
+                            &self.snapshot.keyboard_layout,
+                            (x + 7.0, 14.0, button.rect.2 - 4.0, 40.0),
+                            12.0,
+                            true,
+                            0.85,
+                        )?;
+                        continue;
+                    }
+                    if block == Block::Microphone {
+                        glyph(
+                            '\u{E720}',
+                            (x + 12.0, 18.0, x + 30.0, 36.0),
+                            15.0,
+                            if self.snapshot.microphone_muted.is_some() { 0.9 } else { 0.3 },
+                        )?;
+                        if self.snapshot.microphone_muted == Some(true) {
+                            p.line(
+                                ((x + 13.0) * s, 34.0 * s),
+                                ((x + 30.0) * s, 18.0 * s),
+                                1.6 * s,
+                                rgba(1.0, 0.4, 0.42, 1.0),
+                            )?;
+                        }
+                        continue;
+                    }
                     let (icon, value, active) = match block {
                         Block::Wifi => ('\u{E701}', String::new(), self.snapshot.radios.wifi == Some(true)),
                         Block::Bluetooth => ('\u{E702}', String::new(), self.snapshot.radios.bluetooth == Some(true)),
                         Block::Tray => (if self.tray_open { '\u{E76C}' } else { '\u{E76B}' }, String::new(), true),
+                        Block::Workspaces => ('\u{E7F4}', String::new(), true),
                         Block::Volume => (
                             if self.snapshot.muted { '\u{E74F}' } else { '\u{E767}' },
                             self.snapshot.volume.map(|v| v.to_string()).unwrap_or_else(|| "—".into()),
@@ -473,6 +589,9 @@ impl State {
                     Block::Volume => tr("System volume").into_owned(),
                     Block::Battery => tr("Battery and power").into_owned(),
                     Block::Tray => tr("System tray").into_owned(),
+                    Block::Microphone => tr("Microphone").into_owned(),
+                    Block::Keyboard => tr("Keyboard layout").into_owned(),
+                    Block::Workspaces => tr("Windows and desktops").into_owned(),
                 };
                 text(&title, (26.0, 20.0, w - 55.0, 46.0), 14.0, true, 0.96)?;
                 glyph('\u{E711}', (w - 43.0, 23.0, w - 23.0, 43.0), 11.0, 0.5)?;
@@ -620,6 +739,7 @@ impl State {
                             text(&tr(label), (36.0, top, w - 36.0, top + 32.0), 11.0, false, 0.9)?;
                         }
                     }
+                    Block::Microphone | Block::Keyboard | Block::Workspaces => {}
                     Block::Battery => {
                         let (value, label) = match self.snapshot.battery {
                             Some((v, charging)) => (
@@ -662,10 +782,15 @@ impl State {
                 (u16::from(self.alpha) * u16::from(self.ghost_alpha) / 255) as u8,
             );
         }
+        if self.feedback.active() {
+            unsafe {
+                SetTimer(Some(self.hwnd), FRAME, 16, None);
+            }
+        }
     }
 
     fn hide(&mut self) {
-        if matches!(self.hover, Some(Hit::TrayIcon(_))) {
+        if self.hover.is_some() {
             crate::ui::tip::hide();
         }
         self.hover = None;
@@ -695,6 +820,13 @@ impl State {
 
     fn activate(&mut self, hit: Hit) {
         match hit {
+            Hit::Block(Block::Microphone) => {
+                if self.snapshot.microphone_muted.is_some() {
+                    self.post(Request::Microphone);
+                }
+            }
+            Hit::Block(Block::Keyboard) => self.post(Request::Keyboard),
+            Hit::Block(Block::Workspaces) => self.post(Request::Workspaces),
             Hit::TrayIcon(index) => self.tray_action(index, false),
             Hit::TrayPage => {
                 self.tray_page = if self.tray_page + self.tray_capacity >= self.tray_icons.len() {
@@ -799,7 +931,7 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                 if state.pressed == Some(Hit::Volume) {
                     state.volume_at(point.0);
                 }
-                let hover = state.buttons.iter().find(|b| b.enabled && inside(b.rect, point)).map(|b| b.hit);
+                let hover = state.buttons.iter().find(|b| inside(b.rect, point)).map(|b| b.hit);
                 if state.hover != hover {
                     state.hover = hover;
                     if let Some(Hit::TrayIcon(index)) = hover {
@@ -814,6 +946,32 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                                 state.scale,
                             );
                         }
+                    } else if let Some(Hit::Block(block)) = hover {
+                        let label = match block {
+                            Block::Microphone => Some(if state.snapshot.microphone_muted == Some(true) {
+                                "Unmute microphone"
+                            } else if state.snapshot.microphone_muted == Some(false) {
+                                "Mute microphone"
+                            } else {
+                                "Microphone unavailable"
+                            }),
+                            Block::Keyboard => Some("Switch keyboard layout"),
+                            Block::Workspaces => Some("Windows and desktops"),
+                            _ => None,
+                        };
+                        if let Some(label) = label {
+                            crate::ui::tip::show(
+                                &state.gpu,
+                                &tr(label),
+                                (
+                                    state.origin.0 + (point.0 * state.scale) as i32,
+                                    state.origin.1 + (54.0 * state.scale) as i32,
+                                ),
+                                state.scale,
+                            );
+                        } else {
+                            crate::ui::tip::hide();
+                        }
                     } else {
                         crate::ui::tip::hide();
                     }
@@ -823,7 +981,7 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
             }
             WM_MOUSELEAVE => {
                 let state = &mut *ptr;
-                if matches!(state.hover, Some(Hit::TrayIcon(_))) {
+                if state.hover.is_some() {
                     crate::ui::tip::hide();
                 }
                 if state.hover.take().is_some() {
@@ -839,6 +997,7 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                     state.volume_at(point.0);
                     SetCapture(hwnd);
                 }
+                state.render();
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
@@ -849,6 +1008,9 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                     state.activate(hit);
                 }
                 state.pressed = None;
+                if state.visible {
+                    state.render();
+                }
                 if GetCapture() == hwnd {
                     let _ = ReleaseCapture();
                 }
@@ -886,7 +1048,9 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                     state.render();
                     if t >= 1.0 {
                         state.opening = false;
-                        let _ = KillTimer(Some(hwnd), FRAME);
+                        if !state.feedback.active() {
+                            let _ = KillTimer(Some(hwnd), FRAME);
+                        }
                     }
                 } else if w.0 == DISMISS {
                     let mut point = POINT::default();
@@ -970,6 +1134,7 @@ impl Wing {
             ghost_alpha: 255,
             click_through: false,
             dirty: true,
+            feedback: Default::default(),
             tray_icons: Vec::new(),
             tray_open: false,
             tray_requested: false,
@@ -1005,7 +1170,7 @@ impl Wing {
         unsafe {
             if fresh {
                 self.state.fade = Instant::now();
-                self.state.opening = crate::ui::feedback::motion_allowed();
+                self.state.opening = self.state.settings.animations && crate::ui::feedback::motion_allowed();
                 self.state.alpha = if self.state.opening { 0 } else { 255 };
                 if self.state.opening {
                     SetTimer(Some(self.state.hwnd), FRAME, 16, None);
@@ -1083,6 +1248,7 @@ impl TopPanel {
         self.reflow();
         for wing in [&mut self.left, &mut self.right, &mut self.card] {
             wing.state.settings = settings.clone();
+            wing.state.feedback.set_enabled(settings.animations && crate::ui::feedback::motion_allowed());
             wing.state.dirty = true;
         }
     }
@@ -1165,7 +1331,13 @@ impl TopPanel {
                 (island.0 - 8.0 * scale, island.1 - 8.0 * scale, island.2 + 8.0 * scale, island.3 + 8.0 * scale),
             )
         };
-        self.left.place((left_x, y), scale, !suppressed && self.settings.application && !collision(left_x, 214.0));
+        self.left.place(
+            (left_x, y),
+            scale,
+            !suppressed
+                && (self.settings.application || !left_blocks(&self.settings).is_empty())
+                && !collision(left_x, self.left.state.dimensions().0),
+        );
         self.right.place(
             (right_x, y),
             scale,
@@ -1280,6 +1452,8 @@ impl TopPanel {
             state.ghost_alpha = alpha;
             state.click_through = through;
             if through {
+                state.hover = None;
+                crate::ui::tip::hide();
                 state.pressed = None;
                 if unsafe { GetCapture() } == state.hwnd {
                     unsafe {

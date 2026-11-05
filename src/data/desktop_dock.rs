@@ -9,12 +9,14 @@ pub const MAX_PINS: usize = 32;
 pub struct Pin {
     pub name: String,
     pub target: String,
+    #[serde(default)]
+    pub icon: String,
 }
 
 impl Pin {
     pub fn from_path(path: &str) -> Self {
         let name = Path::new(path).file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        Self { name, target: path.to_string() }
+        Self { name, target: path.to_string(), icon: String::new() }
     }
 }
 
@@ -29,6 +31,9 @@ pub struct DockSettings {
     pub hover_preview: bool,
     pub hide_fullscreen: bool,
     pub economy: bool,
+    pub animations: bool,
+    pub separator: bool,
+    pub lock_pins: bool,
     pub icon_size: u32,
     pub zoom: f32,
     pub opacity: f32,
@@ -55,6 +60,9 @@ impl Default for DockSettings {
             hover_preview: true,
             hide_fullscreen: true,
             economy: false,
+            animations: true,
+            separator: true,
+            lock_pins: false,
             icon_size: 48,
             zoom: 1.3,
             opacity: 0.94,
@@ -66,7 +74,11 @@ impl Default for DockSettings {
             margin: 8,
             monitor: String::new(),
             hidden_apps: Vec::new(),
-            pins: vec![Pin { name: "Explorer".into(), target: format!(r"{windows}\explorer.exe") }],
+            pins: vec![Pin {
+                name: "Explorer".into(),
+                target: format!(r"{windows}\explorer.exe"),
+                icon: String::new(),
+            }],
         }
     }
 }
@@ -112,10 +124,13 @@ impl DockSettings {
         self.pins.truncate(MAX_PINS);
         let mut bytes = 0;
         self.pins.retain(|p| {
-            bytes += p.target.len() + p.name.len().min(320);
+            bytes += p.target.len() + p.name.len().min(320) + p.icon.len().min(2048);
             bytes <= 20 * 1024
         });
         for pin in &mut self.pins {
+            if pin.icon.len() > 2048 || pin.icon.contains(['\0', '\r', '\n']) {
+                pin.icon.clear();
+            }
             pin.name = pin.name.chars().filter(|c| !c.is_control()).take(80).collect();
             if pin.name.is_empty() {
                 pin.name = Pin::from_path(&pin.target).name;
@@ -168,7 +183,7 @@ pub fn import_mydock(bytes: &[u8]) -> Result<Vec<Pin>, &'static str> {
     let mut settings = DockSettings { pins: Vec::new(), ..Default::default() };
     for (_, name, target, separator) in sections {
         if !separator && !target.is_empty() {
-            settings.add(Pin { name, target });
+            settings.add(Pin { name, target, icon: String::new() });
         }
     }
     if settings.pins.is_empty() { Err("No applications found in ico.ini") } else { Ok(settings.pins) }
@@ -177,6 +192,19 @@ pub fn import_mydock(bytes: &[u8]) -> Result<Vec<Pin>, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_shortcut_icons_migrate_and_roundtrip() {
+        let pin: Pin = serde_json::from_str(r#"{"name":"Browser","target":"C:/Browser.exe"}"#).unwrap();
+        assert!(pin.icon.is_empty());
+        let mut config = DockSettings { pins: vec![Pin { icon: "C:/icon.png".into(), ..pin }], ..Default::default() };
+        config.sanitize();
+        let restored: DockSettings = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert_eq!(restored.pins[0].icon, "C:/icon.png");
+        config.pins[0].icon = "bad\0icon".into();
+        config.sanitize();
+        assert!(config.pins[0].icon.is_empty());
+    }
 
     #[test]
     fn dock_material_migration_keeps_density_and_color_controls_bounded() {
@@ -215,7 +243,9 @@ mod tests {
         assert!(!cfg.enabled);
         cfg.zoom = f32::NAN;
         cfg.icon_size = u32::MAX;
-        cfg.pins = (0..100).map(|i| Pin { name: "x".repeat(100), target: format!("C:\\{i}.exe") }).collect();
+        cfg.pins = (0..100)
+            .map(|i| Pin { name: "x".repeat(100), target: format!("C:\\{i}.exe"), icon: String::new() })
+            .collect();
         cfg.sanitize();
         assert_eq!(cfg.zoom, 1.3);
         assert_eq!(cfg.icon_size, 72);

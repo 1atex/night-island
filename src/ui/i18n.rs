@@ -95,6 +95,22 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Панель задач Windows возвращается при выключении дока или выходе из Island."
         }
         "Top panel" => "Верхняя панель",
+        "Animate panel interactions" => "Анимации верхней панели",
+        "Animate dock interactions" => "Анимации нижнего дока",
+        "Separate pinned and running applications" => "Разделять закреплённые и запущенные",
+        "Lock dock icon positions" => "Зафиксировать порядок значков",
+        "Switch keyboard layout" => "Переключить раскладку клавиатуры",
+        "Microphone unavailable" => "Микрофон недоступен",
+        "Microphone mute switch" => "Микрофон: состояние и отключение",
+        "Keyboard layout switch" => "Раскладка клавиатуры: переключение",
+        "Keyboard layout" => "Раскладка клавиатуры",
+        "Windows and desktops" => "Окна и рабочие столы",
+        "Edit dock shortcut" => "Изменить ярлык дока",
+        "Application or file" => "Приложение или файл",
+        "Custom icon (PNG, ICO or application)" => "Свой значок (PNG, ICO или приложение)",
+        "Leave the icon empty to use the original" => "Пустое поле значка — оригинальная иконка",
+        "Reset icon" => "Сбросить значок",
+        "Browse…" => "Выбрать…",
         "Keep window buttons accessible" => "Оставлять место для кнопок окна",
         "Enable top panel" => "Включить верхнюю панель",
         "Companion blocks beside the island, on the main display. Colours follow the island theme." => {

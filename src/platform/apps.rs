@@ -79,9 +79,15 @@ impl DockIconCache {
                 return;
             }
             while let Ok((path, side)) = queue.recv() {
-                let icon = shell_image(&path, side as i32, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)
-                    .map(normalize_dock_icon)
-                    .map(Arc::new);
+                let picture = std::path::Path::new(&path).extension().is_some_and(|e| {
+                    ["png", "jpg", "jpeg", "webp", "bmp"].iter().any(|ext| e.eq_ignore_ascii_case(ext))
+                });
+                let flags = if picture {
+                    SIIGBF_THUMBNAILONLY | SIIGBF_CROPTOSQUARE
+                } else {
+                    SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK
+                };
+                let icon = shell_image(&path, side as i32, flags).map(normalize_dock_icon).map(Arc::new);
                 if finished.send(((path, side), icon)).is_err() {
                     break;
                 }
@@ -437,6 +443,41 @@ mod tests {
 #[cfg(test)]
 mod dock_icon_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "Loads a custom PNG through the actual Windows thumbnail provider"]
+    fn native_dock_custom_png_icon() {
+        let path = std::env::temp_dir().join(format!("island-icon-{}.png", std::process::id()));
+        struct File(PathBuf);
+        impl Drop for File {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _file = File(path.clone());
+        let mut pixels = vec![0u8; 64 * 64 * 4];
+        for y in 12..52 {
+            for x in 12..52 {
+                pixels[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4].copy_from_slice(&[230, 25, 40, 255]);
+            }
+        }
+        let mut encoder = png::Encoder::new(std::fs::File::create(&path).unwrap(), 64, 64);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+        let mut cache = DockIconCache::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let icon = loop {
+            cache.poll();
+            if let Some(icon) = cache.get(path.to_str().unwrap(), 64) {
+                break icon;
+            }
+            assert!(std::time::Instant::now() < deadline, "Custom PNG did not load");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert!(icon.bgra.chunks_exact(4).any(|p| p[2] > 180 && p[0] < 80 && p[3] > 200));
+        assert!(icon.bgra.chunks_exact(4).any(|p| p[3] == 0));
+    }
 
     #[test]
     fn icon_buckets_cover_physical_hover_size_without_unbounded_allocation() {

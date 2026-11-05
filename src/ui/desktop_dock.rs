@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
@@ -74,6 +75,8 @@ struct State {
     hover: Option<usize>,
     pressed: Option<(usize, f32)>,
     dragging: bool,
+    drag_snapshot: Option<Vec<Pin>>,
+    drop_slots: Vec<(usize, f32)>,
     leave_at: Instant,
     scanned_at: Instant,
     hidden: bool,
@@ -99,6 +102,12 @@ fn inside(rect: Rect, point: (f32, f32)) -> bool {
 
 pub fn capacity(width: f32, scale: f32, icon: f32, zoom: f32) -> usize {
     (((width / scale - 48.0 - icon * (zoom - 1.0) * 3.0) / (icon + 12.0)).floor() as usize).clamp(2, 64)
+}
+
+fn motion_key(target: &str, channel: u64) -> u64 {
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    target.hash(&mut hash);
+    (hash.finish() | (1 << 63)) ^ (channel << 56)
 }
 
 fn region_shape(rect: Rect, radius: f32, padding: f32) -> [i32; 6] {
@@ -234,7 +243,7 @@ impl State {
                 } else {
                     entries.push(Entry {
                         pin: if window.island_settings {
-                            Pin { name: window.title.clone(), target: window.path.clone() }
+                            Pin { name: window.title.clone(), target: window.path.clone(), icon: String::new() }
                         } else {
                             Pin::from_path(&window.path)
                         },
@@ -277,11 +286,18 @@ impl State {
             self.config.zoom,
         )
         .saturating_sub(1);
-        let targets: Vec<_> = self.entries.iter().map(|e| e.pin.target.clone()).collect();
+        let targets: Vec<_> = self
+            .entries
+            .iter()
+            .flat_map(|e| [e.pin.target.clone(), e.pin.icon.clone()])
+            .filter(|path| !path.is_empty())
+            .collect();
         self.icons.retain(&targets);
         for (i, entry) in self.entries.iter_mut().enumerate() {
             entry.icon = if i >= self.offset && i < self.offset + slots {
-                self.icons.get(&entry.pin.target, requested)
+                self.icons
+                    .get(if entry.pin.icon.is_empty() { &entry.pin.target } else { &entry.pin.icon }, requested)
+                    .or_else(|| self.icons.get(&entry.pin.target, requested))
             } else {
                 None
             };
@@ -392,18 +408,40 @@ impl State {
                 let d = ((p.0 - (base_left + (n as f32 + 0.5) * pitch)) / (pitch * 1.8)).abs();
                 if p.1 < bottom - icon * self.config.zoom - 10.0 * s { 0.0 } else { (1.0 - d).max(0.0).powi(2) }
             });
-            let zoom = self.feedback.sample(i as u64, strength, 0.0, 150);
+            let id = self.entries.get(i).map_or(i as u64, |entry| motion_key(&entry.pin.target, 1));
+            let zoom = self.feedback.sample(id, strength, 0.0, 150);
             sizes.push(icon * (1.0 + (self.config.zoom - 1.0) * zoom));
         }
-        let total = sizes.iter().sum::<f32>() + (count as f32 + 2.0) * 10.0 * s;
+        let boundary = (0..count).find(|n| {
+            let i = self.offset + n;
+            i > 0 && self.entries[i - 1].pinned && !self.entries[i].pinned
+        });
+        let gap = if self.config.separator && boundary.is_some() { 20.0 * s } else { 0.0 };
+        let total = sizes.iter().sum::<f32>() + (count as f32 + 2.0) * 10.0 * s + gap;
         let left = (width - total) / 2.0;
         self.panel =
             (left - 4.0 * s, bottom - icon - 10.0 * s + shift, left + total + 4.0 * s, bottom + 10.0 * s + shift);
         self.rects.clear();
+        self.drop_slots.clear();
         let mut x = left + 10.0 * s;
         for (n, side) in sizes.iter().enumerate() {
             let i = if n == count { self.entries.len() } else { self.offset + n };
-            self.rects.push((i, (x, bottom - side + shift, x + side, bottom + shift)));
+            if boundary == Some(n) {
+                x += gap;
+            }
+            self.drop_slots.push((i, x + side * 0.5));
+            let animated_x = self
+                .entries
+                .get(i)
+                .map_or(x, |entry| self.feedback.sample(motion_key(&entry.pin.target, 2), x, x, 180));
+            let rect = if self.dragging && self.pressed.is_some_and(|(index, _)| index == i) {
+                let point = self.pointer.unwrap_or((animated_x + side * 0.5, bottom - side * 0.5));
+                let drag_x = (point.0 - side * 0.5).clamp(2.0 * s, width - side - 2.0 * s);
+                (drag_x, bottom - side - 10.0 * s + shift, drag_x + side, bottom - 10.0 * s + shift)
+            } else {
+                (animated_x, bottom - side + shift, animated_x + side, bottom + shift)
+            };
+            self.rects.push((i, rect));
             x += side + 10.0 * s;
         }
         let hint = self.hover.and_then(|i| self.entries.get(i)).map(|e| e.pin.name.clone());
@@ -493,16 +531,33 @@ impl State {
             return;
         }
         let _ = paint_material(p, self.panel, 22.0 * s, s, &self.config);
-        for &(i, rect) in &self.rects {
+        let mut draw_order = self.rects.clone();
+        if self.dragging {
+            draw_order.sort_by_key(|(i, _)| self.pressed.is_some_and(|(pressed, _)| pressed == *i));
+        }
+        for &(i, rect) in &draw_order {
             let active = self.entries.get(i).is_some_and(|e| e.windows.iter().any(|w| w.active));
-            if self.hover == Some(i) || active {
+            let target = self.entries.get(i).map_or("__add", |entry| entry.pin.target.as_str());
+            let glow = self.feedback.sample(
+                motion_key(target, 6),
+                if active {
+                    1.0
+                } else if self.hover == Some(i) {
+                    0.5
+                } else {
+                    0.0
+                },
+                0.0,
+                140,
+            );
+            if glow > 0.001 {
                 let _ = p.fill_round_rect(
                     (rect.0 - 3.0 * s, rect.1 - 3.0 * s, rect.2 + 3.0 * s, rect.3 + 3.0 * s),
                     13.0 * s,
-                    rgba(1.0, 1.0, 1.0, if active { 0.12 } else { 0.06 }),
+                    rgba(1.0, 1.0, 1.0, 0.12 * glow),
                 );
             }
-            if self.dragging && self.hover == Some(i) && self.entries.get(i).is_some_and(|e| e.pinned) {
+            if self.dragging && self.pressed.is_some_and(|(index, _)| index == i) {
                 let _ = p.line(
                     (rect.0 - 5.0 * s, bottom - icon + shift),
                     (rect.0 - 5.0 * s, bottom + shift),
@@ -510,11 +565,17 @@ impl State {
                     rgba(0.65, 0.8, 1.0, 0.9),
                 );
             }
-            let shrink = if self.pressed.is_some_and(|(index, _)| index == i) { 2.0 * s } else { 0.0 };
+            let shrink = self.feedback.sample(
+                motion_key(target, 4),
+                if self.pressed.is_some_and(|(index, _)| index == i) { 2.0 * s } else { 0.0 },
+                0.0,
+                90,
+            );
             let image = (rect.0 + shrink, rect.1 + shrink, rect.2 - shrink, rect.3 - shrink);
             if let Some(entry) = self.entries.get(i) {
                 if let Some(icon) = &entry.icon {
-                    let _ = p.cached_icon(image, icon, &mut self.icon_bitmaps.borrow_mut());
+                    let reveal = self.feedback.sample(motion_key(target, 3), 1.0, 0.0, 180);
+                    let _ = p.cached_icon(image, icon, &mut self.icon_bitmaps.borrow_mut(), reveal);
                 } else {
                     let _ = p.glyph('\u{E8A5}', image, icon * 0.65, rgba(0.85, 0.85, 0.9, 1.0));
                 }
@@ -523,20 +584,26 @@ impl State {
                     let _ = p.fill_round_rect(badge, 6.0 * s, rgba(0.08, 0.1, 0.16, 0.98));
                     let _ = p.glyph('\u{E72E}', badge, 11.0 * s, rgba(0.7, 0.8, 1.0, 1.0));
                 }
-                if !entry.windows.is_empty() {
+                let running = self.feedback.sample(
+                    motion_key(target, 5),
+                    if entry.windows.is_empty() { 0.0 } else { 1.0 },
+                    0.0,
+                    160,
+                );
+                if running > 0.001 {
                     let cx = (rect.0 + rect.2) / 2.0;
                     let _ = p.fill_ellipse(
                         cx,
                         bottom + shift + 6.0 * s,
                         if active { 3.0 } else { 2.0 } * s,
                         2.0 * s,
-                        rgba(1.0, 1.0, 1.0, if active { 0.95 } else { 0.5 }),
+                        rgba(1.0, 1.0, 1.0, (if active { 0.95 } else { 0.5 }) * running),
                     );
                 }
-                if i > 0 && !entry.pinned && self.entries[i - 1].pinned {
+                if self.config.separator && i > 0 && !entry.pinned && self.entries[i - 1].pinned {
                     let _ = p.line(
-                        (rect.0 - 5.0 * s, bottom - icon * 0.7 + shift),
-                        (rect.0 - 5.0 * s, bottom - icon * 0.3 + shift),
+                        (rect.0 - 15.0 * s, bottom - icon * 0.85 + shift),
+                        (rect.0 - 15.0 * s, bottom - icon * 0.15 + shift),
                         s,
                         rgba(1.0, 1.0, 1.0, 0.2),
                     );
@@ -668,7 +735,7 @@ impl State {
         if self.update_suppression() {
             return;
         }
-        self.feedback.set_enabled(motion_allowed());
+        self.feedback.set_enabled(self.config.animations && motion_allowed());
         if self.scanned_at.elapsed() >= Duration::from_secs(2) {
             self.refresh(false);
         }
@@ -755,8 +822,31 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 state.hover = state.hit(point);
                 state.leave_at = Instant::now();
                 state.hidden = false;
-                if let Some((_, start)) = state.pressed {
+                if let Some((from, start)) = state.pressed
+                    && from < state.config.pins.len()
+                    && !state.config.lock_pins
+                {
                     state.dragging |= (point.0 - start).abs() > 7.0 * state.scale;
+                    if state.dragging {
+                        if state.drag_snapshot.is_none() {
+                            state.drag_snapshot = Some(state.config.pins.clone());
+                        }
+                        let to = state
+                            .drop_slots
+                            .iter()
+                            .filter(|(i, _)| *i < state.config.pins.len())
+                            .min_by(|a, b| (a.1 - point.0).abs().total_cmp(&(b.1 - point.0).abs()))
+                            .map(|(i, _)| *i)
+                            .unwrap_or(from);
+                        if from != to {
+                            let pin = state.config.pins.remove(from);
+                            state.config.pins.insert(to, pin);
+                            let entry = state.entries.remove(from);
+                            state.entries.insert(to, entry);
+                            state.pressed = Some((to, start));
+                            state.hover = Some(to);
+                        }
+                    }
                 }
                 let _ = TrackMouseEvent(&mut TRACKMOUSEEVENT {
                     cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
@@ -764,7 +854,14 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                     hwndTrack: hwnd,
                     dwHoverTime: 0,
                 });
-                state.update_preview(POINT { x: state.origin.0 + point.0 as i32, y: state.origin.1 + point.1 as i32 });
+                if state.dragging {
+                    state.hide_preview();
+                } else {
+                    state.update_preview(POINT {
+                        x: state.origin.0 + point.0 as i32,
+                        y: state.origin.1 + point.1 as i32,
+                    });
+                }
                 state.render();
                 LRESULT(0)
             }
@@ -793,16 +890,11 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 let hit = state.hit(point);
                 if let Some((from, _)) = pressed {
                     if state.dragging {
-                        if let Some(to) = hit
-                            && from < state.config.pins.len()
-                            && to < state.config.pins.len()
-                            && from != to
-                        {
-                            let pin = state.config.pins.remove(from);
-                            state.config.pins.insert(to, pin);
+                        let changed = state.drag_snapshot.take().is_some_and(|before| before != state.config.pins);
+                        if changed {
                             state.post(Request::Save);
-                            state.refresh(true);
                         }
+                        state.refresh(true);
                     } else if hit == Some(from) {
                         if let Some(entry) = state.entries.get(from).cloned() {
                             state.post(Request::Launch(entry));
@@ -820,6 +912,10 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 let state = &mut *ptr;
                 state.pressed = None;
                 state.dragging = false;
+                if let Some(before) = state.drag_snapshot.take() {
+                    state.config.pins = before;
+                    state.refresh(true);
+                }
                 state.render();
                 LRESULT(0)
             }
@@ -978,11 +1074,13 @@ impl Dock {
             rects: Vec::new(),
             panel: (0.0, 0.0, 1.0, 1.0),
             region_shapes: Vec::new(),
-            feedback: Feedback::default(),
+            feedback: Feedback::with_capacity(512),
             pointer: None,
             hover: None,
             pressed: None,
             dragging: false,
+            drag_snapshot: None,
+            drop_slots: Vec::new(),
             leave_at: Instant::now(),
             scanned_at: Instant::now(),
             hidden: false,
@@ -998,7 +1096,7 @@ impl Dock {
             capture_hidden: std::cell::Cell::new(false),
         });
         state.actions.set_notify(hwnd);
-        state.feedback.set_enabled(motion_allowed());
+        state.feedback.set_enabled(state.config.animations && motion_allowed());
         state.update_suppression();
         if state.suppressed {
             state.layout();
@@ -1021,6 +1119,7 @@ impl Dock {
         let rebuild = self.state.config.pins != config.pins || self.state.config.show_running != config.show_running;
         self.state.hide_preview();
         self.state.config = config.clone();
+        self.state.feedback.set_enabled(config.animations && motion_allowed());
         if self.state.update_suppression() {
             return;
         }
@@ -1538,11 +1637,36 @@ mod tests {
         unsafe {
             SendMessageW(hwnd, WM_LBUTTONDOWN, Some(WPARAM(0)), Some(pack(a)));
             SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(0)), Some(pack(b)));
+            assert_eq!(dock.config().pins[1], before[0], "Pinned entries must move before mouse release");
             SendMessageW(hwnd, WM_LBUTTONUP, Some(WPARAM(0)), Some(pack(b)));
         }
         assert!(matches!(dock.take_request(), Some(Request::Save)));
         assert_eq!(dock.config().pins[1], before[0]);
         assert_eq!(dock.config().pins[0], before[1]);
+        let stable = dock.config().pins;
+        dock.state.feedback.set_enabled(false);
+        dock.state.render();
+        let a = dock.state.rects[0].1;
+        let b = dock.state.rects[1].1;
+        unsafe {
+            SendMessageW(hwnd, WM_LBUTTONDOWN, Some(WPARAM(0)), Some(pack(a)));
+            SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(0)), Some(pack(b)));
+            SendMessageW(hwnd, WM_CAPTURECHANGED, Some(WPARAM(0)), Some(LPARAM(0)));
+            let _ = ReleaseCapture();
+        }
+        assert_eq!(dock.config().pins, stable, "Cancelling a drag must restore the previous order");
+        assert!(dock.take_request().is_none());
+        dock.state.config.lock_pins = true;
+        dock.state.render();
+        let a = dock.state.rects[0].1;
+        let b = dock.state.rects[1].1;
+        unsafe {
+            SendMessageW(hwnd, WM_LBUTTONDOWN, Some(WPARAM(0)), Some(pack(a)));
+            SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(0)), Some(pack(b)));
+            SendMessageW(hwnd, WM_LBUTTONUP, Some(WPARAM(0)), Some(pack(b)));
+        }
+        assert_eq!(dock.config().pins, stable);
+        assert!(dock.take_request().is_none());
         let mut config = dock.config();
         config.pins.clear();
         config.monitor = "disconnected-monitor".into();

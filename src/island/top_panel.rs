@@ -52,6 +52,13 @@ impl App {
             snapshot.muted = volume::muted().unwrap_or(false);
             snapshot.device = volume::device_name().unwrap_or_default();
             snapshot.battery = view::battery();
+            snapshot.microphone_muted =
+                if self.settings.top_panel.microphone { volume::microphone_muted() } else { None };
+            snapshot.keyboard_layout = if self.settings.top_panel.keyboard {
+                crate::platform::panel_controls::keyboard_layout()
+            } else {
+                String::new()
+            };
         }
         if !suppressed && self.top_panel_radios.elapsed() >= Duration::from_secs(10) {
             self.top_panel_radios = Instant::now();
@@ -98,6 +105,19 @@ impl App {
         }
         while let Some(request) = self.top_panel.as_mut().and_then(|panel| panel.take_request(id)) {
             match request {
+                Request::Microphone => {
+                    if volume::toggle_microphone() {
+                        self.top_panel_data.microphone_muted = volume::microphone_muted();
+                        self.update_top_panel(false);
+                    }
+                }
+                Request::Keyboard => {
+                    crate::platform::panel_controls::next_keyboard_layout();
+                    self.top_panel_poll = Instant::now() - Duration::from_secs(2);
+                }
+                Request::Workspaces => {
+                    crate::platform::panel_controls::task_view();
+                }
                 Request::Tray(anchor) => crate::platform::system_tray::inline::request(self.hwnd, anchor, None),
                 Request::TrayAction(name, context, anchor) => {
                     crate::platform::system_tray::inline::request(self.hwnd, anchor, Some((name, context)))
