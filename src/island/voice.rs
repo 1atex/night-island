@@ -5,8 +5,15 @@ use crate::services::assistant::tools::{self, Tool};
 use crate::services::assistant::{Cap, Level, env, memory, recent, shell};
 use crate::services::attach::{self, Attachment};
 use crate::ui::i18n::tr;
+use crate::ui::pet_speech::VoicePhase;
 
 impl App {
+    fn voice_phase(&mut self, phase: VoicePhase) {
+        self.pet.voice_phase = phase;
+        self.pet.char_key = None;
+        self.set_timer(Timer::Char, 1);
+    }
+
     fn cue(&self, cue: sounds::Cue) {
         sounds::play(cue, self.settings.assistant.cue_volume());
     }
@@ -28,8 +35,13 @@ impl App {
     pub(in crate::island) fn toggle_dictation(&mut self) {
         if dictation::active() {
             dictation::stop();
+            self.voice_phase(VoicePhase::Transcribing);
             self.cue(sounds::Cue::Done);
             self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
+            return;
+        }
+        if self.pet.voice_phase.pending() || ai::busy() {
+            self.notify_for(Notice::Error, '\u{E783}', "Another request is running, try again in a moment", 2500);
             return;
         }
         if !self.speech_ready() {
@@ -38,6 +50,7 @@ impl App {
         wake::pause();
         speech::stop();
         if dictation::start(self.hwnd) {
+            self.voice_phase(VoicePhase::Recording);
             self.cue(sounds::Cue::Heard);
             self.show_notice_for(
                 '\u{E720}',
@@ -77,6 +90,7 @@ impl App {
     }
 
     pub(in crate::island) fn end_wake_session(&mut self) {
+        self.voice_phase(VoicePhase::Idle);
         self.wake_session = false;
         if let Some(run) = self.agent.take() {
             self.keep_run(&run);
@@ -195,6 +209,7 @@ impl App {
         }
         self.wake_session = true;
         if dictation::start_auto(self.hwnd) {
+            self.voice_phase(VoicePhase::Recording);
             self.cue(sounds::Cue::Heard);
             self.show_notice_for('\u{E720}', "Listening…", (dictation::MAX_SECS as u32 + 5) * 1000);
         } else {
@@ -203,12 +218,14 @@ impl App {
     }
 
     pub(in crate::island) fn on_voice(&mut self) {
+        self.voice_phase(VoicePhase::Idle);
         match dictation::take() {
             Some(Ok(wav)) => {
                 if self.wake_session {
                     self.cue(sounds::Cue::Done);
                 }
                 if ai::transcribe(self.hwnd, wav) {
+                    self.voice_phase(VoicePhase::Transcribing);
                     self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
                 } else {
                     self.clear_notice();
@@ -273,6 +290,7 @@ impl App {
         }
         crate::log_info!("Assistant step {step}: asking the model ({} turns)", turns.len());
         if ai::ask_agent(self.hwnd, turns, system, id) {
+            self.voice_phase(VoicePhase::Command);
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
         } else {
             self.fail_by_voice("Another request is running, try again in a moment");
@@ -355,6 +373,7 @@ impl App {
             run.phase = Phase::Listening;
         }
         if dictation::start_auto(self.hwnd) {
+            self.voice_phase(VoicePhase::Recording);
             self.cue(sounds::Cue::Heard);
             self.show_notice_for('\u{E720}', "Listening…", (dictation::MAX_SECS as u32 + 5) * 1000);
         } else {
@@ -406,6 +425,7 @@ impl App {
             crate::log_info!("Assistant: dropped the model's answer to a request that is no longer running");
             return;
         }
+        self.voice_phase(VoicePhase::Idle);
         self.clear_notice();
         let reply = match answer {
             Ok(reply) => reply,
@@ -774,6 +794,7 @@ impl App {
 
     pub(in crate::island) fn on_transcribed(&mut self) {
         let Some(answer) = ai::take_transcript() else { return };
+        self.voice_phase(VoicePhase::Idle);
         self.clear_notice();
         match &answer {
             Ok(text) if self.wake_session || self.agent.is_some() => {

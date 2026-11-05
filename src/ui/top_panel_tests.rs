@@ -93,6 +93,7 @@ fn top_panel_blocks_can_all_be_removed_and_persist_independently() {
         crate::view::Sid::TopKeyboard,
         crate::view::Sid::TopWorkspaces,
         crate::view::Sid::TopAnimations,
+        crate::view::Sid::TopLiquid,
     ] {
         crate::view::toggle_set(id, &mut settings, false);
         assert!(!crate::view::toggle_get(id, &settings));
@@ -108,6 +109,13 @@ fn top_panel_blocks_can_all_be_removed_and_persist_independently() {
     let old: crate::data::settings::Settings = serde_json::from_str("{}").unwrap();
     assert!(!old.top_panel.enabled);
     assert!(old.top_panel.auto_hide && old.top_panel.tray && old.desktop_dock.replace_taskbar);
+    for (index, entrance) in PanelEntrance::ALL.into_iter().enumerate() {
+        crate::view::cycle_pick(crate::view::Sid::TopEntrance, &mut settings, index);
+        assert_eq!(settings.top_panel.entrance, entrance);
+        let restored: crate::data::settings::Settings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.top_panel.entrance, entrance);
+    }
     let empty = TopPanelSettings {
         tray: false,
         application: false,
@@ -157,6 +165,7 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         auto_hide: false,
         reserve_space: false,
         hide_fullscreen: false,
+        entrance: PanelEntrance::Sides,
         ..Default::default()
     };
     let mut panel = TopPanel::new(parent.0, &gpu, &settings)?;
@@ -186,6 +195,11 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         let island =
             (center - 100.0 * scale, panel.top() + 8.0 * scale, center + 100.0 * scale, panel.top() + 42.0 * scale);
         panel.update(snapshot.clone(), island, false);
+        for wing in [&mut panel.left, &mut panel.right] {
+            wing.state.travel.show(true, 0, Instant::now());
+            wing.state.motion_frame();
+            wing.state.render();
+        }
         assert!(panel.left.state.visible && panel.right.state.visible);
         assert!(
             panel.right.state.origin.0 + panel.right.state.size.0 <= panel.monitor.work.right - (144.0 * scale) as i32
@@ -307,7 +321,77 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         assert!(!panel.left.state.visible && !panel.right.state.visible);
         assert_eq!(unsafe { GetForegroundWindow() }, foreground);
     }
+    for entrance in PanelEntrance::ALL {
+        for scale in [1.0, 1.5, 2.0] {
+            let mut config = settings.clone();
+            config.entrance = entrance;
+            panel.left.state.hide();
+            panel.right.state.hide();
+            panel.configure(&config, scale);
+            let center = (panel.monitor.work.left + panel.monitor.work.right) as f32 / 2.0;
+            let island =
+                (center - 100.0 * scale, panel.top() + 8.0 * scale, center + 100.0 * scale, panel.top() + 42.0 * scale);
+            panel.update(snapshot.clone(), island, false);
+            let mut previous = [0u8; 2];
+            for elapsed in [0, 90, 180, 270, 400] {
+                for (index, wing) in [&mut panel.left, &mut panel.right].into_iter().enumerate() {
+                    wing.state.travel.seek(elapsed);
+                    wing.state.motion_frame();
+                    wing.state.render();
+                    assert!(wing.state.alpha >= previous[index]);
+                    previous[index] = wing.state.alpha;
+                    if elapsed == 400 {
+                        assert_eq!(wing.state.origin, wing.state.destination);
+                        assert!(!wing.state.opening);
+                    }
+                }
+            }
+            if entrance == PanelEntrance::Island {
+                assert!(
+                    (panel.left.state.origin.0 as f32 + panel.left.state.size.0 as f32
+                        - (island.0 - config.island_gap as f32 * scale))
+                        .abs()
+                        <= 1.0
+                );
+                assert!(
+                    (panel.right.state.origin.0 as f32 - (island.2 + config.island_gap as f32 * scale)).abs() <= 1.0
+                );
+                let right_start = panel.right.state.origin.0;
+                let wifi =
+                    panel.right.state.buttons.iter().find(|button| button.hit == Hit::Block(Block::Wifi)).unwrap().rect;
+                panel.right.state.tray_requested = true;
+                panel.set_tray_icons(crate::platform::system_tray::inline::preview_entries());
+                for elapsed in [0, 80, 160, 240] {
+                    panel.right.state.tray_started = Instant::now() - std::time::Duration::from_millis(elapsed);
+                    panel.right.state.tray_frame();
+                    panel.update(snapshot.clone(), island, false);
+                    assert_eq!(panel.right.state.origin.0, right_start);
+                    assert_eq!(
+                        panel
+                            .right
+                            .state
+                            .buttons
+                            .iter()
+                            .find(|button| button.hit == Hit::Block(Block::Wifi))
+                            .unwrap()
+                            .rect,
+                        wifi
+                    );
+                    assert!(
+                        panel.right.state.origin.0 + panel.right.state.size.0
+                            <= panel.monitor.work.right - (144.0 * scale) as i32
+                    );
+                }
+                save(&panel.right, &format!("island-tray-{scale:.1}"))?;
+            }
+            save(&panel.left, &format!("{entrance:?}-left-{scale:.1}"))?;
+            save(&panel.right, &format!("{entrance:?}-right-{scale:.1}"))?;
+        }
+    }
+    panel.left.state.hide();
+    panel.right.state.hide();
     let mut only_volume = settings.clone();
+    only_volume.animations = false;
     struct Cursor(POINT);
     impl Drop for Cursor {
         fn drop(&mut self) {
@@ -322,6 +406,7 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
     }
     let _cursor = Cursor(point);
     let mut auto = settings.clone();
+    auto.animations = false;
     auto.auto_hide = true;
     panel.configure(&auto, 1.0);
     let outside = (panel.monitor.bounds.left + 80, panel.monitor.bounds.top + 400);

@@ -95,6 +95,26 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Панель задач Windows возвращается при выключении дока или выходе из Island."
         }
         "Top panel" => "Верхняя панель",
+        "Panel entrance" => "Откуда появляются панели",
+        "From the island" => "Из острова",
+        "From screen sides" => "С боковых краёв экрана",
+        "From the top edge" => "Из верхнего края экрана",
+        "Distance from the island" => "Расстояние от острова",
+        "Panel animation duration" => "Длительность появления",
+        "Liquid panel edges" => "Жидкие края панелей",
+        "Pet reacts to voice assistant" => "Питомец реагирует на голосового помощника",
+        "Body" => "Форма",
+        "Fox" => "Лиса",
+        "Rabbit" => "Кролик",
+        "Ghost" => "Призрак",
+        "Cat" => "Кот",
+        "Robot" => "Робот",
+        "Island mode places the panels beside the island. Edge modes keep them in the screen corners." => {
+            "В режиме «Из острова» панели рядом с ним. В режимах от краёв — в углах экрана."
+        }
+        "Start dictation with the shortcut in Keys. Your pet listens and waits with the assistant." => {
+            "Начните диктовку сочетанием из раздела «Клавиши». Питомец прислушается и дождётся ответа вместе с помощником."
+        }
         "Animate panel interactions" => "Анимации верхней панели",
         "Animate dock interactions" => "Анимации нижнего дока",
         "Separate pinned and running applications" => "Разделять закреплённые и запущенные",
@@ -699,6 +719,7 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Модель или адрес сервера в настройках недопустимы"
         }
         "No connection to the service" => "Нет связи с сервисом",
+        "No connection to the service or the request timed out" => "Нет связи с сервисом или время ожидания истекло",
         "Thinking…" => "Думаю…",
         "AI is not set up" => "Нейросеть не настроена",
         "Open Settings, AI: add a key" => "Откройте Настройки, Нейросети: добавьте ключ",

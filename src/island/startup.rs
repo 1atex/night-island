@@ -390,6 +390,7 @@ impl App {
                 ),
                 speech: Default::default(),
                 speech_cue: Default::default(),
+                voice_phase: Default::default(),
                 motion: Default::default(),
                 controls_at: Instant::now(),
                 cursor: None,

@@ -61,6 +61,7 @@ impl App {
             mini_chat::PET_APPLY => return self.pet_studio_action(view::PetStudioHit::Apply),
             mini_chat::PET_PHOTO => return self.pet_studio_action(view::PetStudioHit::Photo),
             mini_chat::PET_TEXT => return self.pet_studio_action(view::PetStudioHit::TextOnly),
+            mini_chat::PET_BODY => return self.pet_studio_action(view::PetStudioHit::Body),
             mini_chat::SEND if self.ui.chat.pet.enabled => {
                 let prompt = self.pet.chat.as_ref().map(|chat| chat.window.input()).unwrap_or_default();
                 return self.send_pet_request(prompt, true);

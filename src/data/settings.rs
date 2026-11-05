@@ -428,6 +428,7 @@ pub struct Settings {
     pub record_mic: bool,
     pub character: Character,
     pub pet_performance: crate::ui::pet_motion::PetPerformance,
+    pub pet_voice_reactions: bool,
     pub pet_autonomy: bool,
     pub custom_pet: crate::ui::pet_design::PetDesign,
     #[serde(alias = "spark_detached")]
@@ -506,6 +507,7 @@ impl Default for Settings {
             music_cover: true,
             prefer_playing_media: false,
             voice_paste: true,
+            pet_voice_reactions: true,
             activity_track: true,
             activity_ai: false,
             vpn_pill: true,
@@ -952,6 +954,7 @@ impl Settings {
 
     pub fn sanitize(&mut self) {
         self.desktop_dock.sanitize();
+        self.top_panel.sanitize();
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
         if ![1, 2, 4].contains(&self.notification_tiles) {

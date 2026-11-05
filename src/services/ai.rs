@@ -49,6 +49,10 @@ static COMMAND_RESULT: Mutex<Option<(u64, Answer)>> = Mutex::new(None);
 static SORT_RESULT: Mutex<Option<Answer>> = Mutex::new(None);
 static BUSY: AtomicBool = AtomicBool::new(false);
 
+pub fn busy() -> bool {
+    BUSY.load(Ordering::SeqCst)
+}
+
 pub fn configure(settings: &AiSettings) {
     let cell = CONFIG.get_or_init(|| Mutex::new(AiSettings::default()));
     if let Ok(mut g) = cell.lock() {
@@ -605,7 +609,7 @@ fn transcribe_now(settings: &AiSettings, wav: &[u8]) -> Answer {
         }
         None => {
             crate::log_warn!("Speech request could not be made");
-            Err("No connection to the service".into())
+            Err("No connection to the service or the request timed out".into())
         }
     }
 }
@@ -751,7 +755,7 @@ fn run_with(settings: &AiSettings, make_call: impl FnOnce(&str) -> Option<Call>)
         }
         None => {
             crate::log_warn!("AI request could not be made");
-            Err("No connection to the service".into())
+            Err("No connection to the service or the request timed out".into())
         }
     }
 }

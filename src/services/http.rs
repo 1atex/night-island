@@ -1,8 +1,12 @@
+use std::time::{Duration, Instant};
 use windows::Foundation::Uri;
 use windows::Storage::Streams::{DataReader, DataWriter, InMemoryRandomAccessStream, UnicodeEncoding};
 use windows::Web::Http::Headers::HttpCredentialsHeaderValue;
-use windows::Web::Http::{HttpBufferContent, HttpClient, HttpMethod, HttpRequestMessage, HttpStringContent};
-use windows::core::HSTRING;
+use windows::Web::Http::{
+    HttpBufferContent, HttpClient, HttpCompletionOption, HttpMethod, HttpRequestMessage, HttpStringContent,
+};
+use windows::core::{HSTRING, Interface};
+use windows_future::{AsyncStatus, IAsyncInfo};
 
 const MAX_BODY_CHARS: usize = 600_000;
 
@@ -171,10 +175,7 @@ pub fn post_json(url: &str, headers: &[(&str, &str)], body: &str, agent: Option<
     )
     .ok()?;
     message.SetContent(&content).ok()?;
-    let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
-    let status = reply.StatusCode().ok()?.0 as u16;
-    let body = reply.Content().ok()?.ReadAsStringAsync().ok()?.join().ok()?.to_string();
-    Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
+    bounded_response(&client, &message, Duration::from_secs(60))
 }
 
 pub fn post_json_for_bytes(
@@ -246,15 +247,57 @@ pub fn post_bytes(
         .TryAppendWithoutValidation(&HSTRING::from("Content-Type"), &HSTRING::from(content_type))
         .ok()?;
     message.SetContent(&content).ok()?;
-    let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
+    bounded_response(&client, &message, Duration::from_secs(60))
+}
+
+fn wait_response(operation: &IAsyncInfo, deadline: Instant) -> Option<()> {
+    while operation.Status().ok()? == AsyncStatus::Started {
+        if Instant::now() >= deadline {
+            let _ = operation.Cancel();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    (operation.Status().ok()? == AsyncStatus::Completed).then_some(())
+}
+
+fn bounded_response(client: &HttpClient, message: &HttpRequestMessage, timeout: Duration) -> Option<Response> {
+    let deadline = Instant::now() + timeout;
+    let operation = client.SendRequestWithOptionAsync(message, HttpCompletionOption::ResponseHeadersRead).ok()?;
+    wait_response(&operation.cast().ok()?, deadline)?;
+    let reply = operation.GetResults().ok()?;
     let status = reply.StatusCode().ok()?.0 as u16;
-    let body = reply.Content().ok()?.ReadAsStringAsync().ok()?.join().ok()?.to_string();
+    let content = reply.Content().ok()?;
+    if content.Headers().ok()?.ContentLength().is_ok_and(|size| size.Value().unwrap_or(0) > 4 * MAX_BODY_CHARS as u64) {
+        return None;
+    }
+    let operation = content.ReadAsStringAsync().ok()?;
+    wait_response(&operation.cast().ok()?, deadline)?;
+    let body = operation.GetResults().ok()?.to_string();
+    if body.len() > 4 * MAX_BODY_CHARS {
+        return None;
+    }
     Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stalled_request_is_cancelled_and_a_completed_one_is_available() {
+        use windows_future::IAsyncOperation;
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let pending = IAsyncOperation::<bool>::spawn(move || Ok(rx.recv_timeout(Duration::from_secs(2)).is_ok()));
+        let info: IAsyncInfo = pending.cast().unwrap();
+        let start = Instant::now();
+        assert!(wait_response(&info, start + Duration::from_millis(40)).is_none());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(tx);
+        let done = IAsyncOperation::<bool>::ready(Ok(true));
+        assert!(wait_response(&done.cast().unwrap(), Instant::now() + Duration::from_secs(1)).is_some());
+        assert!(done.GetResults().unwrap());
+    }
 
     #[test]
     fn percent_encoding_keeps_unreserved_only() {

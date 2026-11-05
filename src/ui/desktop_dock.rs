@@ -208,7 +208,7 @@ impl State {
             return;
         }
         let force = force || std::mem::take(&mut self.resumed);
-        let scan = desktop::windows();
+        let scan = desktop::cached_windows();
         self.scanned_at = Instant::now();
         if !force && scan == self.scan {
             return;
@@ -736,7 +736,7 @@ impl State {
             return;
         }
         self.feedback.set_enabled(self.config.animations && motion_allowed());
-        if self.scanned_at.elapsed() >= Duration::from_secs(2) {
+        if self.scanned_at.elapsed() >= Duration::from_millis(200) {
             self.refresh(false);
         }
         if self.icons.poll() {
@@ -1467,7 +1467,8 @@ mod tests {
                 None,
             )?
         };
-        let mut config = DockSettings { enabled: true, show_running: false, ..Default::default() };
+        let mut config =
+            DockSettings { enabled: true, show_running: false, hide_fullscreen: false, ..Default::default() };
         if let Some(path) = std::env::var_os("NI_DOCK_IMPORT_FILE") {
             config.pins = crate::data::desktop_dock::import_mydock(&std::fs::read(path).unwrap()).unwrap();
             assert!(config.pins.len() >= 2);

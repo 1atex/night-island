@@ -84,7 +84,9 @@ impl App {
                 }
                 TopAutoHide | TopTray | TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume
                 | TopBattery | TopFullscreen | TopReserve | TopClearControls | TopMicrophone | TopKeyboard
-                | TopWorkspaces | TopAnimations => self.configure_top_panel(),
+                | TopWorkspaces | TopAnimations | TopEntrance | TopGap | TopMotion | TopLiquid => {
+                    self.configure_top_panel()
+                }
                 DockExperimentalCapture
                 | DockReplaceTaskbar
                 | DockEnabled
@@ -142,7 +144,7 @@ impl App {
                     crate::ui::i18n::set_ru(self.settings.language == crate::data::settings::Language::Ru);
                     self.repaint_collapsed();
                 }
-                Character | CharacterDetached | PetPerformance | PetAutonomy => {
+                Character | CharacterDetached | PetPerformance | PetAutonomy | PetVoice => {
                     self.apply_character();
                     self.sync_pet_studio();
                 }

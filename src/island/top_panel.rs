@@ -41,7 +41,7 @@ impl App {
         let mut snapshot = self.top_panel_data.clone();
         if !suppressed && (force || self.top_panel_poll.elapsed() >= Duration::from_secs(1)) {
             self.top_panel_poll = Instant::now();
-            let windows = desktop::windows();
+            let windows = desktop::cached_windows();
             snapshot.active = windows.iter().find(|w| w.active).cloned();
             snapshot.windows = snapshot
                 .active
