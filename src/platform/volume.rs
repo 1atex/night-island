@@ -24,6 +24,14 @@ pub fn set(level: f32) {
     }
 }
 
+pub fn set_muted(muted: bool) {
+    unsafe {
+        if let Ok(ep) = endpoint() {
+            let _ = ep.SetMute(muted, std::ptr::null());
+        }
+    }
+}
+
 fn friendly_name(device: &windows::Win32::Media::Audio::IMMDevice) -> Option<String> {
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::System::Com::STGM_READ;

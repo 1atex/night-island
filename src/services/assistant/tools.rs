@@ -10,6 +10,7 @@ const MAX_LISTED: usize = 120;
 pub enum Tool {
     Cmd(String),
     PowerShell(String),
+    Wsl(String),
     Fetch(String),
     Search(String),
     ReadFile(String),
@@ -19,7 +20,7 @@ pub enum Tool {
 impl Tool {
     pub fn cap(&self) -> Cap {
         match self {
-            Tool::Cmd(_) | Tool::PowerShell(_) => Cap::Shell,
+            Tool::Cmd(_) | Tool::PowerShell(_) | Tool::Wsl(_) => Cap::Shell,
             Tool::Fetch(_) => Cap::Browser,
             Tool::Search(_) => Cap::WebSearch,
             Tool::ReadFile(_) => Cap::FilesRead,
@@ -31,6 +32,7 @@ impl Tool {
         match self {
             Tool::Cmd(_) => "shell",
             Tool::PowerShell(_) => "powershell",
+            Tool::Wsl(_) => "wsl",
             Tool::Fetch(_) => "fetch",
             Tool::Search(_) => "search",
             Tool::ReadFile(_) => "read_file",
@@ -40,13 +42,18 @@ impl Tool {
 
     pub fn detail(&self) -> &str {
         match self {
-            Tool::Cmd(t) | Tool::PowerShell(t) | Tool::Fetch(t) | Tool::Search(t) | Tool::ReadFile(t) => t,
+            Tool::Cmd(t)
+            | Tool::PowerShell(t)
+            | Tool::Wsl(t)
+            | Tool::Fetch(t)
+            | Tool::Search(t)
+            | Tool::ReadFile(t) => t,
             Tool::WriteFile { path, .. } => path,
         }
     }
 
     pub fn script(&self) -> bool {
-        matches!(self, Tool::Cmd(_) | Tool::PowerShell(_))
+        matches!(self, Tool::Cmd(_) | Tool::PowerShell(_) | Tool::Wsl(_))
     }
 
     pub fn looks_only(&self) -> bool {
@@ -56,7 +63,7 @@ impl Tool {
     pub fn external(&self) -> bool {
         match self {
             Tool::Fetch(_) | Tool::Search(_) | Tool::ReadFile(_) => true,
-            Tool::Cmd(t) | Tool::PowerShell(t) => t.to_ascii_lowercase().contains("http"),
+            Tool::Cmd(t) | Tool::PowerShell(t) | Tool::Wsl(t) => t.to_ascii_lowercase().contains("http"),
             Tool::WriteFile { .. } => false,
         }
     }
@@ -131,6 +138,7 @@ pub fn run(tool: &Tool) -> Result<String, String> {
     match tool {
         Tool::Cmd(command) => shell::run(command),
         Tool::PowerShell(script) => shell::run_powershell(script),
+        Tool::Wsl(script) => shell::run_wsl(script),
         Tool::Fetch(url) => web::fetch(url),
         Tool::Search(query) => web::search(query),
         Tool::ReadFile(path) => read_file(path),
@@ -153,6 +161,7 @@ mod tests {
         let all = [
             (Tool::Cmd("dir".into()), Cap::Shell, "shell"),
             (Tool::PowerShell("ls".into()), Cap::Shell, "powershell"),
+            (Tool::Wsl("ls".into()), Cap::Shell, "wsl"),
             (Tool::Fetch("https://a.b".into()), Cap::Browser, "fetch"),
             (Tool::Search("x".into()), Cap::WebSearch, "search"),
             (Tool::ReadFile("a".into()), Cap::FilesRead, "read_file"),

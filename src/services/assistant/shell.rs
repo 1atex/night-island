@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use serde_json::Value;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
@@ -130,9 +131,20 @@ fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> Drain {
     Drain { buf, done }
 }
 
+pub fn decode(bytes: &[u8]) -> String {
+    let high: Vec<u8> = bytes.iter().skip(1).step_by(2).take(32).copied().collect();
+    let wide = bytes.starts_with(&[0xFF, 0xFE])
+        || (bytes.len() >= 4 && high.iter().filter(|b| **b < 0x10).count() * 10 >= high.len() * 9);
+    if wide {
+        let units: Vec<u16> = bytes.chunks_exact(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect();
+        return String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').to_string();
+    }
+    String::from_utf8_lossy(bytes).replace('\0', "")
+}
+
 impl Drain {
     fn text(&self) -> String {
-        self.buf.lock().map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+        self.buf.lock().map(|b| decode(&b)).unwrap_or_default()
     }
 }
 
@@ -222,6 +234,18 @@ pub fn run_powershell(script: &str) -> Result<String, String> {
     let result = collect(cmd);
     let _ = std::fs::remove_file(&path);
     result
+}
+
+pub fn run_wsl(script: &str) -> Result<String, String> {
+    let script = script.trim();
+    if script.is_empty() || script.chars().count() > MAX_COMMAND_CHARS {
+        return Err("The script is empty or too long".into());
+    }
+    let packed = base64::engine::general_purpose::STANDARD.encode(script.as_bytes());
+    let mut cmd = Command::new("wsl.exe");
+    cmd.args(["-e", "bash", "-c"]).arg(format!("echo {packed} | base64 -d | bash"));
+    collect(cmd)
+        .map_err(|why| if why.contains("could not be started") { "WSL could not be started".into() } else { why })
 }
 
 pub const REVIEW_PROMPT: &str = "You are a strict security reviewer for one Windows command line or PowerShell script \
@@ -365,6 +389,25 @@ mod tests {
     #[test]
     fn scripts_are_written_to_distinct_files() {
         assert_ne!(script_file(), script_file());
+    }
+
+    #[test]
+    fn output_in_either_encoding_is_read() {
+        assert_eq!(decode("héllo".as_bytes()), "héllo");
+        assert_eq!(decode(b"a\0b"), "ab");
+        let wide: Vec<u8> = "Нет дистрибутивов".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert_eq!(decode(&wide), "Нет дистрибутивов");
+        let mut bom = vec![0xFF, 0xFE];
+        bom.extend("ok".encode_utf16().flat_map(u16::to_le_bytes));
+        assert_eq!(decode(&bom), "ok");
+        assert_eq!(decode(b""), "");
+    }
+
+    #[test]
+    #[ignore = "needs WSL with a distribution"]
+    fn a_real_linux_command_runs_through_wsl() {
+        let out = run_wsl("echo 'привет'\nuname -s").expect("ran");
+        assert!(out.contains("привет") && out.contains("Linux"), "{out}");
     }
 
     #[test]

@@ -233,16 +233,23 @@ fn gemini_parts(parts: Vec<Part>) -> Vec<serde_json::Value> {
 }
 
 pub fn build_call(settings: &AiSettings, key: &str, prompt: &str) -> Option<Call> {
-    build(settings, key, &[ChatTurn::text(false, prompt)], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS)
+    build(settings, key, &[ChatTurn::text(false, prompt)], SYSTEM_PROMPT, MAX_OUTPUT_TOKENS, false)
 }
 
 pub fn build_chat_call(settings: &AiSettings, key: &str, turns: &[ChatTurn]) -> Option<Call> {
     let recent = &turns[turns.len().saturating_sub(CHAT_TURNS)..];
     let first_user = recent.iter().position(|t| !t.assistant)?;
-    build(settings, key, &recent[first_user..], CHAT_SYSTEM_PROMPT, CHAT_OUTPUT_TOKENS)
+    build(settings, key, &recent[first_user..], CHAT_SYSTEM_PROMPT, CHAT_OUTPUT_TOKENS, false)
 }
 
-fn build(settings: &AiSettings, key: &str, turns: &[ChatTurn], system: &str, max_tokens: u32) -> Option<Call> {
+fn build(
+    settings: &AiSettings,
+    key: &str,
+    turns: &[ChatTurn],
+    system: &str,
+    max_tokens: u32,
+    quick: bool,
+) -> Option<Call> {
     let provider = settings.provider;
     let model = settings.model(provider);
     if !valid_model(model, provider) {
@@ -274,10 +281,14 @@ fn build(settings: &AiSettings, key: &str, turns: &[ChatTurn], system: &str, max
             all.extend(messages.into_iter().map(|(a, parts)| {
                 json!({"role": if a { "assistant" } else { "user" }, "content": content_json(provider, parts)})
             }));
+            let mut body = json!({"model": model, "max_tokens": max_tokens, "messages": all});
+            if quick && settings.openai_base.to_ascii_lowercase().contains("deepseek.com") {
+                body["thinking"] = json!({"type": "disabled"});
+            }
             Call {
                 url: format!("{}/chat/completions", clean_base(&settings.openai_base)?),
                 headers: vec![("Authorization", format!("Bearer {key}"))],
-                body: json!({"model": model, "max_tokens": max_tokens, "messages": all}).to_string(),
+                body: body.to_string(),
             }
         }
         AiProvider::Gemini => Call {
@@ -340,7 +351,16 @@ pub fn parse_reply(provider: AiProvider, status: u16, body: &str) -> Answer {
     };
     match text.map(|t| tidy(&t)) {
         Some(t) if !t.is_empty() => Ok(t),
-        _ => Err("The answer was empty".into()),
+        _ => {
+            let finish = value["choices"][0]["finish_reason"].as_str().unwrap_or("");
+            let thought = value["choices"][0]["message"]["reasoning_content"].as_str().is_some_and(|r| !r.is_empty());
+            crate::log_warn!("AI answer was empty (finish_reason={finish}, reasoning_only={thought})");
+            if thought {
+                Err("The model spent its whole limit thinking and gave no answer".into())
+            } else {
+                Err("The answer was empty".into())
+            }
+        }
     }
 }
 
@@ -538,7 +558,7 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
     let system = crate::tools::appgroups::system_prompt(groups);
     let turn = ChatTurn::text(false, names.join("\n"));
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS));
+        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, SORT_OUTPUT_TOKENS, true));
         if let Ok(mut r) = SORT_RESULT.lock() {
             *r = Some(answer);
         }
@@ -553,7 +573,7 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
 pub fn complete(system: &str, user: &str, max_tokens: u32) -> Answer {
     let settings = config();
     let turn = ChatTurn::text(false, user);
-    run_with(&settings, |key| build(&settings, key, &[turn], system, max_tokens))
+    run_with(&settings, |key| build(&settings, key, &[turn], system, max_tokens, true))
 }
 
 pub fn take_command_result() -> Option<Answer> {
@@ -566,7 +586,7 @@ pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String) -> bool {
     }
     let (raw, settings) = (hwnd.0 as isize, config());
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| build(&settings, key, &turns, &system, COMMAND_OUTPUT_TOKENS));
+        let answer = run_with(&settings, |key| build(&settings, key, &turns, &system, COMMAND_OUTPUT_TOKENS, true));
         if let Ok(mut r) = COMMAND_RESULT.lock() {
             *r = Some(answer);
         }

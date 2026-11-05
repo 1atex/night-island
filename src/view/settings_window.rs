@@ -116,7 +116,7 @@ const ASSISTANT: [(Sid, &str, Kind); 18] = [
     (Sid::AsstReview, "Check commands with a second model call when asking first", Kind::Toggle),
     (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
     (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
-    (Sid::AsstControls, "Mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
+    (Sid::AsstControls, "Volume, mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
     (Sid::AsstOpen, "Open programs and games", Kind::Cycle),
     (Sid::AsstReminders, "Reminders and timers", Kind::Cycle),
     (Sid::AsstMemory, "Remember things about you", Kind::Cycle),

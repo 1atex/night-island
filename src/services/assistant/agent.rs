@@ -18,12 +18,22 @@ pub struct Run {
     pub tainted: bool,
     pub waiting: bool,
     pub phase: Phase,
+    pub retries: usize,
 }
+
+pub const MAX_RETRIES: usize = 2;
 
 impl Run {
     pub fn new(system: String, request: &str) -> Self {
-        let mut run =
-            Self { turns: Vec::new(), system, steps: 0, tainted: false, waiting: false, phase: Phase::Working };
+        let mut run = Self {
+            turns: Vec::new(),
+            system,
+            steps: 0,
+            tainted: false,
+            waiting: false,
+            phase: Phase::Working,
+            retries: 0,
+        };
         run.push(false, request);
         run
     }

@@ -72,7 +72,7 @@ impl Cap {
     pub fn title(self) -> &'static str {
         match self {
             Cap::Media => "Music and media keys",
-            Cap::Controls => "Mic, Wi-Fi, Bluetooth, theme, lock",
+            Cap::Controls => "Volume, mic, Wi-Fi, Bluetooth, theme, lock",
             Cap::Open => "Open programs and games",
             Cap::Reminders => "Reminders and timers",
             Cap::Memory => "Remember things about you",

@@ -11,6 +11,7 @@ impl App {
     }
 
     fn fail_by_voice(&mut self, text: &str) {
+        crate::log_warn!("Assistant failed: {}", brief(text, 300));
         self.cue(sounds::Cue::Error);
         self.notify_for(Notice::Error, '\u{E783}', text, 4000);
     }
@@ -171,6 +172,7 @@ impl App {
         let (offered, can_ask) = (perms.commands_offered(), perms.enabled);
         let system = voicecmd::system_prompt(&offered, can_ask, &notes, &self.facts());
         let request: String = command.chars().take(600).collect();
+        crate::log_info!("Assistant request: {}", brief(&request, 300));
         self.agent = Some(Run::new(system, &request));
         self.call_agent();
     }
@@ -183,11 +185,12 @@ impl App {
             run.waiting = false;
             run.phase = Phase::Working;
         }
-        let (turns, system) = (run.turns.clone(), run.system.clone());
+        let (turns, system, step) = (run.turns.clone(), run.system.clone(), run.steps);
         if exhausted {
             self.fail_by_voice("The assistant needed too many steps");
             return self.end_wake_session();
         }
+        crate::log_info!("Assistant step {step}: asking the model ({} turns)", turns.len());
         if ai::ask_agent(self.hwnd, turns, system) {
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
         } else {
@@ -292,21 +295,37 @@ impl App {
         let reply = match answer {
             Ok(reply) => reply,
             Err(why) => {
+                crate::log_warn!("Assistant: the model failed: {}", brief(&why, 300));
                 let short: String = why.chars().take(70).collect();
                 self.fail_by_voice(&short);
                 return self.end_wake_session();
             }
         };
+        crate::log_info!("Assistant: the model replied: {}", brief(&reply, 600));
+        let commands = voicecmd::parse_many(&reply);
         if let Some(run) = self.agent.as_mut() {
             run.said(&reply);
             run.waiting = false;
+            if voicecmd::malformed(&reply, &commands) {
+                if run.retries < MAX_RETRIES {
+                    run.retries += 1;
+                    run.heard(RETRY_HINT);
+                    crate::log_warn!("Assistant: the reply was not a valid action, asking again ({})", run.retries);
+                    return self.call_agent();
+                }
+                crate::log_warn!("Assistant: the reply was still not a valid action, giving up");
+                self.fail_by_voice("The assistant did not understand the model's reply");
+                return self.end_wake_session();
+            }
         }
-        for command in voicecmd::parse_many(&reply) {
+        for command in commands {
+            crate::log_info!("Assistant action: {}", brief(&format!("{command:?}"), 400));
             self.handle_command(command, false);
             if self.agent.as_ref().is_none_or(|r| r.waiting) {
                 return;
             }
         }
+        crate::log_info!("Assistant: the request is done");
         self.end_wake_session();
     }
 
@@ -326,6 +345,7 @@ impl App {
         let cap = tool.cap();
         let tainted = self.settings.assistant.ask_after_web && self.agent.as_ref().is_some_and(|r| r.tainted);
         let level = self.settings.assistant.perms.command_level(cap, tainted);
+        crate::log_info!("Assistant tool {}: level {level:?}, tainted {tainted}, confirmed {confirmed}", tool.name());
         if level == Level::Off {
             let text = format!("{}: {}", tr(cap.title()), tr("off in the Assistant settings"));
             return self.fail_by_voice(&text);
@@ -340,7 +360,7 @@ impl App {
             let detail: String =
                 tool.detail().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(100).collect();
             let verb = match tool {
-                Tool::Cmd(_) | Tool::PowerShell(_) => "Run:",
+                Tool::Cmd(_) | Tool::PowerShell(_) | Tool::Wsl(_) => "Run:",
                 Tool::Fetch(_) => "Open the page:",
                 Tool::Search(_) => "Search the web:",
                 Tool::ReadFile(_) => "Read:",
@@ -366,6 +386,17 @@ impl App {
                 self.end_wake_session();
             }
             shell::Outcome::Ran { tool, result } => {
+                match &result {
+                    Ok(text) if matches!(tool, Tool::ReadFile(_)) => {
+                        crate::log_info!(
+                            "Assistant tool {} finished, {} characters",
+                            tool.name(),
+                            text.chars().count()
+                        );
+                    }
+                    Ok(text) => crate::log_info!("Assistant tool {} finished: {}", tool.name(), brief(text, 300)),
+                    Err(why) => crate::log_warn!("Assistant tool {} failed: {}", tool.name(), brief(why, 300)),
+                }
                 let Some(run) = self.agent.as_mut() else {
                     return match result {
                         Ok(text) => {
@@ -469,9 +500,42 @@ impl App {
                 self.show_notice_for('\u{E916}', &format!("{} · {length}", crate::ui::i18n::tr("Timer")), 3500);
             }
             voicecmd::Command::Open(name) => {
-                if !self.open_by_voice(&name) {
+                let address = voicecmd::is_web_address(name.trim());
+                if address {
+                    cmd::shell_open(name.trim(), None);
+                    self.show_notice_for('\u{E774}', "Opened", 1800);
+                } else if !self.open_by_voice(&name) {
                     self.open_missed(&name);
                 }
+            }
+            voicecmd::Command::OpenUrl(url, browser) => {
+                let started = match browser.program() {
+                    Some(program) => cmd::shell_run(program, &url),
+                    None => false,
+                };
+                if !started {
+                    cmd::shell_open(&url, None);
+                }
+                self.show_notice_for('\u{E774}', &url, 2500);
+            }
+            voicecmd::Command::Volume(what) => {
+                let level = match what {
+                    voicecmd::Volume::Set(percent) => {
+                        volume::set(f32::from(percent) / 100.0);
+                        volume::get()
+                    }
+                    voicecmd::Volume::Change(delta) => volume::step(f32::from(delta) / 100.0),
+                    voicecmd::Volume::Mute(muted) => {
+                        volume::set_muted(muted);
+                        volume::get()
+                    }
+                };
+                let text = match (what, level) {
+                    (voicecmd::Volume::Mute(true), _) => tr("Muted").into_owned(),
+                    (_, Some(level)) => format!("{} {}%", tr("Volume"), (level * 100.0).round() as u32),
+                    (_, None) => tr("Done").into_owned(),
+                };
+                self.show_notice_for('\u{E767}', &text, 1800);
             }
             voicecmd::Command::Power(what) => {
                 self.pending_power = Some((what, std::time::Instant::now()));
@@ -514,6 +578,13 @@ impl App {
     pub(in crate::island) fn on_transcribed(&mut self) {
         let Some(answer) = ai::take_transcript() else { return };
         self.clear_notice();
+        match &answer {
+            Ok(text) if self.wake_session || self.agent.is_some() => {
+                crate::log_info!("Assistant heard: {}", brief(text, 300));
+            }
+            Err(why) => crate::log_warn!("Speech recognition failed: {}", brief(why, 200)),
+            Ok(_) => {}
+        }
         match answer {
             Ok(text) if self.agent.as_ref().is_some_and(|r| r.phase == Phase::Listening) => {
                 let wakes = voicecmd::wake_words(&self.settings.ai.voice_wake);
@@ -548,4 +619,14 @@ impl App {
             }
         }
     }
+}
+
+const MAX_RETRIES: usize = crate::services::assistant::agent::MAX_RETRIES;
+
+const RETRY_HINT: &str = "That reply was not a valid action. Reply again with exactly one JSON object from the list \
+(or an array of independent ones), starting with \"thought\", and nothing else.";
+
+fn brief(text: &str, max: usize) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max { flat } else { format!("{}…", flat.chars().take(max).collect::<String>()) }
 }

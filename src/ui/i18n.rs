@@ -1009,7 +1009,16 @@ fn phrase(s: &str) -> Option<&'static str> {
         "The script is empty or too long" => "Скрипт пустой или слишком длинный",
         "The script could not be prepared" => "Не удалось подготовить скрипт",
         "Music and media keys" => "Музыка и медиаклавиши",
-        "Mic, Wi-Fi, Bluetooth, theme, lock" => "Микрофон, Wi-Fi, Bluetooth, тема, блокировка",
+        "Volume, mic, Wi-Fi, Bluetooth, theme, lock" => "Громкость, микрофон, Wi-Fi, Bluetooth, тема, блокировка",
+        "The model spent its whole limit thinking and gave no answer" => {
+            "Модель потратила весь лимит на размышления и не ответила"
+        }
+        "Volume" => "Громкость",
+        "Muted" => "Звук выключен",
+        "Opened" => "Открыто",
+        "The assistant did not understand the model's reply" => "Ассистент не понял ответ модели",
+        "That address cannot be opened" => "Этот адрес открыть нельзя",
+        "WSL could not be started" => "Не удалось запустить WSL",
         "Open programs and games" => "Запуск программ и игр",
         "Reminders and timers" => "Напоминания и таймеры",
         "Remember things about you" => "Запоминать факты о вас",
