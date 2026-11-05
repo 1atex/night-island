@@ -72,7 +72,7 @@ use crate::ui::tray;
 use crate::view;
 use windows_numerics::{Vector2, Vector3};
 
-mod appearance;
+pub(crate) mod appearance;
 mod character;
 mod companion_chat;
 mod cover_motion;

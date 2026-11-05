@@ -1,6 +1,6 @@
 use crate::island::*;
 
-pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
+pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
     #[repr(C)]
     struct AccentPolicy {
         state: i32,

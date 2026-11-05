@@ -130,14 +130,14 @@ pub(super) fn create_backdrop(
     use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
     let enabled = windows::core::BOOL::from(true);
     unsafe {
-        DwmSetWindowAttribute(
+        let _ = DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_HOSTBACKDROPBRUSH,
             (&raw const enabled).cast(),
             size_of::<windows::core::BOOL>() as u32,
-        )
-        .ok()?;
+        );
     }
+    crate::island::appearance::set_host_backdrop(hwnd, true);
     let sprite = compositor.CreateSpriteVisual().ok()?;
     sprite.SetBrush(&compositor.CreateHostBackdropBrush().ok()?).ok()?;
     let geometry = compositor.CreateRoundedRectangleGeometry().ok()?;
