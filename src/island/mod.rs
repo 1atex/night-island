@@ -144,7 +144,7 @@ struct App {
     pending_power: Option<(voicecmd::Power, std::time::Instant)>,
     pending_ask: Option<(voicecmd::Command, std::time::Instant)>,
     wake_session: bool,
-    last_request: String,
+    agent: Option<crate::services::assistant::agent::Run>,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
     notice_link: Option<std::path::PathBuf>,

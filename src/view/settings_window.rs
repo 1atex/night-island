@@ -107,13 +107,14 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
-const ASSISTANT: [(Sid, &str, Kind); 17] = [
+const ASSISTANT: [(Sid, &str, Kind); 18] = [
     (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
     (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
     (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
     (Sid::AsstSounds, "Sound cues", Kind::Toggle),
     (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
-    (Sid::AsstReview, "Check each command with a second model call", Kind::Toggle),
+    (Sid::AsstReview, "Check commands with a second model call when asking first", Kind::Toggle),
+    (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
     (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
     (Sid::AsstControls, "Mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
     (Sid::AsstOpen, "Open programs and games", Kind::Cycle),

@@ -1,6 +1,9 @@
+pub mod agent;
 pub mod memory;
 pub mod perms;
 pub mod shell;
+pub mod tools;
+pub mod web;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,11 +18,20 @@ pub struct Assistant {
     pub speak: bool,
     pub volume: u8,
     pub review: bool,
+    pub ask_after_web: bool,
 }
 
 impl Default for Assistant {
     fn default() -> Self {
-        Self { perms: Permissions::default(), wake: false, sounds: true, speak: true, volume: 70, review: true }
+        Self {
+            perms: Permissions::default(),
+            wake: false,
+            sounds: true,
+            speak: true,
+            volume: 70,
+            review: true,
+            ask_after_web: false,
+        }
     }
 }
 

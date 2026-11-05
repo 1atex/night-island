@@ -1,9 +1,13 @@
+use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use windows::Media::SpeechSynthesis::{SpeechSynthesizer, VoiceInformation};
 use windows::Storage::Streams::DataReader;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT, SND_PURGE, SND_SYNC};
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 use windows::core::{HSTRING, PCWSTR};
 
 pub const MAX_CHARS: usize = 600;
@@ -99,9 +103,29 @@ pub fn stop() {
     }
 }
 
+pub const WM_SPOKEN: u32 = WM_APP + 83;
+const ECHO_PAUSE: Duration = Duration::from_millis(250);
+
+fn post_spoken(raw: isize) {
+    unsafe {
+        let _ = PostMessageW(Some(HWND(raw as *mut c_void)), WM_SPOKEN, WPARAM(0), LPARAM(0));
+    }
+}
+
 pub fn speak(text: &str, volume_pct: u8) {
+    start(text, volume_pct, None);
+}
+
+pub fn speak_then_notify(text: &str, volume_pct: u8, hwnd: HWND) {
+    start(text, volume_pct, Some(hwnd.0 as isize));
+}
+
+fn start(text: &str, volume_pct: u8, done: Option<isize>) {
     let text = clip(text);
     if text.is_empty() || volume_pct == 0 {
+        if let Some(raw) = done {
+            post_spoken(raw);
+        }
         return;
     }
     let mine = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -112,13 +136,16 @@ pub fn speak(text: &str, volume_pct: u8) {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-        let Ok(mut wav) = synthesize(&text) else { return };
-        if GENERATION.load(Ordering::SeqCst) != mine {
-            return;
+        let wav = synthesize(&text).ok().filter(|_| GENERATION.load(Ordering::SeqCst) == mine);
+        if let Some(mut wav) = wav {
+            scale_wav(&mut wav, volume_pct);
+            unsafe {
+                let _ = PlaySoundW(PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT);
+            }
         }
-        scale_wav(&mut wav, volume_pct);
-        unsafe {
-            let _ = PlaySoundW(PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT);
+        if let Some(raw) = done.filter(|_| GENERATION.load(Ordering::SeqCst) == mine) {
+            std::thread::sleep(ECHO_PAUSE);
+            post_spoken(raw);
         }
     });
 }

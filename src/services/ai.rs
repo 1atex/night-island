@@ -14,7 +14,7 @@ pub const WM_AI: u32 = WM_APP + 21;
 
 const USER_AGENT: &str = "NightIsland/0.1";
 const MAX_PROMPT_CHARS: usize = 4000;
-const MAX_ANSWER_CHARS: usize = 4000;
+const MAX_ANSWER_CHARS: usize = 24_000;
 const MAX_OUTPUT_TOKENS: u32 = 600;
 const SYSTEM_PROMPT: &str =
     "Answer briefly and plainly, in the language of the question, in at most a few sentences. No markdown.";
@@ -28,7 +28,7 @@ const CHAT_TURNS: usize = 24;
 pub const WM_CHAT: u32 = WM_APP + 24;
 
 pub const WM_COMMAND: u32 = WM_APP + 30;
-const COMMAND_OUTPUT_TOKENS: u32 = 1500;
+const COMMAND_OUTPUT_TOKENS: u32 = 3000;
 
 pub const WM_SORT: u32 = WM_APP + 31;
 pub const SORT_REQUESTS_PER_DAY: u32 = 5;
@@ -560,13 +560,13 @@ pub fn take_command_result() -> Option<Answer> {
     COMMAND_RESULT.lock().ok()?.take()
 }
 
-pub fn ask_command(hwnd: HWND, command: &str, system: String) -> bool {
+pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String) -> bool {
     if BUSY.swap(true, Ordering::SeqCst) {
         return false;
     }
-    let (raw, settings, turn) = (hwnd.0 as isize, config(), ChatTurn::text(false, command));
+    let (raw, settings) = (hwnd.0 as isize, config());
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| build(&settings, key, &[turn], &system, COMMAND_OUTPUT_TOKENS));
+        let answer = run_with(&settings, |key| build(&settings, key, &turns, &system, COMMAND_OUTPUT_TOKENS));
         if let Ok(mut r) = COMMAND_RESULT.lock() {
             *r = Some(answer);
         }
