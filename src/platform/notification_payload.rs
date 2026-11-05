@@ -41,6 +41,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Needs WinRT, which wine does not provide"]
     fn payload_requires_matching_id_app_and_content() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE Notification(Id INTEGER, HandlerId INTEGER, Payload BLOB); CREATE TABLE NotificationHandler(RecordId INTEGER, PrimaryId TEXT);").unwrap();
