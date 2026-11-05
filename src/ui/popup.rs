@@ -59,12 +59,30 @@ impl PopupSurface {
     }
 
     pub fn paint(&self, gpu: &Gpu, draw: impl FnOnce(&Painter) -> Result<()>) -> Result<()> {
+        self.paint_size(gpu, self.size, draw)
+    }
+
+    pub fn fits(&self, size: (i32, i32)) -> bool {
+        size.0 > 0 && size.1 > 0 && size.0 <= self.size.0 && size.1 <= self.size.1
+    }
+
+    pub fn paint_size(&self, gpu: &Gpu, size: (i32, i32), draw: impl FnOnce(&Painter) -> Result<()>) -> Result<()> {
+        if !self.fits(size) {
+            return Err(Error::empty());
+        }
         let mut result = Ok(());
-        gpu.paint_dc(self.dc, self.size, |p| result = draw(p))?;
+        gpu.paint_dc(self.dc, size, |p| result = draw(p))?;
         result
     }
 
     pub fn present(&self, hwnd: HWND, at: Option<POINT>, alpha: u8) -> Result<()> {
+        self.present_size(hwnd, at, self.size, alpha)
+    }
+
+    pub fn present_size(&self, hwnd: HWND, at: Option<POINT>, size: (i32, i32), alpha: u8) -> Result<()> {
+        if !self.fits(size) {
+            return Err(Error::empty());
+        }
         unsafe {
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
@@ -76,7 +94,7 @@ impl PopupSurface {
                 hwnd,
                 None,
                 at.as_ref().map(|p| p as *const _),
-                Some(&SIZE { cx: self.size.0, cy: self.size.1 }),
+                Some(&SIZE { cx: size.0, cy: size.1 }),
                 Some(self.dc),
                 Some(&POINT::default()),
                 COLORREF(0),
@@ -84,6 +102,11 @@ impl PopupSurface {
                 ULW_ALPHA,
             )
         }
+    }
+
+    #[cfg(test)]
+    pub fn storage_id(&self) -> isize {
+        self.bitmap.0 as isize
     }
 
     #[cfg(test)]

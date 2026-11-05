@@ -129,6 +129,8 @@ struct State {
     tray_open: bool,
     tray_requested: bool,
     tray_page: usize,
+    tray_capacity: usize,
+    tray_budget: f32,
     tray_width: f32,
     tray_from: f32,
     tray_started: Instant,
@@ -197,10 +199,33 @@ fn blocks(settings: &TopPanelSettings) -> Vec<Block> {
 }
 
 impl State {
+    fn fit_tray(&mut self, available: f32) {
+        self.tray_budget = available;
+        let slots = (available.max(0.0) / 30.0).floor() as usize;
+        let capacity = if self.tray_icons.len() > slots { slots.saturating_sub(1) } else { slots };
+        if capacity == 0 && self.tray_requested {
+            self.tray_requested = false;
+            self.animate_tray(false);
+            self.tray_width = 0.0;
+            self.tray_from = 0.0;
+            self.dirty = true;
+        }
+        let capacity = capacity.clamp(1, 6);
+        if capacity != self.tray_capacity {
+            self.tray_capacity = capacity;
+            self.tray_page = 0;
+            self.tray_width = self.tray_width.min(self.tray_target());
+            self.dirty = true;
+            if self.tray_open {
+                self.animate_tray(true);
+            }
+        }
+    }
+
     fn tray_target(&self) -> f32 {
         if self.tray_open {
-            (self.tray_icons.len().saturating_sub(self.tray_page).min(6) as f32
-                + if self.tray_icons.len() > 6 { 1.0 } else { 0.0 })
+            (self.tray_icons.len().saturating_sub(self.tray_page).min(self.tray_capacity) as f32
+                + if self.tray_icons.len() > self.tray_capacity { 1.0 } else { 0.0 })
                 * 30.0
         } else {
             0.0
@@ -226,18 +251,8 @@ impl State {
         let width = (self.dimensions().0 * self.scale).ceil() as i32;
         self.origin.0 += self.size.0 - width;
         self.size.0 = width;
-        self.surface.take();
         self.layout();
         unsafe {
-            let _ = SetWindowPos(
-                self.hwnd,
-                None,
-                self.origin.0,
-                self.origin.1,
-                width,
-                self.size.1,
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            );
             if t >= 1.0 {
                 let _ = KillTimer(Some(self.hwnd), TRAY_ANIMATION);
             }
@@ -301,11 +316,11 @@ impl State {
             Role::Right => {
                 let mut x = 14.0;
                 if self.tray_open && self.tray_width >= tray_target - 1.0 {
-                    for index in (self.tray_page..self.tray_icons.len()).take(6) {
+                    for index in (self.tray_page..self.tray_icons.len()).take(self.tray_capacity) {
                         add((x, 12.0, x + 30.0, 42.0), Hit::TrayIcon(index), true);
                         x += 30.0;
                     }
-                    if self.tray_icons.len() > 6 {
+                    if self.tray_icons.len() > self.tray_capacity {
                         add((x, 12.0, x + 30.0, 42.0), Hit::TrayPage, true);
                     }
                 }
@@ -397,14 +412,13 @@ impl State {
                 glyph('\u{E70D}', (w - 34.0, 19.0, w - 18.0, 35.0), 9.0, 0.45)?;
             }
             Role::Right => {
-                let icon_width = (self.tray_icons.len().saturating_sub(self.tray_page).min(6) as f32
-                    + if self.tray_icons.len() > 6 { 1.0 } else { 0.0 })
+                let icon_width = (self.tray_icons.len().saturating_sub(self.tray_page).min(self.tray_capacity) as f32
+                    + if self.tray_icons.len() > self.tray_capacity { 1.0 } else { 0.0 })
                     * 30.0;
-                for (offset, entry) in self.tray_icons.iter().skip(self.tray_page).take(6).enumerate() {
+                p.push_clip(scaled((14.0, 14.0, 14.0 + self.tray_width, 40.0), s));
+                for (offset, entry) in self.tray_icons.iter().skip(self.tray_page).take(self.tray_capacity).enumerate()
+                {
                     let x = 14.0 + self.tray_width - icon_width + offset as f32 * 30.0;
-                    if x < 14.0 || x + 30.0 > 14.0 + self.tray_width {
-                        continue;
-                    }
                     if let Some(icon) = &entry.icon {
                         p.image(scaled((x + 6.0, 18.0, x + 24.0, 36.0), s), 0.0, icon.side, &icon.bgra)?;
                     } else {
@@ -417,6 +431,7 @@ impl State {
                         )?;
                     }
                 }
+                p.pop_clip();
                 for button in &self.buttons {
                     if matches!(button.hit, Hit::TrayIcon(_)) {
                         continue;
@@ -629,13 +644,23 @@ impl State {
 
     fn render(&self) {
         let mut surface = self.surface.borrow_mut();
-        if surface.is_none() {
-            *surface = PopupSurface::new(self.size).ok();
+        if surface.as_ref().is_none_or(|surface| !surface.fits(self.size)) {
+            let capacity = if matches!(self.role, Role::Right) {
+                ((self.dimensions().0 - self.tray_width + 210.0) * self.scale).ceil() as i32
+            } else {
+                self.size.0
+            };
+            *surface = PopupSurface::new((capacity.max(self.size.0), self.size.1)).ok();
         }
         if let Some(surface) = &*surface
-            && surface.paint(&self.gpu, |p| self.draw(p)).is_ok()
+            && surface.paint_size(&self.gpu, self.size, |p| self.draw(p)).is_ok()
         {
-            let _ = surface.present(self.hwnd, None, (u16::from(self.alpha) * u16::from(self.ghost_alpha) / 255) as u8);
+            let _ = surface.present_size(
+                self.hwnd,
+                Some(POINT { x: self.origin.0, y: self.origin.1 }),
+                self.size,
+                (u16::from(self.alpha) * u16::from(self.ghost_alpha) / 255) as u8,
+            );
         }
     }
 
@@ -672,7 +697,11 @@ impl State {
         match hit {
             Hit::TrayIcon(index) => self.tray_action(index, false),
             Hit::TrayPage => {
-                self.tray_page = if self.tray_page + 6 >= self.tray_icons.len() { 0 } else { self.tray_page + 6 };
+                self.tray_page = if self.tray_page + self.tray_capacity >= self.tray_icons.len() {
+                    0
+                } else {
+                    self.tray_page + self.tray_capacity
+                };
                 self.animate_tray(true);
             }
             Hit::Block(block) => self.post(Request::Open(block)),
@@ -945,6 +974,8 @@ impl Wing {
             tray_open: false,
             tray_requested: false,
             tray_page: 0,
+            tray_capacity: 6,
+            tray_budget: 210.0,
             tray_width: 0.0,
             tray_from: 0.0,
             tray_started: Instant::now(),
@@ -966,26 +997,12 @@ impl Wing {
         let (w, h) = self.state.dimensions();
         let size = ((w * scale).ceil() as i32, (h * scale).ceil() as i32);
         let moved = size != self.state.size || origin != self.state.origin;
-        if size != self.state.size {
-            self.state.surface.take();
-        }
         self.state.scale = scale;
         self.state.size = size;
         self.state.origin = origin;
         self.state.visible = true;
         self.state.layout();
         unsafe {
-            if moved || fresh {
-                let _ = SetWindowPos(
-                    self.state.hwnd,
-                    Some(HWND_TOPMOST),
-                    origin.0,
-                    origin.1,
-                    size.0,
-                    size.1,
-                    SWP_NOACTIVATE,
-                );
-            }
             if fresh {
                 self.state.fade = Instant::now();
                 self.state.opening = crate::ui::feedback::motion_allowed();
@@ -1131,8 +1148,16 @@ impl TopPanel {
             wing.state.icon = icon.clone();
         }
         let left_x = self.monitor.work.left + (6.0 * scale) as i32;
-        let right_w = self.right.state.dimensions().0 * scale;
         let controls = if self.settings.clear_window_controls { 144.0 * scale } else { 0.0 };
+        let edge = self.monitor.work.right - ((6.0 * scale) + controls) as i32;
+        let left_bound = if (y as f32) < island.3 + 8.0 * scale && y as f32 + 54.0 * scale > island.1 - 8.0 * scale {
+            (island.2 + 16.0 * scale).max(self.monitor.work.left as f32)
+        } else {
+            self.monitor.work.left as f32
+        };
+        let base = self.right.state.dimensions().0 - self.right.state.tray_width;
+        self.right.state.fit_tray((edge as f32 - left_bound) / scale - base);
+        let right_w = self.right.state.dimensions().0 * scale;
         let right_x = self.monitor.work.right - right_w.ceil() as i32 - ((6.0 * scale) + controls) as i32;
         let collision = |x: i32, width: f32| {
             overlaps(
@@ -1207,11 +1232,15 @@ impl TopPanel {
     }
 
     pub fn set_tray_icons(&mut self, entries: Vec<crate::platform::system_tray::inline::Entry>) {
+        let target = self.right.state.tray_target();
         self.right.state.tray_icons = entries;
+        self.right.state.fit_tray(self.right.state.tray_budget);
         if self.right.state.tray_page >= self.right.state.tray_icons.len() {
             self.right.state.tray_page = 0;
         }
-        if self.right.state.tray_requested {
+        self.right.state.dirty = true;
+        if self.right.state.tray_requested && (!self.right.state.tray_open || self.right.state.tray_target() != target)
+        {
             self.right.state.animate_tray(true);
         }
     }

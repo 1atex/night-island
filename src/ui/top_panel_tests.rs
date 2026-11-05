@@ -187,19 +187,45 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         save(&panel.left, &format!("left-{scale:.1}"))?;
         save(&panel.right, &format!("right-{scale:.1}"))?;
         let right_edge = panel.right.state.origin.0 + panel.right.state.size.0;
+        let buffer = panel.right.state.surface.borrow().as_ref().unwrap().storage_id();
+        let wifi_x = {
+            let button = panel.right.state.buttons.iter().find(|b| b.hit == Hit::Block(Block::Wifi)).unwrap();
+            panel.right.state.origin.0 as f32 + button.rect.0 * scale
+        };
         panel.right.state.tray_requested = true;
         panel.set_tray_icons(crate::platform::system_tray::inline::preview_entries());
+        for elapsed in (0..=240).step_by(20) {
+            panel.right.state.tray_started = Instant::now() - std::time::Duration::from_millis(elapsed);
+            panel.right.state.tray_frame();
+            panel.update(snapshot.clone(), island, false);
+            assert!(panel.right.state.visible, "The expanding wing must remain visible at {elapsed} ms");
+            assert_eq!(panel.right.state.origin.0 + panel.right.state.size.0, right_edge);
+            assert!(panel.right.state.origin.0 as f32 >= island.2 + 8.0 * scale);
+            assert_eq!(panel.right.state.surface.borrow().as_ref().unwrap().storage_id(), buffer);
+            let button = panel.right.state.buttons.iter().find(|b| b.hit == Hit::Block(Block::Wifi)).unwrap();
+            let x = panel.right.state.origin.0 as f32 + button.rect.0 * scale;
+            assert!((x - wifi_x).abs() <= 1.0);
+            let mut actual = RECT::default();
+            unsafe {
+                GetWindowRect(panel.right.state.hwnd, &mut actual)?;
+            }
+            assert_eq!((actual.left, actual.right), (panel.right.state.origin.0, right_edge));
+            save(&panel.right, &format!("tray-frame-{scale:.1}-{elapsed}"))?;
+        }
         panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
         panel.right.state.tray_frame();
         assert_eq!(panel.right.state.origin.0 + panel.right.state.size.0, right_edge);
-        assert_eq!(panel.right.state.buttons.iter().filter(|b| matches!(b.hit, Hit::TrayIcon(_))).count(), 6);
+        assert_eq!(
+            panel.right.state.buttons.iter().filter(|b| matches!(b.hit, Hit::TrayIcon(_))).count(),
+            panel.right.state.tray_capacity
+        );
         save(&panel.right, &format!("inline-tray-{scale:.1}"))?;
         click(&panel.right, Hit::TrayIcon(0));
         assert!(matches!(panel.take_request(1), Some(Request::TrayAction(_, false, _))));
         click(&panel.right, Hit::TrayPage);
         panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
         panel.right.state.tray_frame();
-        assert_eq!(panel.right.state.tray_page, 6);
+        assert_eq!(panel.right.state.tray_page, panel.right.state.tray_capacity);
         panel.open(Block::Tray);
         panel.right.state.tray_started = Instant::now() - std::time::Duration::from_secs(1);
         panel.right.state.tray_frame();
