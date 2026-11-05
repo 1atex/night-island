@@ -45,6 +45,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Needs the Windows process memory counters, which wine does not report"]
     fn the_process_reports_a_plausible_memory_use() {
         let usage = usage().expect("memory info");
         assert!(usage.working_mb() >= 1 && usage.working_mb() < 4096);
@@ -52,6 +53,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Needs the Windows process memory counters, which wine does not report"]
     fn trimming_gives_pages_back_to_windows() {
         let hog = vec![1u8; 48 << 20];
         assert_eq!(hog.iter().map(|b| u64::from(*b)).sum::<u64>(), 48 << 20);
