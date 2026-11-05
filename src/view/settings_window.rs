@@ -925,6 +925,7 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
     out.push(Item::Note("Ask in the command bar (Alt+Space): start with ?, for example  ? what is DPAPI"));
     out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
     out.push(Item::Note("OpenAI-compatible: OpenAI, OpenRouter, or a local server such as LM Studio."));
+    out.push(Item::Note("A chat service may not support speech. If needed, enable a separate speech service below."));
     for &(id, label, kind) in &AI {
         out.push(Item::Row(id, label, kind));
     }

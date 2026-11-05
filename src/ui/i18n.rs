@@ -1281,6 +1281,12 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "Save a key for the speech service first" => "Сначала сохраните ключ сервиса речи",
         "Separate speech service" => "Отдельный сервис речи",
+        "Speech endpoint unavailable; check the separate speech service" => {
+            "Речь недоступна: проверьте отдельный сервис речи в настройках ИИ"
+        }
+        "A chat service may not support speech. If needed, enable a separate speech service below." => {
+            "Сервис чата может не поддерживать речь. В этом случае включите отдельный сервис речи ниже."
+        }
         "Voice command name" => "Имя для голосовых команд",
         "Save command name" => "Сохранить имя",
         "Command name saved" => "Имя сохранено",

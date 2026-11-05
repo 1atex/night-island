@@ -558,6 +558,9 @@ pub fn build_voice_call(settings: &AiSettings, key: &str, wav: &[u8]) -> Option<
 }
 
 pub fn parse_transcript(provider: AiProvider, status: u16, body: &str) -> Answer {
+    if provider == AiProvider::OpenAi && matches!(status, 404 | 405 | 501) {
+        return Err("Speech endpoint unavailable; check the separate speech service".into());
+    }
     if provider == AiProvider::OpenAi && (200..300).contains(&status) {
         let value: serde_json::Value = serde_json::from_str(body).map_err(|_| "The reply was not understood")?;
         return match value["text"].as_str().map(tidy) {
@@ -780,6 +783,71 @@ mod tests {
         assert_eq!(parse_reply(AiProvider::OpenAi, 200, plain), Err("The answer was empty".to_string()));
         let fine = r#"{"choices":[{"finish_reason":"length","message":{"content":"Да"}}]}"#;
         assert_eq!(parse_reply(AiProvider::OpenAi, 200, fine), Ok("Да".to_string()));
+    }
+
+    #[test]
+    #[ignore = "Sends a safe question to the configured AI service using the saved key"]
+    fn configured_provider_answers_a_voice_question() {
+        let settings = crate::data::settings::Settings::load().ai;
+        configure(&settings);
+        let started = std::time::Instant::now();
+        assert!(ask_agent(
+            HWND::default(),
+            vec![ChatTurn::text(false, "Сколько будет два плюс два? Ответь кратко.")],
+            crate::tools::voicecmd::system_prompt(&[], false, "", ""),
+            1,
+        ));
+        let answer = loop {
+            if let Some((serial, answer)) = take_command_result() {
+                assert_eq!(serial, 1);
+                break answer.expect("configured service must answer");
+            }
+            assert!(started.elapsed().as_secs() < 70, "voice command did not complete");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        while busy() && started.elapsed().as_secs() < 70 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!busy(), "the AI must release its busy state");
+        assert!(
+            matches!(crate::tools::voicecmd::parse(&answer), crate::tools::voicecmd::Command::Answer(text) if !text.is_empty())
+        );
+        println!(
+            "Configured AI answered a safe voice question in {:.2}s and released its busy state",
+            started.elapsed().as_secs_f32()
+        );
+    }
+
+    #[test]
+    #[ignore = "Transmits the explicitly selected recording to the configured speech service"]
+    fn configured_speech_service_transcribes_a_recording() {
+        let path = std::env::var_os("NI_VOICE_TEST_RECORDING").expect("Select a test WAV with NI_VOICE_TEST_RECORDING");
+        let wav = std::fs::read(path).expect("test recording must load");
+        assert!(wav.starts_with(b"RIFF") && wav.get(8..12) == Some(b"WAVE"));
+        let settings = crate::data::settings::Settings::load().ai;
+        let started = std::time::Instant::now();
+        let transcript = transcribe_now(&settings, &wav).expect("configured speech service must transcribe");
+        assert!(!transcript.trim().is_empty());
+        println!(
+            "Configured speech service recognized {} characters in {:.2}s",
+            transcript.chars().count(),
+            started.elapsed().as_secs_f32()
+        );
+    }
+
+    #[test]
+    fn unavailable_speech_endpoint_explains_what_to_configure() {
+        for status in [404, 405, 501] {
+            assert_eq!(
+                parse_transcript(AiProvider::OpenAi, status, ""),
+                Err("Speech endpoint unavailable; check the separate speech service".into())
+            );
+        }
+        assert_eq!(
+            parse_transcript(AiProvider::OpenAi, 200, r#"{"text":"Island, hello"}"#),
+            Ok("Island, hello".into())
+        );
+        assert_ne!(parse_transcript(AiProvider::OpenAi, 401, ""), parse_transcript(AiProvider::OpenAi, 404, ""));
     }
 
     #[test]
