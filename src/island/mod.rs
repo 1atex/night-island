@@ -40,6 +40,7 @@ use crate::platform::dnd;
 use crate::platform::downloads;
 use crate::platform::lockkeys;
 use crate::platform::media;
+use crate::platform::memory;
 use crate::platform::metrics;
 use crate::platform::privacy;
 use crate::platform::recognize;

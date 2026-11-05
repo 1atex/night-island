@@ -10,6 +10,7 @@ pub mod downloads;
 pub mod localvoice;
 pub mod lockkeys;
 pub mod media;
+pub mod memory;
 pub mod metrics;
 mod notification_activation;
 mod notification_images;

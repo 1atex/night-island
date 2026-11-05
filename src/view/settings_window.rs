@@ -267,6 +267,8 @@ pub enum Field {
     VoiceKey,
     VoiceModel,
     VoiceBase,
+    TtsKey,
+    TtsBase,
     TtsModel,
     TtsVoice,
     WakeWord,
@@ -291,6 +293,8 @@ pub enum Act {
     AiRemoveKey,
     VoiceSave,
     VoiceRemoveKey,
+    TtsSave,
+    TtsRemoveKey,
     WakeSave,
     GroupAdd,
     GroupDelete(i64),
@@ -817,15 +821,34 @@ fn assistant_items(ui: &UiState) -> Vec<Item> {
         }
         out.push(Item::Row(id, label, kind));
         if id == Sid::AsstNatural && ui.cfg.assistant.natural_voice {
+            let (saved, shared) = (ui.int.tts_key_saved, ui.int.tts_key_shared);
+            out.push(Item::Field(
+                Field::TtsKey,
+                "Voice API key",
+                if saved {
+                    "Saved: type a new one to replace it"
+                } else if shared {
+                    "Same server: the speech service key is used"
+                } else {
+                    "Paste the key here"
+                },
+            ));
+            out.push(Item::Field(Field::TtsBase, "Voice server address", "https://api.openai.com/v1"));
             out.push(Item::Field(Field::TtsModel, "Voice model", "gpt-4o-mini-tts"));
             out.push(Item::Field(Field::TtsVoice, "Voice name", "nova"));
-            out.push(Item::Button(Act::VoiceSave, "Save the voice".into(), true));
+            out.push(Item::Button(Act::TtsSave, "Save the voice service".into(), true));
+            if saved {
+                out.push(Item::Button(Act::TtsRemoveKey, "Remove the voice key".into(), true));
+            }
+            out.push(Item::Note("Any OpenAI-compatible server with /audio/speech. The address is where requests go:"));
             out.push(Item::Note(
-                "Uses the speech service of the AI group (same key). OpenAI voices: alloy, ash, coral,",
+                "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own",
             ));
             out.push(Item::Note(
-                "echo, fable, nova, onyx, sage, shimmer. Other servers (Kokoro, openedai-speech): their names.",
+                "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key.",
             ));
+            out.push(Item::Note("OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."));
+            out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
         }
     }
     out
@@ -1133,6 +1156,8 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::VoiceKey => &ui.int.voice_key,
         Field::VoiceModel => &ui.int.voice_model,
         Field::VoiceBase => &ui.int.voice_base,
+        Field::TtsKey => &ui.int.tts_key,
+        Field::TtsBase => &ui.int.tts_base,
         Field::TtsModel => &ui.int.tts_model,
         Field::TtsVoice => &ui.int.tts_voice,
         Field::WakeWord => &ui.int.wake,
@@ -1355,7 +1380,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         ctl,
                         inner,
                         field_edit(ui, field),
-                        matches!(field, Field::DiscordSecret | Field::AiKey | Field::VoiceKey),
+                        matches!(field, Field::DiscordSecret | Field::AiKey | Field::VoiceKey | Field::TtsKey),
                         hint,
                         ui.sw.field == Some(field),
                         ui.sw.caret_on,

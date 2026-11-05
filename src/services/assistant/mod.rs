@@ -24,6 +24,7 @@ pub struct Assistant {
     pub follow_up: bool,
     pub natural_voice: bool,
     pub local_voice: bool,
+    pub tts_base: String,
     pub tts_model: String,
     pub tts_voice: String,
     pub max_steps: u8,
@@ -44,6 +45,7 @@ impl Default for Assistant {
             follow_up: true,
             natural_voice: false,
             local_voice: false,
+            tts_base: "https://api.openai.com/v1".into(),
             tts_model: "gpt-4o-mini-tts".into(),
             tts_voice: "nova".into(),
             max_steps: 10,
@@ -57,6 +59,7 @@ impl Assistant {
         self.volume = self.volume.min(100);
         self.max_steps = self.max_steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1);
         let defaults = Assistant::default();
+        self.tts_base = crate::services::ai::clean_base(&self.tts_base).unwrap_or(defaults.tts_base.clone());
         if !crate::services::ai::valid_model(&self.tts_model, crate::data::settings::AiProvider::OpenAi) {
             self.tts_model = defaults.tts_model;
         }
@@ -138,6 +141,12 @@ mod tests {
         let mut ok = Assistant { tts_model: "tts-1".into(), tts_voice: "alloy".into(), ..Assistant::default() };
         ok.sanitize();
         assert_eq!((ok.tts_model.as_str(), ok.tts_voice.as_str()), ("tts-1", "alloy"));
+        let mut bad_base = Assistant { tts_base: "http://example.com/v1".into(), ..Assistant::default() };
+        bad_base.sanitize();
+        assert_eq!(bad_base.tts_base, "https://api.openai.com/v1", "plain http is only for this computer");
+        let mut local = Assistant { tts_base: "http://localhost:8880/v1/".into(), ..Assistant::default() };
+        local.sanitize();
+        assert_eq!(local.tts_base, "http://localhost:8880/v1");
         let old: Assistant = serde_json::from_str(r#"{"wake":true}"#).unwrap();
         assert!(old.follow_up && old.tts_model == "gpt-4o-mini-tts" && old.max_steps == 10);
         for (given, kept) in [(0u8, 3u8), (2, 3), (7, 7), (200, 20)] {

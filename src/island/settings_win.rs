@@ -307,6 +307,8 @@ impl App {
             view::Field::VoiceKey => &mut self.ui.int.voice_key,
             view::Field::VoiceModel => &mut self.ui.int.voice_model,
             view::Field::VoiceBase => &mut self.ui.int.voice_base,
+            view::Field::TtsKey => &mut self.ui.int.tts_key,
+            view::Field::TtsBase => &mut self.ui.int.tts_base,
             view::Field::TtsModel => &mut self.ui.int.tts_model,
             view::Field::TtsVoice => &mut self.ui.int.tts_voice,
             view::Field::WakeWord => &mut self.ui.int.wake,
@@ -319,7 +321,10 @@ impl App {
         let Some((_, inner)) = view::sw_field_rects(self.sw_size(), self.dpi_scale, &self.ui, field) else { return };
         let shown = {
             let text = view::field_edit(&self.ui, field).text();
-            if matches!(field, view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey) {
+            if matches!(
+                field,
+                view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey | view::Field::TtsKey
+            ) {
                 "\u{2022}".repeat(text.chars().count())
             } else {
                 text
@@ -350,8 +355,12 @@ impl App {
         self.ui.int.voice_base.set_text(&self.settings.ai.voice_base);
         self.ui.int.voice_key.set_text("");
         self.ui.int.voice_key_saved = ai::has_voice_key();
+        self.ui.int.tts_key.set_text("");
+        self.ui.int.tts_base.set_text(&self.settings.assistant.tts_base);
         self.ui.int.tts_model.set_text(&self.settings.assistant.tts_model);
         self.ui.int.tts_voice.set_text(&self.settings.assistant.tts_voice);
+        self.ui.int.tts_key_saved = ai::has_tts_key();
+        self.ui.int.tts_key_shared = ai::tts_key_is_shared(&self.settings.assistant.tts_base);
         self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
         self.sync_ai_fields();
     }
@@ -395,27 +404,42 @@ impl App {
         let Some(base) = ai::clean_base(&self.ui.int.voice_base.text()) else {
             return self.notify(Notice::Error, '\u{E783}', "The server address must be https:// (or local http://)");
         };
-        let tts_model = self.ui.int.tts_model.text().trim().to_string();
-        let tts_model = if tts_model.is_empty() { self.settings.assistant.tts_model.clone() } else { tts_model };
-        if !ai::valid_model(&tts_model, crate::data::settings::AiProvider::OpenAi) {
-            return self.notify(Notice::Error, '\u{E783}', "That model name is not valid");
-        }
-        let tts_voice = self.ui.int.tts_voice.text().trim().to_string();
-        let tts_voice = if tts_voice.is_empty() { self.settings.assistant.tts_voice.clone() } else { tts_voice };
-        let voice_ok = tts_voice.len() <= 40
-            && tts_voice.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-        if !voice_ok {
-            return self.notify(Notice::Error, '\u{E783}', "That voice name is not valid");
-        }
         self.settings.ai.voice_model = model;
         self.settings.ai.voice_base = base;
-        self.settings.assistant.tts_model = tts_model;
-        self.settings.assistant.tts_voice = tts_voice;
         self.settings.save();
         self.ui.cfg = self.settings.clone();
         ai::configure(&self.settings.ai);
         self.sync_voice_fields();
         self.notify(Notice::Integrations, '\u{E73E}', "Speech service saved");
+    }
+
+    fn save_tts(&mut self) {
+        let key = self.ui.int.tts_key.text();
+        if !key.trim().is_empty() && !ai::save_tts_key(&key) {
+            return self.notify(Notice::Error, '\u{E783}', "That does not look like an API key");
+        }
+        let Some(base) = ai::clean_base(&self.ui.int.tts_base.text()) else {
+            return self.notify(Notice::Error, '\u{E783}', "The server address must be https:// (or local http://)");
+        };
+        let given = self.ui.int.tts_model.text().trim().to_string();
+        let model = if given.is_empty() { self.settings.assistant.tts_model.clone() } else { given };
+        if !ai::valid_model(&model, crate::data::settings::AiProvider::OpenAi) {
+            return self.notify(Notice::Error, '\u{E783}', "That model name is not valid");
+        }
+        let given = self.ui.int.tts_voice.text().trim().to_string();
+        let voice = if given.is_empty() { self.settings.assistant.tts_voice.clone() } else { given };
+        let voice_ok =
+            voice.len() <= 40 && voice.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if !voice_ok {
+            return self.notify(Notice::Error, '\u{E783}', "That voice name is not valid");
+        }
+        self.settings.assistant.tts_base = base;
+        self.settings.assistant.tts_model = model;
+        self.settings.assistant.tts_voice = voice;
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        self.sync_voice_fields();
+        self.notify(Notice::Integrations, '\u{E73E}', "Voice service saved");
     }
 
     fn save_ai(&mut self) {
@@ -638,6 +662,11 @@ impl App {
             }
             view::Act::AiSave => self.save_ai(),
             view::Act::VoiceSave => self.save_voice(),
+            view::Act::TtsSave => self.save_tts(),
+            view::Act::TtsRemoveKey => {
+                ai::remove_tts_key();
+                self.sync_voice_fields();
+            }
             view::Act::WakeSave => self.save_wake(),
             view::Act::GroupAdd => {
                 let name = self.ui.int.group_name.text();
@@ -850,11 +879,10 @@ impl App {
                 let act = match field {
                     view::Field::SpotifyId => view::Act::SpotifySaveId,
                     view::Field::AiKey | view::Field::AiModel | view::Field::AiBase => view::Act::AiSave,
-                    view::Field::VoiceKey
-                    | view::Field::VoiceModel
-                    | view::Field::VoiceBase
-                    | view::Field::TtsModel
-                    | view::Field::TtsVoice => view::Act::VoiceSave,
+                    view::Field::VoiceKey | view::Field::VoiceModel | view::Field::VoiceBase => view::Act::VoiceSave,
+                    view::Field::TtsKey | view::Field::TtsBase | view::Field::TtsModel | view::Field::TtsVoice => {
+                        view::Act::TtsSave
+                    }
                     view::Field::WakeWord => view::Act::WakeSave,
                     view::Field::GroupName => view::Act::GroupAdd,
                     _ => view::Act::DiscordMain,
@@ -872,8 +900,10 @@ impl App {
                 }
             }
             0x03 | 0x18 => {
-                if !matches!(field, view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey)
-                    && let Some(n) = self.sw_edit_mut()
+                if !matches!(
+                    field,
+                    view::Field::DiscordSecret | view::Field::AiKey | view::Field::VoiceKey | view::Field::TtsKey
+                ) && let Some(n) = self.sw_edit_mut()
                     && let Some(text) = n.selected_text()
                 {
                     crate::data::clips::sys::write_text(hwnd, &text);

@@ -61,7 +61,8 @@ impl App {
         if !wake::listening() {
             wake::start(self.hwnd, voicecmd::wake_words(&self.settings.ai.voice_wake));
         }
-        if self.wake_session || dictation::active() {
+        let speaking = self.agent.as_ref().is_some_and(|r| r.phase == Phase::Speaking);
+        if (self.wake_session && !speaking) || dictation::active() {
             wake::pause();
         } else {
             wake::resume();
@@ -99,9 +100,11 @@ impl App {
         let a = &self.settings.assistant;
         speech::Voice {
             local: a.local_voice && localvoice::ready(),
-            natural: a
-                .natural_voice
-                .then(|| speech::Natural { model: a.tts_model.clone(), voice: a.tts_voice.clone() }),
+            natural: a.natural_voice.then(|| speech::Natural {
+                base: a.tts_base.clone(),
+                model: a.tts_model.clone(),
+                voice: a.tts_voice.clone(),
+            }),
         }
     }
 
@@ -175,8 +178,14 @@ impl App {
         if !self.settings.assistant.perms.enabled || !self.speech_ready() {
             return self.sync_wake();
         }
-        self.wake_session = true;
         speech::stop();
+        let interrupted = self.agent.as_ref().is_some_and(|r| r.phase == Phase::Speaking);
+        if interrupted && let Some(run) = self.agent.as_mut() {
+            crate::log_info!("Assistant: interrupted by the call word while speaking");
+            run.phase = Phase::Listening;
+            run.waiting = true;
+        }
+        self.wake_session = true;
         if dictation::start_auto(self.hwnd) {
             self.cue(sounds::Cue::Heard);
             self.show_notice_for('\u{E720}', "Listening…", (dictation::MAX_SECS as u32 + 5) * 1000);

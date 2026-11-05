@@ -97,6 +97,37 @@ pub fn save_voice_key(key: &str) -> bool {
     has_voice_key()
 }
 
+const TTS_SECRET: &str = "ai_tts";
+
+pub fn has_tts_key() -> bool {
+    integrations::dir().is_some_and(|d| d.join(format!("{TTS_SECRET}.bin")).exists())
+}
+
+pub fn save_tts_key(key: &str) -> bool {
+    if !valid_key(key) {
+        return false;
+    }
+    integrations::save_secret(TTS_SECRET, key.trim());
+    has_tts_key()
+}
+
+pub fn remove_tts_key() {
+    integrations::delete_secret(TTS_SECRET);
+}
+
+pub fn tts_credentials(base: &str) -> Option<(String, String)> {
+    let base = clean_base(base)?;
+    if let Some(key) = integrations::load_secret(TTS_SECRET) {
+        return Some((base, key));
+    }
+    let (shared_base, key) = speech_credentials()?;
+    (shared_base == base).then_some((base, key))
+}
+
+pub fn tts_key_is_shared(base: &str) -> bool {
+    !has_tts_key() && clean_base(base).is_some_and(|b| speech_credentials().is_some_and(|(shared, _)| shared == b))
+}
+
 pub fn remove_voice_key() {
     integrations::delete_secret(VOICE_SECRET);
 }

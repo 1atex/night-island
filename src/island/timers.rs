@@ -12,6 +12,38 @@ unsafe extern "system" {
     fn timeBeginPeriod(period: u32) -> u32;
 }
 
+const TRIM_EVERY: Duration = Duration::from_secs(180);
+
+thread_local! {
+    static LAST_TRIM: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+impl App {
+    fn trim_memory_when_idle(&mut self) {
+        let quiet = matches!(self.state, State::Collapsed | State::Hidden)
+            && self.recording.is_none()
+            && !dictation::active()
+            && self.agent.is_none();
+        let due = LAST_TRIM.get().is_none_or(|at| at.elapsed() >= TRIM_EVERY);
+        if !quiet || !due {
+            return;
+        }
+        LAST_TRIM.set(Some(Instant::now()));
+        let before = memory::usage();
+        memory::trim();
+        if let (Some(before), Some(after)) = (before, memory::usage())
+            && memory::worth_logging(before, after)
+        {
+            crate::log_info!(
+                "Memory trimmed: working set {} -> {} MB, private {} MB",
+                before.working_mb(),
+                after.working_mb(),
+                after.private_mb()
+            );
+        }
+    }
+}
+
 pub(in crate::island) fn raise_timer_resolution() {
     unsafe {
         timeBeginPeriod(1);
@@ -287,6 +319,7 @@ impl App {
                 self.refresh_reminder_labels();
                 self.repaint();
                 self.schedule_clock();
+                self.trim_memory_when_idle();
             }
         }
     }

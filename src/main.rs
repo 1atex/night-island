@@ -9,6 +9,9 @@ mod ui;
 mod view;
 
 fn main() -> windows_core::Result<()> {
+    if platform::localvoice::run_helper() {
+        return Ok(());
+    }
     if services::agents::handle_cli() {
         return Ok(());
     }

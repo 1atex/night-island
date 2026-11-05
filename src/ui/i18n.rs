@@ -1017,6 +1017,29 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Живой голос от сервиса речи (платно, ПК не нагружает)"
         }
         "Keep listening after an answer" => "Слушать дальше после ответа",
+        "Voice API key" => "Ключ API голоса",
+        "Voice server address" => "Адрес сервера голоса",
+        "Voice model" => "Модель голоса",
+        "Voice name" => "Имя голоса",
+        "Save the voice service" => "Сохранить сервис голоса",
+        "Remove the voice key" => "Удалить ключ голоса",
+        "Voice service saved" => "Сервис голоса сохранён",
+        "Same server: the speech service key is used" => "Тот же сервер: берётся ключ сервиса речи",
+        "Any OpenAI-compatible server with /audio/speech. The address is where requests go:" => {
+            "Любой OpenAI-совместимый сервер с /audio/speech. Адрес — куда уходят запросы:"
+        }
+        "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own" => {
+            "OpenAI https://api.openai.com/v1 (ключ: platform.openai.com/api-keys, платно) или свой"
+        }
+        "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key." => {
+            "сервер (Kokoro-FastAPI, openedai-speech), например http://localhost:8880/v1 с любым ключом."
+        }
+        "OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer." => {
+            "Голоса OpenAI: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."
+        }
+        "Edit the assistant's own instructions" => "Свои инструкции ассистенту",
+        "Steps per request" => "Шагов на запрос",
+        "How it works" => "Как работает",
         "Local voice Piper (free, works offline, a little CPU while speaking)" => {
             "Локальный голос Piper (бесплатно, без сети, чуть грузит процессор, пока говорит)"
         }

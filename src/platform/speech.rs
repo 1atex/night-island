@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use windows::Media::SpeechSynthesis::{SpeechSynthesizer, VoiceInformation};
 use windows::Storage::Streams::DataReader;
@@ -117,6 +118,7 @@ const NATURAL_RATE: u32 = 24_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Natural {
+    pub base: String,
     pub model: String,
     pub voice: String,
 }
@@ -161,7 +163,10 @@ fn natural_request(text: &str, natural: &Natural) -> String {
 }
 
 fn natural_wav(text: &str, natural: &Natural) -> Option<Vec<u8>> {
-    let (base, key) = crate::services::ai::speech_credentials()?;
+    let Some((base, key)) = crate::services::ai::tts_credentials(&natural.base) else {
+        crate::log_warn!("The natural voice has no key or a wrong address: see the voice service settings");
+        return None;
+    };
     let auth = format!("Bearer {key}");
     let reply = crate::services::http::post_json_for_bytes(
         &format!("{base}/audio/speech"),
@@ -220,11 +225,33 @@ fn start(text: &str, volume_pct: u8, done: Option<isize>, voice: Voice) {
         let _ = PlaySoundW(PCWSTR::null(), None, SND_PURGE);
     }
     std::thread::spawn(move || {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
-        let wav = render(&text, &voice).filter(|_| GENERATION.load(Ordering::SeqCst) == mine);
-        if let Some(mut wav) = wav {
+        let started = Instant::now();
+        let (sender, parts) = mpsc::sync_channel::<Option<Vec<u8>>>(2);
+        let pieces = chunks(&text, CHUNK_CHARS);
+        let maker = voice.clone();
+        std::thread::spawn(move || {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            }
+            for piece in pieces {
+                if GENERATION.load(Ordering::SeqCst) != mine {
+                    break;
+                }
+                if sender.send(render(&piece, &maker)).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut first = true;
+        for part in parts {
+            if GENERATION.load(Ordering::SeqCst) != mine {
+                break;
+            }
+            let Some(mut wav) = part else { continue };
+            if first {
+                first = false;
+                crate::log_info!("The voice starts after {} ms", started.elapsed().as_millis());
+            }
             scale_wav(&mut wav, volume_pct);
             unsafe {
                 let _ = PlaySoundW(PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_SYNC | SND_NODEFAULT);
@@ -235,6 +262,73 @@ fn start(text: &str, volume_pct: u8, done: Option<isize>, voice: Voice) {
             post_spoken(raw);
         }
     });
+}
+
+const CHUNK_CHARS: usize = 170;
+
+fn sentences(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut current = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        current.push(c);
+        let ends = matches!(c, '.' | '!' | '?' | '\u{2026}' | '\n') || (c == ';' && chars.get(i + 1) == Some(&' '));
+        let boundary = chars.get(i + 1).is_none_or(|n| n.is_whitespace());
+        if ends && boundary {
+            out.push(std::mem::take(&mut current).trim().to_string());
+        }
+    }
+    out.push(current.trim().to_string());
+    out.retain(|s| s.chars().any(char::is_alphanumeric));
+    out
+}
+
+fn hard_split(sentence: &str, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest: Vec<char> = sentence.chars().collect();
+    while rest.len() > max {
+        let window = &rest[..max];
+        let cut = window
+            .iter()
+            .rposition(|c| matches!(c, ',' | ';' | ':'))
+            .or_else(|| window.iter().rposition(|c| c.is_whitespace()))
+            .map_or(max, |at| at + 1);
+        let head: String = rest[..cut].iter().collect();
+        out.push(head.trim().to_string());
+        rest = rest[cut..].to_vec();
+        while rest.first().is_some_and(|c| c.is_whitespace()) {
+            rest.remove(0);
+        }
+    }
+    if !rest.is_empty() {
+        out.push(rest.iter().collect());
+    }
+    out
+}
+
+pub fn chunks(text: &str, max: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for (i, sentence) in sentences(text).into_iter().enumerate() {
+        let parts = if sentence.chars().count() > max { hard_split(&sentence, max) } else { vec![sentence] };
+        for part in parts {
+            let joined = current.chars().count() + 1 + part.chars().count();
+            if !current.is_empty() && (i == 0 || joined > max) {
+                out.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(&part);
+        }
+        if i == 0 && !current.is_empty() {
+            out.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -276,6 +370,41 @@ mod tests {
     }
 
     #[test]
+    fn the_first_sentence_goes_alone_so_the_sound_starts_early() {
+        let text = "Привет, я тут. Сегодня в Иваново облачно, около трёх градусов. Завтра снег! К выходным потеплеет.";
+        let parts = chunks(text, 80);
+        assert_eq!(parts[0], "Привет, я тут.");
+        assert_eq!(parts.join(" "), text);
+        assert!(parts.iter().all(|p| p.chars().count() <= 80), "{parts:?}");
+        assert!(parts.len() >= 3);
+    }
+
+    #[test]
+    fn numbers_with_a_dot_and_abbreviation_free_text_are_not_cut_in_the_middle() {
+        let parts = chunks("Температура 3.5 градуса. Ветер 2.1 метра в секунду.", 200);
+        assert_eq!(parts, ["Температура 3.5 градуса.", "Ветер 2.1 метра в секунду."]);
+    }
+
+    #[test]
+    fn a_very_long_sentence_is_cut_at_commas_then_at_spaces() {
+        let sentence = format!("{}.", ["слово"; 60].join(" "));
+        let parts = chunks(&sentence, 50);
+        assert!(parts.len() > 3 && parts.iter().all(|p| p.chars().count() <= 50), "{parts:?}");
+        assert_eq!(parts.join(" "), sentence);
+        let with_commas = chunks("раз два три, четыре пять шесть, семь восемь девять, десять", 25);
+        assert!(with_commas.iter().all(|p| p.chars().count() <= 25), "{with_commas:?}");
+        assert!(with_commas[0].ends_with(','));
+    }
+
+    #[test]
+    fn empty_noise_and_punctuation_make_no_pieces() {
+        assert!(chunks("", 100).is_empty());
+        assert!(chunks("  ...  ?! ", 100).is_empty());
+        assert_eq!(chunks("Без точки", 100), ["Без точки"]);
+        assert_eq!(chunks("Одно.", 100), ["Одно."]);
+    }
+
+    #[test]
     fn raw_samples_get_a_proper_wav_header() {
         let wav = pcm_wav(&[1, 0, 2, 0, 3], 24_000);
         assert_eq!(&wav[..4], b"RIFF");
@@ -299,13 +428,14 @@ mod tests {
 
     #[test]
     fn the_natural_voice_request_is_plain_json_and_only_new_models_get_instructions() {
-        let new = Natural { model: "gpt-4o-mini-tts".into(), voice: "nova".into() };
+        let new =
+            Natural { base: "https://api.openai.com/v1".into(), model: "gpt-4o-mini-tts".into(), voice: "nova".into() };
         let body: serde_json::Value = serde_json::from_str(&natural_request("Привет", &new)).unwrap();
         assert_eq!(body["input"], "Привет");
         assert_eq!(body["voice"], "nova");
         assert_eq!(body["response_format"], "pcm");
         assert!(body["instructions"].is_string());
-        let old = Natural { model: "tts-1".into(), voice: "alloy".into() };
+        let old = Natural { base: "https://api.openai.com/v1".into(), model: "tts-1".into(), voice: "alloy".into() };
         let body: serde_json::Value = serde_json::from_str(&natural_request("Hi", &old)).unwrap();
         assert!(body.get("instructions").is_none());
     }
