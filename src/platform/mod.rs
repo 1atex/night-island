@@ -4,6 +4,7 @@ pub mod apps;
 pub mod audio;
 pub mod audio_mixer;
 pub mod autostart;
+pub mod bt_battery;
 pub mod capture;
 pub mod dictation;
 pub mod dnd;
