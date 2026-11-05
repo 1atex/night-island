@@ -12,7 +12,7 @@ fn main() -> windows_core::Result<()> {
     if platform::localvoice::run_helper() {
         return Ok(());
     }
-    if services::agents::handle_cli() {
+    if platform::taskbar::handle_cli() || services::agents::handle_cli() {
         return Ok(());
     }
     island::run()

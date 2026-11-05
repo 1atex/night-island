@@ -93,10 +93,11 @@ pub(in crate::island) enum Timer {
     NotificationStage = 39,
     NotificationExpire = 40,
     NotificationHover = 41,
+    TopPanel = 42,
 }
 
 impl Timer {
-    const ALL: [Timer; 41] = [
+    const ALL: [Timer; 42] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -138,6 +139,7 @@ impl Timer {
         Timer::NotificationStage,
         Timer::NotificationExpire,
         Timer::NotificationHover,
+        Timer::TopPanel,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -227,6 +229,7 @@ impl App {
         let Some(timer) = Timer::from_id(id) else { return };
         self.kill_timer(timer);
         match timer {
+            Timer::TopPanel => self.update_top_panel(false),
             Timer::NotificationStage => self.notification_stage(),
             Timer::NotificationExpire => self.dismiss_notification_card(),
             Timer::WidthMotion => self.width_motion_done(),

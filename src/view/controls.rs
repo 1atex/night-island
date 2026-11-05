@@ -72,14 +72,13 @@ pub(in crate::view) fn paint_controls(p: &Painter, pill: Rect, scale: f32, ui: &
         };
         let on = state == Some(Some(true));
         let armed = ui.armed == Some(i);
-        let hover = ui.hover_ctl == Some(i) && *ctl != Ctl::Battery;
-        let bg = if armed {
-            rgba(1.0, 0.35, 0.35, 0.28)
-        } else if hover {
-            rgba(1.0, 1.0, 1.0, 0.13)
-        } else {
-            rgba(1.0, 1.0, 1.0, 0.08)
-        };
+        let hover = ui.feedback.sample(
+            700_000 + i as u64,
+            f32::from(ui.hover_ctl == Some(i) && *ctl != Ctl::Battery),
+            0.0,
+            140,
+        );
+        let bg = if armed { rgba(1.0, 0.35, 0.35, 0.28) } else { rgba(1.0, 1.0, 1.0, 0.08 + 0.05 * hover) };
         p.fill_round_rect(r, 20.0 * scale, bg)?;
 
         if i < CTL_COLS {

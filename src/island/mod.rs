@@ -75,7 +75,9 @@ use windows_numerics::{Vector2, Vector3};
 mod appearance;
 mod character;
 mod companion_chat;
+mod cover_motion;
 mod demo;
+mod desktop_dock;
 mod editing;
 mod geometry;
 mod hotkeys;
@@ -83,6 +85,7 @@ mod input;
 mod liquid;
 mod lyric;
 mod motion;
+mod pet_studio;
 mod pill;
 mod pill_motion;
 mod settings_win;
@@ -90,6 +93,7 @@ mod startup;
 mod system_notifications;
 mod tabs;
 mod timers;
+mod top_panel;
 mod voice;
 mod voice_info;
 mod window;
@@ -133,6 +137,12 @@ struct App {
     backdrop: SpriteVisual,
     tint: SpriteVisual,
     settings_win: Option<HWND>,
+    windows_taskbar: Option<crate::platform::taskbar::TaskbarGuard>,
+    desktop_dock: Option<crate::ui::desktop_dock::Dock>,
+    top_panel: Option<crate::ui::top_panel::TopPanel>,
+    top_panel_poll: Instant,
+    top_panel_radios: Instant,
+    top_panel_data: crate::ui::top_panel::Snapshot,
     power_last: Option<(u8, bool)>,
     lock_pending: Vec<u16>,
     ui: view::UiState,
@@ -172,6 +182,8 @@ struct App {
     ears: [Layer; 2],
     collapsed: Layer,
     expanded: Layer,
+    cover_layer: Layer,
+    cover_flight_until: Option<Instant>,
 }
 
 thread_local! {

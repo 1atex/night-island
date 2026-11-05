@@ -80,6 +80,10 @@ impl App {
             let _ = self.set_geometry_now(Win::Big, false, hidden);
         }
         self.state = State::Expanded;
+        self.update_top_panel(false);
+        if self.ui.tab == view::Tab::Chat && self.ui.chat.pet.enabled {
+            self.sync_pet_studio();
+        }
         if let Some((x, y, w, h)) = notification_origin {
             let (wx, wy) = self.window_origin(Win::Big);
             let _ = self.geometry.SetOffset(windows_numerics::Vector2 { X: x - wx, Y: y - wy });
@@ -92,6 +96,7 @@ impl App {
         self.sync_metrics();
         self.set_timer(Timer::Settle, self.open_ms() as u32 + 80);
         let _ = self.animate_to(true, false);
+        self.start_cover_motion(true);
         self.update_weather_timer();
         if matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.select_tab(self.ui.tab);
@@ -114,6 +119,7 @@ impl App {
         self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, false);
+        self.start_cover_motion(false);
         self.set_timer(Timer::Shrink, self.close_ms() as u32 + 60);
     }
 
@@ -121,7 +127,10 @@ impl App {
         if self.state != State::Collapsing {
             return;
         }
+        self.finish_cover_motion();
+        self.ui.home.track_transition.finish();
         self.state = State::Collapsed;
+        self.update_top_panel(false);
         self.set_blur(false);
         self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         self.place(Win::Small);

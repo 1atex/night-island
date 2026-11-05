@@ -97,6 +97,7 @@ pub fn render_music_entrance_preview(gpu: &crate::ui::gfx::Gpu, ui: &UiState, pa
                     crate::ui::characters::Character::Spark,
                     40.0,
                     &crate::ui::characters::Pose {
+                        motion: Default::default(),
                         t: 0.0,
                         reaction: crate::ui::characters::Reaction::Idle,
                         look: (0.0, 0.0),

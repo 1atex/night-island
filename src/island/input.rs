@@ -17,6 +17,10 @@ pub(in crate::island) struct Pointer {
 
 impl App {
     pub(in crate::island) fn mouse_down(&mut self, x: i32, y: i32) {
+        if self.state == State::Expanded {
+            self.ui.pressed_action = self.ui.home.hover_act;
+            self.repaint_expanded();
+        }
         if self.can_release_character(x, y) {
             let mut point = windows::Win32::Foundation::POINT::default();
             unsafe {
@@ -101,6 +105,9 @@ impl App {
     }
 
     pub(in crate::island) fn mouse_up(&mut self) {
+        if self.ui.pressed_action.take().is_some() {
+            self.repaint_expanded();
+        }
         if self.pointer.character_press.take().is_some() {
             unsafe {
                 let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
@@ -124,7 +131,7 @@ impl App {
         }
         let s = self.scale;
         let (sw, sh) = Self::screen_size();
-        let (wl, wt, wr, wb) = Self::work_area();
+        let (wl, wt, wr, wb) = self.island_work_area();
         let (cw, ch) = if self.state == State::Expanded {
             (EXPANDED.0 * s, EXPANDED.1 * s)
         } else {
@@ -319,6 +326,10 @@ impl App {
                 Some(view::ChatHit::RowDelete(i)) => Some(1240 + i),
                 Some(view::ChatHit::ChipRemove(i)) => Some(1260 + i),
                 Some(view::ChatHit::Setup) => Some(1210),
+                Some(view::ChatHit::Pet) => Some(1204),
+                Some(view::ChatHit::PetAction(view::PetStudioHit::Apply)) => Some(1280),
+                Some(view::ChatHit::PetAction(view::PetStudioHit::Photo)) => Some(1281),
+                Some(view::ChatHit::PetAction(view::PetStudioHit::TextOnly)) => Some(1282),
                 _ => None,
             }
         } else if self.ui.tab == view::Tab::Weather {
@@ -770,6 +781,7 @@ impl App {
     }
 
     pub(in crate::island) fn on_mouse_leave(&mut self) {
+        self.ui.pressed_action = None;
         self.pointer.tracking = false;
         let had_hover = self.ui.hover_tab.take().is_some()
             | self.ui.clip.hover.take().is_some()
