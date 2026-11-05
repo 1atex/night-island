@@ -131,6 +131,7 @@ impl App {
     }
 
     pub(in crate::island) fn reset_liquid_pull(&mut self) {
+        self.set_decoration_through(false);
         self.stop_idle();
         self.liquid.bump_amp = 0.0;
         self.liquid.bump_vel = 0.0;
@@ -162,7 +163,7 @@ impl App {
         if self.settings.vertical() {
             return self.place_spectrum_upright(win_w as f32);
         }
-        let pill_left = (win_w as f32 - self.cw * s) / 2.0;
+        let pill_left = self.pill_rect(false).0;
         let Some(bars) = view::music_slots(&self.ui, s, self.cw * s).bars else { return };
         let x0 = pill_left + bars.0;
         let y = self.win_pad().1 * s + (COLLAPSED.1 - SPEC_H) * s / 2.0;
@@ -178,7 +179,7 @@ impl App {
         let s = self.scale;
         let Some(bars) = view::vertical_slots(&self.ui, s, self.cw * s).bars else { return };
         let cx = win_w / 2.0;
-        let top = self.win_pad().1 * s + bars.0;
+        let top = self.pill_rect(false).1 + bars.0;
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetSize(Vector2 { X: SPEC_W * s, Y: SPEC_H * s });
             let _ = bar.SetCenterPoint(Vector3 { X: 0.0, Y: SPEC_H * s / 2.0, Z: 0.0 });
@@ -189,14 +190,16 @@ impl App {
     }
 
     pub(in crate::island) fn spikes_active(&self) -> bool {
-        self.settings.edge_spikes
+        self.pill_motion.width.is_none()
+            && self.settings.edge_spikes
             && !self.settings.eq_style.around()
             && self.music.spectrum_running
             && self.state == State::Collapsed
     }
 
     pub(in crate::island) fn ring_active(&self) -> bool {
-        self.settings.edge_spikes
+        self.pill_motion.width.is_none()
+            && self.settings.edge_spikes
             && self.settings.eq_style.around()
             && self.music.spectrum_running
             && self.state == State::Collapsed
@@ -530,6 +533,8 @@ impl App {
 
     pub(in crate::island) fn update_eq(&mut self) {
         let visible = self.state == State::Collapsed
+            && self.pill_motion.intro.is_none()
+            && !self.notification_card_visible()
             && !self.gaming
             && (!self.pill_hidden || self.ghosted)
             && self.ui.media.playing
@@ -592,11 +597,11 @@ impl App {
 
     pub(in crate::island) fn bump_pivot(&self) -> (f32, f32) {
         let s = self.scale;
-        let (win_w, _) = self.window_size(self.win);
-        let (_, top) = self.win_pad();
+        let core = self.pill_rect(false);
+        let top = core.1 / s;
         let (pw, ph) = self.collapsed();
         let seam = BUMP_SEAM * s;
-        let cx = win_w as f32 / 2.0;
+        let cx = core.0 + pw * s / 2.0;
         match self.settings.hang() {
             Hang::Down => (cx, (top + ph) * s - seam),
             Hang::Up => (cx, top * s + seam),
@@ -721,7 +726,7 @@ impl App {
 
     pub(in crate::island) fn start_liquid(&self) {
         self.start_char();
-        if self.liquid_on() && self.state == State::Collapsed {
+        if self.liquid_on() && self.state == State::Collapsed && !self.notification_card_visible() {
             self.set_timer(Timer::Liquid, 60);
         }
     }
@@ -773,7 +778,8 @@ impl App {
     }
 
     pub(in crate::island) fn liquid_tick(&mut self) {
-        if !self.liquid_on() || self.state != State::Collapsed {
+        self.update_decoration_input();
+        if !self.liquid_on() || self.state != State::Collapsed || self.notification_card_visible() {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
             self.stop_idle();
@@ -781,7 +787,7 @@ impl App {
             self.set_bump_visible(false);
             return;
         }
-        if self.character_interacting() {
+        if self.character_interacting() || self.pill_motion_busy() {
             self.reset_liquid_pull();
             self.set_timer(Timer::Liquid, 60);
             return;

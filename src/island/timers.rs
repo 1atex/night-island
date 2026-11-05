@@ -12,6 +12,38 @@ unsafe extern "system" {
     fn timeBeginPeriod(period: u32) -> u32;
 }
 
+const TRIM_EVERY: Duration = Duration::from_secs(180);
+
+thread_local! {
+    static LAST_TRIM: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+impl App {
+    fn trim_memory_when_idle(&mut self) {
+        let quiet = matches!(self.state, State::Collapsed | State::Hidden)
+            && self.recording.is_none()
+            && !dictation::active()
+            && self.agent.is_none();
+        let due = LAST_TRIM.get().is_none_or(|at| at.elapsed() >= TRIM_EVERY);
+        if !quiet || !due {
+            return;
+        }
+        LAST_TRIM.set(Some(Instant::now()));
+        let before = memory::usage();
+        memory::trim();
+        if let (Some(before), Some(after)) = (before, memory::usage())
+            && memory::worth_logging(before, after)
+        {
+            crate::log_info!(
+                "Memory trimmed: working set {} -> {} MB, private {} MB",
+                before.working_mb(),
+                after.working_mb(),
+                after.private_mb()
+            );
+        }
+    }
+}
+
 pub(in crate::island) fn raise_timer_resolution() {
     unsafe {
         timeBeginPeriod(1);
@@ -56,10 +88,16 @@ pub(in crate::island) enum Timer {
     Tip = 34,
     SwAnim = 35,
     Weather = 36,
+    WidthMotion = 37,
+    MusicIntro = 38,
+    NotificationStage = 39,
+    NotificationExpire = 40,
+    NotificationHover = 41,
+    TopPanel = 42,
 }
 
 impl Timer {
-    const ALL: [Timer; 36] = [
+    const ALL: [Timer; 42] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -96,6 +134,12 @@ impl Timer {
         Timer::Tip,
         Timer::SwAnim,
         Timer::Weather,
+        Timer::WidthMotion,
+        Timer::MusicIntro,
+        Timer::NotificationStage,
+        Timer::NotificationExpire,
+        Timer::NotificationHover,
+        Timer::TopPanel,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -185,6 +229,11 @@ impl App {
         let Some(timer) = Timer::from_id(id) else { return };
         self.kill_timer(timer);
         match timer {
+            Timer::TopPanel => self.update_top_panel(false),
+            Timer::NotificationStage => self.notification_stage(),
+            Timer::NotificationExpire => self.dismiss_notification_card(),
+            Timer::WidthMotion => self.width_motion_done(),
+            Timer::MusicIntro => self.music_intro_step(),
             Timer::Expand if self.character_interacting() => {}
             Timer::Expand if matches!(self.state, State::Hidden | State::Hiding) => self.reveal(),
             Timer::Expand => self.expand(),
@@ -229,17 +278,18 @@ impl App {
                 }
             }
             Timer::Progress => {
-                if self.state == State::Expanded && self.ui.tab == view::Tab::Home {
+                if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) {
                     self.repaint_expanded();
                     self.start_progress_timer();
                 } else if self.progress_pill_visible() && view::progress_strip_on(&self.ui) {
-                    let c = self.pill_rect(false);
+                    let c = self.collapsed_surface_rect();
                     let _ = self.collapsed.paint(&self.gpu, |p| {
                         let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
                     });
                     self.start_progress_timer();
                 }
             }
+            Timer::NotificationHover => self.notification_hover(),
             Timer::DlStale => {
                 self.ui.downloading = None;
                 self.update_eq();
@@ -272,6 +322,7 @@ impl App {
                 self.refresh_reminder_labels();
                 self.repaint();
                 self.schedule_clock();
+                self.trim_memory_when_idle();
             }
         }
     }

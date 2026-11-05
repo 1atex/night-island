@@ -91,6 +91,13 @@ pub fn run() -> Result<()> {
         app.schedule_autohide();
         app.start_liquid();
         APP.with(|cell| *cell.borrow_mut() = Some(app));
+        let _ = windows::Win32::System::RemoteDesktop::WTSRegisterSessionNotification(
+            hwnd,
+            windows::Win32::System::RemoteDesktop::NOTIFY_FOR_THIS_SESSION,
+        );
+        with_app(|app| app.configure_system_notifications());
+        with_app(|app| app.configure_desktop_dock());
+        with_app(|app| app.configure_top_panel());
 
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         let failed = with_app_value(|a| register_hotkeys(hwnd, &a.settings)).unwrap_or_default();
@@ -100,7 +107,9 @@ pub fn run() -> Result<()> {
         #[cfg(feature = "demo")]
         demo::apply(hwnd);
         apps::start_indexing();
+        with_app(|app| media::configure_priority(app.settings.prefer_playing_media));
         media::start(hwnd);
+        crate::services::yandex::start(hwnd);
         downloads::start(hwnd);
         privacy::start(hwnd);
         update::start_background(hwnd);
@@ -127,6 +136,42 @@ pub fn run() -> Result<()> {
 
 impl App {
     pub(in crate::island) fn new(hwnd: HWND, dpi_scale: f32, settings: Settings) -> Result<Self> {
+        let mut app = Self::new_visuals(hwnd, dpi_scale, settings)?;
+        app.store = Store::open();
+        app.apply_character();
+        app.ui.cfg = app.settings.clone();
+        app.ui.char_inset = if app.attached_character_on() { CHAR_INSET } else { 0.0 };
+        app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
+        if app.settings.hang() != Hang::Down {
+            app.apply_layout();
+        }
+        app.ui.mic_muted = volume::mic_muted();
+        vpn::set_enabled(true);
+        vpn::start_watch(app.hwnd);
+        app.reload_clips();
+        if let Some(store) = &app.store {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            store.close_open_uses(now as i64);
+        }
+        app.start_activity();
+        app.sync_metrics();
+        app.sync_wake();
+        app.ui.agents = agents::sessions();
+        agents::watch(hwnd);
+        app.init_steam();
+        steam::watch(hwnd);
+        app.reload_dock();
+        app.restore_tab();
+        app.reload_reminders();
+        app.init_notes();
+        app.update_offsets();
+        app.repaint();
+        app.schedule_clock();
+        app.apply_pill_opacity();
+        Ok(app)
+    }
+
+    pub(in crate::island) fn new_visuals(hwnd: HWND, dpi_scale: f32, settings: Settings) -> Result<Self> {
         crate::island::timers::raise_timer_resolution();
         let compositor = Compositor::new()?;
         let target = unsafe { compositor.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, true)? };
@@ -160,6 +205,17 @@ impl App {
         let char_layer = gpu.layer(&compositor, char_px)?;
         char_layer.sprite.SetIsVisible(false)?;
 
+        let intro_cover = gpu.layer(&compositor, ((28.0 * scale).ceil() as i32, (28.0 * scale).ceil() as i32))?;
+        let cover_layer = gpu.layer(&compositor, ((72.0 * scale).ceil() as i32, (72.0 * scale).ceil() as i32))?;
+        cover_layer.sprite.SetIsVisible(false)?;
+        let previous_pill = gpu.layer(&compositor, collapsed.size())?;
+        previous_pill.sprite.SetIsVisible(false)?;
+        let intro_title = gpu.layer(&compositor, ((240.0 * scale).ceil() as i32, (34.0 * scale).ceil() as i32))?;
+        let intro_title_clip = compositor.CreateInsetClip()?;
+        intro_title.sprite.SetClip(&intro_title_clip)?;
+        intro_cover.sprite.SetIsVisible(false)?;
+        intro_title.sprite.SetIsVisible(false)?;
+
         let ring =
             gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, &window_room(&settings)))?;
         ring.sprite.SetIsVisible(false)?;
@@ -191,6 +247,7 @@ impl App {
         children.InsertAtTop(&highlight.sprite)?;
         children.InsertAtTop(&expanded.sprite)?;
         children.InsertAtTop(&collapsed.sprite)?;
+        children.InsertAtTop(&previous_pill.sprite)?;
         children.InsertAtTop(&char_layer.sprite)?;
 
         let mut spectrum_brushes = Vec::new();
@@ -211,6 +268,9 @@ impl App {
         }
 
         let geometry = compositor.CreateRoundedRectangleGeometry()?;
+        children.InsertAtTop(&intro_cover.sprite)?;
+        children.InsertAtTop(&cover_layer.sprite)?;
+        children.InsertAtTop(&intro_title.sprite)?;
         let round_clip = compositor.CreateGeometricClipWithGeometry(&geometry)?;
         visual.SetClip(&round_clip)?;
         let body_shape = compositor.CreatePathGeometry()?;
@@ -226,11 +286,17 @@ impl App {
         }
         target.SetRoot(&root)?;
 
-        let mut app = App {
+        let app = App {
             hwnd,
             scale,
             dpi_scale,
             settings_win: None,
+            desktop_dock: None,
+            windows_taskbar: None,
+            top_panel: None,
+            top_panel_poll: Instant::now(),
+            top_panel_radios: Instant::now(),
+            top_panel_data: Default::default(),
             power_last: view::battery(),
             lock_pending: Vec::new(),
             settings,
@@ -243,18 +309,36 @@ impl App {
             backdrop,
             tint,
             ui: view::UiState::new(),
-            store: Store::open(),
+            store: None,
             popup_open: false,
             overlay: None,
             want_dock_dialog: false,
             want_chat_dialog: false,
             want_header_menu: false,
             pending_power: None,
+            pending_ask: None,
+            wake_session: false,
+            agent: None,
+            dialog: Vec::new(),
+            run_serial: 0,
+            last_spoken: String::new(),
             reminders: Vec::new(),
             recording: None,
             notice_link: None,
             prev_foreground: HWND::default(),
             cw: COLLAPSED.0,
+            system_notices: Default::default(),
+            pill_motion: super::pill_motion::PillMotion {
+                width: None,
+                intro: None,
+                intro_width: COLLAPSED.0,
+                gate: Default::default(),
+                track: (String::new(), String::new()),
+                cover: intro_cover,
+                previous: previous_pill,
+                title: intro_title,
+                title_clip: intro_title_clip,
+            },
             pending_high_surrogate: None,
             gaming: false,
             pill_hidden: false,
@@ -267,6 +351,8 @@ impl App {
             ears,
             collapsed,
             expanded,
+            cover_layer,
+            cover_flight_until: None,
             liquid: Liquid {
                 ring,
                 highlight,
@@ -295,6 +381,17 @@ impl App {
                 spectrum_scale: [0.0; audio::BANDS],
             },
             pet: Pet {
+                behavior: crate::ui::pet_behavior::PetBehavior::new(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_nanos(),
+                ),
+                speech: Default::default(),
+                speech_cue: Default::default(),
+                motion: Default::default(),
+                controls_at: Instant::now(),
+                cursor: None,
                 char_layer,
                 desktop: None,
                 chat: None,
@@ -306,8 +403,10 @@ impl App {
                 rng: 0x9E37_79B9,
                 reaction_until: None,
                 char_key: None,
+                frame: 0,
             },
             pointer: Pointer {
+                decoration_through: false,
                 tracking: false,
                 press: None,
                 character_press: None,
@@ -323,35 +422,6 @@ impl App {
         };
         app.set_geometry_now(Win::Small, false, false)?;
         app.paint_ears();
-        app.apply_character();
-        app.ui.cfg = app.settings.clone();
-        app.ui.char_inset = if app.attached_character_on() { CHAR_INSET } else { 0.0 };
-        app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
-        if app.settings.hang() != Hang::Down {
-            app.apply_layout();
-        }
-        app.ui.mic_muted = volume::mic_muted();
-        vpn::set_enabled(true);
-        vpn::start_watch(app.hwnd);
-        app.reload_clips();
-        if let Some(store) = &app.store {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-            store.close_open_uses(now as i64);
-        }
-        app.start_activity();
-        app.sync_metrics();
-        app.ui.agents = agents::sessions();
-        agents::watch(hwnd);
-        app.init_steam();
-        steam::watch(hwnd);
-        app.reload_dock();
-        app.restore_tab();
-        app.reload_reminders();
-        app.init_notes();
-        app.update_offsets();
-        app.repaint();
-        app.schedule_clock();
-        app.apply_pill_opacity();
         Ok(app)
     }
 }

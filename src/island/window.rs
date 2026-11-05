@@ -1,11 +1,12 @@
 use crate::island::*;
+use crate::platform::{wake, wake_install};
 
 pub(in crate::island) const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 pub(in crate::island) const WM_MOUSELEAVE: u32 = 0x02A3;
 pub(in crate::island) const WM_SHOW: u32 = WM_APP + 2;
 
 fn customize_header_menu(point: windows::Win32::Foundation::POINT) {
-    use crate::data::settings::{DEFAULT_HEADER_TABS, HEADER_TAB_LIMIT, HIDEABLE_TABS};
+    use crate::data::settings::{DEFAULT_HEADER_TABS, HIDEABLE_TABS};
     use crate::ui::i18n::tr;
     use crate::ui::menu::{self, Entry};
     loop {
@@ -45,27 +46,25 @@ fn customize_header_menu(point: windows::Win32::Foundation::POINT) {
             });
         } else if let Some(name) = choice.checked_sub(1).and_then(|i| HIDEABLE_TABS.get(i)).copied() {
             let mut pinned = false;
-            let mut full = false;
             let mut replacements = Vec::new();
             with_app(|a| {
                 pinned = a.settings.header_tabs.iter().any(|tab| tab == name) && !a.settings.tab_hidden(name);
-                full = !pinned
-                    && !a.settings.header_tabs.iter().any(|tab| tab == name)
-                    && a.settings.header_tabs.len() >= HEADER_TAB_LIMIT;
                 replacements = a.settings.header_tabs.clone();
             });
-            let replacement = if full {
-                let entries = replacements
-                    .iter()
-                    .enumerate()
-                    .map(|(i, old)| Entry::item(i + 1, &format!("{} {}", tr("Replace:"), tr(old))))
-                    .collect();
+            let replacement = if !pinned {
+                let mut entries = vec![Entry::item(100, &tr("Add to header")), Entry::divider()];
+                entries.extend(
+                    replacements
+                        .iter()
+                        .enumerate()
+                        .map(|(i, old)| Entry::item(i + 1, &format!("{} {}", tr("Replace:"), tr(old)))),
+                );
                 let Some(id) =
                     menu::show(entries, (point.x, point.y), false, app_scale(), &|f| with_app(|a| f(&a.gpu)))
                 else {
                     continue;
                 };
-                replacements.get(id - 1).cloned()
+                if id == 100 { None } else { replacements.get(id - 1).cloned() }
             } else {
                 None
             };
@@ -162,6 +161,30 @@ pub(in crate::island) fn point_from(lparam: LPARAM) -> (i32, i32) {
 
 pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        crate::platform::notifications::WM_NOTIFICATION_OPENED => {
+            with_app(|a| {
+                if wparam.0 != 0 {
+                    a.collapse();
+                } else {
+                    a.notify(Notice::Error, '\u{E783}', "Could not open the sender app");
+                }
+            });
+            LRESULT(0)
+        }
+        WM_NCHITTEST => {
+            let (x, y) = point_from(lparam);
+            let mut through = false;
+            with_app(|a| {
+                if a.state == State::Collapsed && a.liquid_on() && !a.character_interacting() && !a.pill_motion_busy() {
+                    let mut rect = windows::Win32::Foundation::RECT::default();
+                    if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() } {
+                        through = !a.on_interactive_body(x - rect.left, y - rect.top);
+                        a.set_decoration_through(through);
+                    }
+                }
+            });
+            LRESULT(if through { HTTRANSPARENT as isize } else { HTCLIENT as isize })
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_MOUSEMOVE => {
             let (x, y) = point_from(lparam);
@@ -176,6 +199,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                     a.drag_read(x, y);
                     a.drag_slider(x);
                     a.drag_volume(x);
+                    a.drag_mixer(x);
                     a.drag_seek(x);
                     a.drag_island();
                     a.drag_tabs(x, y);
@@ -211,12 +235,26 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.finish_note_drag();
                 a.mouse_up();
                 a.finish_seek();
+                a.finish_mixer();
                 a.finish_slider();
             });
             LRESULT(0)
         }
         WM_CAPTURECHANGED => {
-            with_app(|a| a.pointer.character_press = None);
+            with_app(|a| {
+                if a.ui.pressed_action.take().is_some() {
+                    a.repaint_expanded();
+                }
+                if a.pointer.seek_drag {
+                    a.pointer.seek_drag = false;
+                    a.ui.home.seek = None;
+                    a.repaint_expanded();
+                }
+                a.pointer.character_press = None;
+                if a.ui.mixer.dragging.take().is_some() {
+                    a.sync_mixer();
+                }
+            });
             LRESULT(0)
         }
         dnd::WM_DND_ENTER => {
@@ -266,6 +304,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_RBUTTONUP => {
             let (x, y) = point_from(lparam);
+            let mut handled = false;
+            with_app(|a| handled = a.right_click_home_volume(x, y));
+            if handled {
+                return LRESULT(0);
+            }
             if with_app_value(|a| a.can_release_character(x, y)) == Some(true) {
                 with_app(|a| a.popup_open = true);
                 let mut point = windows::Win32::Foundation::POINT::default();
@@ -408,7 +451,13 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         winevent::WM_FOREGROUND => {
             winevent::acknowledge();
-            with_app(|a| a.on_foreground_changed());
+            with_app(|a| {
+                a.on_foreground_changed();
+                a.update_top_panel(true);
+                if let Some(dock) = &mut a.desktop_dock {
+                    dock.refresh_windows();
+                }
+            });
             LRESULT(0)
         }
         metrics::WM_METRICS => {
@@ -419,12 +468,39 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_voice());
             LRESULT(0)
         }
+        crate::services::assistant::shell::WM_SHELL => {
+            with_app(|a| a.on_shell());
+            LRESULT(0)
+        }
+        crate::platform::localvoice::WM_LOCAL_VOICE => {
+            with_app(|a| a.on_local_voice_setup());
+            LRESULT(0)
+        }
+        crate::platform::speech::WM_SPOKEN => {
+            with_app(|a| a.on_spoken());
+            LRESULT(0)
+        }
+        wake::WM_WAKE => {
+            with_app(|a| a.on_wake());
+            LRESULT(0)
+        }
+        wake_install::WM_WAKE_SETUP => {
+            with_app(|a| a.on_wake_setup());
+            LRESULT(0)
+        }
         ai::WM_TRANSCRIBED => {
             with_app(|a| a.on_transcribed());
             LRESULT(0)
         }
         crate::ui::mini_chat::WM_MINI_CHAT => {
             with_app(|a| a.on_mini_chat(wparam.0, lparam.0));
+            let mut dialog = false;
+            with_app(|a| dialog = std::mem::take(&mut a.want_chat_dialog));
+            if dialog {
+                with_app(|a| a.popup_open = true);
+                let picked = pick_file(hwnd);
+                with_app(|a| a.finish_chat_dialog(picked));
+            }
             LRESULT(0)
         }
         ai::WM_CHAT => {
@@ -457,6 +533,28 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         lyrics::WM_LYRICS => {
             with_app(|a| a.on_lyrics());
+            LRESULT(0)
+        }
+        crate::platform::notifications::WM_NOTIFICATIONS | crate::platform::notifications::WM_NOTIFICATION_ACCESS => {
+            with_app(|app| app.on_system_notifications());
+            LRESULT(0)
+        }
+        crate::ui::notification_card::WM_NOTIFICATION_CARD => {
+            with_app(|app| app.on_notification_card(wparam.0, lparam.0));
+            LRESULT(0)
+        }
+        WM_WTSSESSION_CHANGE => {
+            if wparam.0 == 7 || wparam.0 == 8 {
+                with_app(|app| app.notification_session(wparam.0 == 7));
+            }
+            LRESULT(0)
+        }
+        crate::services::yandex::WM_YANDEX => {
+            with_app(|a| a.on_yandex());
+            LRESULT(0)
+        }
+        crate::platform::audio_mixer::WM_MIXER => {
+            with_app(|a| a.on_mixer());
             LRESULT(0)
         }
         media::WM_MEDIA => {
@@ -544,10 +642,60 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         m if m != 0 && m == TASKBAR_CREATED.load(Ordering::Relaxed) => {
             tray::add(hwnd);
+            with_app(|a| a.top_panel_request(4));
+            LRESULT(0)
+        }
+        WM_DPICHANGED => {
+            with_app(|a| {
+                a.dpi_scale = (wparam.0 & 0xffff) as f32 / 96.0;
+                a.apply_layout();
+                if a.top_panel.is_some() {
+                    a.configure_top_panel();
+                }
+            });
+            LRESULT(0)
+        }
+        WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
+            with_app(|a| a.top_panel_request(3));
+            LRESULT(0)
+        }
+        crate::platform::app_capture::WM_APP_CAPTURE => {
+            crate::island::desktop_dock::capture_result();
+            LRESULT(0)
+        }
+        crate::platform::system_tray::inline::WM_RESULT => {
+            if let Some(result) = crate::platform::system_tray::inline::take() {
+                with_app(|a| {
+                    if let Some(panel) = &mut a.top_panel {
+                        match result {
+                            Ok(entries) if wparam.0 == 0 => panel.set_tray_icons(entries),
+                            Err(()) => panel.tray_failed(),
+                            _ => {}
+                        }
+                    }
+                });
+            }
+            LRESULT(0)
+        }
+        crate::ui::top_panel::WM_TOP_PANEL => {
+            with_app(|a| a.top_panel_request(wparam.0));
+            LRESULT(0)
+        }
+        crate::ui::desktop_dock::WM_DESKTOP_DOCK => {
+            crate::island::desktop_dock::handle_request(hwnd, wparam.0);
+            LRESULT(0)
+        }
+        settings_win::WM_SETTINGS_WINDOW_CHANGED => {
+            settings_win::on_settings_window_changed();
             LRESULT(0)
         }
         WM_DESTROY => {
-            with_app(|a| a.save_note());
+            with_app(|a| {
+                a.save_note();
+                a.top_panel.take();
+                a.desktop_dock.take();
+                a.windows_taskbar.take();
+            });
             dnd::unregister(hwnd);
             clips::sys::unlisten(hwnd);
             tray::remove(hwnd);

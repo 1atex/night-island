@@ -61,6 +61,10 @@ impl App {
     }
 
     pub(in crate::island) fn expand(&mut self) {
+        self.set_decoration_through(false);
+        let notification_origin = self.system_notices.origin.take();
+        self.hide_notification_card();
+        self.cancel_pill_motion();
         match self.state {
             State::Expanded => return,
             State::Collapsing => self.kill_timer(Timer::Shrink),
@@ -76,10 +80,23 @@ impl App {
             let _ = self.set_geometry_now(Win::Big, false, hidden);
         }
         self.state = State::Expanded;
+        self.update_top_panel(false);
+        if self.ui.tab == view::Tab::Chat && self.ui.chat.pet.enabled {
+            self.sync_pet_studio();
+        }
+        if let Some((x, y, w, h)) = notification_origin {
+            let (wx, wy) = self.window_origin(Win::Big);
+            let _ = self.geometry.SetOffset(windows_numerics::Vector2 { X: x - wx, Y: y - wy });
+            let _ = self.geometry.SetSize(windows_numerics::Vector2 { X: w, Y: h });
+            let _ =
+                self.geometry.SetCornerRadius(windows_numerics::Vector2 { X: 26.0 * self.scale, Y: 26.0 * self.scale });
+        }
+        self.sync_mixer();
         self.update_eq();
         self.sync_metrics();
         self.set_timer(Timer::Settle, self.open_ms() as u32 + 80);
         let _ = self.animate_to(true, false);
+        self.start_cover_motion(true);
         self.update_weather_timer();
         if matches!(self.ui.tab, view::Tab::Controls | view::Tab::Home) {
             self.select_tab(self.ui.tab);
@@ -93,12 +110,16 @@ impl App {
         self.ui.cmd.open = false;
         self.ui.armed = None;
         self.ui.home.dev_menu = None;
+        self.close_home_mixer();
         self.end_edit(true);
         self.kill_timer(Timer::Collapse);
         self.state = State::Collapsing;
+        self.finish_mixer();
+        self.sync_mixer();
         self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, false);
+        self.start_cover_motion(false);
         self.set_timer(Timer::Shrink, self.close_ms() as u32 + 60);
     }
 
@@ -106,7 +127,10 @@ impl App {
         if self.state != State::Collapsing {
             return;
         }
+        self.finish_cover_motion();
+        self.ui.home.track_transition.finish();
         self.state = State::Collapsed;
+        self.update_top_panel(false);
         self.set_blur(false);
         self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         self.place(Win::Small);
@@ -124,6 +148,9 @@ impl App {
     }
 
     pub(in crate::island) fn settle_layers(&self) {
+        if self.pill_motion_busy() {
+            return;
+        }
         let expanded = match self.state {
             State::Expanded => true,
             State::Collapsed => false,
@@ -163,12 +190,19 @@ impl App {
     }
 
     pub(in crate::island) fn schedule_autohide(&self) {
-        if self.autohide_ok() && self.state == State::Collapsed && !self.cursor_inside() {
+        if !self.notification_card_visible()
+            && self.pill_motion.intro.is_none()
+            && self.autohide_ok()
+            && self.state == State::Collapsed
+            && !self.cursor_inside()
+        {
             self.set_timer(Timer::Autohide, AUTOHIDE_DELAY_MS);
         }
     }
 
     pub(in crate::island) fn hide(&mut self) {
+        self.hide_notification_card();
+        self.cancel_pill_motion();
         if self.state != State::Collapsed {
             return;
         }
