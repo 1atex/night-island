@@ -11,6 +11,7 @@ impl App {
                 if matches!(
                     id,
                     view::Sid::Character
+                        | view::Sid::PetPerformance
                         | view::Sid::Edge
                         | view::Sid::PillBattery
                         | view::Sid::CoverMode
@@ -80,6 +81,29 @@ impl App {
                         let _ = self.tint.SetOpacity(self.settings.tint_open);
                     }
                 }
+                TopAutoHide | TopTray | TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume
+                | TopBattery | TopFullscreen | TopReserve | TopClearControls | TopMicrophone | TopKeyboard
+                | TopWorkspaces | TopAnimations => self.configure_top_panel(),
+                DockExperimentalCapture
+                | DockReplaceTaskbar
+                | DockEnabled
+                | DockAutoHide
+                | DockRunning
+                | DockPreview
+                | DockFullscreen
+                | DockEconomy
+                | DockAnimations
+                | DockSeparator
+                | DockLockPins
+                | DockIconSize
+                | DockZoom
+                | DockOpacity
+                | DockMargin
+                | DockBlur
+                | DockTintHue
+                | DockTintSaturation
+                | DockTintBrightness => self.configure_desktop_dock(),
+                SystemNotifications => self.configure_system_notifications(),
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
                 VpnPill => {
@@ -88,6 +112,8 @@ impl App {
                     self.repaint_collapsed();
                 }
                 MetricsInterval => self.sync_metrics(),
+                AsstEnabled | AsstWake => self.sync_wake(),
+                AsstTtsProvider => self.sync_voice_fields(),
                 AutoHide => {
                     if self.settings.auto_hide {
                         self.schedule_autohide();
@@ -101,7 +127,10 @@ impl App {
                         let _ = self.animate_to(true, false);
                     }
                 }
-                PanelHue | PanelSat | PanelVal | AccentHue | AccentSat => self.apply_theme(),
+                PanelHue | PanelSat | PanelVal | AccentHue | AccentSat => {
+                    self.apply_theme();
+                    self.configure_desktop_dock();
+                }
                 PillOpacity => self.apply_pill_opacity(),
                 PillBlur => self.set_blur(self.state == State::Expanded),
                 Capture => self.apply_capture(),
@@ -112,7 +141,10 @@ impl App {
                     crate::ui::i18n::set_ru(self.settings.language == crate::data::settings::Language::Ru);
                     self.repaint_collapsed();
                 }
-                Character | CharacterDetached => self.apply_character(),
+                Character | CharacterDetached | PetPerformance | PetAutonomy => {
+                    self.apply_character();
+                    self.sync_pet_studio();
+                }
                 UpdateCheck | UpdateBeta => {
                     update::configure(self.settings.update_check, self.settings.update_beta);
                 }
@@ -141,6 +173,10 @@ impl App {
                     self.liquid_tick();
                 }
                 EqStrength | EqGradient => self.refresh_eq_shape(),
+                PreferPlayingMedia => {
+                    media::configure_priority(self.settings.prefer_playing_media);
+                    self.on_media();
+                }
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | ProgressStyle
                 | PillWeather | PillWeatherSide | PillBattery | SpikeColor => {
                     self.update_eq();

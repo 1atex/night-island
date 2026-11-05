@@ -1,6 +1,6 @@
 use crate::island::*;
 
-pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
+pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
     #[repr(C)]
     struct AccentPolicy {
         state: i32,
@@ -43,15 +43,22 @@ pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
 
 impl App {
     pub(in crate::island) fn repaint_collapsed(&mut self) {
+        if self.pill_motion.intro.is_some()
+            && (self.ui.notice.is_some() || self.ui.volume.is_some() || self.ui.downloading.is_some())
+        {
+            self.cancel_pill_motion();
+            self.update_eq();
+        }
         self.fit_width();
         if self.music.spectrum_running {
             self.place_spectrum();
         }
-        let c = self.pill_rect(false);
+        let c = self.collapsed_surface_rect();
         let _ = self.collapsed.paint(&self.gpu, |p| {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
         self.update_weather_timer();
+        self.maybe_show_notification();
     }
 
     pub(in crate::island) fn apply_pill_opacity(&mut self) {
@@ -77,8 +84,12 @@ impl App {
         self.paint_liquid_body(0.0);
         self.apply_accent();
         self.repaint();
+        self.update_notification_card();
         if let Some(chat) = &mut self.pet.chat {
             chat.repaint();
+        }
+        if let Some(panel) = &mut self.top_panel {
+            panel.repaint();
         }
     }
 
@@ -104,7 +115,7 @@ impl App {
     }
 
     pub(in crate::island) fn repaint(&self) {
-        let c = self.pill_rect(false);
+        let c = self.collapsed_surface_rect();
         let _ = self.collapsed.paint(&self.gpu, |p| {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
@@ -112,10 +123,14 @@ impl App {
     }
 
     pub(in crate::island) fn repaint_expanded(&self) {
+        self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let e = self.pill_full();
         let _ = self.expanded.paint(&self.gpu, |p| {
             let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
+        if self.state == State::Expanded && (self.ui.feedback.active() || self.ui.home.track_transition.active()) {
+            self.set_timer(Timer::UiAnim, self.frame_ms());
+        }
         self.update_weather_timer();
     }
 
@@ -134,6 +149,8 @@ impl App {
             _ => false,
         };
         shown
+            && self.pill_motion.intro.is_none()
+            && !self.notification_card_visible()
             && self.settings.weather
             && self.ui.weather.is_some()
             && !self.gaming
@@ -149,7 +166,7 @@ impl App {
         if self.state == State::Expanded {
             return self.repaint_expanded();
         }
-        let pill = self.pill_rect(false);
+        let pill = self.collapsed_surface_rect();
         if let Some(rect) = view::pill_weather_rect(pill, self.scale, &self.ui) {
             let _ = self
                 .collapsed
@@ -174,6 +191,12 @@ impl App {
     }
 
     pub(in crate::island) fn apply_capture(&self) {
+        if let Some(panel) = &self.top_panel {
+            panel.set_capture_hidden(self.settings.capture_hidden);
+        }
+        if let Some(dock) = &self.desktop_dock {
+            dock.set_capture_hidden(self.settings.capture_hidden);
+        }
         let affinity = if self.settings.capture_hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, affinity);
@@ -184,9 +207,11 @@ impl App {
         if let Some(chat) = &self.pet.chat {
             chat.set_capture_hidden(self.settings.capture_hidden);
         }
+        self.update_notification_card();
     }
 
     pub(in crate::island) fn apply_style(&mut self) {
+        self.set_decoration_through(false);
         if self.liquid_on() {
             self.start_liquid();
         } else {

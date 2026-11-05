@@ -179,7 +179,9 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
     if let (Some(s), Some(cover)) = (slots.cover, &ui.media.cover) {
         let side = (w - 14.0 * scale).min(V_COVER * scale);
         let top = y + s.0;
-        p.cover((cx - side / 2.0, top, cx + side / 2.0, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
+        if !ui.cover_in_flight {
+            p.cover((cx - side / 2.0, top, cx + side / 2.0, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
+        }
     }
     if let (Some(s), Some(wx)) = (slots.weather, &ui.weather) {
         let r = slot(s);

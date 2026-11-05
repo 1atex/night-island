@@ -2,6 +2,7 @@ use crate::island::*;
 
 impl App {
     pub(in crate::island) fn open_dev_menu(&mut self) {
+        self.close_home_mixer();
         let items = volume::devices();
         self.ui.home.dev_menu = (!items.is_empty()).then_some((items, 0));
         self.repaint_expanded();
@@ -30,13 +31,24 @@ impl App {
         }
         let pill = self.pill_rect(true);
         match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
+            Some(view::HomeHit::Notification) => {
+                if self.settings.notification_open_app {
+                    self.activate_notification();
+                } else {
+                    self.expand_notification_text();
+                }
+            }
+            Some(view::HomeHit::NotificationExpand) => self.expand_notification_text(),
+            Some(view::HomeHit::Mixer(_)) => self.click_mixer(x, y),
             Some(view::HomeHit::Media(i)) => media::control(match i {
                 0 => media::Control::Previous,
                 1 => media::Control::PlayPause,
                 _ => media::Control::Next,
             }),
             Some(view::HomeHit::Player) => media::next_player(),
+            Some(view::HomeHit::Wave) => self.select_tab(view::Tab::Yandex),
             Some(view::HomeHit::Action(i)) if self.ui.home.edit => self.toggle_home_action(i),
+            Some(view::HomeHit::Action(i)) if self.ui.notifications.preview.is_some() => self.home_action(i),
             Some(view::HomeHit::Action(i)) => {
                 match self.settings.home_actions.iter().position(|&a| usize::from(a) == i) {
                     Some(slot) => self.ui.home.tile_press = Some((slot, x, y)),
@@ -44,6 +56,7 @@ impl App {
                 }
             }
             Some(view::HomeHit::Edit) => {
+                self.close_home_mixer();
                 self.ui.home.edit = !self.ui.home.edit;
                 self.ui.home.edit_scroll = 0;
                 self.ui.home.hover_act = None;
@@ -69,19 +82,19 @@ impl App {
             Some(view::HomeHit::DiscordMute) => discord::set_mute(!self.ui.discord.self_mute),
             Some(view::HomeHit::DiscordDeaf) => discord::set_deaf(!self.ui.discord.self_deaf),
             Some(view::HomeHit::Seek(f)) => {
-                self.pointer.seek_drag = true;
-                self.ui.home.seek = Some(f);
-                self.repaint_expanded();
+                self.begin_seek(f);
             }
             Some(view::HomeHit::VolumeIcon) => {
+                self.close_home_mixer();
                 if self.ui.home.vol_track {
                     self.ui.home.vol_track = false;
-                } else if let Some(v) =
-                    volume::app_volume(&self.ui.media.source).filter(|_| !self.ui.media.source.is_empty())
-                {
-                    self.ui.home.app_vol = v;
+                } else if let Some(level) = volume::app_volume(&self.ui.media.source) {
                     self.ui.home.vol_track = true;
+                    self.ui.home.app_vol = level;
+                } else {
+                    self.notify(Notice::Error, '\u{E767}', "Player volume is unavailable. Right-click for the mixer");
                 }
+                self.refresh_home();
                 self.repaint_expanded();
             }
             Some(view::HomeHit::Volume) => {
@@ -96,6 +109,29 @@ impl App {
             },
             None => {}
         }
+    }
+
+    pub(in crate::island) fn right_click_home_volume(&mut self, x: i32, y: i32) -> bool {
+        if self.state != State::Expanded || self.ui.tab != view::Tab::Home || self.ui.home.dev_menu.is_some() {
+            return false;
+        }
+        if !matches!(
+            view::hit_home(self.pill_rect(true), self.scale, x as f32, y as f32, &self.ui),
+            Some(view::HomeHit::VolumeIcon)
+        ) {
+            return false;
+        }
+        self.finish_mixer();
+        let from = view::home_mixer_progress(&self.ui);
+        self.ui.home.mixer_open = !self.ui.home.mixer_open;
+        self.ui.home.mixer_motion = Some((from, Instant::now()));
+        self.ui.home.edit = false;
+        self.ui.home.dev_menu = None;
+        self.ui.home.dock_open = false;
+        self.sync_mixer();
+        self.set_timer(Timer::UiAnim, self.frame_ms());
+        self.repaint_expanded();
+        true
     }
 
     fn toggle_home_action(&mut self, id: usize) {
@@ -152,12 +188,25 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn begin_seek(&mut self, fraction: f32) {
+        self.pointer.seek_drag = true;
+        self.ui.home.seek = Some(fraction.clamp(0.0, 1.0));
+        unsafe {
+            windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
+        }
+        self.repaint_expanded();
+    }
+
     pub(in crate::island) fn drag_seek(&mut self, x: i32) {
         if !self.pointer.seek_drag {
             return;
         }
-        let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
-        self.ui.home.seek = Some(((x as f32 - l) / (r - l).max(1.0)).clamp(0.0, 1.0));
+        self.ui.home.seek = Some(if self.ui.tab == view::Tab::Yandex {
+            view::wave_fraction(self.pill_rect(true), self.scale, x as f32)
+        } else {
+            let (l, r, _) = view::seek_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
+            ((x as f32 - l) / (r - l).max(1.0)).clamp(0.0, 1.0)
+        });
         self.repaint_expanded();
     }
 
@@ -166,8 +215,17 @@ impl App {
             return;
         }
         self.pointer.seek_drag = false;
-        if let (Some(f), Some((_, len))) = (self.ui.home.seek.take(), media::progress()) {
-            media::seek(f * len);
+        unsafe {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+        }
+        let wave = self.ui.tab == view::Tab::Yandex;
+        let progress = if wave { crate::services::yandex::progress() } else { media::progress() };
+        if let (Some(f), Some((_, len))) = (self.ui.home.seek.take(), progress) {
+            if wave {
+                crate::services::yandex::send(crate::services::yandex::Command::Seek(f * len));
+            } else {
+                media::seek(f * len);
+            }
         }
         self.repaint_expanded();
     }
@@ -214,7 +272,12 @@ impl App {
     }
 
     pub(in crate::island) fn start_progress_timer(&self) {
-        let home = self.state == State::Expanded && self.ui.tab == view::Tab::Home && self.ui.media.playing;
+        let home = self.state == State::Expanded
+            && match self.ui.tab {
+                view::Tab::Home => self.ui.media.playing,
+                view::Tab::Yandex => self.ui.yandex.state.media.playing,
+                _ => false,
+            };
         let pill = self.progress_pill_visible() && view::progress_strip_on(&self.ui);
         if home || pill {
             let interval = if pill && view::pill_progress_fill_on(&self.ui) { self.frame_ms() } else { 1000 };
@@ -225,7 +288,9 @@ impl App {
     }
 
     pub(in crate::island) fn progress_pill_visible(&self) -> bool {
-        self.state == State::Collapsed
+        self.pill_motion.intro.is_none()
+            && !self.notification_card_visible()
+            && self.state == State::Collapsed
             && !self.gaming
             && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
             && unsafe { IsWindowVisible(self.hwnd).as_bool() }

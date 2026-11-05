@@ -29,7 +29,11 @@ mod frame;
 mod home;
 mod integrations;
 mod metrics;
+mod mixer;
+mod music_intro;
 mod note;
+mod notifications;
+mod pet_studio;
 mod pill;
 mod pill_vertical;
 mod privacy;
@@ -41,18 +45,23 @@ mod settings_window;
 mod steam;
 mod text;
 mod tips;
+mod wave_theme;
 mod weather;
 mod widgets;
+mod yandex;
 
 pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
 pub use self::{
     activity::*, agy::*, chat::*, clipboard::*, command::*, companion_popup::*, controls::*, discord::*, frame::*,
-    home::*, integrations::*, metrics::*, note::*, pill::*, pill_vertical::*, privacy::*, record::*, remind::*,
-    settings::*, settings_window::*, steam::*, text::*, weather::*, widgets::*,
+    home::*, integrations::*, metrics::*, mixer::*, music_intro::*, note::*, notifications::*, pill::*,
+    pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
+    widgets::*, yandex::*,
 };
+pub use pet_studio::*;
 
 pub type Rect = (f32, f32, f32, f32);
+pub use wave_theme::{WaveColours, wave_colour};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -69,10 +78,13 @@ pub enum Tab {
     Activity,
     Steam,
     Controls,
+    Mixer,
+    Notifications,
+    Yandex,
     Settings,
 }
 
-pub const TABS: [(Tab, char, &str); 14] = [
+pub const TABS: [(Tab, char, &str); 17] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Text, '\u{E8E9}', "Text"),
@@ -86,6 +98,9 @@ pub const TABS: [(Tab, char, &str); 14] = [
     (Tab::Activity, '\u{E823}', "Activity"),
     (Tab::Steam, '\u{E7FC}', "Steam"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
+    (Tab::Mixer, '\u{E9E9}', "App mixer"),
+    (Tab::Notifications, '\u{E7F4}', "Notifications"),
+    (Tab::Yandex, '\u{E189}', "My Wave"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
 
@@ -131,6 +146,9 @@ pub struct TabDrag {
 }
 
 pub struct UiState {
+    pub feedback: crate::ui::feedback::Feedback,
+    pub pressed_action: Option<usize>,
+    pub cover_in_flight: bool,
     pub tab: Tab,
     pub tab_drag: Option<TabDrag>,
     pub tab_press: Option<(usize, i32, i32)>,
@@ -145,6 +163,9 @@ pub struct UiState {
     pub editing: bool,
     pub caret_on: bool,
     pub media: Media,
+    pub mixer: MixerUi,
+    pub notifications: NotificationsUi,
+    pub yandex: YandexUi,
     pub lyric: LyricUi,
     pub update: crate::services::update::Status,
     pub notes: NotesUi,
@@ -186,6 +207,9 @@ impl UiState {
     pub fn new() -> Self {
         Self {
             tab: Tab::Home,
+            feedback: Default::default(),
+            pressed_action: None,
+            cover_in_flight: false,
             agy: AgyUi::default(),
             chat: ChatUi::default(),
             privacy_log: PrivacyUi::default(),
@@ -200,6 +224,9 @@ impl UiState {
             clip: ClipUi::default(),
             city: CityUi::default(),
             home: HomeUi::default(),
+            mixer: MixerUi::default(),
+            notifications: NotificationsUi::default(),
+            yandex: YandexUi::default(),
             hover_tab: None,
             hover_sub: None,
             note: TextEdit::default(),
@@ -252,3 +279,15 @@ fn acc(alpha: f32) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {
 const GREEN: (f32, f32, f32) = (0.4, 0.85, 0.55);
 
 const RED: (f32, f32, f32) = (1.0, 0.35, 0.35);
+
+impl UiState {
+    pub fn action_hover(&self, id: usize) -> f32 {
+        self.feedback.sample(id as u64, f32::from(self.home.hover_act == Some(id)), 0.0, 140)
+    }
+
+    pub fn action_rect(&self, id: usize, rect: Rect) -> Rect {
+        let pressed = self.feedback.sample(100_000 + id as u64, f32::from(self.pressed_action == Some(id)), 0.0, 90);
+        let inset = (rect.2 - rect.0).min(rect.3 - rect.1) * 0.035 * pressed;
+        (rect.0 + inset, rect.1 + inset, rect.2 - inset, rect.3 - inset)
+    }
+}

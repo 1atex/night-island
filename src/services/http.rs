@@ -66,6 +66,30 @@ pub fn request_as(
     Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
 }
 
+pub fn request_json(method: &str, url: &str, bearer: &str, json: &str) -> Option<Response> {
+    let verb = match method {
+        "POST" => HttpMethod::Post().ok()?,
+        "PUT" => HttpMethod::Put().ok()?,
+        _ => return None,
+    };
+    let client = HttpClient::new().ok()?;
+    let message = HttpRequestMessage::Create(&verb, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
+    let value =
+        HttpCredentialsHeaderValue::CreateFromSchemeWithToken(&HSTRING::from("Bearer"), &HSTRING::from(bearer)).ok()?;
+    message.Headers().ok()?.SetAuthorization(&value).ok()?;
+    let content = HttpStringContent::CreateFromStringWithEncodingAndMediaType(
+        &HSTRING::from(json),
+        UnicodeEncoding::Utf8,
+        &HSTRING::from("application/json"),
+    )
+    .ok()?;
+    message.SetContent(&content).ok()?;
+    let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
+    let status = reply.StatusCode().ok()?.0 as u16;
+    let body = reply.Content().ok()?.ReadAsStringAsync().ok()?.join().ok()?.to_string();
+    Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
+}
+
 pub struct BytesReply {
     pub status: u16,
     pub body: Vec<u8>,
@@ -151,6 +175,46 @@ pub fn post_json(url: &str, headers: &[(&str, &str)], body: &str, agent: Option<
     let status = reply.StatusCode().ok()?.0 as u16;
     let body = reply.Content().ok()?.ReadAsStringAsync().ok()?.join().ok()?.to_string();
     Some(Response { status, body: body.chars().take(MAX_BODY_CHARS).collect() })
+}
+
+pub fn post_json_for_bytes(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+    max_bytes: usize,
+    agent: Option<&str>,
+) -> Option<BytesReply> {
+    let client = HttpClient::new().ok()?;
+    let message =
+        HttpRequestMessage::Create(&HttpMethod::Post().ok()?, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
+    let sent = message.Headers().ok()?;
+    if let Some(agent) = agent {
+        sent.UserAgent().ok()?.TryParseAdd(&HSTRING::from(agent)).ok()?;
+    }
+    for (name, value) in headers {
+        if !sent.TryAppendWithoutValidation(&HSTRING::from(*name), &HSTRING::from(*value)).ok()? {
+            return None;
+        }
+    }
+    let content = HttpStringContent::CreateFromStringWithEncodingAndMediaType(
+        &HSTRING::from(body),
+        UnicodeEncoding::Utf8,
+        &HSTRING::from("application/json"),
+    )
+    .ok()?;
+    message.SetContent(&content).ok()?;
+    let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
+    let status = reply.StatusCode().ok()?.0 as u16;
+    let buffer = reply.Content().ok()?.ReadAsBufferAsync().ok()?.join().ok()?;
+    let len = buffer.Length().ok()? as usize;
+    if len > max_bytes {
+        return None;
+    }
+    let mut bytes = vec![0u8; len];
+    if len > 0 {
+        DataReader::FromBuffer(&buffer).ok()?.ReadBytes(&mut bytes).ok()?;
+    }
+    Some(BytesReply { status, body: bytes })
 }
 
 pub fn post_bytes(

@@ -23,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 13] = [
+const ISLAND: [(Sid, &str, Kind); 15] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -33,7 +33,9 @@ const ISLAND: [(Sid, &str, Kind); 13] = [
     (Sid::Edge, "Edge", Kind::Cycle),
     (Sid::Style, "Shape", Kind::Segment(["Flat", "Liquid"])),
     (Sid::Character, "Character", Kind::Cycle),
-    (Sid::CharacterDetached, "Let the character roam the desktop", Kind::Toggle),
+    (Sid::CharacterDetached, "Release the pet from the island", Kind::Toggle),
+    (Sid::PetPerformance, "Pet animation quality", Kind::Cycle),
+    (Sid::PetAutonomy, "Pet walks, rests and sleeps on its own", Kind::Toggle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
     (Sid::CloseDelay, "Close delay", Kind::Slider),
@@ -55,7 +57,7 @@ const APPEARANCE: [(Sid, &str, Kind); 4] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 19] = [
+const PILL: [(Sid, &str, Kind); 20] = [
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
@@ -63,6 +65,7 @@ const PILL: [(Sid, &str, Kind); 19] = [
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
     (Sid::MusicCover, "Cover art on the pill", Kind::Toggle),
+    (Sid::PreferPlayingMedia, "Prefer the player that is playing", Kind::Toggle),
     (Sid::CoverMode, "Cover shape", Kind::Cycle),
     (Sid::MusicLyrics, "Synced lyrics", Kind::Toggle),
     (Sid::SharedLyrics, "Shared lyrics cache", Kind::Toggle),
@@ -77,7 +80,11 @@ const PILL: [(Sid, &str, Kind); 19] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 16] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 20] = [
+    (Sid::SystemNotifications, "Windows notifications from the island", Kind::Toggle),
+    (Sid::NotificationTiles, "Notification preview size", Kind::Cycle),
+    (Sid::NotificationOpenApp, "Click a notification to open its app", Kind::Toggle),
+    (Sid::WindowsNotificationsSettings, "Windows notification settings", Kind::Button),
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
     (Sid::NotifyCapture, "Screenshots, text and QR", Kind::Toggle),
@@ -102,6 +109,35 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
+const ASSISTANT: [(Sid, &str, Kind); 26] = [
+    (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
+    (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
+    (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
+    (Sid::AsstSounds, "Sound cues", Kind::Toggle),
+    (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
+    (Sid::AsstLocal, "Local voice Piper (free, works offline, a little CPU while speaking)", Kind::Toggle),
+    (Sid::AsstLocalInstall, "Download the local voice (up to 44 MB)", Kind::Button),
+    (Sid::AsstNatural, "Natural voice from the speech service (paid, no load on the PC)", Kind::Toggle),
+    (Sid::AsstFollowUp, "Keep listening after an answer", Kind::Toggle),
+    (Sid::AsstSteps, "Steps per request", Kind::Slider),
+    (Sid::AsstReview, "Check commands with a second model call when asking first", Kind::Toggle),
+    (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
+    (Sid::AsstInstructions, "Edit the assistant's own instructions", Kind::Button),
+    (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
+    (Sid::AsstControls, "Volume, mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
+    (Sid::AsstOpen, "Open programs and games", Kind::Cycle),
+    (Sid::AsstReminders, "Reminders and timers", Kind::Cycle),
+    (Sid::AsstMemory, "Remember things about you", Kind::Cycle),
+    (Sid::AsstWebSearch, "Search the internet", Kind::Cycle),
+    (Sid::AsstFilesRead, "Read and search files", Kind::Cycle),
+    (Sid::AsstFilesWrite, "Create and change files", Kind::Cycle),
+    (Sid::AsstShell, "Command line", Kind::Cycle),
+    (Sid::AsstBrowser, "Browser (open sites, read pages)", Kind::Cycle),
+    (Sid::AsstPower, "Shut down, restart, sleep", Kind::Cycle),
+    (Sid::AsstScreen, "Look at the screen (preview, needs a model that sees images)", Kind::Cycle),
+    (Sid::AsstIsland, "Island data: weather, music, Spotify, Discord, Steam, notes", Kind::Cycle),
+];
+
 const ACTIVITY: [(Sid, &str, Kind); 1] = [(Sid::ActivityAi, "Sort unknown programs with AI", Kind::Toggle)];
 
 const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
@@ -112,7 +148,7 @@ const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::OpenLogs, "Logs folder", Kind::Button),
 ];
 
-const ROWS_TABS_ONLY: [(Sid, &str, Kind); 11] = [
+const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
     (Sid::TabClipboard, "Clipboard", Kind::Toggle),
     (Sid::TabText, "Text", Kind::Toggle),
     (Sid::TabNote, "Note", Kind::Toggle),
@@ -124,12 +160,15 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 11] = [
     (Sid::TabSteam, "Steam", Kind::Toggle),
     (Sid::TabSystem, "System", Kind::Toggle),
     (Sid::TabControls, "Controls", Kind::Toggle),
+    (Sid::TabMixer, "App mixer", Kind::Toggle),
+    (Sid::TabNotifications, "Notifications", Kind::Toggle),
+    (Sid::TabYandex, "My Wave", Kind::Toggle),
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
-    [(0, "Application"), (4, "Look and feel"), (8, "Monitoring"), (11, "Services"), (14, "Program")];
+    [(0, "Application"), (6, "Look and feel"), (10, "Monitoring"), (13, "Services"), (17, "Program")];
 
-pub const GROUPS: [Group; 15] = [
+pub const GROUPS: [Group; 18] = [
     Group {
         glyph: '\u{E713}',
         name: "General",
@@ -142,8 +181,10 @@ pub const GROUPS: [Group; 15] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (11, "Open and close")],
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (13, "Open and close")],
     },
+    Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
+    Group { glyph: '\u{E8A9}', name: "Top panel", rows: &[], custom: Some(top_panel_items), sections: &[] },
     Group { glyph: '\u{E71D}', name: "Tabs", rows: &ROWS_TABS_ONLY, custom: None, sections: &[] },
     Group { glyph: '\u{E765}', name: "Keys", rows: &[], custom: Some(key_items), sections: &[] },
     Group {
@@ -166,19 +207,20 @@ pub const GROUPS: [Group; 15] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (4, "Music"), (12, "Edges")],
+        sections: &[(0, "Pill"), (4, "Music"), (13, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',
         name: "Notifications",
         rows: &NOTIFICATIONS,
         custom: None,
-        sections: &[(0, "System"), (7, "Clipboard and keys"), (11, "Apps and services")],
+        sections: &[(0, "System"), (9, "Clipboard and keys"), (13, "Apps and services")],
     },
     Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
     Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items), sections: &[] },
     Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items), sections: &[] },
+    Group { glyph: '\u{E720}', name: "Assistant", rows: &ASSISTANT, custom: Some(assistant_items), sections: &[] },
     Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items), sections: &[] },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items), sections: &[] },
 ];
@@ -215,8 +257,8 @@ const ROW_H: f32 = 46.0;
 const SERVICE_H: f32 = 56.0;
 const NOTE_H: f32 = 19.0;
 const CTL_W: f32 = 300.0;
-const GROUP_H: f32 = 32.0;
-const SIDE_SECTION_H: f32 = 26.0;
+const GROUP_H: f32 = 25.0;
+const SIDE_SECTION_H: f32 = 22.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Field {
@@ -229,6 +271,10 @@ pub enum Field {
     VoiceKey,
     VoiceModel,
     VoiceBase,
+    TtsKey,
+    TtsBase,
+    TtsModel,
+    TtsVoice,
     WakeWord,
     GroupName,
     Search,
@@ -236,6 +282,11 @@ pub enum Field {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
+    YandexMain,
+    YandexWave,
+    YandexBrowser,
+    YandexCopy,
+    YandexAutoplay,
     DiscordMain,
     DiscordMute,
     DiscordDeaf,
@@ -246,6 +297,8 @@ pub enum Act {
     AiRemoveKey,
     VoiceSave,
     VoiceRemoveKey,
+    TtsSave,
+    TtsRemoveKey,
     WakeSave,
     GroupAdd,
     GroupDelete(i64),
@@ -256,12 +309,15 @@ pub enum Act {
     KeysReset,
     LyricsAppAdd,
     LyricsAppRemove(usize),
+    DockRemove(usize),
+    DockHiddenRemove(usize),
     Metric(usize),
     Agent(usize),
 }
 
 #[derive(Default)]
 pub struct SwUi {
+    pub dock_status: String,
     pub group: usize,
     pub scroll: f32,
     pub search: String,
@@ -362,6 +418,42 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     use discord::Status as D;
     let mut out = vec![Item::Heading("Integrations")];
 
+    let wave = &ui.yandex.state;
+    let status = if !wave.error.is_empty() {
+        wave.error.clone()
+    } else if !wave.code.is_empty() {
+        crate::ui::i18n::tr("Waiting for the browser…").into_owned()
+    } else if wave.busy {
+        crate::ui::i18n::tr("Connecting…").into_owned()
+    } else if wave.has_token {
+        wave.account.clone()
+    } else {
+        crate::ui::i18n::tr("Not connected").into_owned()
+    };
+    out.push(Item::Service { name: "Yandex Music", glyph: '\u{E8D6}', status, live: wave.has_token });
+    if !wave.code.is_empty() {
+        out.push(Item::Text(format!("{}: {}", crate::ui::i18n::tr("Code"), wave.code)));
+        out.push(Item::Button(Act::YandexCopy, if ui.yandex.copied { "Copied" } else { "Copy code" }.into(), true));
+        out.push(Item::Button(Act::YandexBrowser, "Open sign-in page".into(), true));
+    }
+    let label = if wave.has_token {
+        "Disconnect"
+    } else if wave.busy || !wave.code.is_empty() {
+        "Cancel"
+    } else {
+        "Connect"
+    };
+    out.push(Item::Button(Act::YandexMain, label.into(), true));
+    if wave.has_token {
+        out.push(Item::Pair(
+            Act::YandexAutoplay,
+            "Start My Wave with the island".into(),
+            if wave.config.autoplay { "On" } else { "Off" }.into(),
+            wave.config.autoplay,
+        ));
+    }
+    out.push(Item::Button(Act::YandexWave, "Open My Wave".into(), true));
+
     let (status, live) = discord_status_text(&ui.discord);
     out.push(Item::Service { name: "Discord", glyph: '\u{E8F2}', status, live });
     match &ui.discord.status {
@@ -382,8 +474,15 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
             let mute = if ui.discord.self_mute { "Unmute the microphone" } else { "Mute the microphone" };
             let deaf = if ui.discord.self_deaf { "Undeafen" } else { "Deafen" };
             let overlay = if ui.cfg.discord_overlay { "Hide the call overlay" } else { "Show the call overlay" };
-            out.push(Item::Button(Act::DiscordMute, mute.into(), true));
-            out.push(Item::Button(Act::DiscordDeaf, deaf.into(), true));
+            out.push(Item::Button(Act::DiscordMute, mute.into(), ui.discord.voice_available));
+            out.push(Item::Button(Act::DiscordDeaf, deaf.into(), ui.discord.voice_available));
+            if !ui.discord.voice_available {
+                out.push(Item::Note(if ui.discord.voice_error.is_some() {
+                    "Discord voice controls unavailable"
+                } else {
+                    "Waiting for Discord voice settings"
+                }));
+            }
             out.push(Item::Button(Act::DiscordOverlay, overlay.into(), true));
             out.push(Item::Button(Act::DiscordMain, "Disconnect".into(), true));
         }
@@ -620,6 +719,7 @@ fn pill_items(ui: &UiState) -> Vec<Item> {
     if let Some(group) = GROUPS.iter().find(|g| g.name == "Pill and music") {
         out.extend(rows_with_sections(group));
     }
+    out.push(Item::Note("Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls."));
     out.push(Item::Section("Players for lyrics"));
     let apps = &ui.cfg.lyrics_apps;
     if apps.is_empty() {
@@ -724,6 +824,75 @@ fn activity_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
+fn assistant_items(ui: &UiState) -> Vec<Item> {
+    let mut out = Vec::new();
+    for &(id, label, kind) in &ASSISTANT {
+        match id {
+            Sid::AsstEnabled => out.push(Item::Section("Voice")),
+            Sid::AsstSteps => out.push(Item::Section("How it works")),
+            Sid::AsstMedia => out.push(Item::Section("What it may do")),
+            _ => {}
+        }
+        out.push(Item::Row(id, label, kind));
+        if id == Sid::AsstNatural && ui.cfg.assistant.natural_voice {
+            let (saved, shared) = (ui.int.tts_key_saved, ui.int.tts_key_shared);
+            let provider = ui.cfg.assistant.tts_provider;
+            let eleven = provider == crate::services::assistant::TtsProvider::Eleven;
+            let fish = provider == crate::services::assistant::TtsProvider::Fish;
+            out.push(Item::Row(Sid::AsstTtsProvider, "Cloud voice service", Kind::Cycle));
+            out.push(Item::Field(
+                Field::TtsKey,
+                "Voice API key",
+                if saved {
+                    "Saved: type a new one to replace it"
+                } else if shared {
+                    "Same server: the speech service key is used"
+                } else {
+                    "Paste the key here"
+                },
+            ));
+            let (base_hint, model_hint, voice_hint) = provider.defaults();
+            out.push(Item::Field(Field::TtsBase, "Voice server address", base_hint));
+            out.push(Item::Field(Field::TtsModel, "Voice model", model_hint));
+            out.push(Item::Field(Field::TtsVoice, if eleven || fish { "Voice ID" } else { "Voice name" }, voice_hint));
+            out.push(Item::Button(Act::TtsSave, "Save the voice service".into(), true));
+            if saved {
+                out.push(Item::Button(Act::TtsRemoveKey, "Remove the voice key".into(), true));
+            }
+            if fish {
+                out.push(Item::Note("Fish Audio: the key is in fish.audio, Developers, API keys."));
+                out.push(Item::Note(
+                    "The voice ID is the ID of a voice model from fish.audio/discovery; \"default\" uses the stock voice.",
+                ));
+                out.push(Item::Note(
+                    "Models: s2.1-pro (default), s2-pro, s1; s2.1-pro-free is the free developer tier.",
+                ));
+            } else if eleven {
+                out.push(Item::Note(
+                    "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota).",
+                ));
+                out.push(Item::Note(
+                    "The voice ID is under Voices, the ID of a voice you added; the default is a stock voice.",
+                ));
+                out.push(Item::Note("Models: eleven_multilingual_v2 (speaks Russian), eleven_flash_v2_5 (faster)."));
+            } else {
+                out.push(Item::Note(
+                    "Any OpenAI-compatible server with /audio/speech. The address is where requests go:",
+                ));
+                out.push(Item::Note(
+                    "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own",
+                ));
+                out.push(Item::Note(
+                    "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key.",
+                ));
+                out.push(Item::Note("OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."));
+            }
+            out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
+        }
+    }
+    out
+}
+
 fn ai_items(ui: &UiState) -> Vec<Item> {
     use crate::data::settings::AiProvider;
     let provider = ui.cfg.ai.provider;
@@ -790,6 +959,122 @@ fn matches(label: &str, query: &str) -> bool {
     q.is_empty() || label.to_lowercase().contains(&q) || crate::ui::i18n::tr(label).to_lowercase().contains(&q)
 }
 
+fn top_panel_items(ui: &UiState) -> Vec<Item> {
+    use crate::ui::i18n::tr;
+    let mut items = vec![
+        Item::Row(Sid::TopEnabled, "Enable top panel", Kind::Toggle),
+        Item::Text(
+            tr("Companion blocks beside the island, on the main display. Colours follow the island theme.")
+                .into_owned(),
+        ),
+        Item::Section("Visible blocks"),
+        Item::Row(Sid::TopTray, "System tray", Kind::Toggle),
+        Item::Row(Sid::DockTaskbar, "Set up the Windows system tray", Kind::Button),
+        Item::Text(tr("Windows taskbar settings: Other system tray icons → Hidden icon menu.").into_owned()),
+        Item::Row(Sid::TopApplication, "Active application and window actions", Kind::Toggle),
+        Item::Row(Sid::TopWifi, "Wi-Fi", Kind::Toggle),
+        Item::Row(Sid::TopBluetooth, "Bluetooth", Kind::Toggle),
+        Item::Row(Sid::TopVolume, "System volume", Kind::Toggle),
+        Item::Row(Sid::TopBattery, "Battery and power", Kind::Toggle),
+        Item::Row(Sid::TopMicrophone, "Microphone mute switch", Kind::Toggle),
+        Item::Row(Sid::TopKeyboard, "Keyboard layout switch", Kind::Toggle),
+        Item::Row(Sid::TopWorkspaces, "Windows and desktops", Kind::Toggle),
+        Item::Section("Behaviour"),
+        Item::Row(Sid::TopAnimations, "Animate panel interactions", Kind::Toggle),
+        Item::Row(Sid::TopAutoHide, "Show top panel at the screen edge", Kind::Toggle),
+        Item::Text(tr("Autohide frees the top edge. Island visibility is configured separately.").into_owned()),
+        Item::Row(Sid::TopFullscreen, "Hide top panel in fullscreen apps", Kind::Toggle),
+        Item::Row(Sid::TopReserve, "Keep maximized windows below the top panel", Kind::Toggle),
+        Item::Row(Sid::TopClearControls, "Keep window buttons accessible", Kind::Toggle),
+        Item::Text(
+            tr("Music, time and notifications stay in the island. Right-click a block to customize the panel.")
+                .into_owned(),
+        ),
+    ];
+    if ui.cfg.top_panel.auto_hide {
+        items.retain(|item| !matches!(item, Item::Row(Sid::TopReserve, _, _)));
+    }
+    items
+}
+
+fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![
+        Item::Heading("Desktop dock"),
+        Item::Row(Sid::DockEnabled, "Enable desktop dock", Kind::Toggle),
+        Item::Note("One process with Island. Enable after closing your other dock."),
+        Item::Section("Capture protection"),
+        Item::Row(Sid::DockExperimentalCapture, "Experimental capture protection", Kind::Toggle),
+        Item::Text(crate::ui::i18n::tr("Alt + right-click an app in the dock to hide its windows from capture. Repeat to restore.").into_owned()),
+        Item::Text(crate::ui::i18n::tr("Current windows only. Browsers, messengers, editors and players; 64-bit, without administrator rights.").into_owned()),
+        Item::Text(crate::ui::i18n::tr("A temporary module runs inside the chosen app. Anti-cheat blocks this mode.").into_owned()),
+        Item::Text(crate::ui::i18n::tr("New windows are configured separately").into_owned()),
+        Item::Text(crate::ui::i18n::tr("Some recording methods can ignore Windows capture protection.").into_owned()),
+        Item::Section("Behaviour"),
+        Item::Row(Sid::DockAutoHide, "Automatically hide the dock", Kind::Toggle),
+        Item::Row(Sid::DockRunning, "Show running applications", Kind::Toggle),
+        Item::Row(Sid::DockPreview, "Window previews and controls on hover", Kind::Toggle),
+        Item::Row(Sid::DockFullscreen, "Hide over fullscreen applications", Kind::Toggle),
+        Item::Note("Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back."),
+        Item::Row(Sid::DockAnimations, "Animate dock interactions", Kind::Toggle),
+        Item::Row(Sid::DockSeparator, "Separate pinned and running applications", Kind::Toggle),
+        Item::Row(Sid::DockLockPins, "Lock dock icon positions", Kind::Toggle),
+        Item::Row(Sid::DockEconomy, "Economy animations (30 fps)", Kind::Toggle),
+        Item::Section("Appearance"),
+        Item::Row(Sid::DockIconSize, "Dock icon size", Kind::Slider),
+        Item::Row(Sid::DockZoom, "Magnification on hover", Kind::Slider),
+        Item::Row(Sid::DockBlur, "Blur behind the dock", Kind::Toggle),
+        Item::Row(Sid::DockOpacity, "Dock opacity", Kind::Slider),
+        Item::Row(Sid::DockTintHue, "Dock tint", Kind::Slider),
+        Item::Row(Sid::DockTintSaturation, "Dock tint saturation", Kind::Slider),
+        Item::Row(Sid::DockTintBrightness, "Dock tint brightness", Kind::Slider),
+        Item::Row(Sid::DockMargin, "Bottom margin", Kind::Slider),
+        Item::Row(Sid::DockMonitor, "Switch dock monitor", Kind::Button),
+        Item::Text(if ui.cfg.desktop_dock.monitor.is_empty() {
+            crate::ui::i18n::tr("Primary monitor").into_owned()
+        } else {
+            crate::platform::desktop_dock::monitors()
+                .iter()
+                .enumerate()
+                .find(|(_, m)| m.device == ui.cfg.desktop_dock.monitor)
+                .map(|(i, m)| {
+                    format!(
+                        "{} {} · {} × {}",
+                        crate::ui::i18n::tr("Monitor"),
+                        i + 1,
+                        m.bounds.right - m.bounds.left,
+                        m.bounds.bottom - m.bounds.top
+                    )
+                })
+                .unwrap_or_else(|| crate::ui::i18n::tr("Primary monitor").into_owned())
+        }),
+        Item::Section("Applications"),
+        Item::Row(Sid::DockImport, "Import applications from MyDockFinder", Kind::Button),
+        Item::Row(Sid::DockAdd, "Add application or file", Kind::Button),
+        Item::Note("Drop shortcuts onto the dock. Drag pinned icons to reorder."),
+        Item::Note("Right-click for windows, pinning and settings. Scroll for more apps."),
+        Item::Row(Sid::DockTaskbar, "Windows taskbar settings", Kind::Button),
+        Item::Row(Sid::DockReplaceTaskbar, "Replace Windows taskbar while dock is enabled", Kind::Toggle),
+        Item::Note("The Windows taskbar returns when the dock or Island closes."),
+    ];
+    if !ui.sw.dock_status.is_empty() {
+        let index = out.iter().position(|item| matches!(item, Item::Row(Sid::DockImport, ..))).unwrap_or(0);
+        out.insert(index + 1, Item::Text(ui.sw.dock_status.clone()));
+    }
+    out.push(Item::Section("Games and application rules"));
+    out.push(Item::Note("For a windowed game, right-click its dock icon and choose Hide dock in this app."));
+    for (i, path) in ui.cfg.desktop_dock.hidden_apps.iter().enumerate() {
+        let name = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy().into_owned();
+        out.push(Item::Pair(Act::DockHiddenRemove(i), name, "Remove rule".into(), false));
+    }
+    if !ui.cfg.desktop_dock.pins.is_empty() {
+        out.push(Item::Section("Pinned applications"));
+    }
+    for (i, pin) in ui.cfg.desktop_dock.pins.iter().enumerate() {
+        out.push(Item::Pair(Act::DockRemove(i), pin.name.clone(), "Remove".into(), false));
+    }
+    out
+}
+
 fn rows_with_sections(group: &Group) -> Vec<Item> {
     let mut out = Vec::new();
     for (i, &(id, label, kind)) in group.rows.iter().enumerate() {
@@ -797,6 +1082,9 @@ fn rows_with_sections(group: &Group) -> Vec<Item> {
             out.push(Item::Section(title));
         }
         out.push(Item::Row(id, label, kind));
+        if id == Sid::PetAutonomy {
+            out.push(Item::Note("Pets pause near the pointer and during chat. Reduced motion stops walking."));
+        }
     }
     out
 }
@@ -1026,6 +1314,10 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::VoiceKey => &ui.int.voice_key,
         Field::VoiceModel => &ui.int.voice_model,
         Field::VoiceBase => &ui.int.voice_base,
+        Field::TtsKey => &ui.int.tts_key,
+        Field::TtsBase => &ui.int.tts_base,
+        Field::TtsModel => &ui.int.tts_model,
+        Field::TtsVoice => &ui.int.tts_voice,
         Field::WakeWord => &ui.int.wake,
         Field::GroupName => &ui.int.group_name,
         Field::Search => &ui.int.search,
@@ -1200,7 +1492,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         DWRITE_TEXT_ALIGNMENT_LEADING,
                         rgba(1.0, 1.0, 1.0, 0.9),
                     )?;
-                    paint_control(p, scale, &ui.cfg, id, kind, ctl)?;
+                    paint_control(p, scale, &ui.cfg, id, kind, ctl, &ui.feedback)?;
                 }
                 Item::Service { name, glyph, status, live } => {
                     let d = 38.0 * scale;
@@ -1246,7 +1538,7 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         ctl,
                         inner,
                         field_edit(ui, field),
-                        matches!(field, Field::DiscordSecret | Field::AiKey | Field::VoiceKey),
+                        matches!(field, Field::DiscordSecret | Field::AiKey | Field::VoiceKey | Field::TtsKey),
                         hint,
                         ui.sw.field == Some(field),
                         ui.sw.caret_on,
@@ -1376,6 +1668,99 @@ mod tests {
     use super::*;
 
     #[test]
+    fn desktop_dock_controls_persist_and_sidebar_stays_inside_the_window() {
+        let mut ui = UiState::new();
+        ui.sw.group = GROUPS.iter().position(|g| g.name == "Desktop dock").unwrap();
+        let rows = items(&ui);
+        for sid in [
+            Sid::DockEnabled,
+            Sid::DockAutoHide,
+            Sid::DockRunning,
+            Sid::DockPreview,
+            Sid::DockFullscreen,
+            Sid::DockEconomy,
+            Sid::DockIconSize,
+            Sid::DockZoom,
+            Sid::DockOpacity,
+            Sid::DockBlur,
+            Sid::DockTintHue,
+            Sid::DockTintSaturation,
+            Sid::DockTintBrightness,
+            Sid::DockMargin,
+            Sid::DockMonitor,
+            Sid::DockImport,
+            Sid::DockAdd,
+            Sid::DockTaskbar,
+        ] {
+            assert!(rows.iter().any(|item| matches!(item, Item::Row(id, ..) if *id == sid)));
+        }
+        toggle_set(Sid::DockEnabled, &mut ui.cfg, true);
+        toggle_set(Sid::DockAutoHide, &mut ui.cfg, true);
+        slider_apply(Sid::DockIconSize, &mut ui.cfg, 1.0);
+        toggle_set(Sid::DockBlur, &mut ui.cfg, true);
+        slider_apply(Sid::DockTintHue, &mut ui.cfg, 0.5);
+        slider_apply(Sid::DockTintSaturation, &mut ui.cfg, 0.6);
+        slider_apply(Sid::DockTintBrightness, &mut ui.cfg, 0.5);
+        slider_apply(Sid::DockOpacity, &mut ui.cfg, 0.5);
+        assert!((ui.cfg.desktop_dock.blur_opacity - 0.6).abs() < 0.001);
+        assert_eq!(ui.cfg.desktop_dock.opacity, 0.94);
+        toggle_set(Sid::DockBlur, &mut ui.cfg, false);
+        slider_apply(Sid::DockOpacity, &mut ui.cfg, 1.0);
+        assert_eq!(ui.cfg.desktop_dock.opacity, 1.0);
+        assert!((ui.cfg.desktop_dock.blur_opacity - 0.6).abs() < 0.001);
+        ui.cfg.desktop_dock.hidden_apps.push(r"c:\games\game.exe".into());
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Pair(Act::DockHiddenRemove(0), ..))));
+        let saved = serde_json::to_string(&ui.cfg).unwrap();
+        let restored: Settings = serde_json::from_str(&saved).unwrap();
+        assert!(restored.desktop_dock.enabled && restored.desktop_dock.auto_hide);
+        assert_eq!(restored.desktop_dock.icon_size, 72);
+        assert_eq!(restored.desktop_dock.tint_hue, 180.0);
+        assert_eq!(restored.desktop_dock.hidden_apps.len(), 1);
+        for scale in [1.0, 1.5, 2.0] {
+            let size = (SW_SIZE.0 * scale, SW_SIZE.1 * scale);
+            assert!(group_rect(&layout(size, scale), scale, GROUPS.len() - 1).3 <= size.1);
+        }
+    }
+
+    #[test]
+    fn wave_integration_covers_sign_in_code_and_connected_account() {
+        let mut ui = UiState::new();
+        let rows = integration_items(&ui);
+        assert!(rows.iter().any(|row| matches!(row, Item::Service { name: "Yandex Music", .. })));
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexMain,label,true) if label == "Connect")));
+        ui.yandex.state.code = "TEST-CODE".into();
+        let rows = integration_items(&ui);
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexCopy, _, true))));
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexBrowser, _, true))));
+        ui.yandex.state.code.clear();
+        ui.yandex.state.has_token = true;
+        ui.yandex.state.account = "Account".into();
+        let rows = integration_items(&ui);
+        assert!(
+            rows.iter().any(|row| matches!(row, Item::Button(Act::YandexMain,label,true) if label == "Disconnect"))
+        );
+        assert!(rows.iter().any(|row| matches!(row, Item::Pair(Act::YandexAutoplay, ..))));
+        assert!(rows.iter().any(|row| matches!(row, Item::Button(Act::YandexWave, _, true))));
+    }
+
+    #[test]
+    fn notification_size_dropdown_and_settings_round_trip() {
+        let mut settings = Settings::default();
+        for (index, count) in [1, 2, 4].into_iter().enumerate() {
+            cycle_pick(Sid::NotificationTiles, &mut settings, index);
+            assert_eq!(settings.notification_tiles, count);
+            assert_eq!(cycle_options(Sid::NotificationTiles, &settings).1, index);
+            toggle_set(Sid::NotificationOpenApp, &mut settings, true);
+            let saved: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(saved.notification_tiles, count);
+            assert!(saved.notification_open_app);
+        }
+        settings.notification_tiles = 255;
+        settings.sanitize();
+        assert_eq!(settings.notification_tiles, 4);
+    }
+
+    #[test]
     fn search_finds_rows_in_both_languages() {
         assert!(matches("Synced lyrics", "lyr"));
         assert!(matches("Synced lyrics", "  "));
@@ -1401,11 +1786,26 @@ mod tests {
         toggle_set(Sid::CharacterDetached, &mut ui.cfg, true);
         assert!(ui.cfg.character_detached);
         assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
-        ui.sw.search = "roam".into();
+        ui.sw.search = "release".into();
         assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::CharacterDetached, ..))));
         toggle_set(Sid::CharacterDetached, &mut ui.cfg, false);
         assert!(!ui.cfg.character_detached);
         assert_eq!(ui.cfg.character, crate::ui::characters::Character::Cat);
+    }
+
+    #[test]
+    fn pet_autonomy_can_be_disabled_without_docking_or_changing_the_pet() {
+        let mut ui = UiState::new();
+        ui.cfg.character_detached = true;
+        let character = ui.cfg.character;
+        toggle_set(Sid::PetAutonomy, &mut ui.cfg, false);
+        assert!(!toggle_get(Sid::PetAutonomy, &ui.cfg));
+        assert!(ui.cfg.character_detached);
+        assert_eq!(ui.cfg.character, character);
+        ui.sw.search = "sleeps".into();
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::PetAutonomy, ..))));
+        toggle_set(Sid::PetAutonomy, &mut ui.cfg, true);
+        assert!(toggle_get(Sid::PetAutonomy, &ui.cfg));
     }
 
     #[test]
