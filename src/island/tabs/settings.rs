@@ -83,9 +83,22 @@ impl App {
                 }
                 TopAutoHide | TopTray | TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume
                 | TopBattery | TopFullscreen | TopReserve => self.configure_top_panel(),
-                DockReplaceTaskbar | DockEnabled | DockAutoHide | DockRunning | DockPreview | DockFullscreen
-                | DockEconomy | DockIconSize | DockZoom | DockOpacity | DockMargin | DockBlur | DockTintHue
-                | DockTintSaturation | DockTintBrightness => self.configure_desktop_dock(),
+                DockExperimentalCapture
+                | DockReplaceTaskbar
+                | DockEnabled
+                | DockAutoHide
+                | DockRunning
+                | DockPreview
+                | DockFullscreen
+                | DockEconomy
+                | DockIconSize
+                | DockZoom
+                | DockOpacity
+                | DockMargin
+                | DockBlur
+                | DockTintHue
+                | DockTintSaturation
+                | DockTintBrightness => self.configure_desktop_dock(),
                 SystemNotifications => self.configure_system_notifications(),
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),

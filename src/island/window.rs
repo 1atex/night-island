@@ -638,16 +638,16 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.top_panel_request(3));
             LRESULT(0)
         }
+        crate::platform::app_capture::WM_APP_CAPTURE => {
+            crate::island::desktop_dock::capture_result();
+            LRESULT(0)
+        }
         crate::platform::system_tray::WM_TRAY_RESULT => {
             if wparam.0 == 0 {
                 with_app(|a| {
-                    a.show_notice_for(
-                        '\u{E783}',
-                        &crate::ui::i18n::tr(
-                            "Windows tray is unavailable. Enable the hidden icon menu in Windows taskbar settings.",
-                        ),
-                        5000,
-                    )
+                    if let Some(panel) = &mut a.top_panel {
+                        panel.tray_help();
+                    }
                 });
             }
             LRESULT(0)

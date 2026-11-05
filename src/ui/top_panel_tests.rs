@@ -196,6 +196,15 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
             click(&panel.card, Hit::Close);
             assert!(!panel.card.state.visible);
         }
+        panel.tray_help();
+        assert!(panel.card.state.visible);
+        assert_eq!(panel.card.state.size.0, (338.0 * scale) as i32);
+        save(&panel.card, &format!("tray-help-{scale:.1}"))?;
+        click(&panel.card, Hit::WindowsSettings);
+        assert!(matches!(panel.take_request(2), Some(Request::WindowsSettings(Block::Tray))));
+        panel.tray_help();
+        click(&panel.card, Hit::TrayRetry);
+        assert!(matches!(panel.take_request(2), Some(Request::Open(Block::Tray))));
         panel.open(Block::Volume);
         click(&panel.card, Hit::Mute);
         assert!(matches!(panel.take_request(2), Some(Request::Mute)));

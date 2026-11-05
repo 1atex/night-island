@@ -15,6 +15,7 @@ pub enum Sid {
 
     DockEnabled,
     DockReplaceTaskbar,
+    DockExperimentalCapture,
     DockAutoHide,
     DockRunning,
     DockPreview,
@@ -368,6 +369,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
     match id {
         Sid::TopAutoHide => c.top_panel.auto_hide,
         Sid::TopTray => c.top_panel.tray,
+        Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture,
         Sid::DockReplaceTaskbar => c.desktop_dock.replace_taskbar,
         Sid::TopEnabled => c.top_panel.enabled,
         Sid::TopApplication => c.top_panel.application,
@@ -449,6 +451,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
     match id {
         Sid::TopAutoHide => c.top_panel.auto_hide = on,
         Sid::TopTray => c.top_panel.tray = on,
+        Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture = on,
         Sid::DockReplaceTaskbar => c.desktop_dock.replace_taskbar = on,
         Sid::TopEnabled => c.top_panel.enabled = on,
         Sid::TopApplication => c.top_panel.application = on,

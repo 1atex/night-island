@@ -9,6 +9,7 @@ use std::time::Duration;
 use windows::core::BOOL;
 
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, GetWindowRgn, HRGN, SetWindowRgn};
 use windows::Win32::UI::Shell::{ABM_GETSTATE, ABM_SETSTATE, ABS_AUTOHIDE, APPBARDATA, SHAppBarMessage};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -52,10 +53,36 @@ fn taskbars() -> Vec<HWND> {
     result
 }
 
+struct Region(Option<HRGN>);
+impl Region {
+    fn capture(hwnd: HWND) -> Self {
+        unsafe {
+            let region = CreateRectRgn(0, 0, 0, 0);
+            if region.0.is_null() {
+                return Self(None);
+            }
+            if GetWindowRgn(hwnd, region).0 != 0 {
+                return Self(Some(region));
+            }
+            let _ = DeleteObject(region.into());
+            Self(None)
+        }
+    }
+}
+impl Drop for Region {
+    fn drop(&mut self) {
+        if let Some(region) = self.0.take() {
+            unsafe {
+                let _ = DeleteObject(region.into());
+            }
+        }
+    }
+}
+
 struct HiddenTaskbars {
     state: usize,
     owned_state: usize,
-    hidden: Vec<(HWND, u32, RECT)>,
+    hidden: Vec<(HWND, u32, RECT, Region)>,
 }
 
 impl HiddenTaskbars {
@@ -71,7 +98,7 @@ impl HiddenTaskbars {
     }
 
     fn refresh(&mut self) {
-        self.hidden.retain(|(hwnd, pid, _)| unsafe {
+        self.hidden.retain(|(hwnd, pid, _, _)| unsafe {
             let mut current = 0;
             GetWindowThreadProcessId(*hwnd, Some(&mut current));
             IsWindow(Some(*hwnd)).as_bool() && current == *pid
@@ -82,12 +109,12 @@ impl HiddenTaskbars {
                     continue;
                 }
                 if IsWindowVisible(hwnd).as_bool() {
-                    if !self.hidden.iter().any(|(old, _, _)| *old == hwnd) {
+                    if !self.hidden.iter().any(|(old, _, _, _)| *old == hwnd) {
                         let mut pid = 0;
                         GetWindowThreadProcessId(hwnd, Some(&mut pid));
                         let mut rect = RECT::default();
                         let _ = GetWindowRect(hwnd, &mut rect);
-                        self.hidden.push((hwnd, pid, rect));
+                        self.hidden.push((hwnd, pid, rect, Region::capture(hwnd)));
                     }
                     let _ = ShowWindow(hwnd, SW_HIDE);
                 }
@@ -99,12 +126,15 @@ impl HiddenTaskbars {
 impl Drop for HiddenTaskbars {
     fn drop(&mut self) {
         unsafe {
-            for (hwnd, pid, rect) in &self.hidden {
+            for (hwnd, pid, rect, region) in &mut self.hidden {
                 let mut current = 0;
                 GetWindowThreadProcessId(*hwnd, Some(&mut current));
                 if current == *pid && IsWindow(Some(*hwnd)).as_bool() {
                     if !GetPropW(*hwnd, windows::core::w!("NightIsland.TrayAccess")).0.is_null() {
                         let _ = RemovePropW(*hwnd, windows::core::w!("NightIsland.TrayAccess"));
+                        if SetWindowRgn(*hwnd, region.0, false) != 0 {
+                            region.0 = None;
+                        }
                         let _ = SetWindowPos(
                             *hwnd,
                             None,

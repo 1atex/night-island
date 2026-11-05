@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod app_capture;
 pub mod apps;
 pub mod audio;
 pub mod audio_mixer;

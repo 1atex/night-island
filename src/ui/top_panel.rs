@@ -80,6 +80,7 @@ enum Hit {
     Minimize,
     Maximize,
     CloseWindow,
+    TrayRetry,
     Window(usize),
 }
 
@@ -204,6 +205,7 @@ impl State {
             ),
             Role::Card(Block::Application) => (306.0, 210.0 + self.snapshot.windows.len().min(3) as f32 * 32.0),
             Role::Card(Block::Volume) => (306.0, 190.0),
+            Role::Card(Block::Tray) => (338.0, 314.0),
             Role::Card(_) => (306.0, 176.0),
         }
     }
@@ -252,7 +254,10 @@ impl State {
                         add((24.0, 66.0, width - 24.0, 108.0), Hit::Toggle, available.is_some());
                         add((24.0, 123.0, width - 24.0, 155.0), Hit::WindowsSettings, true);
                     }
-                    Block::Tray => {}
+                    Block::Tray => {
+                        add((24.0, 224.0, width - 24.0, 256.0), Hit::WindowsSettings, true);
+                        add((24.0, 264.0, width - 24.0, 296.0), Hit::TrayRetry, true);
+                    }
                     Block::Battery => add((24.0, 123.0, width - 24.0, 155.0), Hit::WindowsSettings, true),
                 }
             }
@@ -461,7 +466,26 @@ impl State {
                         )?;
                         text(&tr("Open Windows settings"), (34.0, 123.0, w - 34.0, 155.0), 11.0, false, 0.6)?;
                     }
-                    Block::Tray => {}
+                    Block::Tray => {
+                        text(&tr("Could not open the Windows tray"), (26.0, 54.0, w - 26.0, 78.0), 12.0, false, 0.8)?;
+                        for (label, y) in [
+                            ("1. Open Windows taskbar settings.", 88.0),
+                            ("2. Open Other system tray icons.", 114.0),
+                            ("3. Enable Hidden icon menu.", 140.0),
+                            ("You do not need to enable each application icon.", 163.0),
+                            ("Already enabled? Try again below.", 188.0),
+                        ] {
+                            text(&tr(label), (26.0, y, w - 26.0, y + 22.0), 11.0, false, 0.7)?;
+                        }
+                        for (label, top) in [("Open Windows settings", 224.0), ("Try again", 264.0)] {
+                            p.fill_round_rect(
+                                scaled((24.0, top, w - 24.0, top + 32.0), s),
+                                10.0 * s,
+                                rgba(1.0, 1.0, 1.0, 0.07),
+                            )?;
+                            text(&tr(label), (36.0, top, w - 36.0, top + 32.0), 11.0, false, 0.9)?;
+                        }
+                    }
                     Block::Battery => {
                         let (value, label) = match self.snapshot.battery {
                             Some((v, charging)) => (
@@ -523,6 +547,10 @@ impl State {
                 self.hide();
             }
             Hit::Close => self.hide(),
+            Hit::TrayRetry => {
+                self.post(Request::Open(Block::Tray));
+                self.hide();
+            }
             Hit::Toggle => {
                 if let Role::Card(block) = self.role {
                     self.post(if block == Block::Wifi { Request::ToggleWifi } else { Request::ToggleBluetooth });
@@ -901,7 +929,9 @@ impl TopPanel {
                     (point.x as f32, point.y as f32),
                 )
         });
-        let interacting = self.card.state.pressed.is_some() || crate::platform::system_tray::is_open();
+        let interacting = self.card.state.pressed.is_some()
+            || crate::platform::system_tray::is_open()
+            || (self.card.state.visible && matches!(self.card.state.role, Role::Card(Block::Tray)));
         if !fullscreen && (at_edge || over_panel || interacting) {
             self.last_inside = Instant::now();
             self.revealed = true;
@@ -975,6 +1005,19 @@ impl TopPanel {
             self.card.state.hide();
             return;
         }
+        self.show_card(block);
+    }
+
+    pub fn tray_help(&mut self) {
+        if self.suppressed() {
+            return;
+        }
+        self.revealed = true;
+        self.last_inside = Instant::now();
+        self.show_card(Block::Tray);
+    }
+
+    fn show_card(&mut self, block: Block) {
         self.card.state.hide();
         self.card.state.role = Role::Card(block);
         self.card.state.dirty = true;

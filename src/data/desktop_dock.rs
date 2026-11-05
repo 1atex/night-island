@@ -23,6 +23,7 @@ impl Pin {
 pub struct DockSettings {
     pub enabled: bool,
     pub replace_taskbar: bool,
+    pub experimental_capture: bool,
     pub auto_hide: bool,
     pub show_running: bool,
     pub hover_preview: bool,
@@ -48,6 +49,7 @@ impl Default for DockSettings {
         Self {
             enabled: false,
             replace_taskbar: true,
+            experimental_capture: false,
             auto_hide: false,
             show_running: true,
             hover_preview: true,

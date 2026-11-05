@@ -138,16 +138,36 @@ fn capture_application(entry: &crate::ui::desktop_dock::Entry) {
                 3000,
             );
             a.render_settings_win();
+        } else if windows.is_empty() {
+            a.show_notice_for('\u{E783}', &tr("Start the application before changing capture protection"), 3000);
+        } else if crate::platform::app_capture::start(a.hwnd, windows, a.settings.desktop_dock.experimental_capture) {
+            a.show_notice_for('\u{E72E}', &tr("Checking capture protection…"), 1800);
+        }
+    });
+}
+
+pub(in crate::island) fn capture_result() {
+    let Some(result) = crate::platform::app_capture::take_result() else { return };
+    with_app(|a| {
+        let message = if result.failed == 0 {
+            format!(
+                "{}: {}",
+                tr(if result.hidden { "Windows excluded from capture" } else { "Capture protection removed" }),
+                result.applied
+            )
+        } else if result.applied == 0 {
+            tr(result.failure.unwrap_or(crate::platform::app_capture::Failure::Rejected).text()).into_owned()
         } else {
-            a.show_notice_for(
-                '\u{E783}',
-                &tr(if windows.is_empty() {
-                    "Start the application before changing capture protection"
-                } else {
-                    "This application needs a capture integration. Protection was not enabled."
-                }),
-                6000,
-            );
+            format!("{}: {} · {}: {}", tr("Applied"), result.applied, tr("Not confirmed"), result.failed)
+        };
+        if result.failure == Some(crate::platform::app_capture::Failure::Disabled)
+            && let Some(group) = view::GROUPS.iter().position(|g| g.name == "Desktop dock")
+        {
+            a.open_settings_at(group);
+        }
+        a.show_notice_for(if result.failed == 0 { '\u{E72E}' } else { '\u{E783}' }, &message, 6000);
+        if let Some(dock) = &mut a.desktop_dock {
+            dock.refresh_windows();
         }
     });
 }
@@ -200,7 +220,7 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                         );
                     }
                     if !entry.windows.is_empty() {
-                        if own_settings {
+                        if own_settings || crate::platform::app_capture::supported(&entry_app_path(entry)) {
                             items.push(
                                 Entry::item(26, &tr("Toggle capture protection · Alt + right-click")).glyph('\u{E72E}'),
                             );

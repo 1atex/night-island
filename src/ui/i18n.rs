@@ -39,6 +39,52 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Для этой программы нужен модуль защиты. Скрытие от захвата не включено."
         }
         "Toggle capture protection · Alt + right-click" => "Защита от захвата · Alt + ПКМ",
+        "Enable experimental capture protection in desktop dock settings" => {
+            "Включи экспериментальную защиту в настройках нижнего дока"
+        }
+        "Capture protection is not supported for this application" => {
+            "Это приложение пока не поддерживает экспериментальную защиту"
+        }
+        "Capture integration is unavailable while anti-cheat is running" => {
+            "Режим недоступен: обнаружен работающий античит"
+        }
+        "Protected or elevated applications are not supported" => {
+            "Защищённые программы и запуск от администратора не поддерживаются"
+        }
+        "Capture integration requires a 64-bit application" => "Для этого режима нужна 64-битная версия приложения",
+        "The application window has closed or changed" => "Окно приложения закрылось или изменилось",
+        "Could not load the capture integration" => "Не удалось загрузить модуль защиты",
+        "The application did not confirm capture protection" => "Приложение не подтвердило защиту от захвата",
+        "Windows did not apply capture protection" => "Windows не применила защиту от захвата",
+        "Experimental capture protection" => "Защита от захвата (эксперимент)",
+        "Alt + right-click an app in the dock to hide its windows from capture. Repeat to restore." => {
+            "Alt + ПКМ по программе в доке скрывает её окна от захвата. Повторное нажатие снимает защиту."
+        }
+        "Some recording methods can ignore Windows capture protection." => {
+            "Некоторые способы записи могут игнорировать защиту Windows."
+        }
+        "Current windows only. Browsers, messengers, editors and players; 64-bit, without administrator rights." => {
+            "Для текущих окон браузеров, мессенджеров и редакторов: 64-битные, без прав администратора."
+        }
+        "A temporary module runs inside the chosen app. Anti-cheat blocks this mode." => {
+            "В выбранное приложение загружается временный модуль. Известные античиты блокируют режим."
+        }
+        "Checking capture protection…" => "Проверяем защиту от захвата…",
+        "Windows excluded from capture" => "Скрыто от захвата, окон",
+        "Capture protection removed" => "Защита снята, окон",
+        "New windows are configured separately" => "Новые окна нужно защищать отдельно",
+        "Not confirmed" => "Не подтверждено",
+        "Could not open the Windows tray" => "Не удалось открыть системный трей",
+        "1. Open Windows taskbar settings." => "1. Открой параметры панели задач Windows.",
+        "2. Open Other system tray icons." => "2. «Другие значки области уведомлений».",
+        "3. Enable Hidden icon menu." => "3. Проверь «Меню скрытых значков».",
+        "Already enabled? Try again below." => "Уже включено? Нажми «Повторить» ниже.",
+        "You do not need to enable each application icon." => "Значки отдельных приложений менять не нужно.",
+        "Set up the Windows system tray" => "Открыть параметры трея Windows",
+        "Windows taskbar settings: Other system tray icons → Hidden icon menu." => {
+            "В Windows: «Другие значки области уведомлений» → «Меню скрытых значков»."
+        }
+        "Capture protection" => "Защита от захвата",
         "System tray" => "Системный трей",
         "Show top panel at the screen edge" => "Показывать при наведении к верхнему краю",
         "Autohide frees the top edge. Island visibility is configured separately." => {
@@ -47,9 +93,6 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Replace Windows taskbar while dock is enabled" => "Заменять панель задач Windows",
         "The Windows taskbar returns when the dock or Island closes." => {
             "Панель задач Windows возвращается при выключении дока или выходе из Island."
-        }
-        "Windows tray is unavailable. Enable the hidden icon menu in Windows taskbar settings." => {
-            "Трей недоступен. Включи меню скрытых значков в параметрах панели задач Windows."
         }
         "Top panel" => "Верхняя панель",
         "Enable top panel" => "Включить верхнюю панель",

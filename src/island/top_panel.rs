@@ -120,6 +120,7 @@ impl App {
                         Block::Wifi => "ms-settings:network-wifi",
                         Block::Bluetooth => "ms-settings:bluetooth",
                         Block::Battery => "ms-settings:powersleep",
+                        Block::Tray => "ms-settings:taskbar",
                         _ => "ms-settings:sound",
                     },
                     None,

@@ -518,6 +518,11 @@ impl State {
                 } else {
                     let _ = p.glyph('\u{E8A5}', image, icon * 0.65, rgba(0.85, 0.85, 0.9, 1.0));
                 }
+                if entry.windows.iter().any(crate::platform::app_capture::marked) {
+                    let badge = (rect.2 - 15.0 * s, rect.1 - 2.0 * s, rect.2 + 3.0 * s, rect.1 + 16.0 * s);
+                    let _ = p.fill_round_rect(badge, 6.0 * s, rgba(0.08, 0.1, 0.16, 0.98));
+                    let _ = p.glyph('\u{E72E}', badge, 11.0 * s, rgba(0.7, 0.8, 1.0, 1.0));
+                }
                 if !entry.windows.is_empty() {
                     let cx = (rect.0 + rect.2) / 2.0;
                     let _ = p.fill_ellipse(
