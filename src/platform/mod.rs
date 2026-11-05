@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod app_capture;
 pub mod apps;
 pub mod audio;
 pub mod audio_mixer;
@@ -14,6 +15,7 @@ mod notification_activation;
 mod notification_images;
 mod notification_payload;
 pub mod notifications;
+pub mod panel_controls;
 pub mod privacy;
 pub mod recognize;
 pub mod recorder;
@@ -23,3 +25,10 @@ pub mod system;
 pub mod volume;
 pub mod vpn;
 pub mod winevent;
+
+pub mod desktop_dock;
+pub mod system_tray;
+pub mod taskbar;
+
+pub mod dock_actions;
+pub mod window_preview;

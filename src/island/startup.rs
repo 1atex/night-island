@@ -96,6 +96,8 @@ pub fn run() -> Result<()> {
             windows::Win32::System::RemoteDesktop::NOTIFY_FOR_THIS_SESSION,
         );
         with_app(|app| app.configure_system_notifications());
+        with_app(|app| app.configure_desktop_dock());
+        with_app(|app| app.configure_top_panel());
 
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         let failed = with_app_value(|a| register_hotkeys(hwnd, &a.settings)).unwrap_or_default();
@@ -203,6 +205,8 @@ impl App {
         char_layer.sprite.SetIsVisible(false)?;
 
         let intro_cover = gpu.layer(&compositor, ((28.0 * scale).ceil() as i32, (28.0 * scale).ceil() as i32))?;
+        let cover_layer = gpu.layer(&compositor, ((72.0 * scale).ceil() as i32, (72.0 * scale).ceil() as i32))?;
+        cover_layer.sprite.SetIsVisible(false)?;
         let previous_pill = gpu.layer(&compositor, collapsed.size())?;
         previous_pill.sprite.SetIsVisible(false)?;
         let intro_title = gpu.layer(&compositor, ((240.0 * scale).ceil() as i32, (34.0 * scale).ceil() as i32))?;
@@ -264,6 +268,7 @@ impl App {
 
         let geometry = compositor.CreateRoundedRectangleGeometry()?;
         children.InsertAtTop(&intro_cover.sprite)?;
+        children.InsertAtTop(&cover_layer.sprite)?;
         children.InsertAtTop(&intro_title.sprite)?;
         let round_clip = compositor.CreateGeometricClipWithGeometry(&geometry)?;
         visual.SetClip(&round_clip)?;
@@ -285,6 +290,12 @@ impl App {
             scale,
             dpi_scale,
             settings_win: None,
+            desktop_dock: None,
+            windows_taskbar: None,
+            top_panel: None,
+            top_panel_poll: Instant::now(),
+            top_panel_radios: Instant::now(),
+            top_panel_data: Default::default(),
             power_last: view::battery(),
             lock_pending: Vec::new(),
             settings,
@@ -333,6 +344,8 @@ impl App {
             ears,
             collapsed,
             expanded,
+            cover_layer,
+            cover_flight_until: None,
             liquid: Liquid {
                 ring,
                 highlight,
@@ -361,6 +374,17 @@ impl App {
                 spectrum_scale: [0.0; audio::BANDS],
             },
             pet: Pet {
+                behavior: crate::ui::pet_behavior::PetBehavior::new(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_nanos(),
+                ),
+                speech: Default::default(),
+                speech_cue: Default::default(),
+                motion: Default::default(),
+                controls_at: Instant::now(),
+                cursor: None,
                 char_layer,
                 desktop: None,
                 chat: None,
@@ -372,6 +396,7 @@ impl App {
                 rng: 0x9E37_79B9,
                 reaction_until: None,
                 char_key: None,
+                frame: 0,
             },
             pointer: Pointer {
                 decoration_through: false,

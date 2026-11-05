@@ -33,6 +33,7 @@ mod mixer;
 mod music_intro;
 mod note;
 mod notifications;
+mod pet_studio;
 mod pill;
 mod pill_vertical;
 mod privacy;
@@ -57,6 +58,7 @@ pub use self::{
     pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
     widgets::*, yandex::*,
 };
+pub use pet_studio::*;
 
 pub type Rect = (f32, f32, f32, f32);
 pub use wave_theme::{WaveColours, wave_colour};
@@ -144,6 +146,9 @@ pub struct TabDrag {
 }
 
 pub struct UiState {
+    pub feedback: crate::ui::feedback::Feedback,
+    pub pressed_action: Option<usize>,
+    pub cover_in_flight: bool,
     pub tab: Tab,
     pub tab_drag: Option<TabDrag>,
     pub tab_press: Option<(usize, i32, i32)>,
@@ -202,6 +207,9 @@ impl UiState {
     pub fn new() -> Self {
         Self {
             tab: Tab::Home,
+            feedback: Default::default(),
+            pressed_action: None,
+            cover_in_flight: false,
             agy: AgyUi::default(),
             chat: ChatUi::default(),
             privacy_log: PrivacyUi::default(),
@@ -271,3 +279,15 @@ fn acc(alpha: f32) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {
 const GREEN: (f32, f32, f32) = (0.4, 0.85, 0.55);
 
 const RED: (f32, f32, f32) = (1.0, 0.35, 0.35);
+
+impl UiState {
+    pub fn action_hover(&self, id: usize) -> f32 {
+        self.feedback.sample(id as u64, f32::from(self.home.hover_act == Some(id)), 0.0, 140)
+    }
+
+    pub fn action_rect(&self, id: usize, rect: Rect) -> Rect {
+        let pressed = self.feedback.sample(100_000 + id as u64, f32::from(self.pressed_action == Some(id)), 0.0, 90);
+        let inset = (rect.2 - rect.0).min(rect.3 - rect.1) * 0.035 * pressed;
+        (rect.0 + inset, rect.1 + inset, rect.2 - inset, rect.3 - inset)
+    }
+}

@@ -6,3 +6,7 @@ pub mod log;
 pub mod notes;
 pub mod settings;
 pub mod usage;
+
+pub mod desktop_dock;
+
+pub mod top_panel;
