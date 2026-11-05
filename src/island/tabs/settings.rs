@@ -113,6 +113,7 @@ impl App {
                 }
                 MetricsInterval => self.sync_metrics(),
                 AsstEnabled | AsstWake => self.sync_wake(),
+                AsstTtsProvider => self.sync_voice_fields(),
                 AutoHide => {
                     if self.settings.auto_hide {
                         self.schedule_autohide();

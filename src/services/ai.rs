@@ -7,6 +7,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 use crate::data::settings::{AiProvider, AiSettings};
+use crate::services::assistant::TtsProvider;
 use crate::services::attach::{Attachment, Kind as FileKind};
 use crate::services::{http, integrations};
 
@@ -97,41 +98,45 @@ pub fn save_voice_key(key: &str) -> bool {
     has_voice_key()
 }
 
-fn tts_secret(eleven: bool) -> &'static str {
-    if eleven { "ai_tts_eleven" } else { "ai_tts" }
+fn tts_secret(provider: TtsProvider) -> &'static str {
+    match provider {
+        TtsProvider::OpenAi => "ai_tts",
+        TtsProvider::Eleven => "ai_tts_eleven",
+        TtsProvider::Fish => "ai_tts_fish",
+    }
 }
 
-pub fn has_tts_key(eleven: bool) -> bool {
-    integrations::dir().is_some_and(|d| d.join(format!("{}.bin", tts_secret(eleven))).exists())
+pub fn has_tts_key(provider: TtsProvider) -> bool {
+    integrations::dir().is_some_and(|d| d.join(format!("{}.bin", tts_secret(provider))).exists())
 }
 
-pub fn save_tts_key(eleven: bool, key: &str) -> bool {
+pub fn save_tts_key(provider: TtsProvider, key: &str) -> bool {
     if !valid_key(key) {
         return false;
     }
-    integrations::save_secret(tts_secret(eleven), key.trim());
-    has_tts_key(eleven)
+    integrations::save_secret(tts_secret(provider), key.trim());
+    has_tts_key(provider)
 }
 
-pub fn remove_tts_key(eleven: bool) {
-    integrations::delete_secret(tts_secret(eleven));
+pub fn remove_tts_key(provider: TtsProvider) {
+    integrations::delete_secret(tts_secret(provider));
 }
 
-pub fn tts_credentials(base: &str, eleven: bool) -> Option<(String, String)> {
+pub fn tts_credentials(base: &str, provider: TtsProvider) -> Option<(String, String)> {
     let base = clean_base(base)?;
-    if let Some(key) = integrations::load_secret(tts_secret(eleven)) {
+    if let Some(key) = integrations::load_secret(tts_secret(provider)) {
         return Some((base, key));
     }
-    if eleven {
+    if provider.needs_own_key() {
         return None;
     }
     let (shared_base, key) = speech_credentials()?;
     (shared_base == base).then_some((base, key))
 }
 
-pub fn tts_key_is_shared(base: &str, eleven: bool) -> bool {
-    !eleven
-        && !has_tts_key(false)
+pub fn tts_key_is_shared(base: &str, provider: TtsProvider) -> bool {
+    !provider.needs_own_key()
+        && !has_tts_key(provider)
         && clean_base(base).is_some_and(|b| speech_credentials().is_some_and(|(shared, _)| shared == b))
 }
 

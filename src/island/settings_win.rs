@@ -389,9 +389,9 @@ impl App {
         self.ui.int.tts_base.set_text(&self.settings.assistant.tts_base);
         self.ui.int.tts_model.set_text(&self.settings.assistant.tts_model);
         self.ui.int.tts_voice.set_text(&self.settings.assistant.tts_voice);
-        self.ui.int.tts_key_saved = ai::has_tts_key(self.settings.assistant.tts_eleven);
+        self.ui.int.tts_key_saved = ai::has_tts_key(self.settings.assistant.tts_provider);
         self.ui.int.tts_key_shared =
-            ai::tts_key_is_shared(&self.settings.assistant.tts_base, self.settings.assistant.tts_eleven);
+            ai::tts_key_is_shared(&self.settings.assistant.tts_base, self.settings.assistant.tts_provider);
         self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
         self.sync_ai_fields();
     }
@@ -446,7 +446,7 @@ impl App {
 
     fn save_tts(&mut self) {
         let key = self.ui.int.tts_key.text();
-        if !key.trim().is_empty() && !ai::save_tts_key(self.settings.assistant.tts_eleven, &key) {
+        if !key.trim().is_empty() && !ai::save_tts_key(self.settings.assistant.tts_provider, &key) {
             return self.notify(Notice::Error, '\u{E783}', "That does not look like an API key");
         }
         let Some(base) = ai::clean_base(&self.ui.int.tts_base.text()) else {
@@ -707,7 +707,7 @@ impl App {
             view::Act::VoiceSave => self.save_voice(),
             view::Act::TtsSave => self.save_tts(),
             view::Act::TtsRemoveKey => {
-                ai::remove_tts_key(self.settings.assistant.tts_eleven);
+                ai::remove_tts_key(self.settings.assistant.tts_provider);
                 self.sync_voice_fields();
             }
             view::Act::WakeSave => self.save_wake(),
@@ -771,6 +771,7 @@ impl App {
                     || matches!(
                         id,
                         view::Sid::Character
+                            | view::Sid::AsstTtsProvider
                             | view::Sid::PetPerformance
                             | view::Sid::Edge
                             | view::Sid::PillBattery

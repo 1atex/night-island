@@ -836,12 +836,10 @@ fn assistant_items(ui: &UiState) -> Vec<Item> {
         out.push(Item::Row(id, label, kind));
         if id == Sid::AsstNatural && ui.cfg.assistant.natural_voice {
             let (saved, shared) = (ui.int.tts_key_saved, ui.int.tts_key_shared);
-            let eleven = ui.cfg.assistant.tts_eleven;
-            out.push(Item::Row(
-                Sid::AsstTtsProvider,
-                "Cloud voice service",
-                Kind::Segment(["OpenAI-compatible", "ElevenLabs"]),
-            ));
+            let provider = ui.cfg.assistant.tts_provider;
+            let eleven = provider == crate::services::assistant::TtsProvider::Eleven;
+            let fish = provider == crate::services::assistant::TtsProvider::Fish;
+            out.push(Item::Row(Sid::AsstTtsProvider, "Cloud voice service", Kind::Cycle));
             out.push(Item::Field(
                 Field::TtsKey,
                 "Voice API key",
@@ -853,19 +851,23 @@ fn assistant_items(ui: &UiState) -> Vec<Item> {
                     "Paste the key here"
                 },
             ));
-            let (base_hint, model_hint, voice_hint) = if eleven {
-                ("https://api.elevenlabs.io", "eleven_multilingual_v2", "21m00Tcm4TlvDq8ikWAM")
-            } else {
-                ("https://api.openai.com/v1", "gpt-4o-mini-tts", "nova")
-            };
+            let (base_hint, model_hint, voice_hint) = provider.defaults();
             out.push(Item::Field(Field::TtsBase, "Voice server address", base_hint));
             out.push(Item::Field(Field::TtsModel, "Voice model", model_hint));
-            out.push(Item::Field(Field::TtsVoice, if eleven { "Voice ID" } else { "Voice name" }, voice_hint));
+            out.push(Item::Field(Field::TtsVoice, if eleven || fish { "Voice ID" } else { "Voice name" }, voice_hint));
             out.push(Item::Button(Act::TtsSave, "Save the voice service".into(), true));
             if saved {
                 out.push(Item::Button(Act::TtsRemoveKey, "Remove the voice key".into(), true));
             }
-            if eleven {
+            if fish {
+                out.push(Item::Note("Fish Audio: the key is in fish.audio, Developers, API keys."));
+                out.push(Item::Note(
+                    "The voice ID is the ID of a voice model from fish.audio/discovery; \"default\" uses the stock voice.",
+                ));
+                out.push(Item::Note(
+                    "Models: s2.1-pro (default), s2-pro, s1; s2.1-pro-free is the free developer tier.",
+                ));
+            } else if eleven {
                 out.push(Item::Note(
                     "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota).",
                 ));

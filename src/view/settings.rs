@@ -634,7 +634,6 @@ pub(in crate::view) fn segment_value(id: Sid, c: &Settings) -> usize {
         Sid::Placement => usize::from(c.placement == Placement::Docked),
         Sid::Style => usize::from(c.style == Style::Liquid),
         Sid::RecFormat => usize::from(c.record_format == RecordFormat::Gif),
-        Sid::AsstTtsProvider => usize::from(c.assistant.tts_eleven),
         _ => 0,
     }
 }
@@ -645,6 +644,12 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
         return c.assistant.perms.set(cap, next);
     }
     match id {
+        Sid::AsstTtsProvider => {
+            let all = crate::services::assistant::TtsProvider::ALL;
+            let at = all.iter().position(|p| *p == c.assistant.tts_provider).unwrap_or(0);
+            let next = if forward { (at + 1) % all.len() } else { (at + all.len() - 1) % all.len() };
+            c.assistant.set_provider(all[next]);
+        }
         Sid::NotificationTiles => {
             c.notification_tiles = match (c.notification_tiles, forward) {
                 (1, true) | (4, false) => 2,
@@ -679,6 +684,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
         return c.assistant.perms.configured(cap).name();
     }
     match id {
+        Sid::AsstTtsProvider => c.assistant.tts_provider.name(),
         Sid::NotificationTiles => match c.notification_tiles {
             1 => "1 tile",
             2 => "2 tiles",
@@ -713,6 +719,9 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
         return all(&crate::services::assistant::Level::ALL, now, |v| v.name());
     }
     match id {
+        Sid::AsstTtsProvider => {
+            all(&crate::services::assistant::TtsProvider::ALL, c.assistant.tts_provider, |v| v.name())
+        }
         Sid::NotificationTiles => (
             vec!["1 tile", "2 tiles", "4 tiles"],
             [1, 2, 4].iter().position(|v| *v == c.notification_tiles).unwrap_or(2),
@@ -743,6 +752,10 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
         return c.assistant.perms.set(cap, levels[k.min(levels.len() - 1)]);
     }
     match id {
+        Sid::AsstTtsProvider => {
+            let all = crate::services::assistant::TtsProvider::ALL;
+            c.assistant.set_provider(all[k.min(all.len() - 1)]);
+        }
         Sid::NotificationTiles => c.notification_tiles = [1, 2, 4][k.min(2)],
         Sid::Character => {
             c.character = crate::ui::characters::Character::ALL[k.min(crate::ui::characters::Character::ALL.len() - 1)]
@@ -774,7 +787,6 @@ pub fn segment_set(id: Sid, c: &mut Settings, option: usize) {
         Sid::Placement => c.placement = if option == 1 { Placement::Docked } else { Placement::Floating },
         Sid::Style => c.style = if option == 1 { Style::Liquid } else { Style::Flat },
         Sid::RecFormat => c.record_format = if option == 1 { RecordFormat::Gif } else { RecordFormat::Mp4 },
-        Sid::AsstTtsProvider => c.assistant.set_eleven(option == 1),
         _ => {}
     }
 }

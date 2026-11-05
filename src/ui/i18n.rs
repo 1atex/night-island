@@ -1302,6 +1302,15 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Did not catch that" => "Не расслышал",
         "Cloud voice service" => "Облачный сервис голоса",
         "Voice ID" => "ID голоса",
+        "Fish Audio: the key is in fish.audio, Developers, API keys." => {
+            "Fish Audio: ключ на fish.audio, Developers, API keys."
+        }
+        "The voice ID is the ID of a voice model from fish.audio/discovery; \"default\" uses the stock voice." => {
+            "ID голоса это ID модели голоса с fish.audio/discovery; «default» берёт стандартный голос."
+        }
+        "Models: s2.1-pro (default), s2-pro, s1; s2.1-pro-free is the free developer tier." => {
+            "Модели: s2.1-pro (по умолчанию), s2-pro, s1; s2.1-pro-free это бесплатный уровень для разработчиков."
+        }
         "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota)." => {
             "ElevenLabs: ключ на elevenlabs.io, профиль, API keys (после бесплатной квоты платно)."
         }

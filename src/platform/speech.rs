@@ -118,7 +118,7 @@ const NATURAL_RATE: u32 = 24_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Natural {
-    pub eleven: bool,
+    pub provider: crate::services::assistant::TtsProvider,
     pub base: String,
     pub model: String,
     pub voice: String,
@@ -172,23 +172,46 @@ pub fn eleven_url(base: &str, voice: &str) -> String {
     format!("{base}/v1/text-to-speech/{voice}?output_format=wav_24000")
 }
 
+fn fish_request(text: &str, natural: &Natural) -> String {
+    let mut body = serde_json::json!({
+        "text": text,
+        "format": "wav",
+        "sample_rate": NATURAL_RATE,
+        "latency": "balanced",
+    });
+    if natural.voice != crate::services::assistant::FISH_DEFAULT_VOICE {
+        body["reference_id"] = natural.voice.clone().into();
+    }
+    body.to_string()
+}
+
+pub fn fish_url(base: &str) -> String {
+    let base = base.trim_end_matches('/').trim_end_matches("/v1");
+    format!("{base}/v1/tts")
+}
+
 fn natural_wav(text: &str, natural: &Natural) -> Option<Vec<u8>> {
-    let Some((base, key)) = crate::services::ai::tts_credentials(&natural.base, natural.eleven) else {
+    use crate::services::assistant::TtsProvider;
+    let Some((base, key)) = crate::services::ai::tts_credentials(&natural.base, natural.provider) else {
         crate::log_warn!("The natural voice has no key or a wrong address: see the voice service settings");
         return None;
     };
-    let (url, header, body) = if natural.eleven {
-        (eleven_url(&base, &natural.voice), ("xi-api-key", key), eleven_request(text, natural))
-    } else {
-        (format!("{base}/audio/speech"), ("Authorization", format!("Bearer {key}")), natural_request(text, natural))
+    let bearer = format!("Bearer {key}");
+    let (url, headers, body): (String, Vec<(&str, &str)>, String) = match natural.provider {
+        TtsProvider::Eleven => {
+            (eleven_url(&base, &natural.voice), vec![("xi-api-key", key.as_str())], eleven_request(text, natural))
+        }
+        TtsProvider::Fish => (
+            fish_url(&base),
+            vec![("Authorization", bearer.as_str()), ("model", natural.model.as_str())],
+            fish_request(text, natural),
+        ),
+        TtsProvider::OpenAi => {
+            (format!("{base}/audio/speech"), vec![("Authorization", bearer.as_str())], natural_request(text, natural))
+        }
     };
-    let reply = crate::services::http::post_json_for_bytes(
-        &url,
-        &[(header.0, header.1.as_str())],
-        &body,
-        MAX_SPEECH_BYTES,
-        Some("NightIsland/0.1"),
-    )?;
+    let reply =
+        crate::services::http::post_json_for_bytes(&url, &headers, &body, MAX_SPEECH_BYTES, Some("NightIsland/0.1"))?;
     if reply.status != 200 {
         let why: String = String::from_utf8_lossy(&reply.body).chars().filter(|c| !c.is_control()).take(160).collect();
         crate::log_warn!("The natural voice answered with status {}: {why}", reply.status);
@@ -387,7 +410,7 @@ mod tests {
     #[test]
     fn the_elevenlabs_request_follows_its_documented_shape() {
         let natural = Natural {
-            eleven: true,
+            provider: crate::services::assistant::TtsProvider::Eleven,
             base: "https://api.elevenlabs.io".into(),
             model: "eleven_multilingual_v2".into(),
             voice: "21m00Tcm4TlvDq8ikWAM".into(),
@@ -404,6 +427,26 @@ mod tests {
             "https://api.us.elevenlabs.io/v1/text-to-speech/abc?output_format=wav_24000",
             "a base typed with /v1 does not double it"
         );
+    }
+
+    #[test]
+    fn the_fish_audio_request_follows_its_documented_shape() {
+        let mut natural = Natural {
+            provider: crate::services::assistant::TtsProvider::Fish,
+            base: "https://api.fish.audio".into(),
+            model: "s2.1-pro".into(),
+            voice: "default".into(),
+        };
+        let body: serde_json::Value = serde_json::from_str(&fish_request("Привет", &natural)).unwrap();
+        assert_eq!(body["text"], "Привет");
+        assert_eq!(body["format"], "wav");
+        assert_eq!(body["sample_rate"], 24000);
+        assert!(body.get("reference_id").is_none(), "the default voice sends no reference");
+        natural.voice = "0123456789abcdef0123456789abcdef".into();
+        let body: serde_json::Value = serde_json::from_str(&fish_request("Hi", &natural)).unwrap();
+        assert_eq!(body["reference_id"], "0123456789abcdef0123456789abcdef");
+        assert_eq!(fish_url("https://api.fish.audio"), "https://api.fish.audio/v1/tts");
+        assert_eq!(fish_url("https://api.fish.audio/v1/"), "https://api.fish.audio/v1/tts");
     }
 
     #[test]
@@ -466,7 +509,7 @@ mod tests {
     #[test]
     fn the_natural_voice_request_is_plain_json_and_only_new_models_get_instructions() {
         let new = Natural {
-            eleven: false,
+            provider: crate::services::assistant::TtsProvider::OpenAi,
             base: "https://api.openai.com/v1".into(),
             model: "gpt-4o-mini-tts".into(),
             voice: "nova".into(),
@@ -477,7 +520,7 @@ mod tests {
         assert_eq!(body["response_format"], "pcm");
         assert!(body["instructions"].is_string());
         let old = Natural {
-            eleven: false,
+            provider: crate::services::assistant::TtsProvider::OpenAi,
             base: "https://api.openai.com/v1".into(),
             model: "tts-1".into(),
             voice: "alloy".into(),

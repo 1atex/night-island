@@ -11,6 +11,38 @@ use serde::{Deserialize, Serialize};
 
 pub use perms::{Cap, Level, Permissions};
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TtsProvider {
+    #[default]
+    OpenAi,
+    Eleven,
+    Fish,
+}
+
+impl TtsProvider {
+    pub const ALL: [TtsProvider; 3] = [TtsProvider::OpenAi, TtsProvider::Eleven, TtsProvider::Fish];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            TtsProvider::OpenAi => "OpenAI-compatible",
+            TtsProvider::Eleven => "ElevenLabs",
+            TtsProvider::Fish => "Fish Audio",
+        }
+    }
+
+    pub fn defaults(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            TtsProvider::OpenAi => OPENAI_TTS,
+            TtsProvider::Eleven => ELEVEN_TTS,
+            TtsProvider::Fish => FISH_TTS,
+        }
+    }
+
+    pub fn needs_own_key(self) -> bool {
+        self != TtsProvider::OpenAi
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct Assistant {
@@ -24,7 +56,9 @@ pub struct Assistant {
     pub follow_up: bool,
     pub natural_voice: bool,
     pub local_voice: bool,
-    pub tts_eleven: bool,
+    pub tts_provider: TtsProvider,
+    #[serde(skip_serializing)]
+    tts_eleven: bool,
     pub tts_base: String,
     pub tts_model: String,
     pub tts_voice: String,
@@ -35,6 +69,8 @@ pub const STEPS_RANGE: (u8, u8) = (3, 20);
 pub const OPENAI_TTS: (&str, &str, &str) = ("https://api.openai.com/v1", "gpt-4o-mini-tts", "nova");
 pub const ELEVEN_TTS: (&str, &str, &str) =
     ("https://api.elevenlabs.io", "eleven_multilingual_v2", "21m00Tcm4TlvDq8ikWAM");
+pub const FISH_TTS: (&str, &str, &str) = ("https://api.fish.audio", "s2.1-pro", FISH_DEFAULT_VOICE);
+pub const FISH_DEFAULT_VOICE: &str = "default";
 
 impl Default for Assistant {
     fn default() -> Self {
@@ -49,6 +85,7 @@ impl Default for Assistant {
             follow_up: true,
             natural_voice: false,
             local_voice: false,
+            tts_provider: TtsProvider::OpenAi,
             tts_eleven: false,
             tts_base: OPENAI_TTS.0.into(),
             tts_model: OPENAI_TTS.1.into(),
@@ -59,12 +96,12 @@ impl Default for Assistant {
 }
 
 impl Assistant {
-    pub fn set_eleven(&mut self, eleven: bool) {
-        if self.tts_eleven == eleven {
+    pub fn set_provider(&mut self, provider: TtsProvider) {
+        if self.tts_provider == provider {
             return;
         }
-        let (base, model, voice) = if eleven { ELEVEN_TTS } else { OPENAI_TTS };
-        self.tts_eleven = eleven;
+        let (base, model, voice) = provider.defaults();
+        self.tts_provider = provider;
         self.tts_base = base.into();
         self.tts_model = model.into();
         self.tts_voice = voice.into();
@@ -74,7 +111,10 @@ impl Assistant {
         self.perms.sanitize();
         self.volume = self.volume.min(100);
         self.max_steps = self.max_steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1);
-        let (base, model, voice) = if self.tts_eleven { ELEVEN_TTS } else { OPENAI_TTS };
+        if std::mem::take(&mut self.tts_eleven) && self.tts_provider == TtsProvider::OpenAi {
+            self.tts_provider = TtsProvider::Eleven;
+        }
+        let (base, model, voice) = self.tts_provider.defaults();
         self.tts_base = crate::services::ai::clean_base(&self.tts_base).unwrap_or_else(|| base.to_string());
         if !crate::services::ai::valid_model(&self.tts_model, crate::data::settings::AiProvider::OpenAi) {
             self.tts_model = model.to_string();
@@ -164,7 +204,7 @@ mod tests {
         local.sanitize();
         assert_eq!(local.tts_base, "http://localhost:8880/v1");
         let mut eleven = Assistant::default();
-        eleven.set_eleven(true);
+        eleven.set_provider(TtsProvider::Eleven);
         assert_eq!(
             (eleven.tts_base.as_str(), eleven.tts_model.as_str(), eleven.tts_voice.as_str()),
             ("https://api.elevenlabs.io", "eleven_multilingual_v2", "21m00Tcm4TlvDq8ikWAM")
@@ -172,8 +212,21 @@ mod tests {
         eleven.tts_voice = "bad voice!".into();
         eleven.sanitize();
         assert_eq!(eleven.tts_voice, "21m00Tcm4TlvDq8ikWAM", "a bad voice falls back to the provider's own");
-        eleven.set_eleven(false);
+        eleven.set_provider(TtsProvider::Fish);
+        assert_eq!(
+            (eleven.tts_base.as_str(), eleven.tts_model.as_str(), eleven.tts_voice.as_str()),
+            ("https://api.fish.audio", "s2.1-pro", "default")
+        );
+        eleven.tts_voice = "0123456789abcdef0123456789abcdef".into();
+        eleven.sanitize();
+        assert_eq!(eleven.tts_voice, "0123456789abcdef0123456789abcdef", "a Fish model id is kept");
+        eleven.set_provider(TtsProvider::OpenAi);
         assert_eq!((eleven.tts_base.as_str(), eleven.tts_voice.as_str()), ("https://api.openai.com/v1", "nova"));
+        let legacy: Assistant = serde_json::from_str(r#"{"tts_eleven":true}"#).unwrap();
+        let mut legacy = legacy;
+        legacy.sanitize();
+        assert_eq!(legacy.tts_provider, TtsProvider::Eleven);
+        assert!(!serde_json::to_string(&legacy).unwrap().contains("tts_eleven"));
         let old: Assistant = serde_json::from_str(r#"{"wake":true}"#).unwrap();
         assert!(old.follow_up && old.tts_model == "gpt-4o-mini-tts" && old.max_steps == 10);
         for (given, kept) in [(0u8, 3u8), (2, 3), (7, 7), (200, 20)] {

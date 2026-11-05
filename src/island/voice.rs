@@ -101,7 +101,7 @@ impl App {
         speech::Voice {
             local: a.local_voice && localvoice::ready(),
             natural: a.natural_voice.then(|| speech::Natural {
-                eleven: a.tts_eleven,
+                provider: a.tts_provider,
                 base: a.tts_base.clone(),
                 model: a.tts_model.clone(),
                 voice: a.tts_voice.clone(),
