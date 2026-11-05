@@ -69,6 +69,7 @@ fn pump() {
 }
 
 fn click(preview: &Preview, action: Action) {
+    let foreground = unsafe { GetForegroundWindow() };
     let button = preview.state.buttons.iter().find(|button| button.action == action && button.enabled).unwrap();
     let x = ((button.rect.0 + button.rect.2) * 0.5 * preview.state.scale) as u16;
     let y = ((button.rect.1 + button.rect.3) * 0.5 * preview.state.scale) as u16;
@@ -77,6 +78,7 @@ fn click(preview: &Preview, action: Action) {
         SendMessageW(preview.state.hwnd, WM_MOUSEMOVE, Some(WPARAM(0)), Some(point));
         SendMessageW(preview.state.hwnd, WM_LBUTTONDOWN, Some(WPARAM(0)), Some(point));
         SendMessageW(preview.state.hwnd, WM_LBUTTONUP, Some(WPARAM(0)), Some(point));
+        assert_eq!(GetForegroundWindow(), foreground);
     }
     pump();
 }
@@ -99,6 +101,33 @@ fn expect_live_color(preview: &Preview, color: u32) {
         }
     }
     panic!("DWM preview pixel mismatch: expected {color:#x}, got {:#x}", pixel.0);
+}
+
+fn volume_drag(preview: &mut Preview) {
+    let foreground = unsafe { GetForegroundWindow() };
+    let hwnd = preview.state.hwnd;
+    let button = preview.state.buttons.iter().find(|button| button.action == Action::Volume).unwrap();
+    let y = (button.rect.1 + button.rect.3) * 0.5;
+    let point = |x: f32| {
+        let x = (x * preview.state.scale) as i16 as u16;
+        let y = (y * preview.state.scale) as i16 as u16;
+        LPARAM((u32::from(x) | (u32::from(y) << 16)) as isize)
+    };
+    let start = point((button.rect.0 + button.rect.2) * 0.5);
+    let minimum = point(-10.0);
+    let maximum = point(preview.state.layout.width + 20.0);
+    unsafe {
+        SendMessageW(hwnd, WM_LBUTTONDOWN, Some(WPARAM(1)), Some(start));
+        assert_eq!(GetCapture(), hwnd);
+        SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(1)), Some(minimum));
+        assert_eq!(preview.state.snapshot.audio.as_ref().unwrap().volume, 0.0);
+        SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(1)), Some(maximum));
+        assert_eq!(preview.state.snapshot.audio.as_ref().unwrap().volume, 1.0);
+        SendMessageW(hwnd, WM_LBUTTONUP, Some(WPARAM(0)), Some(maximum));
+        assert_ne!(GetCapture(), hwnd);
+        assert!(preview.state.pressed.is_none());
+        assert_eq!(GetForegroundWindow(), foreground);
+    }
 }
 
 fn screenshot(preview: &Preview, name: &str) -> Result<()> {
@@ -170,7 +199,6 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
     };
     let compositor = Compositor::new()?;
     let gpu = Gpu::new(&compositor)?;
-    let foreground = unsafe { GetForegroundWindow() };
     let monitor = desktop::monitors().into_iter().find(|monitor| monitor.primary).unwrap();
     let work = monitor.work;
     let instance = unsafe { GetModuleHandleW(None)? };
@@ -259,7 +287,11 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
                 error: None,
                 mute: false,
                 deaf: false,
-                channel: "Fixture voice".into(),
+                channel: "General".into(),
+                members: vec![
+                    crate::services::discord::Member { name: "Alex".into(), muted: false, deaf: false, speaking: true },
+                    crate::services::discord::Member { name: "Mira".into(), muted: true, deaf: false, speaking: false },
+                ],
             }),
         };
         preview.state.arrange();
@@ -268,13 +300,43 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
             assert!(button.rect.0 >= 0.0 && button.rect.2 <= preview.state.layout.width);
             assert!(button.rect.1 >= 0.0 && button.rect.3 <= preview.state.layout.height);
         }
+        volume_drag(&mut preview);
+        preview.state.snapshot.audio.as_mut().unwrap().volume = 0.64;
+        preview.state.arrange();
         screenshot(&preview, &format!("hover-controls-{scale:.1}"))?;
+        preview.state.entry.pin.name = "Discord".into();
+        preview.state.snapshot.media.clear();
+        preview.state.arrange();
+        expect_live_color(&preview, 0x0011bb33);
+        screenshot(&preview, &format!("hover-discord-{scale:.1}"))?;
+        if scale == 1.0 {
+            let voice = preview.state.snapshot.discord.as_mut().unwrap();
+            voice.mute = true;
+            voice.deaf = true;
+            preview.state.arrange();
+            screenshot(&preview, "hover-discord-muted")?;
+            let voice = preview.state.snapshot.discord.as_mut().unwrap();
+            voice.available = false;
+            voice.error = Some("Fixture connection unavailable".into());
+            preview.state.arrange();
+            assert!(
+                preview
+                    .state
+                    .buttons
+                    .iter()
+                    .filter(|b| matches!(b.action, Action::Microphone | Action::Deafen))
+                    .all(|b| !b.enabled)
+            );
+            screenshot(&preview, "hover-discord-unavailable")?;
+        }
         click(&preview, Action::Dismiss);
         assert!(!preview.is_open());
         assert!(preview.dismissed());
         assert!(preview.state.thumbnail.is_none());
         assert!(!unsafe { IsWindowVisible(preview.state.hwnd).as_bool() });
-        assert_eq!(unsafe { GetForegroundWindow() }, foreground);
+        let foreground = unsafe { GetForegroundWindow() };
+        assert_ne!(foreground, preview.state.hwnd);
+        assert!(!sources.0.contains(&foreground));
     }
     preview.show(&entry, anchor, work, 1.0);
     click(&preview, Action::NextWindow);
@@ -294,6 +356,122 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
     preview.sync_entry(&entry);
     assert!(!preview.is_open());
     assert!(preview.state.thumbnail.is_none());
-    assert_eq!(unsafe { GetForegroundWindow() }, foreground);
+    let foreground = unsafe { GetForegroundWindow() };
+    assert_ne!(foreground, preview.state.hwnd);
+    assert!(!sources.0.contains(&foreground));
+    Ok(())
+}
+
+#[test]
+#[ignore = "Checks smooth alpha popup composition with live DWM thumbnails using synthetic windows"]
+fn native_alpha_popup_thumbnail_compatibility() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    let _runtime = Runtime(unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) });
+    let _queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    let compositor = Compositor::new()?;
+    let gpu = Gpu::new(&compositor)?;
+    let work = desktop::monitors().into_iter().find(|m| m.primary).unwrap().work;
+    let instance = unsafe { GetModuleHandleW(None)? };
+    let class = w!("NightIsland.AlphaPreviewFixture");
+    unsafe {
+        RegisterClassW(&WNDCLASSW {
+            lpfnWndProc: Some(source_proc),
+            hInstance: instance.into(),
+            lpszClassName: class,
+            ..Default::default()
+        });
+    }
+    let mut windows = Sources(Vec::new());
+    let mut create = |style, x, y, width, height, color| -> Result<HWND> {
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | style,
+                class,
+                w!("Alpha preview fixture"),
+                WS_POPUP,
+                x,
+                y,
+                width,
+                height,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )?
+        };
+        windows.0.push(hwnd);
+        unsafe {
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, color);
+        }
+        Ok(hwnd)
+    };
+    let x = work.left + 380;
+    let y = work.top + 100;
+    let source = create(WINDOW_EX_STYLE(0), work.left + 20, work.top + 20, 240, 160, 0x0011bb33)?;
+    let backing = create(WINDOW_EX_STYLE(0), x - 10, y - 10, 320, 260, 0x00bb1166)?;
+    let destination = create(WS_EX_LAYERED, x, y, 300, 240, 0)?;
+    unsafe {
+        let _ = ShowWindow(source, SW_SHOWNOACTIVATE);
+        let _ = ShowWindow(backing, SW_SHOWNOACTIVATE);
+    }
+    let surface = crate::ui::popup::PopupSurface::new((300, 240))?;
+    surface.paint(&gpu, |p| p.fill_round_rect((8.0, 8.0, 292.0, 232.0), 28.0, rgba(0.04, 0.04, 0.04, 1.0)))?;
+    surface.present(destination, None, 255)?;
+    unsafe {
+        let _ = ShowWindow(destination, SW_SHOWNOACTIVATE);
+    }
+    let source_record = desktop::Window {
+        handle: source.0 as isize,
+        path: std::env::current_exe().unwrap().to_string_lossy().into_owned(),
+        title: "Alpha source".into(),
+        active: false,
+        minimized: false,
+        island_settings: false,
+    };
+    let mut thumbnail = Thumbnail::new(destination, &source_record).unwrap();
+    assert!(thumbnail.update(RECT { left: 20, top: 40, right: 280, bottom: 180 }, true));
+    let mut center = 0;
+    let mut corner = 0;
+    for _ in 0..20 {
+        pump();
+        unsafe {
+            let dc = GetDC(None);
+            center = GetPixel(dc, x + 150, y + 100).0;
+            corner = GetPixel(dc, x + 10, y + 10).0;
+            ReleaseDC(None, dc);
+        }
+        if center == 0x0011bb33 {
+            break;
+        }
+    }
+    println!("layered center={center:#x} corner={corner:#x}");
+    assert_eq!(corner, 0x00bb1166, "Rounded alpha corner should reveal synthetic backing");
+    assert_eq!(center, 0x0011bb33, "Live DWM thumbnail should render over alpha popup");
+    unsafe {
+        SetWindowLongPtrW(source, GWLP_USERDATA, 0x00cc4422);
+        let _ = InvalidateRect(Some(source), None, false);
+    }
+    surface.paint(&gpu, |p| p.fill_round_rect((8.0, 8.0, 292.0, 232.0), 28.0, rgba(0.08, 0.08, 0.08, 1.0)))?;
+    surface.present(destination, None, 255)?;
+    for _ in 0..20 {
+        pump();
+        unsafe {
+            let dc = GetDC(None);
+            center = GetPixel(dc, x + 150, y + 100).0;
+            ReleaseDC(None, dc);
+        }
+        if center == 0x00cc4422 {
+            break;
+        }
+    }
+    assert_eq!(center, 0x00cc4422, "Re-presenting alpha content must preserve live thumbnail updates");
     Ok(())
 }

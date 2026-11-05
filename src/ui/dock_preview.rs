@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
@@ -6,12 +7,11 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER,
     DWRITE_TEXT_ALIGNMENT_LEADING,
 };
-use windows::Win32::Graphics::Dwm::{
-    DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
-};
-use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT};
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, VK_ESCAPE,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Result, w};
 
@@ -39,8 +39,7 @@ enum Action {
     PreviousTrack,
     PlayPause,
     NextTrack,
-    Quieter,
-    Louder,
+    Volume,
     Mute,
     Microphone,
     Deafen,
@@ -69,21 +68,19 @@ struct Layout {
 
 impl Layout {
     fn new(work: RECT, scale: f32, media: bool, audio: bool, discord: bool) -> Self {
-        let width = (work.right - work.left) as f32 / scale;
+        let width = ((work.right - work.left) as f32 / scale - 16.0).clamp(220.0, 388.0);
         let height = (work.bottom - work.top) as f32 / scale;
-        let width = (width - 16.0).clamp(160.0, 340.0);
-        let extras = 92.0 * if media { 1.0 } else { 0.0 }
-            + 48.0 * if audio { 1.0 } else { 0.0 }
-            + 84.0 * if discord { 1.0 } else { 0.0 };
-        let image_height = (height - 108.0 - extras).clamp(40.0, 168.0);
-        let image = (12.0, 44.0, width - 12.0, 44.0 + image_height);
-        let caption = (12.0, image.3 + 4.0, width - 12.0, image.3 + 36.0);
+        let discord_y = 64.0;
+        let image_top = if discord { 180.0 } else { 64.0 };
+        let fixed_height = image_top + 40.0 + if media { 112.0 } else { 0.0 } + if audio { 52.0 } else { 0.0 } + 24.0;
+        let image_height = (height - 16.0 - fixed_height).clamp(40.0, if discord { 116.0 } else { 168.0 });
+        let image = (26.0, image_top, width - 26.0, image_top + image_height);
+        let caption = (26.0, image.3 + 4.0, width - 26.0, image.3 + 36.0);
         let media_y = caption.3 + 4.0;
-        let audio_y = media_y + if media { 92.0 } else { 0.0 };
-        let discord_y = audio_y + if audio { 48.0 } else { 0.0 };
+        let audio_y = media_y + if media { 112.0 } else { 0.0 };
         Self {
             width,
-            height: discord_y + if discord { 84.0 } else { 0.0 } + 12.0,
+            height: audio_y + if audio { 52.0 } else { 0.0 } + 24.0,
             image,
             caption,
             media_y,
@@ -97,6 +94,7 @@ struct State {
     hwnd: HWND,
     parent: HWND,
     gpu: Gpu,
+    surface: RefCell<Option<((i32, i32), crate::ui::popup::PopupSurface)>>,
     entry: Entry,
     actions: Client,
     snapshot: Snapshot,
@@ -142,8 +140,23 @@ fn fit(source: (i32, i32), area: Rect) -> RECT {
 
 impl State {
     fn invalidate(&self) {
-        unsafe {
-            let _ = InvalidateRect(Some(self.hwnd), None, false);
+        let size = ((self.layout.width * self.scale).ceil() as i32, (self.layout.height * self.scale).ceil() as i32);
+        let mut surface = self.surface.borrow_mut();
+        if surface.as_ref().is_none_or(|(previous, _)| *previous != size) {
+            *surface = crate::ui::popup::PopupSurface::new(size).ok().map(|surface| (size, surface));
+        }
+        if let Some((_, surface)) = &*surface
+            && surface.paint(&self.gpu, |p| self.paint(p)).is_ok()
+        {
+            let _ = surface.present(self.hwnd, None, 255);
+        }
+    }
+
+    fn set_volume_from_point(&mut self, x: f32) {
+        if let Some(audio) = &mut self.snapshot.audio {
+            audio.volume = ((x - 82.0) / (self.layout.width - 170.0).max(1.0)).clamp(0.0, 1.0);
+            self.actions.set_volume(audio.volume);
+            self.invalidate();
         }
     }
 
@@ -159,7 +172,7 @@ impl State {
 
     fn arrange(&mut self) {
         self.hover = None;
-        self.pressed = None;
+        let pressed = self.pressed.and_then(|i| self.buttons.get(i)).map(|b| b.action);
         if self.media_id.is_none_or(|id| !self.snapshot.media.iter().any(|m| m.id == id)) {
             self.media_id = self.snapshot.media.first().map(|m| m.id);
         }
@@ -173,34 +186,35 @@ impl State {
         let l = self.layout;
         self.buttons.clear();
         self.button(
-            (l.width - 40.0, 6.0, l.width - 6.0, 40.0),
+            (l.width - 54.0, 24.0, l.width - 26.0, 52.0),
             "Close preview",
-            Some('\u{E8BB}'),
+            Some('\u{E711}'),
             Action::Dismiss,
             true,
             false,
         );
         if !self.entry.windows.is_empty() {
             self.button(l.image, "Open window", None, Action::Open, true, false);
-            let many = self.entry.windows.len() > 1;
+            if self.entry.windows.len() > 1 {
+                self.button(
+                    (l.width - 118.0, l.caption.1, l.width - 90.0, l.caption.3),
+                    "Previous window",
+                    Some('\u{E76B}'),
+                    Action::PreviousWindow,
+                    true,
+                    false,
+                );
+                self.button(
+                    (l.width - 88.0, l.caption.1, l.width - 60.0, l.caption.3),
+                    "Next window",
+                    Some('\u{E76C}'),
+                    Action::NextWindow,
+                    true,
+                    false,
+                );
+            }
             self.button(
-                (12.0, l.caption.1, 44.0, l.caption.3),
-                "Previous window",
-                Some('\u{E76B}'),
-                Action::PreviousWindow,
-                many,
-                false,
-            );
-            self.button(
-                (l.width - 82.0, l.caption.1, l.width - 50.0, l.caption.3),
-                "Next window",
-                Some('\u{E76C}'),
-                Action::NextWindow,
-                many,
-                false,
-            );
-            self.button(
-                (l.width - 44.0, l.caption.1, l.width - 12.0, l.caption.3),
+                (l.width - 54.0, l.caption.1, l.width - 26.0, l.caption.3),
                 "Close window",
                 Some('\u{E8BB}'),
                 Action::CloseWindow,
@@ -211,10 +225,10 @@ impl State {
         if let Some(i) = self.media_index() {
             let media = &self.snapshot.media[i];
             let (prev, toggle, next, playing) = (media.can_previous, media.can_toggle, media.can_next, media.playing);
-            let y = l.media_y + 48.0;
-            let slot = (l.width - 32.0) / 3.0;
+            let y = l.media_y + 58.0;
+            let center = l.width / 2.0;
             self.button(
-                (12.0, y, 12.0 + slot, y + 38.0),
+                (center - 86.0, y + 4.0, center - 50.0, y + 40.0),
                 "Previous track",
                 Some('\u{E892}'),
                 Action::PreviousTrack,
@@ -222,7 +236,7 @@ impl State {
                 false,
             );
             self.button(
-                (16.0 + slot, y, 16.0 + 2.0 * slot, y + 38.0),
+                (center - 22.0, y, center + 22.0, y + 44.0),
                 if playing { "Pause" } else { "Play" },
                 Some(if playing { '\u{E769}' } else { '\u{E768}' }),
                 Action::PlayPause,
@@ -230,7 +244,7 @@ impl State {
                 false,
             );
             self.button(
-                (20.0 + 2.0 * slot, y, l.width - 12.0, y + 38.0),
+                (center + 50.0, y + 4.0, center + 86.0, y + 40.0),
                 "Next track",
                 Some('\u{E893}'),
                 Action::NextTrack,
@@ -239,7 +253,7 @@ impl State {
             );
             if self.snapshot.media.len() > 1 {
                 self.button(
-                    (l.width - 78.0, l.media_y, l.width - 46.0, l.media_y + 36.0),
+                    (l.width - 94.0, l.media_y + 10.0, l.width - 66.0, l.media_y + 38.0),
                     "Previous player",
                     Some('\u{E76B}'),
                     Action::PreviousPlayer,
@@ -247,7 +261,7 @@ impl State {
                     false,
                 );
                 self.button(
-                    (l.width - 44.0, l.media_y, l.width - 12.0, l.media_y + 36.0),
+                    (l.width - 62.0, l.media_y + 10.0, l.width - 34.0, l.media_y + 38.0),
                     "Next player",
                     Some('\u{E76C}'),
                     Action::NextPlayer,
@@ -258,56 +272,40 @@ impl State {
         }
         if let Some(audio) = &self.snapshot.audio {
             let muted = audio.muted;
-            let y = l.audio_y + 6.0;
+            let y = l.audio_y + 8.0;
             self.button(
-                (12.0, y, 50.0, y + 36.0),
+                (32.0, y, 68.0, y + 36.0),
                 if muted { "Unmute application" } else { "Mute application" },
                 Some(if muted { '\u{E74F}' } else { '\u{E767}' }),
                 Action::Mute,
                 true,
                 muted,
             );
-            self.button(
-                (l.width - 90.0, y, l.width - 54.0, y + 36.0),
-                "Quieter",
-                Some('\u{E738}'),
-                Action::Quieter,
-                true,
-                false,
-            );
-            self.button(
-                (l.width - 48.0, y, l.width - 12.0, y + 36.0),
-                "Louder",
-                Some('\u{E710}'),
-                Action::Louder,
-                true,
-                false,
-            );
+            self.button((78.0, y, l.width - 82.0, y + 36.0), "Application volume", None, Action::Volume, true, false);
         }
         if let Some(voice) = &self.snapshot.discord {
             let (connected, available, muted, deaf) = (voice.connected, voice.available, voice.mute, voice.deaf);
-            let y = l.discord_y + 32.0;
+            let y = l.discord_y + 16.0;
             if connected {
-                let mid = l.width / 2.0;
                 self.button(
-                    (12.0, y, mid - 3.0, y + 42.0),
+                    (l.width - 122.0, y, l.width - 82.0, y + 40.0),
                     if muted { "Unmute microphone" } else { "Mute microphone" },
-                    Some('\u{E720}'),
+                    Some(if muted { '\u{F781}' } else { '\u{E720}' }),
                     Action::Microphone,
                     available,
                     muted,
                 );
                 self.button(
-                    (mid + 3.0, y, l.width - 12.0, y + 42.0),
+                    (l.width - 76.0, y, l.width - 36.0, y + 40.0),
                     if deaf { "Undeafen" } else { "Deafen" },
-                    Some('\u{E7F6}'),
+                    Some(if deaf { '\u{E74F}' } else { '\u{E7F5}' }),
                     Action::Deafen,
                     available,
                     deaf,
                 );
             } else {
                 self.button(
-                    (12.0, y, l.width - 12.0, y + 42.0),
+                    (38.0, l.discord_y + 60.0, l.width - 38.0, l.discord_y + 92.0),
                     "Connect Discord in settings",
                     Some('\u{E713}'),
                     Action::SetupDiscord,
@@ -316,6 +314,7 @@ impl State {
                 );
             }
         }
+        self.pressed = pressed.and_then(|action| self.buttons.iter().position(|b| b.action == action && b.enabled));
         let size = ((l.width * self.scale).ceil() as i32, (l.height * self.scale).ceil() as i32);
         self.origin = position(self.work, self.anchor, size, self.scale);
         unsafe {
@@ -363,21 +362,90 @@ impl State {
                 size * s,
                 if strong { DWRITE_FONT_WEIGHT_SEMI_BOLD } else { DWRITE_FONT_WEIGHT_NORMAL },
                 DWRITE_TEXT_ALIGNMENT_LEADING,
-                if muted { rgba(0.63, 0.64, 0.69, 1.0) } else { rgba(0.96, 0.96, 0.98, 1.0) },
+                rgba(1.0, 1.0, 1.0, if muted { 0.5 } else { 0.96 }),
             )
         };
-        p.fill_rect((0.0, 0.0, l.width * s, l.height * s), rgba(0.065, 0.068, 0.08, 1.0))?;
-        p.stroke_round_rect(
-            (0.5, 0.5, l.width * s - 0.5, l.height * s - 0.5),
-            8.0 * s,
-            1.0,
-            rgba(0.24, 0.25, 0.28, 1.0),
-        )?;
+        crate::view::paint_popup_panel(p, (l.width * s, l.height * s), s)?;
         if let Some(icon) = &self.entry.icon {
-            p.image(scaled((12.0, 12.0, 32.0, 32.0), s), 0.0, icon.side, &icon.bgra)?;
+            p.image(scaled((28.0, 26.0, 50.0, 48.0), s), 0.0, icon.side, &icon.bgra)?;
+        } else {
+            p.glyph(
+                if self.snapshot.discord.is_some() { '\u{E8F2}' } else { '\u{E737}' },
+                scaled((28.0, 26.0, 50.0, 48.0), s),
+                17.0 * s,
+                rgba(1.0, 1.0, 1.0, 0.65),
+            )?;
         }
-        text(&self.entry.pin.name, (40.0, 4.0, l.width - 48.0, 40.0), 13.0, true, false)?;
-        p.fill_round_rect(scaled(l.image, s), 6.0 * s, rgba(0.035, 0.037, 0.045, 1.0))?;
+        text(&self.entry.pin.name, (60.0, 22.0, l.width - 66.0, 52.0), 14.0, true, false)?;
+        if let Some(voice) = &self.snapshot.discord {
+            let y = l.discord_y;
+            p.fill_round_rect(scaled((26.0, y, l.width - 26.0, y + 104.0), s), 18.0 * s, rgba(1.0, 1.0, 1.0, 0.07))?;
+            let title = if voice.channel.is_empty() {
+                tr("Voice chat")
+            } else {
+                std::borrow::Cow::Borrowed(voice.channel.as_str())
+            };
+            let right = if voice.connected { l.width - 132.0 } else { l.width - 40.0 };
+            text(&title, (42.0, y + 12.0, right, y + 36.0), 15.0, true, false)?;
+            let status = if !voice.connected {
+                tr("Connect to control your call")
+            } else if voice.error.is_some() {
+                tr("Discord voice controls unavailable")
+            } else if !voice.available {
+                tr("Waiting for Discord voice settings")
+            } else if voice.channel.is_empty() {
+                tr("Not in a voice channel")
+            } else {
+                tr("Voice channel")
+            };
+            text(&status, (42.0, y + 36.0, right, y + 57.0), 11.0, false, true)?;
+            if voice.connected {
+                let mut x = 42.0;
+                let mut shown = 0;
+                for member in &voice.members {
+                    let width = (member.name.chars().count() as f32 * 6.0 + 34.0).clamp(56.0, 106.0);
+                    if x + width > l.width - 42.0 {
+                        break;
+                    }
+                    let chip = (x, y + 68.0, x + width, y + 92.0);
+                    p.fill_round_rect(
+                        scaled(chip, s),
+                        12.0 * s,
+                        rgba(1.0, 1.0, 1.0, if member.speaking { 0.16 } else { 0.06 }),
+                    )?;
+                    let color = if member.speaking {
+                        rgba(0.35, 0.9, 0.5, 1.0)
+                    } else if member.muted || member.deaf {
+                        rgba(1.0, 0.45, 0.45, 0.9)
+                    } else {
+                        rgba(1.0, 1.0, 1.0, 0.3)
+                    };
+                    p.fill_ellipse((x + 10.0) * s, (y + 80.0) * s, 3.0 * s, 3.0 * s, color)?;
+                    text(&member.name, (x + 20.0, y + 68.0, x + width - 8.0, y + 92.0), 11.0, false, false)?;
+                    x += width + 6.0;
+                    shown += 1;
+                }
+                if shown < voice.members.len() {
+                    text(
+                        &format!("+{}", voice.members.len() - shown),
+                        (x, y + 68.0, l.width - 32.0, y + 92.0),
+                        11.0,
+                        false,
+                        true,
+                    )?;
+                }
+                if voice.members.is_empty() {
+                    p.glyph(
+                        '\u{E716}',
+                        scaled((42.0, y + 68.0, 62.0, y + 92.0), s),
+                        13.0 * s,
+                        rgba(1.0, 1.0, 1.0, 0.35),
+                    )?;
+                    text(&tr("No voice participants"), (68.0, y + 68.0, l.width - 40.0, y + 92.0), 11.0, false, true)?;
+                }
+            }
+        }
+        p.fill_round_rect(scaled(l.image, s), 18.0 * s, rgba(1.0, 1.0, 1.0, 0.045))?;
         if !self.thumbnail_visible {
             let label = if self.thumbnail.as_ref().is_some_and(|t| t.is_minimized())
                 || self.entry.windows.get(self.window_index).is_some_and(|w| w.minimized)
@@ -392,81 +460,125 @@ impl State {
                 12.0 * s,
                 DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_TEXT_ALIGNMENT_CENTER,
-                rgba(0.6, 0.61, 0.67, 1.0),
+                rgba(1.0, 1.0, 1.0, 0.4),
             )?;
         }
+        let caption_right = l.width - if self.entry.windows.len() > 1 { 124.0 } else { 62.0 };
         if let Some(window) = self.entry.windows.get(self.window_index) {
-            text(
-                &format!("{}/{} · {}", self.window_index + 1, self.entry.windows.len(), window.title),
-                (48.0, l.caption.1, l.width - 88.0, l.caption.3),
-                11.0,
-                false,
-                true,
-            )?;
+            let title = if self.entry.windows.len() > 1 {
+                format!("{}/{} · {}", self.window_index + 1, self.entry.windows.len(), window.title)
+            } else {
+                window.title.clone()
+            };
+            text(&title, (30.0, l.caption.1, caption_right, l.caption.3), 11.0, false, true)?;
         }
         if let Some(i) = self.media_index() {
             let media = &self.snapshot.media[i];
-            let right = l.width - if self.snapshot.media.len() > 1 { 86.0 } else { 12.0 };
-            text(&media.title, (14.0, l.media_y, right, l.media_y + 23.0), 13.0, true, false)?;
+            p.fill_round_rect(
+                scaled((26.0, l.media_y, l.width - 26.0, l.media_y + 106.0), s),
+                18.0 * s,
+                rgba(1.0, 1.0, 1.0, 0.07),
+            )?;
+            let right = l.width - if self.snapshot.media.len() > 1 { 100.0 } else { 42.0 };
+            text(&media.title, (42.0, l.media_y + 9.0, right, l.media_y + 33.0), 14.0, true, false)?;
             let subtitle = if media.artist.is_empty() { &media.source } else { &media.artist };
             let subtitle = if self.snapshot.media.len() > 1 {
                 format!("{}/{} · {subtitle}", i + 1, self.snapshot.media.len())
             } else {
                 subtitle.clone()
             };
-            text(&subtitle, (14.0, l.media_y + 23.0, right, l.media_y + 43.0), 11.0, false, true)?;
+            text(&subtitle, (42.0, l.media_y + 33.0, right, l.media_y + 53.0), 11.0, false, true)?;
         }
         if let Some(audio) = &self.snapshot.audio {
+            let y = l.audio_y;
+            p.fill_round_rect(
+                scaled((26.0, y + 4.0, l.width - 26.0, y + 48.0), s),
+                16.0 * s,
+                rgba(1.0, 1.0, 1.0, 0.07),
+            )?;
+            let track = (82.0, y + 26.0, l.width - 88.0);
+            p.fill_round_rect(
+                scaled((track.0, track.1 - 2.0, track.2, track.1 + 2.0), s),
+                2.0 * s,
+                rgba(1.0, 1.0, 1.0, 0.2),
+            )?;
+            let x = track.0 + (track.2 - track.0) * audio.volume.clamp(0.0, 1.0);
+            p.fill_round_rect(
+                scaled((track.0, track.1 - 2.0, x, track.1 + 2.0), s),
+                2.0 * s,
+                rgba(1.0, 1.0, 1.0, if audio.muted { 0.35 } else { 0.95 }),
+            )?;
+            p.fill_ellipse(x * s, track.1 * s, 5.0 * s, 5.0 * s, rgba(1.0, 1.0, 1.0, 0.96))?;
             text(
-                &format!("{} · {}%", tr("Application volume"), (audio.volume * 100.0).round() as u32),
-                (58.0, l.audio_y, l.width - 96.0, l.audio_y + 48.0),
-                11.0,
+                &format!("{}", (audio.volume * 100.0).round() as u32),
+                (l.width - 74.0, y + 4.0, l.width - 38.0, y + 48.0),
+                12.0,
                 false,
                 true,
             )?;
         }
-        if let Some(voice) = &self.snapshot.discord {
-            let status = if !voice.connected {
-                tr("Discord voice controls require connection")
-            } else if voice.error.is_some() {
-                tr("Discord voice controls unavailable")
-            } else if !voice.available {
-                tr("Waiting for Discord voice settings")
-            } else if voice.channel.is_empty() {
-                std::borrow::Cow::Borrowed("Discord")
-            } else {
-                std::borrow::Cow::Owned(format!("Discord · {}", voice.channel))
-            };
-            text(&status, (14.0, l.discord_y + 2.0, l.width - 12.0, l.discord_y + 30.0), 11.0, false, true)?;
-        }
         for (i, button) in self.buttons.iter().enumerate() {
-            if button.action == Action::Open {
+            if matches!(button.action, Action::Open | Action::Volume) {
                 continue;
             }
             let hot = self.hover == Some(i) && button.enabled;
-            let background = if button.selected {
-                rgba(0.45, 0.18, 0.24, 1.0)
-            } else if hot {
-                rgba(0.23, 0.24, 0.29, 1.0)
+            let primary = button.action == Action::PlayPause && button.enabled;
+            let voice = matches!(button.action, Action::Microphone | Action::Deafen);
+            let background = if primary {
+                rgba(1.0, 1.0, 1.0, if hot { 0.85 } else { 1.0 })
+            } else if button.selected {
+                rgba(1.0, 0.35, 0.35, 0.32)
             } else {
-                rgba(0.12, 0.13, 0.16, 1.0)
+                rgba(
+                    1.0,
+                    1.0,
+                    1.0,
+                    if hot {
+                        0.16
+                    } else if voice || button.action == Action::SetupDiscord {
+                        0.08
+                    } else {
+                        0.0
+                    },
+                )
             };
-            p.fill_round_rect(scaled(button.rect, s), 8.0 * s, background)?;
-            let color = rgba(0.94, 0.94, 0.97, if button.enabled { 1.0 } else { 0.25 });
-            let has_text = matches!(button.action, Action::Microphone | Action::Deafen | Action::SetupDiscord);
+            let radius = (button.rect.3 - button.rect.1) / 2.0;
+            p.fill_round_rect(scaled(button.rect, s), radius * s, background)?;
+            let color = if primary {
+                rgba(0.0, 0.0, 0.0, 1.0)
+            } else {
+                rgba(
+                    1.0,
+                    1.0,
+                    1.0,
+                    if !button.enabled {
+                        0.25
+                    } else if button.selected || hot || voice {
+                        0.95
+                    } else {
+                        0.6
+                    },
+                )
+            };
+            let has_text = button.action == Action::SetupDiscord;
             if let Some(glyph) = button.glyph {
                 let rect = if has_text {
-                    (button.rect.0 + 6.0, button.rect.1, button.rect.0 + 32.0, button.rect.3)
+                    (button.rect.0 + 12.0, button.rect.1, button.rect.0 + 40.0, button.rect.3)
                 } else {
                     button.rect
                 };
-                p.glyph(glyph, scaled(rect, s), 15.0 * s, color)?;
+                p.glyph(
+                    glyph,
+                    scaled(rect, s),
+                    if matches!(button.action, Action::Dismiss | Action::CloseWindow) { 11.0 } else { 15.0 } * s,
+                    color,
+                )?;
             }
             if has_text {
                 p.text(
                     &button.label,
-                    scaled((button.rect.0 + 34.0, button.rect.1, button.rect.2 - 6.0, button.rect.3), s),
-                    10.0 * s,
+                    scaled((button.rect.0 + 46.0, button.rect.1, button.rect.2 - 12.0, button.rect.3), s),
+                    12.0 * s,
                     DWRITE_FONT_WEIGHT_NORMAL,
                     DWRITE_TEXT_ALIGNMENT_LEADING,
                     color,
@@ -474,9 +586,7 @@ impl State {
             }
         }
         if let Some((message, _)) = self.error {
-            let rect = (48.0, l.caption.1, l.width - 88.0, l.caption.3);
-            p.fill_rect(scaled(rect, s), rgba(0.3, 0.12, 0.14, 1.0))?;
-            text(&tr(message), rect, 11.0, false, false)?;
+            text(&tr(message), (30.0, l.caption.1, caption_right, l.caption.3), 11.0, false, false)?;
         }
         Ok(())
     }
@@ -487,6 +597,10 @@ impl State {
 
     fn hide(&mut self) {
         self.visible = false;
+        self.pressed = None;
+        unsafe {
+            let _ = PostMessageW(Some(self.hwnd), WM_APP + 88, WPARAM(0), LPARAM(0));
+        }
         self.thumbnail.take();
         self.thumbnail_visible = false;
         self.actions.clear();
@@ -543,12 +657,7 @@ impl State {
                     );
                 }
             }
-            Action::Quieter | Action::Louder => {
-                if let Some(audio) = &mut self.snapshot.audio {
-                    audio.volume = (audio.volume + if action == Action::Louder { 0.1 } else { -0.1 }).clamp(0.0, 1.0);
-                    self.actions.set_volume(audio.volume);
-                }
-            }
+            Action::Volume => {}
             Action::Mute => {
                 if let Some(audio) = &mut self.snapshot.audio {
                     audio.muted = !audio.muted;
@@ -599,22 +708,44 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
             WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
-                let state = &*ptr;
                 let mut paint = PAINTSTRUCT::default();
-                let dc = BeginPaint(hwnd, &mut paint);
-                let size = (
-                    (state.layout.width * state.scale).ceil() as i32,
-                    (state.layout.height * state.scale).ceil() as i32,
-                );
-                let _ = state.gpu.paint_dc(dc, size, |p| {
-                    let _ = state.paint(p);
-                });
+                BeginPaint(hwnd, &mut paint);
                 let _ = EndPaint(hwnd, &paint);
+                (*ptr).invalidate();
+                LRESULT(0)
+            }
+            WM_NCHITTEST => {
+                let state = &*ptr;
+                let point =
+                    (l.0 as i16 as f32 - state.origin.0 as f32, (l.0 >> 16) as i16 as f32 - state.origin.1 as f32);
+                LRESULT(
+                    if crate::ui::popup::hit_panel(
+                        point,
+                        (state.layout.width * state.scale, state.layout.height * state.scale),
+                        state.scale,
+                    ) {
+                        HTCLIENT as isize
+                    } else {
+                        HTTRANSPARENT as isize
+                    },
+                )
+            }
+            message if message == WM_APP + 88 => {
+                if GetCapture() == hwnd {
+                    let _ = ReleaseCapture();
+                }
+                LRESULT(0)
+            }
+            WM_CAPTURECHANGED => {
+                (*ptr).pressed = None;
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
                 let state = &mut *ptr;
                 let point = (l.0 as i16 as f32 / state.scale, (l.0 >> 16) as i16 as f32 / state.scale);
+                if state.pressed.and_then(|i| state.buttons.get(i)).is_some_and(|b| b.action == Action::Volume) {
+                    state.set_volume_from_point(point.0);
+                }
                 let hover = state.hit(point);
                 if hover != state.hover {
                     state.hover = hover;
@@ -625,6 +756,10 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
             WM_LBUTTONDOWN => {
                 let state = &mut *ptr;
                 state.pressed = state.hit((l.0 as i16 as f32 / state.scale, (l.0 >> 16) as i16 as f32 / state.scale));
+                if state.pressed.and_then(|i| state.buttons.get(i)).is_some_and(|b| b.action == Action::Volume) {
+                    state.set_volume_from_point(l.0 as i16 as f32 / state.scale);
+                    SetCapture(hwnd);
+                }
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
@@ -638,6 +773,9 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                         None
                     }
                 };
+                if GetCapture() == hwnd {
+                    let _ = ReleaseCapture();
+                }
                 if let Some(window) = activate {
                     desktop::activate(&window, false);
                 }
@@ -676,7 +814,7 @@ impl Preview {
         });
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 w!("NightIsland.DockPreview"),
                 w!("Night Island Preview"),
                 WS_POPUP,
@@ -690,26 +828,11 @@ impl Preview {
                 None,
             )?
         };
-        unsafe {
-            let corner = DWMWCP_ROUND;
-            let border = 0x003c3c40u32;
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_WINDOW_CORNER_PREFERENCE,
-                (&raw const corner).cast(),
-                size_of_val(&corner) as u32,
-            );
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_BORDER_COLOR,
-                (&raw const border).cast(),
-                size_of_val(&border) as u32,
-            );
-        }
         let state = Box::new(State {
             hwnd,
             parent,
             gpu: gpu.popup(),
+            surface: RefCell::new(None),
             entry: entry.clone(),
             actions: Client::new(),
             snapshot: Snapshot::default(),
@@ -810,14 +933,10 @@ impl Preview {
 
     pub fn contains(&self, point: POINT) -> bool {
         self.state.visible
-            && inside(
-                (
-                    self.state.origin.0 as f32,
-                    self.state.origin.1 as f32,
-                    self.state.origin.0 as f32 + self.state.layout.width * self.state.scale,
-                    self.state.origin.1 as f32 + self.state.layout.height * self.state.scale,
-                ),
-                (point.x as f32, point.y as f32),
+            && crate::ui::popup::hit_panel(
+                ((point.x - self.state.origin.0) as f32, (point.y - self.state.origin.1) as f32),
+                (self.state.layout.width * self.state.scale, self.state.layout.height * self.state.scale),
+                self.state.scale,
             )
     }
 
@@ -830,7 +949,7 @@ impl Preview {
             self.state.hide();
             return;
         }
-        if over_source || self.contains(point) {
+        if over_source || self.contains(point) || self.state.pressed.is_some() {
             self.state.last_inside = Instant::now();
         } else if self.state.last_inside.elapsed() > Duration::from_millis(450) {
             self.state.hide();

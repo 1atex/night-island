@@ -51,6 +51,7 @@ pub struct DiscordVoice {
     pub mute: bool,
     pub deaf: bool,
     pub channel: String,
+    pub members: Vec<crate::services::discord::Member>,
 }
 
 #[derive(Clone, Copy)]
@@ -368,6 +369,7 @@ fn discord_voice(identity: &Identity) -> Option<DiscordVoice> {
         mute: state.self_mute,
         deaf: state.self_deaf,
         channel: state.channel,
+        members: state.members.into_iter().take(8).collect(),
     })
 }
 
