@@ -6,6 +6,7 @@ pub(in crate::island) struct Pet {
     pub(in crate::island) behavior: crate::ui::pet_behavior::PetBehavior,
     pub(in crate::island) speech: crate::ui::pet_speech::PetSpeech,
     pub(in crate::island) speech_cue: crate::ui::pet_speech::SpeechCue,
+    pub(in crate::island) voice_phase: crate::ui::pet_speech::VoicePhase,
     pub(in crate::island) char_layer: Layer,
     pub(in crate::island) motion: crate::ui::pet_motion::PetMotion,
     pub(in crate::island) controls_at: Instant,
@@ -277,7 +278,7 @@ impl App {
             self.kill_timer(Timer::Collapse);
             self.kill_timer(Timer::Autohide);
         }
-        if character == Character::None || (!detached && self.state != State::Collapsed) {
+        if character == Character::None || (!detached && (self.state != State::Collapsed || self.pill_hidden)) {
             return;
         }
         let now = Instant::now();
@@ -327,19 +328,20 @@ impl App {
                 .map_or(look.0.abs() < 0.36 && look.1.abs() < 0.46, |desktop| desktop.pointer_near(point))
         });
         let held = self.character_interacting();
-        let still = self.settings.pet_performance == crate::ui::pet_motion::PetPerformance::Still;
+        let still = self.settings.pet_performance == crate::ui::pet_motion::PetPerformance::Still
+            || !crate::ui::feedback::motion_allowed();
         let chat_open =
             self.pet.chat.as_ref().is_some_and(|chat| unsafe { IsWindowVisible(chat.window.hwnd()).as_bool() })
                 || (self.state == State::Expanded && self.ui.tab == view::Tab::Chat && !self.pill_hidden);
         let chat_pending =
             self.pet.chat.as_ref().is_some_and(|chat| chat.pending) || self.ui.chat.pet.pending || self.ui.chat.pending;
         use crate::ui::pet_speech::SpeechCue;
-        let speech_cue = if self.pet.speech_cue.engaged() {
+        let speech_cue = if self.settings.pet_voice_reactions && self.pet.voice_phase.cue().engaged() {
+            self.pet.voice_phase.cue()
+        } else if self.pet.speech_cue.engaged() {
             self.pet.speech_cue
         } else if chat_pending {
             SpeechCue::Thinking
-        } else if chat_open {
-            SpeechCue::Listening
         } else {
             SpeechCue::Quiet
         };
@@ -350,7 +352,7 @@ impl App {
                 enabled: self.settings.pet_autonomy,
                 reduced_motion: still,
                 held,
-                engaged: near || desktop.controls_visible() || speech_cue.engaged() || urgent,
+                engaged: near || desktop.controls_visible() || chat_open || speech_cue.engaged() || urgent,
                 position: desktop.position().map(|v| v as f32),
                 bounds: desktop.walking_bounds(),
                 scale: self.scale,
@@ -383,11 +385,25 @@ impl App {
         } else {
             self.pet.motion.look
         };
+        let gaze_moving = (gaze.0 - self.pet.motion.look.0).abs() + (gaze.1 - self.pet.motion.look.1).abs() > 0.015;
         self.pet.cursor = cursor;
         let mut motion = self.pet.motion.advance(gaze, dt, near, held, still);
         motion.lid = if still { 0.0 } else { lid };
         motion.behavior = behavior.as_ref().map_or(Default::default(), |frame| frame.pose);
         motion.mouth = self.pet.speech.advance(speech_cue, dt, still);
+        if speech_cue.engaged() {
+            reaction = Reaction::Idle;
+            motion.warmth = motion.warmth.max(0.45);
+            if !still && !held {
+                let target = match speech_cue {
+                    SpeechCue::Listening => 0.1 + crate::platform::dictation::level() * 0.18,
+                    SpeechCue::Thinking => (t * 1.8).sin() * 0.1,
+                    _ => 0.0,
+                };
+                motion.lean += target;
+                motion.stretch += target.abs() * 0.12;
+            }
+        }
         let look = self.pet.motion.look;
         let target = if detached || self.music.spectrum_running {
             (0..3).map(audio::level).sum::<f32>() / 3.0
@@ -406,6 +422,7 @@ impl App {
             [motion.behavior.sit, motion.behavior.sleep].iter().any(|value| *value > 0.005 && *value < 0.995);
         let interval = self.settings.pet_performance.interval(
             near || held
+                || gaze_moving
                 || pose.lively()
                 || motion.warmth > 0.0
                 || motion.behavior.walk > 0.0
@@ -422,7 +439,9 @@ impl App {
                 self.pet.char_key = None;
             }
             let available = self.ui.media.playing || !self.ui.media.title.is_empty() || self.ui.media.players > 0;
-            if now.duration_since(self.pet.controls_at) >= Duration::from_millis(80) {
+            if (near || held || desktop.controls_visible())
+                && now.duration_since(self.pet.controls_at) >= Duration::from_millis(80)
+            {
                 self.pet.controls_at = now;
                 if let Err(error) = desktop.update_controls(available, &self.ui.media, media::progress(), self.scale) {
                     crate::log_warn!("could not draw companion music controls: {error}");

@@ -1,6 +1,13 @@
 use crate::island::*;
+use crate::ui::pet_speech::VoicePhase;
 
 impl App {
+    fn voice_phase(&mut self, phase: VoicePhase) {
+        self.pet.voice_phase = phase;
+        self.pet.char_key = None;
+        self.set_timer(Timer::Char, 1);
+    }
+
     fn clear_notice(&mut self) {
         self.kill_timer(Timer::Notice);
         self.ui.notice = None;
@@ -12,7 +19,12 @@ impl App {
     pub(in crate::island) fn toggle_dictation(&mut self) {
         if dictation::active() {
             dictation::stop();
+            self.voice_phase(VoicePhase::Transcribing);
             self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
+            return;
+        }
+        if self.pet.voice_phase.pending() || ai::busy() {
+            self.notify_for(Notice::Error, '\u{E783}', "Another request is running, try again in a moment", 2500);
             return;
         }
         if !ai::can_transcribe(&self.settings.ai) {
@@ -27,6 +39,7 @@ impl App {
             return self.notify_for(Notice::Error, '\u{E783}', "Save a key for the speech service first", 3500);
         }
         if dictation::start(self.hwnd) {
+            self.voice_phase(VoicePhase::Recording);
             self.show_notice_for(
                 '\u{E720}',
                 "Listening… press the keys again",
@@ -36,9 +49,15 @@ impl App {
     }
 
     pub(in crate::island) fn on_voice(&mut self) {
-        match dictation::take() {
+        self.finish_recording(dictation::take());
+    }
+
+    fn finish_recording(&mut self, outcome: Option<std::result::Result<Vec<u8>, &'static str>>) {
+        self.voice_phase(VoicePhase::Idle);
+        match outcome {
             Some(Ok(wav)) => {
                 if ai::transcribe(self.hwnd, wav) {
+                    self.voice_phase(VoicePhase::Transcribing);
                     self.show_notice_for('\u{F801}', "Recognizing…", 60_000);
                 } else {
                     self.clear_notice();
@@ -63,6 +82,7 @@ impl App {
             return self.show_notice_for('\u{E720}', "Say a command after the name", 2200);
         }
         if ai::ask_command(self.hwnd, command) {
+            self.voice_phase(VoicePhase::Command);
             self.show_notice_for('\u{E99A}', "Thinking…", 60_000);
         } else {
             self.notify_for(Notice::Error, '\u{E783}', "Another request is running, try again in a moment", 3500);
@@ -89,6 +109,11 @@ impl App {
 
     pub(in crate::island) fn on_voice_command(&mut self) {
         let Some(answer) = ai::take_command_result() else { return };
+        self.finish_voice_command(answer);
+    }
+
+    fn finish_voice_command(&mut self, answer: ai::Answer) {
+        self.voice_phase(VoicePhase::Idle);
         self.clear_notice();
         let reply = match answer {
             Ok(reply) => reply,
@@ -170,6 +195,11 @@ impl App {
 
     pub(in crate::island) fn on_transcribed(&mut self) {
         let Some(answer) = ai::take_transcript() else { return };
+        self.finish_transcription(answer);
+    }
+
+    fn finish_transcription(&mut self, answer: ai::Answer) {
+        self.voice_phase(VoicePhase::Idle);
         self.clear_notice();
         match answer {
             Ok(text) => {
@@ -190,5 +220,89 @@ impl App {
                 self.notify_for(Notice::Error, '\u{E783}', &short, 4500);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::System::WinRT::{
+        CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
+        RO_INIT_SINGLETHREADED, RoInitialize, RoUninitialize,
+    };
+
+    #[test]
+    #[ignore = "Uses an isolated native island with synthetic voice results; no microphone, clipboard or provider access"]
+    fn native_voice_failures_and_answers_release_the_pet_and_allow_retry() -> Result<()> {
+        unsafe {
+            RoInitialize(RO_INIT_SINGLETHREADED)?;
+        }
+        struct Runtime;
+        impl Drop for Runtime {
+            fn drop(&mut self) {
+                unsafe { RoUninitialize() };
+            }
+        }
+        let _runtime = Runtime;
+        let _queue = unsafe {
+            CreateDispatcherQueueController(DispatcherQueueOptions {
+                dwSize: size_of::<DispatcherQueueOptions>() as u32,
+                threadType: DQTYPE_THREAD_CURRENT,
+                apartmentType: DQTAT_COM_NONE,
+            })?
+        };
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                w!("STATIC"),
+                w!("Voice lifecycle fixture"),
+                WS_POPUP,
+                -12000,
+                -12000,
+                1,
+                1,
+                None,
+                None,
+                Some(GetModuleHandleW(None)?.into()),
+                None,
+            )?
+        };
+        struct Window(HWND);
+        impl Drop for Window {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                }
+            }
+        }
+        let _window = Window(hwnd);
+        let settings = Settings { music_eq: false, edge_spikes: false, ..Default::default() };
+        let mut app = App::new_visuals(hwnd, 1.0, settings)?;
+        app.voice_phase(VoicePhase::Recording);
+        assert!(app.pet.voice_phase.cue().engaged());
+        app.finish_recording(Some(Err("Nothing was heard (is the microphone muted?)")));
+        assert_eq!(app.pet.voice_phase, VoicePhase::Idle);
+        app.voice_phase(VoicePhase::Transcribing);
+        app.toggle_dictation();
+        assert_eq!(app.pet.voice_phase, VoicePhase::Transcribing);
+        assert!(!dictation::active());
+        app.finish_transcription(Err("No connection to the service".into()));
+        assert_eq!(app.pet.voice_phase, VoicePhase::Idle);
+        for answer in [
+            Err("Request timed out".into()),
+            Ok("not JSON".into()),
+            Ok(r#"{"action":"answer","text":"Привет!"}"#.into()),
+            Ok(r#"{"action":"cancel"}"#.into()),
+        ] {
+            app.voice_phase(VoicePhase::Command);
+            app.finish_voice_command(answer);
+            assert_eq!(app.pet.voice_phase, VoicePhase::Idle);
+            assert!(!app.pet.voice_phase.cue().engaged());
+            assert!(app.pet.char_key.is_none());
+        }
+        app.voice_phase(VoicePhase::Recording);
+        app.finish_recording(None);
+        assert_eq!(app.pet.voice_phase, VoicePhase::Idle);
+        Ok(())
     }
 }

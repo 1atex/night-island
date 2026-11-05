@@ -17,6 +17,10 @@ pub enum Sid {
     TopKeyboard,
     TopWorkspaces,
     TopAnimations,
+    TopEntrance,
+    TopGap,
+    TopMotion,
+    TopLiquid,
 
     DockEnabled,
     DockReplaceTaskbar,
@@ -130,6 +134,7 @@ pub enum Sid {
     CharacterDetached,
     PetPerformance,
     PetAutonomy,
+    PetVoice,
     RecFormat,
     RecFps,
     RecSystem,
@@ -232,6 +237,8 @@ pub(in crate::view) fn setting_row(pill: Rect, scale: f32, index: usize) -> (Rec
 
 pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
     match id {
+        Sid::TopGap => (12.0, 160.0, 2.0),
+        Sid::TopMotion => (160.0, 800.0, 20.0),
         Sid::DockIconSize => (32.0, 72.0, 2.0),
         Sid::DockZoom => (1.0, 1.7, 0.05),
         Sid::DockOpacity => (0.2, 1.0, 0.02),
@@ -262,6 +269,8 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
 
 pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
     match id {
+        Sid::TopGap => c.top_panel.island_gap as f32,
+        Sid::TopMotion => c.top_panel.motion_ms as f32,
         Sid::DockIconSize => c.desktop_dock.icon_size as f32,
         Sid::DockZoom => c.desktop_dock.zoom,
         Sid::DockOpacity => {
@@ -302,6 +311,8 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
 
 pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
     match id {
+        Sid::TopGap => format!("{v:.0} px"),
+        Sid::TopMotion => format!("{v:.0} ms"),
         Sid::DockIconSize | Sid::DockMargin => format!("{v:.0} px"),
         Sid::DockZoom => format!("{v:.2}×"),
         Sid::DockOpacity | Sid::DockTintSaturation | Sid::DockTintBrightness => format!("{:.0}%", v * 100.0),
@@ -327,6 +338,8 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
     let raw = min + (max - min) * norm.clamp(0.0, 1.0);
     let v = (raw / step).round() * step;
     match id {
+        Sid::TopGap => c.top_panel.island_gap = v as u32,
+        Sid::TopMotion => c.top_panel.motion_ms = v as u32,
         Sid::DockIconSize => c.desktop_dock.icon_size = v as u32,
         Sid::DockZoom => c.desktop_dock.zoom = v,
         Sid::DockOpacity => {
@@ -392,6 +405,8 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::TopKeyboard => c.top_panel.keyboard,
         Sid::TopWorkspaces => c.top_panel.workspaces,
         Sid::TopAnimations => c.top_panel.animations,
+        Sid::TopLiquid => c.top_panel.liquid,
+        Sid::PetVoice => c.pet_voice_reactions,
         Sid::DockPreview => c.desktop_dock.hover_preview,
         Sid::DockBlur => c.desktop_dock.blur,
         Sid::DockEnabled => c.desktop_dock.enabled,
@@ -482,6 +497,8 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::TopKeyboard => c.top_panel.keyboard = on,
         Sid::TopWorkspaces => c.top_panel.workspaces = on,
         Sid::TopAnimations => c.top_panel.animations = on,
+        Sid::TopLiquid => c.top_panel.liquid = on,
+        Sid::PetVoice => c.pet_voice_reactions = on,
         Sid::DockPreview => c.desktop_dock.hover_preview = on,
         Sid::DockBlur => c.desktop_dock.blur = on,
         Sid::DockEnabled => c.desktop_dock.enabled = on,
@@ -576,6 +593,7 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
         }
         Sid::Character => c.character = c.character.step(forward),
         Sid::PetPerformance => c.pet_performance = c.pet_performance.step(forward),
+        Sid::TopEntrance => c.top_panel.entrance = c.top_panel.entrance.step(forward),
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
         Sid::PillWeatherSide => c.pill_weather_side = c.pill_weather_side.step(forward),
@@ -605,6 +623,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
         },
         Sid::Character => c.character.name(),
         Sid::PetPerformance => c.pet_performance.name(),
+        Sid::TopEntrance => c.top_panel.entrance.name(),
         Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
@@ -633,6 +652,7 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
             [1, 2, 4].iter().position(|v| *v == c.notification_tiles).unwrap_or(2),
         ),
         Sid::PetPerformance => all(&crate::ui::pet_motion::PetPerformance::ALL, c.pet_performance, |v| v.name()),
+        Sid::TopEntrance => all(&crate::data::top_panel::PanelEntrance::ALL, c.top_panel.entrance, |v| v.name()),
         Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
         Sid::AiProvider => all(&AiProvider::ALL, c.ai.provider, |v| v.name()),
         Sid::PillBattery => all(&BatteryStyle::ALL, c.pill_battery, |v| v.name()),
@@ -659,6 +679,7 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
             c.character = crate::ui::characters::Character::ALL[k.min(crate::ui::characters::Character::ALL.len() - 1)]
         }
         Sid::PetPerformance => c.pet_performance = crate::ui::pet_motion::PetPerformance::ALL[k.min(3)],
+        Sid::TopEntrance => c.top_panel.entrance = crate::data::top_panel::PanelEntrance::ALL[k.min(2)],
         Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
         Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],
         Sid::PillWeatherSide => c.pill_weather_side = WeatherSide::ALL[k.min(1)],

@@ -23,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 15] = [
+const ISLAND: [(Sid, &str, Kind); 16] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -35,6 +35,7 @@ const ISLAND: [(Sid, &str, Kind); 15] = [
     (Sid::Character, "Character", Kind::Cycle),
     (Sid::CharacterDetached, "Release the pet from the island", Kind::Toggle),
     (Sid::PetPerformance, "Pet animation quality", Kind::Cycle),
+    (Sid::PetVoice, "Pet reacts to voice assistant", Kind::Toggle),
     (Sid::PetAutonomy, "Pet walks, rests and sleeps on its own", Kind::Toggle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
@@ -152,7 +153,7 @@ pub const GROUPS: [Group; 17] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (13, "Open and close")],
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (14, "Open and close")],
     },
     Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
     Group { glyph: '\u{E8A9}', name: "Top panel", rows: &[], custom: Some(top_panel_items), sections: &[] },
@@ -876,6 +877,11 @@ fn top_panel_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::TopWorkspaces, "Windows and desktops", Kind::Toggle),
         Item::Section("Behaviour"),
         Item::Row(Sid::TopAnimations, "Animate panel interactions", Kind::Toggle),
+        Item::Row(Sid::TopEntrance, "Panel entrance", Kind::Cycle),
+        Item::Note("Island mode places the panels beside the island. Edge modes keep them in the screen corners."),
+        Item::Row(Sid::TopGap, "Distance from the island", Kind::Slider),
+        Item::Row(Sid::TopMotion, "Panel animation duration", Kind::Slider),
+        Item::Row(Sid::TopLiquid, "Liquid panel edges", Kind::Toggle),
         Item::Row(Sid::TopAutoHide, "Show top panel at the screen edge", Kind::Toggle),
         Item::Text(tr("Autohide frees the top edge. Island visibility is configured separately.").into_owned()),
         Item::Row(Sid::TopFullscreen, "Hide top panel in fullscreen apps", Kind::Toggle),
@@ -888,6 +894,9 @@ fn top_panel_items(ui: &UiState) -> Vec<Item> {
     ];
     if ui.cfg.top_panel.auto_hide {
         items.retain(|item| !matches!(item, Item::Row(Sid::TopReserve, _, _)));
+    }
+    if ui.cfg.top_panel.entrance != crate::data::top_panel::PanelEntrance::Island {
+        items.retain(|item| !matches!(item, Item::Row(Sid::TopGap, _, _)));
     }
     items
 }
@@ -979,6 +988,11 @@ fn rows_with_sections(group: &Group) -> Vec<Item> {
         out.push(Item::Row(id, label, kind));
         if id == Sid::PetAutonomy {
             out.push(Item::Note("Pets pause near the pointer and during chat. Reduced motion stops walking."));
+        }
+        if id == Sid::PetVoice {
+            out.push(Item::Note(
+                "Start dictation with the shortcut in Keys. Your pet listens and waits with the assistant.",
+            ));
         }
     }
     out

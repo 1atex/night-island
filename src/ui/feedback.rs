@@ -81,6 +81,14 @@ impl Feedback {
 }
 
 pub fn motion_allowed() -> bool {
+    thread_local! {
+        static CACHED: Cell<Option<(Instant, bool)>> = const { Cell::new(None) };
+    }
+    if let Some((at, enabled)) = CACHED.get()
+        && at.elapsed() < Duration::from_millis(500)
+    {
+        return enabled;
+    }
     use windows::Win32::UI::WindowsAndMessaging::{
         SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
     };
@@ -93,7 +101,9 @@ pub fn motion_allowed() -> bool {
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         );
     }
-    enabled.as_bool()
+    let enabled = enabled.as_bool();
+    CACHED.set(Some((Instant::now(), enabled)));
+    enabled
 }
 
 #[cfg(test)]

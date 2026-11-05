@@ -45,7 +45,7 @@ impl PetPerformance {
                 } else if active {
                     30
                 } else if detached {
-                    24
+                    12
                 } else {
                     15
                 }
@@ -56,7 +56,7 @@ impl PetPerformance {
                 } else if active {
                     60
                 } else if detached {
-                    30
+                    18
                 } else {
                     20
                 }

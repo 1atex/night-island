@@ -1,14 +1,14 @@
 use std::ffi::c_void;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Media::Audio::{
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
     IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, eCapture, eConsole,
 };
-use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
+use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 use windows::core::Result;
 
@@ -22,16 +22,35 @@ const AUDCLNT_BUFFERFLAGS_SILENT: u32 = 0x2;
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static WANTED: AtomicBool = AtomicBool::new(false);
+static LEVEL: AtomicU32 = AtomicU32::new(0);
 static RESULT: Mutex<Option<std::result::Result<Vec<u8>, &'static str>>> = Mutex::new(None);
 
 pub fn active() -> bool {
     RUNNING.load(Ordering::SeqCst)
 }
 
+pub fn level() -> f32 {
+    LEVEL.load(Ordering::Relaxed) as f32 / 1000.0
+}
+
+fn packet_level(samples: &[i16]) -> u32 {
+    if samples.is_empty() {
+        return 0;
+    }
+    let energy = samples.iter().map(|sample| (f64::from(*sample) / 32768.0).powi(2)).sum::<f64>();
+    ((energy / samples.len() as f64).sqrt() * 4000.0).min(1000.0) as u32
+}
+
 pub fn start(hwnd: HWND) -> bool {
+    let Ok(result) = RESULT.lock() else { return false };
+    if result.is_some() {
+        return false;
+    }
     if RUNNING.swap(true, Ordering::SeqCst) {
         return false;
     }
+    drop(result);
+    LEVEL.store(0, Ordering::Relaxed);
     WANTED.store(true, Ordering::SeqCst);
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
@@ -39,6 +58,7 @@ pub fn start(hwnd: HWND) -> bool {
             Ok(samples) => finish(&samples),
             Err(_) => Err("The microphone could not be opened"),
         };
+        LEVEL.store(0, Ordering::Relaxed);
         if let Ok(mut r) = RESULT.lock() {
             *r = Some(outcome);
         }
@@ -92,6 +112,13 @@ pub fn wav(samples: &[i16]) -> Vec<u8> {
 fn capture() -> Result<Vec<i16>> {
     unsafe {
         CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
+        struct Runtime;
+        impl Drop for Runtime {
+            fn drop(&mut self) {
+                unsafe { CoUninitialize() };
+            }
+        }
+        let _runtime = Runtime;
         let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
         let device = enumerator.GetDefaultAudioEndpoint(eCapture, eConsole)?;
         let client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
@@ -114,24 +141,36 @@ fn capture() -> Result<Vec<i16>> {
         )?;
         let capture: IAudioCaptureClient = client.GetService()?;
         client.Start()?;
-        let mut samples: Vec<i16> = Vec::with_capacity(RATE as usize * 10);
-        while WANTED.load(Ordering::SeqCst) && samples.len() < RATE as usize * MAX_SECS {
-            std::thread::sleep(Duration::from_millis(30));
-            while capture.GetNextPacketSize().unwrap_or(0) > 0 {
-                let (mut data, mut frames, mut flags) = (std::ptr::null_mut(), 0u32, 0u32);
-                if capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None).is_err() {
-                    break;
+        struct Recording(IAudioClient);
+        impl Drop for Recording {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = self.0.Stop();
                 }
-                let n = frames as usize;
+            }
+        }
+        let _recording = Recording(client);
+        let started = Instant::now();
+        let mut samples: Vec<i16> = Vec::with_capacity(RATE as usize * 10);
+        while WANTED.load(Ordering::SeqCst)
+            && samples.len() < RATE as usize * MAX_SECS
+            && started.elapsed() < Duration::from_secs(MAX_SECS as u64)
+        {
+            std::thread::sleep(Duration::from_millis(30));
+            while capture.GetNextPacketSize()? > 0 && samples.len() < RATE as usize * MAX_SECS {
+                let (mut data, mut frames, mut flags) = (std::ptr::null_mut(), 0u32, 0u32);
+                capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None)?;
+                let n = (frames as usize).min(RATE as usize * MAX_SECS - samples.len());
+                let from = samples.len();
                 if flags & AUDCLNT_BUFFERFLAGS_SILENT != 0 || data.is_null() {
                     samples.resize(samples.len() + n, 0);
                 } else {
                     samples.extend((0..n).map(|i| (data as *const i16).add(i).read_unaligned()));
                 }
-                let _ = capture.ReleaseBuffer(frames);
+                capture.ReleaseBuffer(frames)?;
+                LEVEL.store(packet_level(&samples[from..]), Ordering::Relaxed);
             }
         }
-        let _ = client.Stop();
         Ok(samples)
     }
 }
@@ -139,6 +178,15 @@ fn capture() -> Result<Vec<i16>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn microphone_envelope_is_bounded_and_silence_resets_it() {
+        assert_eq!(packet_level(&[]), 0);
+        assert_eq!(packet_level(&[0; 100]), 0);
+        assert_eq!(packet_level(&[i16::MIN; 100]), 1000);
+        assert_eq!(packet_level(&[i16::MAX; 100]), 1000);
+        assert!(packet_level(&[1000; 100]) < packet_level(&[4000; 100]));
+    }
 
     #[test]
     fn a_wav_file_has_a_correct_header() {
