@@ -143,9 +143,60 @@ pub fn pcm_wav(pcm: &[u8], rate: u32) -> Vec<u8> {
     out
 }
 
+fn canonical_wav(pcm: &[u8], rate: u32, channels: u16) -> Vec<u8> {
+    let block = usize::from(channels) * 2;
+    let pcm = &pcm[..pcm.len() / block * block];
+    let mut out = Vec::with_capacity(44 + pcm.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * block as u32).to_le_bytes());
+    out.extend_from_slice(&(block as u16).to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    out.extend_from_slice(pcm);
+    out
+}
+
+fn normalize_wav(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut format: Option<(u16, u32)> = None;
+    let mut at = 12usize;
+    while at + 8 <= bytes.len() {
+        let id = &bytes[at..at + 4];
+        let size = u32::from_le_bytes(bytes[at + 4..at + 8].try_into().ok()?) as usize;
+        let body = at + 8;
+        if id == b"fmt " && size >= 16 && body + 16 <= bytes.len() {
+            let tag = u16::from_le_bytes(bytes[body..body + 2].try_into().ok()?);
+            let channels = u16::from_le_bytes(bytes[body + 2..body + 4].try_into().ok()?);
+            let rate = u32::from_le_bytes(bytes[body + 4..body + 8].try_into().ok()?);
+            let bits = u16::from_le_bytes(bytes[body + 14..body + 16].try_into().ok()?);
+            if tag != 1 || bits != 16 || !(1..=2).contains(&channels) || !(8_000..=96_000).contains(&rate) {
+                return None;
+            }
+            format = Some((channels, rate));
+        } else if id == b"data" {
+            let (channels, rate) = format?;
+            let available = bytes.len() - body;
+            let length = if size == 0 || size > available { available } else { size };
+            let data = &bytes[body..body + length];
+            return (data.len() >= rate as usize / 20).then(|| canonical_wav(data, rate, channels));
+        }
+        at = body.checked_add(size)?.checked_add(size & 1)?;
+    }
+    None
+}
+
 fn as_wav(bytes: Vec<u8>) -> Option<Vec<u8>> {
     if bytes.starts_with(b"RIFF") {
-        return Some(bytes);
+        return normalize_wav(&bytes);
     }
     (bytes.len() >= NATURAL_RATE as usize / 10).then(|| pcm_wav(&bytes, NATURAL_RATE))
 }
@@ -285,7 +336,10 @@ fn start(text: &str, volume_pct: u8, done: Option<isize>, voice: Voice) {
             if GENERATION.load(Ordering::SeqCst) != mine {
                 break;
             }
-            let Some(mut wav) = part else { continue };
+            let Some(mut wav) = part.and_then(|w| normalize_wav(&w)) else {
+                crate::log_warn!("A piece of speech was not a sound that can be played safely, skipped");
+                continue;
+            };
             if first {
                 first = false;
                 crate::log_info!("The voice starts after {} ms", started.elapsed().as_millis());
@@ -427,6 +481,56 @@ mod tests {
             "https://api.us.elevenlabs.io/v1/text-to-speech/abc?output_format=wav_24000",
             "a base typed with /v1 does not double it"
         );
+    }
+
+    fn streamed_wav(declared: u32, extra: &[u8], pcm: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&u32::MAX.to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&24_000u32.to_le_bytes());
+        out.extend_from_slice(&48_000u32.to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(extra);
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&declared.to_le_bytes());
+        out.extend_from_slice(pcm);
+        out
+    }
+
+    #[test]
+    fn a_streamed_wav_with_unknown_sizes_is_rewritten_with_the_real_ones() {
+        let pcm = vec![7u8; 24_000];
+        for declared in [u32::MAX, 0, 24_000, 999_999_999] {
+            let fixed = as_wav(streamed_wav(declared, b"", &pcm)).expect("repaired");
+            assert_eq!(fixed.len(), 44 + 24_000, "declared {declared}");
+            assert_eq!(u32::from_le_bytes(fixed[4..8].try_into().unwrap()) as usize, fixed.len() - 8);
+            assert_eq!(u32::from_le_bytes(fixed[40..44].try_into().unwrap()), 24_000);
+            assert_eq!(u32::from_le_bytes(fixed[24..28].try_into().unwrap()), 24_000);
+        }
+        let mut extra = b"LIST".to_vec();
+        extra.extend_from_slice(&5u32.to_le_bytes());
+        extra.extend_from_slice(b"abcde\0");
+        let with_list = as_wav(streamed_wav(u32::MAX, &extra, &pcm)).expect("a LIST chunk is skipped");
+        assert_eq!(with_list.len(), 44 + 24_000);
+        let odd = as_wav(streamed_wav(u32::MAX, b"", &pcm[..24_001 - 1 - 1])).expect("an odd tail is cut");
+        assert_eq!(odd.len() % 2, 0);
+    }
+
+    #[test]
+    fn a_wav_that_cannot_be_played_safely_is_refused() {
+        assert!(as_wav(b"RIFF".to_vec()).is_none());
+        assert!(as_wav(streamed_wav(u32::MAX, b"", &[1u8; 10])).is_none(), "too short to be speech");
+        let mut float = streamed_wav(u32::MAX, b"", &[1u8; 24_000]);
+        float[20] = 3;
+        assert!(as_wav(float).is_none(), "only 16-bit integer sound is played");
+        let mut no_data = streamed_wav(0, b"", &[]);
+        no_data.truncate(36);
+        assert!(as_wav(no_data).is_none());
     }
 
     #[test]
