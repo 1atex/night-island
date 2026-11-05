@@ -30,6 +30,8 @@ fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
         "Window previews and controls on hover" => "Предпросмотр окон и управление при наведении",
         "Window preview and controls" => "Предпросмотр и управление",
+        "Show application" => "Показать приложение",
+        "More options…" => "Дополнительно…",
         "Voice chat" => "Голосовой чат",
         "Voice channel" => "Голосовой канал",
         "No voice participants" => "В канале пока никого нет",

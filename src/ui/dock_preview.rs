@@ -67,20 +67,22 @@ struct Layout {
 }
 
 impl Layout {
-    fn new(work: RECT, scale: f32, media: bool, audio: bool, discord: bool) -> Self {
-        let width = ((work.right - work.left) as f32 / scale - 16.0).clamp(220.0, 388.0);
+    fn new(work: RECT, scale: f32, media: bool, audio: bool, discord: bool, multiple: bool, players: bool) -> Self {
+        let width = ((work.right - work.left) as f32 / scale - 16.0).clamp(220.0, 320.0);
         let height = (work.bottom - work.top) as f32 / scale;
-        let discord_y = 64.0;
-        let image_top = if discord { 180.0 } else { 64.0 };
-        let fixed_height = image_top + 40.0 + if media { 112.0 } else { 0.0 } + if audio { 52.0 } else { 0.0 } + 24.0;
-        let image_height = (height - 16.0 - fixed_height).clamp(40.0, if discord { 116.0 } else { 168.0 });
-        let image = (26.0, image_top, width - 26.0, image_top + image_height);
-        let caption = (26.0, image.3 + 4.0, width - 26.0, image.3 + 36.0);
+        let discord_y = 52.0;
+        let image_top = if discord { 140.0 } else { 52.0 };
+        let caption_height = if media && !multiple { 0.0 } else { 28.0 };
+        let media_height = if media { if players { 80.0 } else { 52.0 } } else { 0.0 };
+        let fixed_height = image_top + caption_height + 4.0 + media_height + if audio { 40.0 } else { 0.0 } + 20.0;
+        let image_height = (height - 16.0 - fixed_height).clamp(40.0, if discord { 92.0 } else { 124.0 });
+        let image = (22.0, image_top, width - 22.0, image_top + image_height);
+        let caption = (22.0, image.3, width - 22.0, image.3 + caption_height);
         let media_y = caption.3 + 4.0;
-        let audio_y = media_y + if media { 112.0 } else { 0.0 };
+        let audio_y = media_y + media_height;
         Self {
             width,
-            height: audio_y + if audio { 52.0 } else { 0.0 } + 24.0,
+            height: audio_y + if audio { 40.0 } else { 0.0 } + 20.0,
             image,
             caption,
             media_y,
@@ -154,7 +156,7 @@ impl State {
 
     fn set_volume_from_point(&mut self, x: f32) {
         if let Some(audio) = &mut self.snapshot.audio {
-            audio.volume = ((x - 82.0) / (self.layout.width - 170.0).max(1.0)).clamp(0.0, 1.0);
+            audio.volume = ((x - 68.0) / (self.layout.width - 136.0).max(1.0)).clamp(0.0, 1.0);
             self.actions.set_volume(audio.volume);
             self.invalidate();
         }
@@ -182,11 +184,13 @@ impl State {
             !self.snapshot.media.is_empty(),
             self.snapshot.audio.is_some(),
             self.snapshot.discord.is_some(),
+            self.entry.windows.len() > 1,
+            self.snapshot.media.len() > 1,
         );
         let l = self.layout;
         self.buttons.clear();
         self.button(
-            (l.width - 54.0, 24.0, l.width - 26.0, 52.0),
+            (l.width - 48.0, 18.0, l.width - 22.0, 44.0),
             "Close preview",
             Some('\u{E711}'),
             Action::Dismiss,
@@ -213,22 +217,23 @@ impl State {
                     false,
                 );
             }
-            self.button(
-                (l.width - 54.0, l.caption.1, l.width - 26.0, l.caption.3),
-                "Close window",
-                Some('\u{E8BB}'),
-                Action::CloseWindow,
-                true,
-                false,
-            );
+            if l.caption.3 > l.caption.1 {
+                self.button(
+                    (l.width - 48.0, l.caption.1, l.width - 22.0, l.caption.3),
+                    "Close window",
+                    Some('\u{E8BB}'),
+                    Action::CloseWindow,
+                    true,
+                    false,
+                );
+            }
         }
         if let Some(i) = self.media_index() {
             let media = &self.snapshot.media[i];
             let (prev, toggle, next, playing) = (media.can_previous, media.can_toggle, media.can_next, media.playing);
-            let y = l.media_y + 58.0;
-            let center = l.width / 2.0;
+            let y = l.media_y + 10.0;
             self.button(
-                (center - 86.0, y + 4.0, center - 50.0, y + 40.0),
+                (l.width - 120.0, y + 2.0, l.width - 94.0, y + 28.0),
                 "Previous track",
                 Some('\u{E892}'),
                 Action::PreviousTrack,
@@ -236,7 +241,7 @@ impl State {
                 false,
             );
             self.button(
-                (center - 22.0, y, center + 22.0, y + 44.0),
+                (l.width - 90.0, y, l.width - 58.0, y + 32.0),
                 if playing { "Pause" } else { "Play" },
                 Some(if playing { '\u{E769}' } else { '\u{E768}' }),
                 Action::PlayPause,
@@ -244,7 +249,7 @@ impl State {
                 false,
             );
             self.button(
-                (center + 50.0, y + 4.0, center + 86.0, y + 40.0),
+                (l.width - 54.0, y + 2.0, l.width - 28.0, y + 28.0),
                 "Next track",
                 Some('\u{E893}'),
                 Action::NextTrack,
@@ -253,7 +258,7 @@ impl State {
             );
             if self.snapshot.media.len() > 1 {
                 self.button(
-                    (l.width - 94.0, l.media_y + 10.0, l.width - 66.0, l.media_y + 38.0),
+                    (l.width - 88.0, l.media_y + 48.0, l.width - 60.0, l.media_y + 76.0),
                     "Previous player",
                     Some('\u{E76B}'),
                     Action::PreviousPlayer,
@@ -261,7 +266,7 @@ impl State {
                     false,
                 );
                 self.button(
-                    (l.width - 62.0, l.media_y + 10.0, l.width - 34.0, l.media_y + 38.0),
+                    (l.width - 56.0, l.media_y + 48.0, l.width - 28.0, l.media_y + 76.0),
                     "Next player",
                     Some('\u{E76C}'),
                     Action::NextPlayer,
@@ -270,25 +275,26 @@ impl State {
                 );
             }
         }
+
         if let Some(audio) = &self.snapshot.audio {
             let muted = audio.muted;
-            let y = l.audio_y + 8.0;
+            let y = l.audio_y + 4.0;
             self.button(
-                (32.0, y, 68.0, y + 36.0),
+                (26.0, y, 58.0, y + 32.0),
                 if muted { "Unmute application" } else { "Mute application" },
                 Some(if muted { '\u{E74F}' } else { '\u{E767}' }),
                 Action::Mute,
                 true,
                 muted,
             );
-            self.button((78.0, y, l.width - 82.0, y + 36.0), "Application volume", None, Action::Volume, true, false);
+            self.button((64.0, y, l.width - 64.0, y + 32.0), "Application volume", None, Action::Volume, true, false);
         }
         if let Some(voice) = &self.snapshot.discord {
             let (connected, available, muted, deaf) = (voice.connected, voice.available, voice.mute, voice.deaf);
-            let y = l.discord_y + 16.0;
+            let y = l.discord_y + 12.0;
             if connected {
                 self.button(
-                    (l.width - 122.0, y, l.width - 82.0, y + 40.0),
+                    (l.width - 100.0, y, l.width - 66.0, y + 34.0),
                     if muted { "Unmute microphone" } else { "Mute microphone" },
                     Some(if muted { '\u{F781}' } else { '\u{E720}' }),
                     Action::Microphone,
@@ -296,7 +302,7 @@ impl State {
                     muted,
                 );
                 self.button(
-                    (l.width - 76.0, y, l.width - 36.0, y + 40.0),
+                    (l.width - 62.0, y, l.width - 28.0, y + 34.0),
                     if deaf { "Undeafen" } else { "Deafen" },
                     Some(if deaf { '\u{E74F}' } else { '\u{E7F5}' }),
                     Action::Deafen,
@@ -305,7 +311,7 @@ impl State {
                 );
             } else {
                 self.button(
-                    (38.0, l.discord_y + 60.0, l.width - 38.0, l.discord_y + 92.0),
+                    (30.0, l.discord_y + 48.0, l.width - 30.0, l.discord_y + 76.0),
                     "Connect Discord in settings",
                     Some('\u{E713}'),
                     Action::SetupDiscord,
@@ -367,26 +373,26 @@ impl State {
         };
         crate::view::paint_popup_panel(p, (l.width * s, l.height * s), s)?;
         if let Some(icon) = &self.entry.icon {
-            p.image(scaled((28.0, 26.0, 50.0, 48.0), s), 0.0, icon.side, &icon.bgra)?;
+            p.image(scaled((24.0, 21.0, 44.0, 41.0), s), 0.0, icon.side, &icon.bgra)?;
         } else {
             p.glyph(
                 if self.snapshot.discord.is_some() { '\u{E8F2}' } else { '\u{E737}' },
-                scaled((28.0, 26.0, 50.0, 48.0), s),
+                scaled((24.0, 21.0, 44.0, 41.0), s),
                 17.0 * s,
                 rgba(1.0, 1.0, 1.0, 0.65),
             )?;
         }
-        text(&self.entry.pin.name, (60.0, 22.0, l.width - 66.0, 52.0), 14.0, true, false)?;
+        text(&self.entry.pin.name, (52.0, 18.0, l.width - 58.0, 44.0), 13.0, true, false)?;
         if let Some(voice) = &self.snapshot.discord {
             let y = l.discord_y;
-            p.fill_round_rect(scaled((26.0, y, l.width - 26.0, y + 104.0), s), 18.0 * s, rgba(1.0, 1.0, 1.0, 0.07))?;
+            p.fill_round_rect(scaled((22.0, y, l.width - 22.0, y + 80.0), s), 18.0 * s, rgba(1.0, 1.0, 1.0, 0.07))?;
             let title = if voice.channel.is_empty() {
                 tr("Voice chat")
             } else {
                 std::borrow::Cow::Borrowed(voice.channel.as_str())
             };
-            let right = if voice.connected { l.width - 132.0 } else { l.width - 40.0 };
-            text(&title, (42.0, y + 12.0, right, y + 36.0), 15.0, true, false)?;
+            let right = if voice.connected { l.width - 106.0 } else { l.width - 40.0 };
+            text(&title, (34.0, y + 8.0, right, y + 30.0), 13.0, true, false)?;
             let status = if !voice.connected {
                 tr("Connect to control your call")
             } else if voice.error.is_some() {
@@ -398,16 +404,16 @@ impl State {
             } else {
                 tr("Voice channel")
             };
-            text(&status, (42.0, y + 36.0, right, y + 57.0), 11.0, false, true)?;
+            text(&status, (34.0, y + 28.0, right, y + 47.0), 11.0, false, true)?;
             if voice.connected {
-                let mut x = 42.0;
+                let mut x = 34.0;
                 let mut shown = 0;
                 for member in &voice.members {
                     let width = (member.name.chars().count() as f32 * 6.0 + 34.0).clamp(56.0, 106.0);
                     if x + width > l.width - 42.0 {
                         break;
                     }
-                    let chip = (x, y + 68.0, x + width, y + 92.0);
+                    let chip = (x, y + 52.0, x + width, y + 74.0);
                     p.fill_round_rect(
                         scaled(chip, s),
                         12.0 * s,
@@ -420,15 +426,15 @@ impl State {
                     } else {
                         rgba(1.0, 1.0, 1.0, 0.3)
                     };
-                    p.fill_ellipse((x + 10.0) * s, (y + 80.0) * s, 3.0 * s, 3.0 * s, color)?;
-                    text(&member.name, (x + 20.0, y + 68.0, x + width - 8.0, y + 92.0), 11.0, false, false)?;
+                    p.fill_ellipse((x + 10.0) * s, (y + 63.0) * s, 3.0 * s, 3.0 * s, color)?;
+                    text(&member.name, (x + 20.0, y + 52.0, x + width - 8.0, y + 74.0), 11.0, false, false)?;
                     x += width + 6.0;
                     shown += 1;
                 }
                 if shown < voice.members.len() {
                     text(
                         &format!("+{}", voice.members.len() - shown),
-                        (x, y + 68.0, l.width - 32.0, y + 92.0),
+                        (x, y + 52.0, l.width - 32.0, y + 74.0),
                         11.0,
                         false,
                         true,
@@ -437,11 +443,11 @@ impl State {
                 if voice.members.is_empty() {
                     p.glyph(
                         '\u{E716}',
-                        scaled((42.0, y + 68.0, 62.0, y + 92.0), s),
+                        scaled((42.0, y + 52.0, 62.0, y + 74.0), s),
                         13.0 * s,
                         rgba(1.0, 1.0, 1.0, 0.35),
                     )?;
-                    text(&tr("No voice participants"), (68.0, y + 68.0, l.width - 40.0, y + 92.0), 11.0, false, true)?;
+                    text(&tr("No voice participants"), (68.0, y + 52.0, l.width - 40.0, y + 74.0), 11.0, false, true)?;
                 }
             }
         }
@@ -464,7 +470,9 @@ impl State {
             )?;
         }
         let caption_right = l.width - if self.entry.windows.len() > 1 { 124.0 } else { 62.0 };
-        if let Some(window) = self.entry.windows.get(self.window_index) {
+        if let Some(window) = self.entry.windows.get(self.window_index)
+            && l.caption.3 > l.caption.1
+        {
             let title = if self.entry.windows.len() > 1 {
                 format!("{}/{} · {}", self.window_index + 1, self.entry.windows.len(), window.title)
             } else {
@@ -474,29 +482,35 @@ impl State {
         }
         if let Some(i) = self.media_index() {
             let media = &self.snapshot.media[i];
+            let multiple = self.snapshot.media.len() > 1;
             p.fill_round_rect(
-                scaled((26.0, l.media_y, l.width - 26.0, l.media_y + 106.0), s),
-                18.0 * s,
-                rgba(1.0, 1.0, 1.0, 0.07),
-            )?;
-            let right = l.width - if self.snapshot.media.len() > 1 { 100.0 } else { 42.0 };
-            text(&media.title, (42.0, l.media_y + 9.0, right, l.media_y + 33.0), 14.0, true, false)?;
-            let subtitle = if media.artist.is_empty() { &media.source } else { &media.artist };
-            let subtitle = if self.snapshot.media.len() > 1 {
-                format!("{}/{} · {subtitle}", i + 1, self.snapshot.media.len())
-            } else {
-                subtitle.clone()
-            };
-            text(&subtitle, (42.0, l.media_y + 33.0, right, l.media_y + 53.0), 11.0, false, true)?;
-        }
-        if let Some(audio) = &self.snapshot.audio {
-            let y = l.audio_y;
-            p.fill_round_rect(
-                scaled((26.0, y + 4.0, l.width - 26.0, y + 48.0), s),
+                scaled((22.0, l.media_y, l.width - 22.0, l.media_y + if multiple { 76.0 } else { 48.0 }), s),
                 16.0 * s,
                 rgba(1.0, 1.0, 1.0, 0.07),
             )?;
-            let track = (82.0, y + 26.0, l.width - 88.0);
+            let right = l.width - 124.0;
+            text(&media.title, (34.0, l.media_y + 5.0, right, l.media_y + 27.0), 12.0, true, false)?;
+            let subtitle = if media.artist.is_empty() { &media.source } else { &media.artist };
+            text(subtitle, (34.0, l.media_y + 26.0, right, l.media_y + 43.0), 10.5, false, true)?;
+            if multiple {
+                text(
+                    &format!("{}/{} · {}", i + 1, self.snapshot.media.len(), media.source),
+                    (34.0, l.media_y + 48.0, l.width - 94.0, l.media_y + 76.0),
+                    11.0,
+                    false,
+                    true,
+                )?;
+            }
+        }
+
+        if let Some(audio) = &self.snapshot.audio {
+            let y = l.audio_y;
+            p.fill_round_rect(
+                scaled((22.0, y + 2.0, l.width - 22.0, y + 38.0), s),
+                16.0 * s,
+                rgba(1.0, 1.0, 1.0, 0.07),
+            )?;
+            let track = (68.0, y + 20.0, l.width - 68.0);
             p.fill_round_rect(
                 scaled((track.0, track.1 - 2.0, track.2, track.1 + 2.0), s),
                 2.0 * s,
@@ -511,7 +525,7 @@ impl State {
             p.fill_ellipse(x * s, track.1 * s, 5.0 * s, 5.0 * s, rgba(1.0, 1.0, 1.0, 0.96))?;
             text(
                 &format!("{}", (audio.volume * 100.0).round() as u32),
-                (l.width - 74.0, y + 4.0, l.width - 38.0, y + 48.0),
+                (l.width - 58.0, y + 2.0, l.width - 28.0, y + 38.0),
                 12.0,
                 false,
                 true,
@@ -844,7 +858,7 @@ impl Preview {
             work,
             anchor,
             origin: (0, 0),
-            layout: Layout::new(work, scale, false, false, false),
+            layout: Layout::new(work, scale, false, false, false, false, false),
             buttons: Vec::new(),
             hover: None,
             pressed: None,
@@ -999,7 +1013,7 @@ mod tests {
     fn preview_fits_windows_without_stretching_and_stays_on_negative_monitor() {
         let work = RECT { left: -1920, top: 0, right: 0, bottom: 1040 };
         for scale in [1.0, 1.5, 2.0] {
-            let layout = Layout::new(work, scale, true, true, true);
+            let layout = Layout::new(work, scale, true, true, true, true, true);
             let size = ((layout.width * scale).ceil() as i32, (layout.height * scale).ceil() as i32);
             let at = position(work, (-100.0, 950.0, -40.0, 1010.0), size, scale);
             assert!(at.0 >= work.left && at.0 + size.0 <= work.right);

@@ -143,6 +143,38 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
             items.push(Entry::info(&menu_title(&entry.pin.name)));
             match page {
                 0 => {
+                    if !entry.windows.is_empty() {
+                        items.push(
+                            Entry::item(25, &tr(if own_settings { "Island settings" } else { "Show application" }))
+                                .glyph('\u{E8A7}'),
+                        );
+                    }
+                    if !own_settings || entry.windows.is_empty() {
+                        items.push(
+                            Entry::item(1, &tr(if entry.windows.is_empty() { "Open" } else { "Open new window" }))
+                                .glyph('\u{E710}'),
+                        );
+                    }
+                    if !entry.windows.is_empty() {
+                        items.push(Entry::item(24, &tr("Window preview and controls")).glyph('\u{E714}'));
+                        if entry.windows.len() > 1 {
+                            items.push(
+                                Entry::item(18, &format!("{} ({})…", tr("Windows"), entry.windows.len()))
+                                    .glyph('\u{E737}'),
+                            );
+                        }
+                        if entry.windows.iter().any(|w| w.minimized) {
+                            items.push(Entry::item(11, &tr("Restore all windows")).glyph('\u{E923}'));
+                        }
+                        if entry.windows.iter().any(|w| !w.minimized) {
+                            items.push(Entry::item(12, &tr("Minimize all windows")).glyph('\u{E921}'));
+                        }
+                        items.push(Entry::item(13, &tr("Close windows normally")).glyph('\u{E711}').danger());
+                    }
+                    items.push(Entry::divider());
+                    items.push(Entry::item(8, &tr("More options…")).glyph('\u{E712}'));
+                }
+                1 => {
                     let state = if entry.windows.is_empty() { "Not running" } else { "Running" };
                     items.push(Entry::info(&format!(
                         "{} · {}: {} · {}: {}",
@@ -152,28 +184,6 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                         tr("Minimized"),
                         entry.windows.iter().filter(|w| w.minimized).count()
                     )));
-                    items.push(
-                        Entry::item(1, &tr(if own_settings { "Island settings" } else { "Open new window" }))
-                            .glyph('\u{E8A7}'),
-                    );
-                    if !entry.windows.is_empty() {
-                        items.push(Entry::item(24, &tr("Window preview and controls")).glyph('\u{E714}'));
-                        items.push(
-                            Entry::item(18, &format!("{} ({})…", tr("Windows"), entry.windows.len())).glyph('\u{E737}'),
-                        );
-                    }
-                    items.push(
-                        Entry::item(
-                            2,
-                            &tr(if entry.pinned { "Unpin from desktop dock" } else { "Pin to desktop dock" }),
-                        )
-                        .glyph('\u{E718}'),
-                    );
-                    items.push(Entry::item(20, &tr("Dock behavior…")).glyph('\u{E713}'));
-                    items.push(Entry::item(8, &tr("Application actions…")).glyph('\u{E712}'));
-                    items.push(Entry::divider());
-                }
-                1 => {
                     let target = std::path::Path::new(&entry.pin.target);
                     if target.exists() {
                         items.push(Entry::item(14, &tr("Show in folder")).glyph('\u{E838}'));
@@ -187,12 +197,15 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                         }
                     }
                     items.push(Entry::item(16, &tr("Copy application path")).glyph('\u{E8C8}'));
-                    if !entry.windows.is_empty() {
-                        items.push(Entry::divider());
-                        items.push(Entry::item(11, &tr("Restore all windows")).glyph('\u{E923}'));
-                        items.push(Entry::item(12, &tr("Minimize all windows")).glyph('\u{E921}'));
-                        items.push(Entry::item(13, &tr("Close windows normally")).glyph('\u{E711}').danger());
-                    }
+                    items.push(Entry::divider());
+                    items.push(
+                        Entry::item(
+                            2,
+                            &tr(if entry.pinned { "Unpin from desktop dock" } else { "Pin to desktop dock" }),
+                        )
+                        .glyph('\u{E718}'),
+                    );
+                    items.push(Entry::item(20, &tr("Dock behavior…")).glyph('\u{E713}'));
                 }
                 2 => {
                     if let Some(i) = config.pins.iter().position(|p| key(&p.target) == key(&entry.pin.target)) {
@@ -250,11 +263,12 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                     .glyph('\u{E8B3}'),
             );
         }
-        if page == 0 {
+        if entry.is_none() || page == 1 {
             items.push(Entry::item(5, &tr("Add application or file")).glyph('\u{E710}'));
             items.push(Entry::item(6, &tr("Desktop dock settings")).glyph('\u{E713}'));
             items.push(Entry::item(7, &tr("Island settings")).glyph('\u{E80F}'));
-        } else {
+        }
+        if page != 0 {
             items.push(Entry::divider());
             items.push(Entry::item(21, &tr("Back")).glyph('\u{E72B}'));
         }
@@ -262,7 +276,7 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
             Some(8) => page = 1,
             Some(20) => page = 2,
             Some(18) => page = 3,
-            Some(21) => page = 0,
+            Some(21) => page = if page == 2 { 1 } else { 0 },
             other => return other,
         }
     }
@@ -407,6 +421,11 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                 Some(17) => {
                     if let Some(entry) = &entry {
                         cmd::shell_open(&entry.pin.target, Some("runas"));
+                    }
+                }
+                Some(25) => {
+                    if let Some(window) = entry.as_ref().and_then(|e| e.windows.first()) {
+                        desktop::activate(window, false);
                     }
                 }
                 Some(24) => {
