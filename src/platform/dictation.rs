@@ -173,7 +173,8 @@ fn capture() -> Result<Vec<i16>> {
         let count = chunk.len().min(RATE as usize * MAX_SECS - samples.len());
         samples.extend_from_slice(&chunk[..count]);
         LEVEL.store(packet_level(chunk), Ordering::Relaxed);
-        WANTED.load(Ordering::SeqCst) && samples.len() < RATE as usize * MAX_SECS
+        WANTED.load(Ordering::SeqCst)
+            && samples.len() < RATE as usize * MAX_SECS
             && started.elapsed() < Duration::from_secs(MAX_SECS as u64)
             && !(auto && endpoint.feed(chunk))
     })?;
@@ -215,7 +216,9 @@ pub fn stream(mut on_chunk: impl FnMut(&[i16]) -> bool) -> Result<()> {
         struct Recording(IAudioClient);
         impl Drop for Recording {
             fn drop(&mut self) {
-                unsafe { let _ = self.0.Stop(); }
+                unsafe {
+                    let _ = self.0.Stop();
+                }
             }
         }
         let _recording = Recording(client);

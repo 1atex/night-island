@@ -28,11 +28,18 @@ impl Drop for Window {
 }
 
 fn save(wing: &Wing, name: &str) -> Result<()> {
+    if std::env::var_os("NI_TOP_PANEL_PREVIEW").is_none() {
+        return Ok(());
+    }
+    let surface = PopupSurface::new(wing.state.size)?;
+    surface.paint(&wing.state.gpu, |p| wing.state.draw(p))?;
+    save_surface(&surface, wing.state.size, name)
+}
+
+fn save_surface(surface: &PopupSurface, size: (i32, i32), name: &str) -> Result<()> {
     let Some(folder) = std::env::var_os("NI_TOP_PANEL_PREVIEW") else { return Ok(()) };
     let folder = std::path::PathBuf::from(folder);
     std::fs::create_dir_all(&folder).unwrap();
-    let surface = PopupSurface::new(wing.state.size)?;
-    surface.paint(&wing.state.gpu, |p| wing.state.draw(p))?;
     let mut pixels = surface.pixels();
     for pixel in pixels.chunks_exact_mut(4) {
         pixel.swap(0, 2);
@@ -45,8 +52,8 @@ fn save(wing: &Wing, name: &str) -> Result<()> {
     }
     let mut encoder = png::Encoder::new(
         std::fs::File::create(folder.join(format!("{name}.png"))).unwrap(),
-        wing.state.size.0 as u32,
-        wing.state.size.1 as u32,
+        size.0 as u32,
+        size.1 as u32,
     );
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
@@ -157,6 +164,14 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
     };
     let compositor = Compositor::new()?;
     let gpu = Gpu::new(&compositor)?;
+    if std::env::var_os("NI_TOP_PANEL_PREVIEW").is_some() {
+        let mut ui = crate::view::UiState::new();
+        ui.sw.group = crate::view::GROUPS.iter().position(|group| group.name == "Assistant").unwrap();
+        let size = (940, 680);
+        let surface = PopupSurface::new(size)?;
+        surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
+        save_surface(&surface, size, "master-assistant-settings")?;
+    }
     let parent = Window(unsafe {
         CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -355,6 +370,15 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
                 (center - 100.0 * scale, panel.top() + 8.0 * scale, center + 100.0 * scale, panel.top() + 42.0 * scale);
             panel.update(snapshot.clone(), island, false);
             let mut previous = [0u8; 2];
+            if entrance == PanelEntrance::Island {
+                assert!(panel.interacting_at(
+                    island,
+                    (
+                        (panel.right.state.destination.0 + panel.right.state.size.0 - 20) as f32,
+                        panel.right.state.destination.1 as f32 + 25.0 * scale,
+                    )
+                ));
+            }
             for elapsed in [0, 90, 180, 270, 400] {
                 for (index, wing) in [&mut panel.left, &mut panel.right].into_iter().enumerate() {
                     wing.state.travel.seek(elapsed);

@@ -1389,11 +1389,19 @@ impl TopPanel {
                 (state.origin.0 + state.size.0) as f32,
                 (state.origin.1 + state.size.1) as f32,
             );
-            state.pressed.is_some()
-                || inside(bounds, point)
-                || (self.settings.entrance == PanelEntrance::Island
-                    && !matches!(state.role, Role::Card(_))
-                    && across_gap(island, bounds, point, 12.0 * self.scale))
+            let destination = (
+                state.destination.0 as f32,
+                state.destination.1 as f32,
+                (state.destination.0 + state.size.0) as f32,
+                (state.destination.1 + state.size.1) as f32,
+            );
+            let connected = |bounds| {
+                inside(bounds, point)
+                    || (self.settings.entrance == PanelEntrance::Island
+                        && !matches!(state.role, Role::Card(_))
+                        && across_gap(island, bounds, point, 12.0 * self.scale))
+            };
+            state.pressed.is_some() || connected(bounds) || (state.opening && connected(destination))
         })
     }
 
