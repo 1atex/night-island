@@ -13,6 +13,7 @@ pub enum Cap {
     Shell,
     Browser,
     Power,
+    Screen,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -22,7 +23,7 @@ pub enum Level {
     Auto,
 }
 
-pub const ALL: [Cap; 11] = [
+pub const ALL: [Cap; 12] = [
     Cap::Media,
     Cap::Controls,
     Cap::Open,
@@ -34,6 +35,7 @@ pub const ALL: [Cap; 11] = [
     Cap::Shell,
     Cap::Browser,
     Cap::Power,
+    Cap::Screen,
 ];
 
 impl Cap {
@@ -51,6 +53,7 @@ impl Cap {
             Cap::Shell => "shell",
             Cap::Browser => "browser",
             Cap::Power => "power",
+            Cap::Screen => "screen",
         }
     }
 
@@ -58,12 +61,12 @@ impl Cap {
         match self {
             Cap::Media | Cap::Controls | Cap::Open | Cap::Reminders | Cap::Memory => Level::Auto,
             Cap::WebSearch | Cap::Power => Level::Ask,
-            Cap::FilesRead | Cap::FilesWrite | Cap::Shell | Cap::Browser => Level::Off,
+            Cap::FilesRead | Cap::FilesWrite | Cap::Shell | Cap::Browser | Cap::Screen => Level::Off,
         }
     }
 
     pub fn dangerous(self) -> bool {
-        matches!(self, Cap::FilesWrite | Cap::Shell | Cap::Browser | Cap::Power)
+        matches!(self, Cap::FilesWrite | Cap::Shell | Cap::Browser | Cap::Power | Cap::Screen)
     }
 }
 
@@ -125,7 +128,6 @@ impl Permissions {
             _ => Level::Off,
         }
     }
-
     pub fn commands_offered(&self) -> Vec<Cap> {
         ALL.iter().copied().filter(|&c| self.command_level(c, false) != Level::Off).collect()
     }
@@ -166,6 +168,18 @@ mod tests {
         assert_eq!(p.level(Cap::Power), Level::Ask);
         assert_eq!(p.level(Cap::Media), Level::Auto);
         assert!(!p.commands_offered().contains(&Cap::Shell));
+    }
+
+    #[test]
+    fn the_screen_is_off_until_the_user_turns_it_on() {
+        let mut p = on();
+        assert_eq!(p.level(Cap::Screen), Level::Off);
+        assert!(!p.commands_offered().contains(&Cap::Screen));
+        assert!(Cap::Screen.dangerous());
+        assert_eq!(Permissions::default().command_level(Cap::Screen, false), Level::Off);
+        p.set(Cap::Screen, Level::Auto);
+        assert!(p.commands_offered().contains(&Cap::Screen));
+        assert_eq!(p.decide(Cap::Screen, true), Level::Ask);
     }
 
     #[test]

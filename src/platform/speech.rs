@@ -112,15 +112,80 @@ fn post_spoken(raw: isize) {
     }
 }
 
-pub fn speak(text: &str, volume_pct: u8) {
-    start(text, volume_pct, None);
+const MAX_SPEECH_BYTES: usize = 8 * 1024 * 1024;
+const NATURAL_RATE: u32 = 24_000;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Natural {
+    pub model: String,
+    pub voice: String,
 }
 
-pub fn speak_then_notify(text: &str, volume_pct: u8, hwnd: HWND) {
-    start(text, volume_pct, Some(hwnd.0 as isize));
+pub fn pcm_wav(pcm: &[u8], rate: u32) -> Vec<u8> {
+    let pcm = &pcm[..pcm.len() & !1];
+    let mut out = Vec::with_capacity(44 + pcm.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    out.extend_from_slice(pcm);
+    out
 }
 
-fn start(text: &str, volume_pct: u8, done: Option<isize>) {
+fn as_wav(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if bytes.starts_with(b"RIFF") {
+        return Some(bytes);
+    }
+    (bytes.len() >= NATURAL_RATE as usize / 10).then(|| pcm_wav(&bytes, NATURAL_RATE))
+}
+
+fn natural_request(text: &str, natural: &Natural) -> String {
+    let mut body = serde_json::json!({
+        "model": natural.model,
+        "input": text,
+        "voice": natural.voice,
+        "response_format": "pcm",
+    });
+    if natural.model.starts_with("gpt-4o") {
+        body["instructions"] = "Speak naturally and warmly at a calm, even pace, in the language of the text.".into();
+    }
+    body.to_string()
+}
+
+fn natural_wav(text: &str, natural: &Natural) -> Option<Vec<u8>> {
+    let (base, key) = crate::services::ai::speech_credentials()?;
+    let auth = format!("Bearer {key}");
+    let reply = crate::services::http::post_json_for_bytes(
+        &format!("{base}/audio/speech"),
+        &[("Authorization", auth.as_str())],
+        &natural_request(text, natural),
+        MAX_SPEECH_BYTES,
+        Some("NightIsland/0.1"),
+    )?;
+    if reply.status != 200 {
+        crate::log_warn!("The natural voice answered with status {}", reply.status);
+        return None;
+    }
+    as_wav(reply.body)
+}
+
+pub fn speak(text: &str, volume_pct: u8, natural: Option<Natural>) {
+    start(text, volume_pct, None, natural);
+}
+
+pub fn speak_then_notify(text: &str, volume_pct: u8, hwnd: HWND, natural: Option<Natural>) {
+    start(text, volume_pct, Some(hwnd.0 as isize), natural);
+}
+
+fn start(text: &str, volume_pct: u8, done: Option<isize>, natural: Option<Natural>) {
     let text = clip(text);
     if text.is_empty() || volume_pct == 0 {
         if let Some(raw) = done {
@@ -136,7 +201,11 @@ fn start(text: &str, volume_pct: u8, done: Option<isize>) {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-        let wav = synthesize(&text).ok().filter(|_| GENERATION.load(Ordering::SeqCst) == mine);
+        let natural_wav = natural.as_ref().and_then(|n| natural_wav(&text, n));
+        if natural.is_some() && natural_wav.is_none() {
+            crate::log_info!("The natural voice is not available, the system voice speaks");
+        }
+        let wav = natural_wav.or_else(|| synthesize(&text).ok()).filter(|_| GENERATION.load(Ordering::SeqCst) == mine);
         if let Some(mut wav) = wav {
             scale_wav(&mut wav, volume_pct);
             unsafe {
@@ -189,11 +258,46 @@ mod tests {
     }
 
     #[test]
+    fn raw_samples_get_a_proper_wav_header() {
+        let wav = pcm_wav(&[1, 0, 2, 0, 3], 24_000);
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 4, "the odd byte is dropped");
+        assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 24_000);
+        assert_eq!(wav.len(), 48);
+        let data = data_chunk(&wav).expect("a data chunk");
+        assert_eq!(data.len(), 4);
+    }
+
+    #[test]
+    fn a_reply_is_a_wav_already_or_raw_samples_but_never_a_tiny_error() {
+        let wav = pcm_wav(&vec![0u8; 8000], 24_000);
+        assert_eq!(as_wav(wav.clone()), Some(wav));
+        let raw = vec![1u8; 5000];
+        assert_eq!(as_wav(raw).map(|w| w.len()), Some(5044));
+        assert_eq!(as_wav(b"{\"error\":1}".to_vec()), None);
+        assert_eq!(as_wav(Vec::new()), None);
+    }
+
+    #[test]
+    fn the_natural_voice_request_is_plain_json_and_only_new_models_get_instructions() {
+        let new = Natural { model: "gpt-4o-mini-tts".into(), voice: "nova".into() };
+        let body: serde_json::Value = serde_json::from_str(&natural_request("Привет", &new)).unwrap();
+        assert_eq!(body["input"], "Привет");
+        assert_eq!(body["voice"], "nova");
+        assert_eq!(body["response_format"], "pcm");
+        assert!(body["instructions"].is_string());
+        let old = Natural { model: "tts-1".into(), voice: "alloy".into() };
+        let body: serde_json::Value = serde_json::from_str(&natural_request("Hi", &old)).unwrap();
+        assert!(body.get("instructions").is_none());
+    }
+
+    #[test]
     #[ignore = "needs an audio device and an installed voice"]
     fn speaks_aloud() {
         let wav = synthesize("Привет").expect("a voice synthesized the text");
         assert!(data_chunk(&wav).is_some());
-        speak("Привет, это остров", 60);
+        speak("Привет, это остров", 60, None);
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
 }

@@ -1013,6 +1013,14 @@ fn phrase(s: &str) -> Option<&'static str> {
         "The model spent its whole limit thinking and gave no answer" => {
             "Модель потратила весь лимит на размышления и не ответила"
         }
+        "Natural voice from the speech service (paid, no load on the PC)" => {
+            "Живой голос от сервиса речи (платно, ПК не нагружает)"
+        }
+        "Keep listening after an answer" => "Слушать дальше после ответа",
+        "Look at the screen (preview, needs a model that sees images)" => {
+            "Смотреть на экран (превью, нужна модель с картинками)"
+        }
+        "The screen could not be captured" => "Не удалось снять экран",
         "Volume" => "Громкость",
         "Muted" => "Звук выключен",
         "Opened" => "Открыто",

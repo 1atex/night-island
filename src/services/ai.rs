@@ -116,6 +116,16 @@ pub fn voice_shares_chat_key(settings: &AiSettings) -> bool {
         && matches!((clean_base(&settings.voice_base), clean_base(&settings.openai_base)), (Some(a), Some(b)) if a == b)
 }
 
+pub fn speech_credentials() -> Option<(String, String)> {
+    let settings = config();
+    if voice_provider(&settings) != AiProvider::OpenAi {
+        return None;
+    }
+    let base = clean_base(if settings.voice_separate { &settings.voice_base } else { &settings.openai_base })?;
+    let key = integrations::load_secret(&voice_secret(&settings)?)?;
+    Some((base, key))
+}
+
 pub fn voice_ready(settings: &AiSettings) -> bool {
     voice_secret(settings).is_some()
 }

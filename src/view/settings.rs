@@ -118,6 +118,8 @@ pub enum Sid {
     AsstInstall,
     AsstReview,
     AsstWebAsk,
+    AsstFollowUp,
+    AsstNatural,
     AsstMedia,
     AsstControls,
     AsstOpen,
@@ -129,6 +131,7 @@ pub enum Sid {
     AsstShell,
     AsstBrowser,
     AsstPower,
+    AsstScreen,
 }
 
 pub(in crate::view) fn asst_cap(id: Sid) -> Option<crate::services::assistant::Cap> {
@@ -145,6 +148,7 @@ pub(in crate::view) fn asst_cap(id: Sid) -> Option<crate::services::assistant::C
         Sid::AsstShell => Cap::Shell,
         Sid::AsstBrowser => Cap::Browser,
         Sid::AsstPower => Cap::Power,
+        Sid::AsstScreen => Cap::Screen,
         _ => return None,
     })
 }
@@ -393,6 +397,8 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::AsstSpeak => c.assistant.speak,
         Sid::AsstReview => c.assistant.review,
         Sid::AsstWebAsk => c.assistant.ask_after_web,
+        Sid::AsstFollowUp => c.assistant.follow_up,
+        Sid::AsstNatural => c.assistant.natural_voice,
         Sid::RecSystem => c.record_system_audio,
         Sid::RecMic => c.record_mic,
         _ => false,
@@ -466,6 +472,8 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::AsstSpeak => c.assistant.speak = on,
         Sid::AsstReview => c.assistant.review = on,
         Sid::AsstWebAsk => c.assistant.ask_after_web = on,
+        Sid::AsstFollowUp => c.assistant.follow_up = on,
+        Sid::AsstNatural => c.assistant.natural_voice = on,
         Sid::RecSystem => c.record_system_audio = on,
         Sid::RecMic => c.record_mic = on,
         _ => {}

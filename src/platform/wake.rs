@@ -76,7 +76,7 @@ pub fn translit(word: &str) -> Vec<String> {
         return Vec::new();
     }
     if lower == "island" {
-        return vec!["айленд".into(), "исланд".into()];
+        return ["айленд", "исланд", "айлэнд", "ислэнд", "айланд"].map(String::from).to_vec();
     }
     if !lower.chars().any(|c| c.is_ascii_alphabetic()) {
         return vec![lower];
@@ -115,7 +115,7 @@ pub fn translit(word: &str) -> Vec<String> {
     vec![lower.chars().map(|c| if c.is_ascii_alphabetic() { map(c) } else { "" }).collect()]
 }
 
-const GREETINGS: [&str; 3] = ["хей", "эй", "окей"];
+const GREETINGS: [&str; 7] = ["хей", "эй", "окей", "окэй", "ок", "хэй", "привет"];
 
 pub fn keywords_text(wake_words: &[String], vocab: &HashMap<String, ()>) -> String {
     let mut lines: Vec<String> = Vec::new();
@@ -330,6 +330,9 @@ impl Detector {
                 return false;
             }
             let hit = !(*found).keyword.is_null() && !CStr::from_ptr((*found).keyword).to_bytes().is_empty();
+            if hit {
+                crate::log_info!("Wake word heard: {}", CStr::from_ptr((*found).keyword).to_string_lossy());
+            }
             (self.api.destroy_result)(found);
             if hit {
                 (self.api.reset)(self.spotter, self.stream);
@@ -434,7 +437,7 @@ mod tests {
 
     #[test]
     fn latin_call_words_are_spelled_the_way_a_russian_model_hears_them() {
-        assert_eq!(translit("Island"), ["айленд", "исланд"]);
+        assert_eq!(translit("Island"), ["айленд", "исланд", "айлэнд", "ислэнд", "айланд"]);
         assert_eq!(translit("Айленд"), ["айленд"]);
         assert_eq!(translit("Nova"), ["нова"]);
         assert!(translit("  ").is_empty());

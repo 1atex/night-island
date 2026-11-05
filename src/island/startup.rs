@@ -308,6 +308,7 @@ impl App {
             pending_ask: None,
             wake_session: false,
             agent: None,
+            dialog: Vec::new(),
             reminders: Vec::new(),
             recording: None,
             notice_link: None,

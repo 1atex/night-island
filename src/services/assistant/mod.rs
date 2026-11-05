@@ -1,6 +1,8 @@
 pub mod agent;
+pub mod env;
 pub mod memory;
 pub mod perms;
+pub mod recent;
 pub mod shell;
 pub mod tools;
 pub mod web;
@@ -19,6 +21,10 @@ pub struct Assistant {
     pub volume: u8,
     pub review: bool,
     pub ask_after_web: bool,
+    pub follow_up: bool,
+    pub natural_voice: bool,
+    pub tts_model: String,
+    pub tts_voice: String,
 }
 
 impl Default for Assistant {
@@ -31,6 +37,10 @@ impl Default for Assistant {
             volume: 70,
             review: true,
             ask_after_web: false,
+            follow_up: true,
+            natural_voice: false,
+            tts_model: "gpt-4o-mini-tts".into(),
+            tts_voice: "nova".into(),
         }
     }
 }
@@ -39,6 +49,16 @@ impl Assistant {
     pub fn sanitize(&mut self) {
         self.perms.sanitize();
         self.volume = self.volume.min(100);
+        let defaults = Assistant::default();
+        if !crate::services::ai::valid_model(&self.tts_model, crate::data::settings::AiProvider::OpenAi) {
+            self.tts_model = defaults.tts_model;
+        }
+        let voice_ok = !self.tts_voice.is_empty()
+            && self.tts_voice.len() <= 40
+            && self.tts_voice.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if !voice_ok {
+            self.tts_voice = defaults.tts_voice;
+        }
     }
 
     pub fn cue_volume(&self) -> u8 {
@@ -82,6 +102,7 @@ impl Cap {
             Cap::Shell => "Command line",
             Cap::Browser => "Browser (open sites, read pages)",
             Cap::Power => "Shut down, restart, sleep",
+            Cap::Screen => "Look at the screen (preview, needs a model that sees images)",
         }
     }
 }
@@ -95,6 +116,22 @@ mod tests {
         assert_eq!(Level::Off.step(true), Level::Ask);
         assert_eq!(Level::Auto.step(true), Level::Off);
         assert_eq!(Level::Off.step(false), Level::Auto);
+    }
+
+    #[test]
+    fn the_natural_voice_settings_are_cleaned_and_the_follow_up_is_on_by_default() {
+        let mut a = Assistant::default();
+        assert!(a.follow_up && !a.natural_voice);
+        a.tts_model = "bad model!".into();
+        a.tts_voice = "../x".into();
+        a.sanitize();
+        let defaults = Assistant::default();
+        assert_eq!((a.tts_model, a.tts_voice), (defaults.tts_model, defaults.tts_voice));
+        let mut ok = Assistant { tts_model: "tts-1".into(), tts_voice: "alloy".into(), ..Assistant::default() };
+        ok.sanitize();
+        assert_eq!((ok.tts_model.as_str(), ok.tts_voice.as_str()), ("tts-1", "alloy"));
+        let old: Assistant = serde_json::from_str(r#"{"wake":true}"#).unwrap();
+        assert!(old.follow_up && old.tts_model == "gpt-4o-mini-tts");
     }
 
     #[test]

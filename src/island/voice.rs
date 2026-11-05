@@ -1,8 +1,9 @@
 use crate::island::*;
 use crate::platform::{sounds, speech, wake, wake_install};
-use crate::services::assistant::agent::{Phase, Run};
+use crate::services::assistant::agent::{self, Phase, Run};
 use crate::services::assistant::tools::Tool;
-use crate::services::assistant::{Cap, Level, memory, shell};
+use crate::services::assistant::{Cap, Level, env, memory, recent, shell};
+use crate::services::attach::{self, Attachment};
 use crate::ui::i18n::tr;
 
 impl App {
@@ -76,8 +77,35 @@ impl App {
 
     pub(in crate::island) fn end_wake_session(&mut self) {
         self.wake_session = false;
-        self.agent = None;
+        if let Some(run) = self.agent.take() {
+            self.keep_run(&run);
+        }
         self.sync_wake();
+    }
+
+    fn keep_run(&mut self, run: &Run) {
+        if let Some(exchange) = run.exchange() {
+            self.dialog.push(exchange);
+            agent::fresh(&mut self.dialog);
+        }
+        let remembers = self.settings.assistant.perms.command_level(Cap::Memory, false) != Level::Off;
+        if remembers && (!run.did.is_empty() || !run.spoken.is_empty()) {
+            let when = chrono::Local::now().format("%H:%M").to_string();
+            recent::record(&recent::entry(&when, &run.request, &run.did, &run.spoken));
+        }
+    }
+
+    fn natural(&self) -> Option<speech::Natural> {
+        let a = &self.settings.assistant;
+        a.natural_voice.then(|| speech::Natural { model: a.tts_model.clone(), voice: a.tts_voice.clone() })
+    }
+
+    fn quiet_or_fail(&mut self, why: &str) {
+        if self.agent.as_ref().is_some_and(|r| r.following) {
+            crate::log_info!("Assistant: the conversation was not continued ({})", brief(why, 80));
+        } else {
+            self.fail_by_voice(why);
+        }
     }
 
     pub(in crate::island) fn install_wake_runtime(&mut self) {
@@ -148,7 +176,7 @@ impl App {
             }
             Some(Err(why)) => {
                 self.clear_notice();
-                self.fail_by_voice(why);
+                self.quiet_or_fail(why);
                 self.end_wake_session();
             }
             None => {
@@ -164,16 +192,20 @@ impl App {
             return self.end_wake_session();
         }
         let perms = &self.settings.assistant.perms;
-        let notes = if perms.command_level(Cap::Memory, false) == Level::Off {
-            String::new()
-        } else {
-            memory::prompt_block(&memory::load(), 1500)
-        };
+        let mut notes = String::new();
+        if perms.command_level(Cap::Memory, false) != Level::Off {
+            notes = memory::prompt_block(&memory::load(), 1500);
+            let earlier = recent::prompt_block(&recent::load(), 900);
+            if !earlier.is_empty() {
+                notes.push_str(&format!("Earlier requests, oldest first (what happened before):\n{earlier}"));
+            }
+        }
         let (offered, can_ask) = (perms.commands_offered(), perms.enabled);
         let system = voicecmd::system_prompt(&offered, can_ask, &notes, &self.facts());
         let request: String = command.chars().take(600).collect();
         crate::log_info!("Assistant request: {}", brief(&request, 300));
-        self.agent = Some(Run::new(system, &request));
+        agent::fresh(&mut self.dialog);
+        self.agent = Some(Run::new(system, &request, &self.dialog));
         self.call_agent();
     }
 
@@ -182,7 +214,7 @@ impl App {
         let exhausted = run.out_of_steps();
         if !exhausted {
             run.steps += 1;
-            run.waiting = false;
+            run.waiting = true;
             run.phase = Phase::Working;
         }
         let (turns, system, step) = (run.turns.clone(), run.system.clone(), run.steps);
@@ -202,7 +234,24 @@ impl App {
     fn say(&mut self, text: &str) {
         let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
         self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);
-        speech::speak(text, self.settings.assistant.voice_volume());
+        let (volume, natural) = (self.settings.assistant.voice_volume(), self.natural());
+        let chat = self.agent.as_ref().is_some_and(|r| r.did.is_empty() && r.follow_ups < agent::MAX_FOLLOW_UPS);
+        let follow = chat && self.settings.assistant.follow_up && self.settings.assistant.perms.enabled;
+        if let Some(run) = self.agent.as_mut() {
+            run.spoken = text.to_string();
+            if follow {
+                run.waiting = true;
+                run.following = true;
+                run.phase = Phase::Speaking;
+            }
+        }
+        if follow {
+            self.wake_session = true;
+            self.sync_wake();
+            speech::speak_then_notify(text, volume, self.hwnd, natural);
+        } else {
+            speech::speak(text, volume, natural);
+        }
     }
 
     fn wait_for_result(&mut self) {
@@ -230,7 +279,8 @@ impl App {
         }
         self.wake_session = true;
         self.sync_wake();
-        speech::speak_then_notify(text, self.settings.assistant.voice_volume(), self.hwnd);
+        let (volume, natural) = (self.settings.assistant.voice_volume(), self.natural());
+        speech::speak_then_notify(text, volume, self.hwnd, natural);
     }
 
     pub(in crate::island) fn on_spoken(&mut self) {
@@ -320,6 +370,9 @@ impl App {
         }
         for command in commands {
             crate::log_info!("Assistant action: {}", brief(&format!("{command:?}"), 400));
+            if let (Some(run), Some(label)) = (self.agent.as_mut(), action_label(&command)) {
+                run.did.push(label);
+            }
             self.handle_command(command, false);
             if self.agent.as_ref().is_none_or(|r| r.waiting) {
                 return;
@@ -334,10 +387,11 @@ impl App {
         let up = unsafe { windows::Win32::System::SystemInformation::GetTickCount64() } / 1000;
         let home = std::env::var("USERPROFILE").unwrap_or_default();
         format!(
-            "Local time: {}\nThe computer has been on for {} hours {} minutes since it started\nUser folder: {home}\n",
+            "Local time: {}\nThe computer has been on for {} hours {} minutes since it started\nUser folder: {home}\n{}",
             now.format("%A, %d %B %Y, %H:%M"),
             up / 3600,
-            up % 3600 / 60
+            up % 3600 / 60,
+            env::facts()
         )
     }
 
@@ -369,6 +423,14 @@ impl App {
             let text = self.confirm_text(&format!("{} {detail}?", tr(verb)));
             self.pending_ask = Some((voicecmd::Command::Tool(tool), std::time::Instant::now()));
             return self.ask_user('\u{E756}', &text);
+        }
+        let signature = format!("{}:{}", tool.name(), tool.detail());
+        if self.agent.as_ref().is_some_and(|r| r.repeated(&signature)) {
+            crate::log_warn!("Assistant: the same {} was asked for twice, not running it again", tool.name());
+            if let Some(run) = self.agent.as_mut() {
+                run.result(tool.name(), &Err(REPEAT_HINT.to_string()));
+            }
+            return self.call_agent();
         }
         self.wait_for_result();
         self.show_notice_for('\u{E756}', "Running…", 60_000);
@@ -410,6 +472,7 @@ impl App {
                 if result.is_ok() && tool.external() {
                     run.tainted = true;
                 }
+                run.did_tool(tool.name(), tool.detail(), format!("{}:{}", tool.name(), tool.detail()), result.is_ok());
                 run.result(tool.name(), &result);
                 self.call_agent();
             }
@@ -518,6 +581,27 @@ impl App {
                 }
                 self.show_notice_for('\u{E774}', &url, 2500);
             }
+            voicecmd::Command::Screenshot => {
+                let shot = capture::screen_png(self.hwnd, 1280);
+                let size = shot.as_ref().map_or(0, |png| png.len() / 1024);
+                crate::log_info!("Assistant: screenshot taken, {size} KB");
+                if let Some(run) = self.agent.as_mut() {
+                    match shot {
+                        Some(png) => {
+                            run.tainted = true;
+                            let picture = Attachment {
+                                name: "screen.png".into(),
+                                kind: attach::Kind::Image,
+                                mime: "image/png",
+                                data: std::sync::Arc::new(png),
+                            };
+                            run.saw("Here is the screenshot of the main screen.", picture);
+                        }
+                        None => run.result("screenshot", &Err("The screen could not be captured".into())),
+                    }
+                }
+                self.call_agent();
+            }
             voicecmd::Command::Volume(what) => {
                 let level = match what {
                     voicecmd::Volume::Set(percent) => {
@@ -589,8 +673,20 @@ impl App {
             Ok(text) if self.agent.as_ref().is_some_and(|r| r.phase == Phase::Listening) => {
                 let wakes = voicecmd::wake_words(&self.settings.ai.voice_wake);
                 let reply = voicecmd::strip_wake(&text, &wakes).filter(|r| !r.is_empty()).unwrap_or(text);
-                if let Some(run) = self.agent.as_mut() {
+                if let Some(mut run) = self.agent.take() {
+                    if run.following {
+                        self.keep_run(&run);
+                        run.did.clear();
+                        run.done.clear();
+                        run.spoken.clear();
+                        run.request = reply.chars().take(600).collect();
+                        run.follow_ups += 1;
+                        run.following = false;
+                    }
+                    run.steps = 0;
+                    run.retries = 0;
                     run.heard(&reply);
+                    self.agent = Some(run);
                 }
                 self.call_agent();
             }
@@ -614,14 +710,34 @@ impl App {
             }
             Err(why) => {
                 let short: String = why.chars().take(70).collect();
-                self.fail_by_voice(&short);
+                self.quiet_or_fail(&short);
                 self.end_wake_session();
             }
         }
     }
 }
 
+fn action_label(command: &voicecmd::Command) -> Option<String> {
+    use voicecmd::Command as C;
+    Some(match command {
+        C::Media(_) => "media".into(),
+        C::Control(what, _) => format!("control {what:?}").to_lowercase(),
+        C::Volume(_) => "volume".into(),
+        C::Remind(_) | C::Timer(_) => "reminder".into(),
+        C::Open(name) => format!("open {name}"),
+        C::OpenUrl(url, _) => format!("open_url {url}"),
+        C::Power(what) => format!("power {what:?}").to_lowercase(),
+        C::Remember(_) => "remember".into(),
+        C::Forget(_) => "forget".into(),
+        C::Screenshot => "screenshot".into(),
+        C::Tool(_) | C::Confirm | C::Cancel | C::Answer(_) | C::Ask(_) | C::Unknown => return None,
+    })
+}
+
 const MAX_RETRIES: usize = crate::services::assistant::agent::MAX_RETRIES;
+
+const REPEAT_HINT: &str = "You already ran exactly this and its result is above. Use that result, change the \
+command, or finish with an answer.";
 
 const RETRY_HINT: &str = "That reply was not a valid action. Reply again with exactly one JSON object from the list \
 (or an array of independent ones), starting with \"thought\", and nothing else.";

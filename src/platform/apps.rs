@@ -232,6 +232,27 @@ pub(super) fn notification_shortcuts() -> Vec<String> {
     out
 }
 
+pub fn names() -> Vec<&'static str> {
+    const NOISE: [&str; 11] = [
+        "readme",
+        "help",
+        "manual",
+        "documentation",
+        "license",
+        "release notes",
+        "website",
+        "справка",
+        "руководство",
+        "документация",
+        "лицензи",
+    ];
+    let Some(index) = INDEX.get() else { return Vec::new() };
+    let mut names: Vec<&str> =
+        index.iter().filter(|a| !NOISE.iter().any(|n| a.lower.contains(n))).map(|a| a.name.as_str()).collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
+}
+
 pub fn find(query: &str, limit: usize) -> Vec<&'static AppEntry> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {

@@ -107,12 +107,14 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
-const ASSISTANT: [(Sid, &str, Kind); 18] = [
+const ASSISTANT: [(Sid, &str, Kind); 21] = [
     (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
     (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
     (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
     (Sid::AsstSounds, "Sound cues", Kind::Toggle),
     (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
+    (Sid::AsstNatural, "Natural voice from the speech service (paid, no load on the PC)", Kind::Toggle),
+    (Sid::AsstFollowUp, "Keep listening after an answer", Kind::Toggle),
     (Sid::AsstReview, "Check commands with a second model call when asking first", Kind::Toggle),
     (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
     (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
@@ -126,6 +128,7 @@ const ASSISTANT: [(Sid, &str, Kind); 18] = [
     (Sid::AsstShell, "Command line", Kind::Cycle),
     (Sid::AsstBrowser, "Browser (open sites, read pages)", Kind::Cycle),
     (Sid::AsstPower, "Shut down, restart, sleep", Kind::Cycle),
+    (Sid::AsstScreen, "Look at the screen (preview, needs a model that sees images)", Kind::Cycle),
 ];
 
 const ACTIVITY: [(Sid, &str, Kind); 1] = [(Sid::ActivityAi, "Sort unknown programs with AI", Kind::Toggle)];

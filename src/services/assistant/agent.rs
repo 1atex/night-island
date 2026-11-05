@@ -1,7 +1,15 @@
-use crate::services::ai::ChatTurn;
+use std::time::{Duration, Instant};
 
-pub const MAX_STEPS: usize = 14;
+use crate::services::ai::ChatTurn;
+use crate::services::attach::Attachment;
+
+pub const MAX_STEPS: usize = 10;
+pub const MAX_RETRIES: usize = 2;
+pub const MAX_FOLLOW_UPS: usize = 5;
+pub const MAX_EXCHANGES: usize = 6;
+pub const EXCHANGE_LIFE: Duration = Duration::from_secs(15 * 60);
 const MAX_TURN_CHARS: usize = 3800;
+const MAX_REPLY_CHARS: usize = 700;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -11,29 +19,56 @@ pub enum Phase {
 }
 
 #[derive(Clone, Debug)]
+pub struct Exchange {
+    pub at: Instant,
+    pub request: String,
+    pub reply: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct Run {
     pub turns: Vec<ChatTurn>,
     pub system: String,
+    pub request: String,
     pub steps: usize,
     pub tainted: bool,
     pub waiting: bool,
     pub phase: Phase,
     pub retries: usize,
+    pub follow_ups: usize,
+    pub following: bool,
+    pub did: Vec<String>,
+    pub done: Vec<String>,
+    pub spoken: String,
 }
 
-pub const MAX_RETRIES: usize = 2;
+pub fn fresh(exchanges: &mut Vec<Exchange>) {
+    exchanges.retain(|e| e.at.elapsed() <= EXCHANGE_LIFE);
+    let extra = exchanges.len().saturating_sub(MAX_EXCHANGES);
+    exchanges.drain(..extra);
+}
 
 impl Run {
-    pub fn new(system: String, request: &str) -> Self {
+    pub fn new(system: String, request: &str, earlier: &[Exchange]) -> Self {
         let mut run = Self {
             turns: Vec::new(),
             system,
+            request: request.to_string(),
             steps: 0,
             tainted: false,
             waiting: false,
             phase: Phase::Working,
             retries: 0,
+            follow_ups: 0,
+            following: false,
+            did: Vec::new(),
+            done: Vec::new(),
+            spoken: String::new(),
         };
+        for past in earlier {
+            run.push(false, &past.request);
+            run.push(true, &past.reply);
+        }
         run.push(false, request);
         run
     }
@@ -66,8 +101,40 @@ impl Run {
         self.push(false, &text);
     }
 
+    pub fn saw(&mut self, note: &str, picture: Attachment) {
+        self.push(false, note);
+        if let Some(last) = self.turns.last_mut() {
+            last.attachments.push(picture);
+        }
+    }
+
     pub fn out_of_steps(&self) -> bool {
         self.steps >= MAX_STEPS
+    }
+
+    pub fn repeated(&self, signature: &str) -> bool {
+        self.done.iter().any(|s| s == signature)
+    }
+
+    pub fn did_tool(&mut self, name: &str, detail: &str, signature: String, succeeded: bool) {
+        let brief: String = detail.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
+        self.did.push(format!("{name} {brief}"));
+        if succeeded {
+            self.done.push(signature);
+        }
+    }
+
+    pub fn exchange(&self) -> Option<Exchange> {
+        let reply = self.turns.last().filter(|t| t.assistant)?;
+        if self.spoken.is_empty() {
+            return None;
+        }
+        let text: String = reply.text.chars().take(MAX_REPLY_CHARS).collect();
+        Some(Exchange {
+            at: Instant::now(),
+            request: self.request.chars().take(MAX_REPLY_CHARS).collect(),
+            reply: text,
+        })
     }
 }
 
@@ -77,7 +144,7 @@ mod tests {
 
     #[test]
     fn a_run_starts_with_the_request_and_alternates() {
-        let mut run = Run::new("sys".into(), "open the notes");
+        let mut run = Run::new("sys".into(), "open the notes", &[]);
         run.said("{\"action\":\"powershell\"}");
         run.result("powershell", &Ok("a.txt".into()));
         run.said("{\"action\":\"answer\"}");
@@ -88,7 +155,7 @@ mod tests {
 
     #[test]
     fn two_turns_of_one_side_are_joined_so_the_roles_still_alternate() {
-        let mut run = Run::new("sys".into(), "hi");
+        let mut run = Run::new("sys".into(), "hi", &[]);
         run.heard("yes");
         assert_eq!(run.turns.len(), 1);
         assert_eq!(run.turns[0].text, "hi\nyes");
@@ -99,7 +166,7 @@ mod tests {
 
     #[test]
     fn failures_are_told_to_the_model_and_long_text_is_cut() {
-        let mut run = Run::new("sys".into(), "x");
+        let mut run = Run::new("sys".into(), "x", &[]);
         run.said("y");
         run.result("fetch", &Err("The site answered with status 404".into()));
         assert!(run.turns[2].text.starts_with("FAILED fetch: The site"));
@@ -110,9 +177,55 @@ mod tests {
 
     #[test]
     fn the_run_stops_after_the_step_limit() {
-        let mut run = Run::new("sys".into(), "x");
+        let mut run = Run::new("sys".into(), "x", &[]);
         assert!(!run.out_of_steps());
         run.steps = MAX_STEPS;
         assert!(run.out_of_steps());
+    }
+
+    #[test]
+    fn an_earlier_exchange_comes_first_so_a_follow_up_has_its_context() {
+        let before = Exchange {
+            at: Instant::now(),
+            request: "what is the weather".into(),
+            reply: "{\"action\":\"answer\",\"text\":\"Sunny\"}".into(),
+        };
+        let run = Run::new("sys".into(), "and tomorrow?", &[before]);
+        let roles: Vec<bool> = run.turns.iter().map(|t| t.assistant).collect();
+        assert_eq!(roles, [false, true, false]);
+        assert_eq!(run.turns[0].text, "what is the weather");
+        assert_eq!(run.turns[2].text, "and tomorrow?");
+    }
+
+    #[test]
+    fn a_finished_run_that_spoke_becomes_an_exchange_and_old_ones_expire() {
+        let mut run = Run::new("sys".into(), "play music", &[]);
+        assert!(run.exchange().is_none());
+        run.said("{\"action\":\"answer\",\"text\":\"Playing\"}");
+        assert!(run.exchange().is_none(), "nothing was said aloud");
+        run.spoken = "Playing".into();
+        let kept = run.exchange().expect("an exchange");
+        assert_eq!(kept.request, "play music");
+        assert!(kept.reply.contains("Playing"));
+
+        let old = Instant::now().checked_sub(EXCHANGE_LIFE + Duration::from_secs(5));
+        if let Some(at) = old {
+            let mut list = vec![Exchange { at, request: "a".into(), reply: "b".into() }, kept.clone()];
+            fresh(&mut list);
+            assert_eq!(list.len(), 1);
+        }
+        let mut many: Vec<Exchange> = (0..10).map(|_| kept.clone()).collect();
+        fresh(&mut many);
+        assert_eq!(many.len(), MAX_EXCHANGES);
+    }
+
+    #[test]
+    fn a_tool_that_worked_is_remembered_and_its_repeat_is_caught() {
+        let mut run = Run::new("sys".into(), "x", &[]);
+        run.did_tool("powershell", "Get-Process\n  | select -First 3", "powershell:Get-Process".into(), true);
+        run.did_tool("fetch", "https://a.b", "fetch:https://a.b".into(), false);
+        assert!(run.repeated("powershell:Get-Process"));
+        assert!(!run.repeated("fetch:https://a.b"), "a failed one may be tried again");
+        assert_eq!(run.did[0], "powershell Get-Process | select -First 3");
     }
 }
