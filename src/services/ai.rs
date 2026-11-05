@@ -30,6 +30,11 @@ pub const WM_CHAT: u32 = WM_APP + 24;
 
 pub const WM_COMMAND: u32 = WM_APP + 30;
 const COMMAND_OUTPUT_TOKENS: u32 = 3000;
+static REPLY_TOKENS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(COMMAND_OUTPUT_TOKENS);
+
+pub fn set_reply_tokens(tokens: u32) {
+    REPLY_TOKENS.store(tokens, std::sync::atomic::Ordering::Relaxed);
+}
 
 pub const WM_SORT: u32 = WM_APP + 31;
 pub const SORT_REQUESTS_PER_DAY: u32 = 5;
@@ -405,10 +410,16 @@ pub fn parse_reply(provider: AiProvider, status: u16, body: &str) -> Answer {
     match text.map(|t| tidy(&t)) {
         Some(t) if !t.is_empty() => Ok(t),
         _ => {
-            let finish = value["choices"][0]["finish_reason"].as_str().unwrap_or("");
+            let finish = value["choices"][0]["finish_reason"]
+                .as_str()
+                .or(value["candidates"][0]["finishReason"].as_str())
+                .or(value["stop_reason"].as_str())
+                .unwrap_or("");
             let thought = value["choices"][0]["message"]["reasoning_content"].as_str().is_some_and(|r| !r.is_empty());
             crate::log_warn!("AI answer was empty (finish_reason={finish}, reasoning_only={thought})");
-            if thought {
+            if matches!(finish, "length" | "MAX_TOKENS" | "max_tokens") {
+                Err(CUT_OFF.into())
+            } else if thought {
                 Err("The model spent its whole limit thinking and gave no answer".into())
             } else {
                 Err("The answer was empty".into())
@@ -623,10 +634,23 @@ pub fn ask_sort(hwnd: HWND, names: &[String], groups: &[String]) -> bool {
     true
 }
 
+pub const CUT_OFF: &str = "The model ran out of its limit before it began to answer";
+const GROWN_TOKENS_CAP: u32 = 16_000;
+
+fn run_growing(settings: &AiSettings, turns: &[ChatTurn], system: &str, tokens: u32) -> Answer {
+    let first = run_with(settings, |key| build(settings, key, turns, system, tokens, true));
+    if first.as_ref().err().is_some_and(|why| why == CUT_OFF) {
+        let more = (tokens.saturating_mul(4)).min(GROWN_TOKENS_CAP.max(tokens));
+        crate::log_info!("AI: the limit of {tokens} tokens ran out, asking again with {more}");
+        return run_with(settings, |key| build(settings, key, turns, system, more, true));
+    }
+    first
+}
+
 pub fn complete(system: &str, user: &str, max_tokens: u32) -> Answer {
     let settings = config();
     let turn = ChatTurn::text(false, user);
-    run_with(&settings, |key| build(&settings, key, &[turn], system, max_tokens, true))
+    run_growing(&settings, &[turn], system, max_tokens)
 }
 
 pub fn take_command_result() -> Option<(u64, Answer)> {
@@ -636,7 +660,7 @@ pub fn take_command_result() -> Option<(u64, Answer)> {
 pub fn ask_agent(hwnd: HWND, turns: Vec<ChatTurn>, system: String, serial: u64) -> bool {
     let (raw, settings) = (hwnd.0 as isize, config());
     std::thread::spawn(move || {
-        let answer = run_with(&settings, |key| build(&settings, key, &turns, &system, COMMAND_OUTPUT_TOKENS, true));
+        let answer = run_growing(&settings, &turns, &system, REPLY_TOKENS.load(std::sync::atomic::Ordering::Relaxed));
         if let Ok(mut r) = COMMAND_RESULT.lock() {
             *r = Some((serial, answer));
         }
@@ -738,6 +762,20 @@ mod tests {
 
     fn settings(provider: AiProvider) -> AiSettings {
         AiSettings { provider, ..AiSettings::default() }
+    }
+
+    #[test]
+    fn an_empty_answer_that_hit_the_limit_is_told_apart_from_a_plain_empty_one() {
+        let hit = r#"{"choices":[{"finish_reason":"length","message":{"content":""}}]}"#;
+        assert_eq!(parse_reply(AiProvider::OpenAi, 200, hit), Err(CUT_OFF.to_string()));
+        let gemini = r#"{"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[]}}]}"#;
+        assert_eq!(parse_reply(AiProvider::Gemini, 200, gemini), Err(CUT_OFF.to_string()));
+        let claude = r#"{"stop_reason":"max_tokens","content":[]}"#;
+        assert_eq!(parse_reply(AiProvider::Claude, 200, claude), Err(CUT_OFF.to_string()));
+        let plain = r#"{"choices":[{"finish_reason":"stop","message":{"content":""}}]}"#;
+        assert_eq!(parse_reply(AiProvider::OpenAi, 200, plain), Err("The answer was empty".to_string()));
+        let fine = r#"{"choices":[{"finish_reason":"length","message":{"content":"Да"}}]}"#;
+        assert_eq!(parse_reply(AiProvider::OpenAi, 200, fine), Ok("Да".to_string()));
     }
 
     #[test]

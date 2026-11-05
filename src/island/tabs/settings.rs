@@ -57,6 +57,7 @@ impl App {
 
     pub(in crate::island) fn setting_changed(&mut self, id: view::Sid, apply: bool) {
         self.ui.cfg = self.settings.clone();
+        self.settings.assistant.apply();
         crate::island::geometry::SNAP_FIT.store(true, std::sync::atomic::Ordering::Relaxed);
         self.apply_setting(id, apply);
         if self.state == State::Collapsed {

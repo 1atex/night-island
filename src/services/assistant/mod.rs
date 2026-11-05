@@ -63,9 +63,15 @@ pub struct Assistant {
     pub tts_model: String,
     pub tts_voice: String,
     pub max_steps: u8,
+    pub reply_tokens: u16,
+    pub command_secs: u8,
+    pub output_chars: u16,
 }
 
 pub const STEPS_RANGE: (u8, u8) = (3, 20);
+pub const TOKENS_RANGE: (u16, u16) = (500, 16_000);
+pub const SECS_RANGE: (u8, u8) = (5, 180);
+pub const OUTPUT_RANGE: (u16, u16) = (500, 20_000);
 pub const OPENAI_TTS: (&str, &str, &str) = ("https://api.openai.com/v1", "gpt-4o-mini-tts", "nova");
 pub const ELEVEN_TTS: (&str, &str, &str) =
     ("https://api.elevenlabs.io", "eleven_multilingual_v2", "21m00Tcm4TlvDq8ikWAM");
@@ -91,6 +97,9 @@ impl Default for Assistant {
             tts_model: OPENAI_TTS.1.into(),
             tts_voice: OPENAI_TTS.2.into(),
             max_steps: 10,
+            reply_tokens: 3000,
+            command_secs: 60,
+            output_chars: 2500,
         }
     }
 }
@@ -111,6 +120,9 @@ impl Assistant {
         self.perms.sanitize();
         self.volume = self.volume.min(100);
         self.max_steps = self.max_steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1);
+        self.reply_tokens = self.reply_tokens.clamp(TOKENS_RANGE.0, TOKENS_RANGE.1);
+        self.command_secs = self.command_secs.clamp(SECS_RANGE.0, SECS_RANGE.1);
+        self.output_chars = self.output_chars.clamp(OUTPUT_RANGE.0, OUTPUT_RANGE.1);
         if std::mem::take(&mut self.tts_eleven) && self.tts_provider == TtsProvider::OpenAi {
             self.tts_provider = TtsProvider::Eleven;
         }
@@ -125,6 +137,11 @@ impl Assistant {
         if !voice_ok {
             self.tts_voice = voice.to_string();
         }
+    }
+
+    pub fn apply(&self) {
+        crate::services::ai::set_reply_tokens(u32::from(self.reply_tokens));
+        shell::configure(u64::from(self.command_secs), usize::from(self.output_chars));
     }
 
     pub fn cue_volume(&self) -> u8 {
@@ -234,6 +251,20 @@ mod tests {
             a.sanitize();
             assert_eq!(a.max_steps, kept);
         }
+    }
+
+    #[test]
+    fn the_limits_stay_inside_their_ranges_and_reach_the_workers() {
+        let mut a = Assistant { reply_tokens: 1, command_secs: 0, output_chars: 60_000, ..Assistant::default() };
+        a.sanitize();
+        assert_eq!((a.reply_tokens, a.command_secs, a.output_chars), (500, 5, 20_000));
+        let mut big = Assistant { reply_tokens: 60_000, command_secs: 250, output_chars: 1, ..Assistant::default() };
+        big.sanitize();
+        assert_eq!((big.reply_tokens, big.command_secs, big.output_chars), (16_000, 180, 500));
+        let old: Assistant = serde_json::from_str(r#"{"wake":true}"#).unwrap();
+        assert_eq!((old.reply_tokens, old.command_secs, old.output_chars), (3000, 60, 2500));
+        shell::configure(u64::from(old.command_secs), usize::from(old.output_chars));
+        assert_eq!(shell::clip_output(&"x".repeat(5000)).chars().count(), 2500 + "\n[cut]".len());
     }
 
     #[test]

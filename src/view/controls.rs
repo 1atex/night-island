@@ -130,8 +130,17 @@ pub(in crate::view) fn paint_controls(p: &Painter, pill: Rect, scale: f32, ui: &
                     None => "Unavailable",
                 },
             };
+            let devices = if *ctl == Ctl::Bluetooth && on {
+                crate::platform::bt_battery::summary(&crate::platform::bt_battery::latest())
+            } else {
+                None
+            };
+            let status = match devices {
+                Some(levels) => format!("{} · {levels}", crate::ui::i18n::tr(status)),
+                None => status.to_string(),
+            };
             p.text(
-                status,
+                &status,
                 (l + 16.0 * scale, b - 30.0 * scale, rr - 8.0 * scale, b - 10.0 * scale),
                 13.0 * scale,
                 DWRITE_FONT_WEIGHT_NORMAL,
