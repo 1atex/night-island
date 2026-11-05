@@ -2,6 +2,46 @@ use crate::view::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sid {
+    TopEnabled,
+    TopAutoHide,
+    TopTray,
+    TopApplication,
+    TopWifi,
+    TopBluetooth,
+    TopVolume,
+    TopBattery,
+    TopFullscreen,
+    TopReserve,
+    TopClearControls,
+    TopMicrophone,
+    TopKeyboard,
+    TopWorkspaces,
+    TopAnimations,
+
+    DockEnabled,
+    DockReplaceTaskbar,
+    DockExperimentalCapture,
+    DockAutoHide,
+    DockRunning,
+    DockPreview,
+    DockFullscreen,
+    DockEconomy,
+    DockLockPins,
+    DockSeparator,
+    DockAnimations,
+    DockIconSize,
+    DockZoom,
+    DockOpacity,
+    DockBlur,
+    DockTintHue,
+    DockTintSaturation,
+    DockTintBrightness,
+    DockMargin,
+    DockMonitor,
+    DockImport,
+    DockAdd,
+    DockTaskbar,
+
     PillBlur,
     Autostart,
     PillOpacity,
@@ -88,6 +128,8 @@ pub enum Sid {
     Spikes,
     Character,
     CharacterDetached,
+    PetPerformance,
+    PetAutonomy,
     RecFormat,
     RecFps,
     RecSystem,
@@ -190,6 +232,13 @@ pub(in crate::view) fn setting_row(pill: Rect, scale: f32, index: usize) -> (Rec
 
 pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
     match id {
+        Sid::DockIconSize => (32.0, 72.0, 2.0),
+        Sid::DockZoom => (1.0, 1.7, 0.05),
+        Sid::DockOpacity => (0.2, 1.0, 0.02),
+        Sid::DockTintHue => (0.0, 360.0, 1.0),
+        Sid::DockTintSaturation => (0.0, 1.0, 0.01),
+        Sid::DockTintBrightness => (0.02, 0.35, 0.01),
+        Sid::DockMargin => (0.0, 40.0, 1.0),
         Sid::Size => (80.0, 200.0, 5.0),
         Sid::LiquidReach => (60.0, 300.0, 5.0),
         Sid::LiquidStrength => (6.0, 40.0, 1.0),
@@ -213,6 +262,19 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
 
 pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
     match id {
+        Sid::DockIconSize => c.desktop_dock.icon_size as f32,
+        Sid::DockZoom => c.desktop_dock.zoom,
+        Sid::DockOpacity => {
+            if c.desktop_dock.blur {
+                c.desktop_dock.blur_opacity
+            } else {
+                c.desktop_dock.opacity
+            }
+        }
+        Sid::DockTintHue => c.desktop_dock.tint_hue,
+        Sid::DockTintSaturation => c.desktop_dock.tint_saturation,
+        Sid::DockTintBrightness => c.desktop_dock.tint_brightness,
+        Sid::DockMargin => c.desktop_dock.margin as f32,
         Sid::Size => c.scale_percent as f32,
         Sid::LiquidReach => c.liquid_reach,
         Sid::LiquidStrength => c.liquid_strength,
@@ -240,6 +302,10 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
 
 pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
     match id {
+        Sid::DockIconSize | Sid::DockMargin => format!("{v:.0} px"),
+        Sid::DockZoom => format!("{v:.2}×"),
+        Sid::DockOpacity | Sid::DockTintSaturation | Sid::DockTintBrightness => format!("{:.0}%", v * 100.0),
+        Sid::DockTintHue => format!("{v:.0}°"),
         Sid::Size => format!("{v:.0}%"),
         Sid::LiquidReach | Sid::LiquidStrength => format!("{v:.0} px"),
         Sid::EqStrength => format!("\u{00D7}{v:.1}"),
@@ -261,6 +327,19 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
     let raw = min + (max - min) * norm.clamp(0.0, 1.0);
     let v = (raw / step).round() * step;
     match id {
+        Sid::DockIconSize => c.desktop_dock.icon_size = v as u32,
+        Sid::DockZoom => c.desktop_dock.zoom = v,
+        Sid::DockOpacity => {
+            if c.desktop_dock.blur {
+                c.desktop_dock.blur_opacity = v
+            } else {
+                c.desktop_dock.opacity = v
+            }
+        }
+        Sid::DockTintHue => c.desktop_dock.tint_hue = v,
+        Sid::DockTintSaturation => c.desktop_dock.tint_saturation = v,
+        Sid::DockTintBrightness => c.desktop_dock.tint_brightness = v,
+        Sid::DockMargin => c.desktop_dock.margin = v as u32,
         Sid::Size => c.scale_percent = v as u32,
         Sid::LiquidReach => c.liquid_reach = v,
         Sid::LiquidStrength => c.liquid_strength = v,
@@ -296,6 +375,33 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::TopAutoHide => c.top_panel.auto_hide,
+        Sid::TopTray => c.top_panel.tray,
+        Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture,
+        Sid::DockReplaceTaskbar => c.desktop_dock.replace_taskbar,
+        Sid::TopEnabled => c.top_panel.enabled,
+        Sid::TopApplication => c.top_panel.application,
+        Sid::TopWifi => c.top_panel.wifi,
+        Sid::TopBluetooth => c.top_panel.bluetooth,
+        Sid::TopVolume => c.top_panel.volume,
+        Sid::TopBattery => c.top_panel.battery,
+        Sid::TopFullscreen => c.top_panel.hide_fullscreen,
+        Sid::TopReserve => c.top_panel.reserve_space,
+        Sid::TopClearControls => c.top_panel.clear_window_controls,
+        Sid::TopMicrophone => c.top_panel.microphone,
+        Sid::TopKeyboard => c.top_panel.keyboard,
+        Sid::TopWorkspaces => c.top_panel.workspaces,
+        Sid::TopAnimations => c.top_panel.animations,
+        Sid::DockPreview => c.desktop_dock.hover_preview,
+        Sid::DockBlur => c.desktop_dock.blur,
+        Sid::DockEnabled => c.desktop_dock.enabled,
+        Sid::DockAutoHide => c.desktop_dock.auto_hide,
+        Sid::DockRunning => c.desktop_dock.show_running,
+        Sid::DockFullscreen => c.desktop_dock.hide_fullscreen,
+        Sid::DockEconomy => c.desktop_dock.economy,
+        Sid::DockLockPins => c.desktop_dock.lock_pins,
+        Sid::DockSeparator => c.desktop_dock.separator,
+        Sid::DockAnimations => c.desktop_dock.animations,
         Sid::AutoHide => c.auto_hide,
         Sid::LockDrag => c.lock_drag,
         Sid::Acrylic => c.acrylic,
@@ -306,6 +412,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::GhostThrough => c.ghost_click_through,
         Sid::GhostHold => c.ghost_hold,
         Sid::CharacterDetached => c.character_detached,
+        Sid::PetAutonomy => c.pet_autonomy,
         Sid::Spikes => c.edge_spikes,
         Sid::PillWeather => c.pill_weather,
         Sid::MusicEq => c.music_eq,
@@ -358,6 +465,33 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::TopAutoHide => c.top_panel.auto_hide = on,
+        Sid::TopTray => c.top_panel.tray = on,
+        Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture = on,
+        Sid::DockReplaceTaskbar => c.desktop_dock.replace_taskbar = on,
+        Sid::TopEnabled => c.top_panel.enabled = on,
+        Sid::TopApplication => c.top_panel.application = on,
+        Sid::TopWifi => c.top_panel.wifi = on,
+        Sid::TopBluetooth => c.top_panel.bluetooth = on,
+        Sid::TopVolume => c.top_panel.volume = on,
+        Sid::TopBattery => c.top_panel.battery = on,
+        Sid::TopFullscreen => c.top_panel.hide_fullscreen = on,
+        Sid::TopReserve => c.top_panel.reserve_space = on,
+        Sid::TopClearControls => c.top_panel.clear_window_controls = on,
+        Sid::TopMicrophone => c.top_panel.microphone = on,
+        Sid::TopKeyboard => c.top_panel.keyboard = on,
+        Sid::TopWorkspaces => c.top_panel.workspaces = on,
+        Sid::TopAnimations => c.top_panel.animations = on,
+        Sid::DockPreview => c.desktop_dock.hover_preview = on,
+        Sid::DockBlur => c.desktop_dock.blur = on,
+        Sid::DockEnabled => c.desktop_dock.enabled = on,
+        Sid::DockAutoHide => c.desktop_dock.auto_hide = on,
+        Sid::DockRunning => c.desktop_dock.show_running = on,
+        Sid::DockFullscreen => c.desktop_dock.hide_fullscreen = on,
+        Sid::DockEconomy => c.desktop_dock.economy = on,
+        Sid::DockLockPins => c.desktop_dock.lock_pins = on,
+        Sid::DockSeparator => c.desktop_dock.separator = on,
+        Sid::DockAnimations => c.desktop_dock.animations = on,
         Sid::AutoHide => c.auto_hide = on,
         Sid::LockDrag => c.lock_drag = on,
         Sid::Acrylic => c.acrylic = on,
@@ -367,6 +501,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::GhostMode => c.ghost_mode = on,
         Sid::GhostThrough => c.ghost_click_through = on,
         Sid::GhostHold => c.ghost_hold = on,
+        Sid::PetAutonomy => c.pet_autonomy = on,
         Sid::CharacterDetached => {
             c.character_detached = on;
             if on && c.character == crate::ui::characters::Character::None {
@@ -440,6 +575,7 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
             };
         }
         Sid::Character => c.character = c.character.step(forward),
+        Sid::PetPerformance => c.pet_performance = c.pet_performance.step(forward),
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
         Sid::PillWeatherSide => c.pill_weather_side = c.pill_weather_side.step(forward),
@@ -468,6 +604,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
             _ => "4 tiles",
         },
         Sid::Character => c.character.name(),
+        Sid::PetPerformance => c.pet_performance.name(),
         Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
@@ -495,6 +632,7 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
             vec!["1 tile", "2 tiles", "4 tiles"],
             [1, 2, 4].iter().position(|v| *v == c.notification_tiles).unwrap_or(2),
         ),
+        Sid::PetPerformance => all(&crate::ui::pet_motion::PetPerformance::ALL, c.pet_performance, |v| v.name()),
         Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
         Sid::AiProvider => all(&AiProvider::ALL, c.ai.provider, |v| v.name()),
         Sid::PillBattery => all(&BatteryStyle::ALL, c.pill_battery, |v| v.name()),
@@ -517,7 +655,10 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
     use crate::data::settings::*;
     match id {
         Sid::NotificationTiles => c.notification_tiles = [1, 2, 4][k.min(2)],
-        Sid::Character => c.character = crate::ui::characters::Character::ALL[k.min(6)],
+        Sid::Character => {
+            c.character = crate::ui::characters::Character::ALL[k.min(crate::ui::characters::Character::ALL.len() - 1)]
+        }
+        Sid::PetPerformance => c.pet_performance = crate::ui::pet_motion::PetPerformance::ALL[k.min(3)],
         Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
         Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],
         Sid::PillWeatherSide => c.pill_weather_side = WeatherSide::ALL[k.min(1)],
@@ -623,7 +764,7 @@ pub(in crate::view) fn paint_rows(
             DWRITE_TEXT_ALIGNMENT_LEADING,
             rgba(1.0, 1.0, 1.0, 0.85),
         )?;
-        paint_control(p, scale, &ui.cfg, *id, *kind, ctl)?;
+        paint_control(p, scale, &ui.cfg, *id, *kind, ctl, &ui.feedback)?;
     }
     Ok(())
 }
@@ -635,6 +776,7 @@ pub(in crate::view) fn paint_control(
     id: Sid,
     kind: Kind,
     ctl: Rect,
+    feedback: &crate::ui::feedback::Feedback,
 ) -> Result<()> {
     let accent = acc(1.0);
     let cy = (ctl.1 + ctl.3) / 2.0;
@@ -643,15 +785,19 @@ pub(in crate::view) fn paint_control(
             let selected = segment_value(id, cfg);
             p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
             let half = (ctl.2 - ctl.0) / 2.0;
+            let position = feedback.sample(600_000 + id as u64, selected as f32, selected as f32, 180);
+            p.fill_round_rect(
+                (
+                    ctl.0 + position * half + 2.0 * scale,
+                    ctl.1 + 2.0 * scale,
+                    ctl.0 + (position + 1.0) * half - 2.0 * scale,
+                    ctl.3 - 2.0 * scale,
+                ),
+                7.0 * scale,
+                acc(0.35),
+            )?;
             for (n, text) in opts.iter().enumerate() {
                 let r = (ctl.0 + n as f32 * half, ctl.1, ctl.0 + (n + 1) as f32 * half, ctl.3);
-                if n == selected {
-                    p.fill_round_rect(
-                        (r.0 + 2.0 * scale, r.1 + 2.0 * scale, r.2 - 2.0 * scale, r.3 - 2.0 * scale),
-                        7.0 * scale,
-                        acc(0.35),
-                    )?;
-                }
                 let alpha = if n == selected { 1.0 } else { 0.6 };
                 p.text(
                     text,
@@ -730,7 +876,12 @@ pub(in crate::view) fn paint_control(
         Kind::Button => {
             p.fill_round_rect(ctl, 9.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
             p.text(
-                "Open",
+                match id {
+                    Sid::DockImport => "Import",
+                    Sid::DockAdd => "Add",
+                    Sid::DockMonitor => "Switch",
+                    _ => "Open",
+                },
                 (ctl.0, ctl.1, ctl.2 - 26.0 * scale, ctl.3),
                 12.0 * scale,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
@@ -740,12 +891,22 @@ pub(in crate::view) fn paint_control(
             p.glyph('\u{E76C}', (ctl.2 - 26.0 * scale, ctl.1, ctl.2, ctl.3), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.75))?;
         }
         Kind::Toggle => {
-            let on = toggle_value(id, cfg);
+            let on = f32::from(toggle_value(id, cfg));
+            let level = feedback.sample(500_000 + id as u64, on, on, 180);
             let (w, h) = (40.0 * scale, 22.0 * scale);
             let track = (ctl.2 - w, cy - h / 2.0, ctl.2, cy + h / 2.0);
-            p.fill_round_rect(track, h / 2.0, if on { acc(0.9) } else { rgba(1.0, 1.0, 1.0, 0.16) })?;
+            p.fill_round_rect(
+                track,
+                h / 2.0,
+                rgba(
+                    1.0 + (accent.r - 1.0) * level,
+                    1.0 + (accent.g - 1.0) * level,
+                    1.0 + (accent.b - 1.0) * level,
+                    0.16 + 0.74 * level,
+                ),
+            )?;
             let knob = 16.0 * scale;
-            let kx = if on { track.2 - knob - 3.0 * scale } else { track.0 + 3.0 * scale };
+            let kx = track.0 + 3.0 * scale + (w - knob - 6.0 * scale) * level;
             p.fill_round_rect((kx, cy - knob / 2.0, kx + knob, cy + knob / 2.0), knob / 2.0, WHITE)?;
         }
     }

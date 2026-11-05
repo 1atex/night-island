@@ -3,7 +3,7 @@ use crate::services::ai::ChatTurn;
 use crate::ui::mini_chat::MiniChatWindow;
 
 pub(in crate::island) struct CompanionChat {
-    window: MiniChatWindow,
+    pub(in crate::island) window: MiniChatWindow,
     turns: Vec<ChatTurn>,
     pub(in crate::island) pending: bool,
     error: Option<String>,
@@ -46,15 +46,28 @@ impl App {
                 self.settings.ai.provider.name(),
                 self.settings.ai.model(self.settings.ai.provider)
             ));
+            chat.window.update_pet(&self.ui.chat.pet, &self.settings.custom_pet, self.settings.character);
             chat.window.show(anchor, self.settings.character);
         }
     }
 
     pub(in crate::island) fn on_mini_chat(&mut self, action: usize, source: isize) {
-        let Some(chat) = &mut self.pet.chat else { return };
-        if chat.window.hwnd().0 as isize != source {
+        use crate::ui::mini_chat;
+        if self.pet.chat.as_ref().is_none_or(|chat| chat.window.hwnd().0 as isize != source) {
             return;
         }
+        match action {
+            mini_chat::PET => return self.toggle_pet_studio(),
+            mini_chat::PET_APPLY => return self.pet_studio_action(view::PetStudioHit::Apply),
+            mini_chat::PET_PHOTO => return self.pet_studio_action(view::PetStudioHit::Photo),
+            mini_chat::PET_TEXT => return self.pet_studio_action(view::PetStudioHit::TextOnly),
+            mini_chat::SEND if self.ui.chat.pet.enabled => {
+                let prompt = self.pet.chat.as_ref().map(|chat| chat.window.input()).unwrap_or_default();
+                return self.send_pet_request(prompt, true);
+            }
+            _ => {}
+        }
+        let Some(chat) = &mut self.pet.chat else { return };
         if action == crate::ui::mini_chat::SETUP {
             return self.open_ai_settings();
         }

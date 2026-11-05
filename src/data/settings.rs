@@ -363,6 +363,8 @@ impl ProgressStyle {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    pub top_panel: crate::data::top_panel::TopPanelSettings,
+    pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
     pub weather: bool,
     pub weather_city: String,
@@ -424,6 +426,9 @@ pub struct Settings {
     pub record_system_audio: bool,
     pub record_mic: bool,
     pub character: Character,
+    pub pet_performance: crate::ui::pet_motion::PetPerformance,
+    pub pet_autonomy: bool,
+    pub custom_pet: crate::ui::pet_design::PetDesign,
     #[serde(alias = "spark_detached")]
     pub character_detached: bool,
     #[serde(alias = "spark_pos")]
@@ -467,6 +472,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            top_panel: Default::default(),
+            desktop_dock: Default::default(),
             language: Language::Ru,
             weather: true,
             weather_city: String::new(),
@@ -528,6 +535,9 @@ impl Default for Settings {
             record_system_audio: true,
             record_mic: true,
             character: Character::Spark,
+            pet_performance: Default::default(),
+            pet_autonomy: true,
+            custom_pet: Default::default(),
             character_detached: false,
             character_pos: None,
             edge_spikes: true,
@@ -939,6 +949,7 @@ impl Settings {
     }
 
     pub fn sanitize(&mut self) {
+        self.desktop_dock.sanitize();
         let d = Settings::default();
         self.scale_percent = self.scale_percent.clamp(80, 200);
         if ![1, 2, 4].contains(&self.notification_tiles) {
@@ -970,6 +981,7 @@ impl Settings {
             self.weather_city.chars().filter(|c| !c.is_control()).take(60).collect::<String>().trim().to_string();
         self.dock_offset = clamp_f(self.dock_offset, 0.0, 1.0, 0.5);
         self.float_pos = self.float_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
+        self.custom_pet.sanitize();
         self.character_pos = self.character_pos.map(|[x, y]| [x.clamp(-20_000, 20_000), y.clamp(-20_000, 20_000)]);
         if self.character == Character::None {
             self.character_detached = false;
@@ -1062,6 +1074,29 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_settings_keep_spark_and_custom_pets_survive_restarts() {
+        use crate::ui::pet_motion::PetPerformance;
+        let legacy: Settings = serde_json::from_str(r#"{"character":"spark"}"#).unwrap();
+        assert_eq!(legacy.character, Character::Spark);
+        assert_eq!(legacy.pet_performance, PetPerformance::Balanced);
+        assert!(legacy.pet_autonomy);
+        for performance in PetPerformance::ALL {
+            let mut settings =
+                Settings { character: Character::Custom, pet_performance: performance, ..Default::default() };
+            settings.pet_autonomy = false;
+            settings.custom_pet.name = "Мишка".into();
+            settings.custom_pet.ear_size = 40.0;
+            settings.sanitize();
+            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(restored.character, Character::Custom);
+            assert_eq!(restored.pet_performance, performance);
+            assert!(!restored.pet_autonomy);
+            assert_eq!(restored.custom_pet, settings.custom_pet);
+            assert_eq!(restored.custom_pet.ear_size, 1.25);
+        }
+    }
 
     #[test]
     fn weather_side_defaults_to_left_and_survives_settings_round_trips() {
