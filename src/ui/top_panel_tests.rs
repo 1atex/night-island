@@ -71,6 +71,75 @@ fn pump() {
     }
 }
 
+fn expect_right_panel_fades_before_hide(panel: &mut TopPanel) -> Result<()> {
+    use windows::Win32::Foundation::COLORREF;
+    use windows::Win32::Graphics::Dwm::DwmFlush;
+    use windows::Win32::Graphics::Gdi::{GetDC, GetPixel, ReleaseDC};
+
+    let work = panel.monitor.work;
+    let origin = POINT { x: (work.left + work.right) / 2, y: (work.top + work.bottom) / 2 };
+    let right = &mut panel.right;
+    let width = right.state.dimensions().0.ceil() as i32;
+    let size = (width + 80, 64);
+    let backdrop = Window(unsafe {
+        CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+            w!("STATIC"),
+            w!("Panel fade test"),
+            WS_POPUP,
+            origin.x,
+            origin.y,
+            size.0,
+            size.1,
+            None,
+            None,
+            Some(GetModuleHandleW(None)?.into()),
+            None,
+        )?
+    });
+    let surface = PopupSurface::new(size)?;
+    surface
+        .paint(&right.state.gpu, |p| p.fill_rect((0.0, 0.0, size.0 as f32, size.1 as f32), rgba(0.3, 0.7, 0.4, 1.0)))?;
+    surface.present(backdrop.0, Some(origin), 255)?;
+    unsafe {
+        let _ = ShowWindow(backdrop.0, SW_SHOWNOACTIVATE);
+    }
+    let sample = |x| unsafe {
+        pump();
+        DwmFlush()?;
+        let dc = GetDC(None);
+        let pixel = GetPixel(dc, x, origin.y + 27);
+        ReleaseDC(None, dc);
+        assert_ne!(pixel, COLORREF(u32::MAX));
+        Ok::<_, windows::core::Error>(pixel)
+    };
+    let x = origin.x + 30;
+    let background = sample(x)?;
+    let expected = COLORREF(0x66b24c);
+    let close_to = |a: COLORREF, b: COLORREF, tolerance| {
+        [0, 8, 16].into_iter().all(|shift| ((a.0 >> shift) & 255).abs_diff((b.0 >> shift) & 255) <= tolerance)
+    };
+    assert!(close_to(background, expected, 2), "synthetic background must cover the test pixel");
+
+    right.state.settings.motion_ms = 800;
+    right.state.boundary = Some((origin.x as f32, false));
+    right.state.departure = (origin.x - width + 50, origin.y);
+    let destination = (origin.x + 20, origin.y);
+    right.place(destination, 1.0, true);
+    right.state.travel.seek(810);
+    right.state.motion_frame();
+    right.state.render();
+    right.place(destination, 1.0, false);
+    right.state.stop_frames();
+    right.state.reveal.borrow().as_ref().expect("composition reveal").seek(0.4)?;
+    assert!(!close_to(sample(x)?, background, 10), "the closing panel must be visible");
+    right.state.reveal.borrow().as_ref().expect("composition reveal").seek(0.95)?;
+    assert!(close_to(sample(x)?, background, 3), "the panel must be transparent at the end of its travel");
+    assert!(right.state.reveal.borrow().is_some(), "the compositor is still drawing the animation window");
+    right.state.hide();
+    Ok(())
+}
+
 #[test]
 fn island_panel_corridor_covers_diagonal_crossings_without_covering_the_desktop() {
     let island = (500.0, 8.0, 1100.0, 408.0);
@@ -477,6 +546,9 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
     assert!(right.state.reveal.borrow().is_none());
     assert!(!unsafe { IsWindowVisible(right.state.hwnd) }.as_bool());
     panel.left.state.hide();
+    if crate::ui::feedback::motion_allowed() {
+        expect_right_panel_fades_before_hide(&mut panel)?;
+    }
     let mut only_volume = settings.clone();
     only_volume.animations = false;
     struct Cursor(POINT);

@@ -1224,7 +1224,7 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                     state.tray_frame();
                 } else if w.0 == FRAME {
                     state.motion_frame();
-                    if !state.travel.shown() && !state.opening {
+                    if !state.travel.shown() && state.alpha == 0 {
                         state.hide();
                         return LRESULT(0);
                     }

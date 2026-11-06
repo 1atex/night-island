@@ -2,7 +2,7 @@ use std::sync::Once;
 use std::time::Instant;
 
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
-use windows::UI::Composition::{Compositor, ContainerVisual, SpriteVisual};
+use windows::UI::Composition::{Compositor, ContainerVisual, LayerVisual, SpriteVisual};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
@@ -18,6 +18,7 @@ pub(super) struct Reveal {
     compositor: Compositor,
     target: DesktopWindowTarget,
     root: ContainerVisual,
+    content: LayerVisual,
     plate: Layer,
     bridge: SpriteVisual,
 }
@@ -30,7 +31,11 @@ impl Reveal {
     pub fn new(gpu: &Gpu) -> Result<Self> {
         let compositor = gpu.compositor()?;
         let root = compositor.CreateContainerVisual()?;
-        root.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+        let fill = Vector2 { X: 1.0, Y: 1.0 };
+        root.SetRelativeSizeAdjustment(fill)?;
+        let content = compositor.CreateLayerVisual()?;
+        content.SetRelativeSizeAdjustment(fill)?;
+        root.Children()?.InsertAtTop(&content)?;
         let plate = gpu.layer(&compositor, (1, 1))?;
         let bridge = compositor.CreateSpriteVisual()?;
         let shape = compositor.CreateRoundedRectangleGeometry()?;
@@ -38,8 +43,8 @@ impl Reveal {
         shape.SetCornerRadius(Vector2 { X: 0.5, Y: 0.5 })?;
         bridge.SetClip(&compositor.CreateGeometricClipWithGeometry(&shape)?)?;
         bridge.SetSize(Vector2 { X: 1.0, Y: 1.0 })?;
-        root.Children()?.InsertAtTop(&bridge)?;
-        root.Children()?.InsertAtTop(&plate.sprite)?;
+        content.Children()?.InsertAtTop(&bridge)?;
+        content.Children()?.InsertAtTop(&plate.sprite)?;
         static CLASS: Once = Once::new();
         let instance = unsafe { GetModuleHandleW(None)? };
         CLASS.call_once(|| unsafe {
@@ -76,7 +81,7 @@ impl Reveal {
                 })
         };
         match target {
-            Ok(target) => Ok(Self { hwnd, compositor, target, root, plate, bridge }),
+            Ok(target) => Ok(Self { hwnd, compositor, target, root, content, plate, bridge }),
             Err(error) => {
                 unsafe {
                     let _ = DestroyWindow(hwnd);
@@ -120,6 +125,7 @@ impl Reveal {
             (edge.ceil(), frames.iter().map(|f| f.1 + w).fold(edge, f32::max).ceil())
         };
         let offset = self.compositor.CreateVector3KeyFrameAnimation()?;
+        let fade = self.compositor.CreateScalarKeyFrameAnimation()?;
         let neck_offset = self.compositor.CreateVector3KeyFrameAnimation()?;
         let neck_scale = self.compositor.CreateVector3KeyFrameAnimation()?;
         let linear = self.compositor.CreateCubicBezierEasingFunction(
@@ -130,8 +136,12 @@ impl Reveal {
             let reach = 27.0 * state.scale;
             let inner = if left { (x + w - reach).min(edge) } else { (x + reach).max(edge) };
             let width = (inner - edge).abs();
-            let taper = ((1.0 - progress) / 0.16).clamp(0.0, 1.0);
-            let neck = if travel.is_zero() { 0.0 } else { 25.0 * state.scale * taper };
+            let neck = if travel.is_zero() {
+                0.0
+            } else {
+                neck_height(progress, width, state.settings.island_gap as f32, state.scale)
+            };
+            fade.InsertKeyFrameWithEasingFunction(t, reveal_opacity(progress), &linear)?;
             offset.InsertKeyFrameWithEasingFunction(t, Vector3 { X: x - start, Y: y - top, Z: 0.0 }, &linear)?;
             neck_offset.InsertKeyFrameWithEasingFunction(
                 t,
@@ -140,9 +150,12 @@ impl Reveal {
             )?;
             neck_scale.InsertKeyFrameWithEasingFunction(t, Vector3 { X: width, Y: neck, Z: 1.0 }, &linear)?;
         }
+        let duration = duration.max(std::time::Duration::from_millis(1));
         for animation in [&offset, &neck_offset, &neck_scale] {
-            animation.SetDuration(duration.max(std::time::Duration::from_millis(1)).into())?;
+            animation.SetDuration(duration.into())?;
         }
+        fade.SetDuration(duration.into())?;
+        self.content.StartAnimation(h!("Opacity"), &fade)?;
         self.plate.sprite.StartAnimation(h!("Offset"), &offset)?;
         self.bridge.StartAnimation(h!("Offset"), &neck_offset)?;
         self.bridge.StartAnimation(h!("Scale"), &neck_scale)?;
@@ -163,6 +176,20 @@ impl Reveal {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn seek(&self, progress: f32) -> Result<()> {
+        for controller in [
+            self.plate.sprite.TryGetAnimationController(h!("Offset"))?,
+            self.bridge.TryGetAnimationController(h!("Offset"))?,
+            self.bridge.TryGetAnimationController(h!("Scale"))?,
+            self.content.TryGetAnimationController(h!("Opacity"))?,
+        ] {
+            controller.Pause()?;
+            controller.SetProgress(progress)?;
+        }
+        Ok(())
+    }
+
     pub fn opacity(&self, alpha: u8) {
         let _ = self.root.SetOpacity(f32::from(alpha) / 255.0);
     }
@@ -174,6 +201,17 @@ impl Reveal {
     }
 }
 
+fn reveal_opacity(progress: f32) -> f32 {
+    let t = (progress / 0.45).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn neck_height(progress: f32, width: f32, gap: f32, scale: f32) -> f32 {
+    let taper = ((1.0 - progress) / 0.16).clamp(0.0, 1.0);
+    let proximity = ((gap + 33.0 - width / scale) / 6.0).clamp(0.0, 1.0);
+    25.0 * scale * taper * proximity
+}
+
 impl Drop for Reveal {
     fn drop(&mut self) {
         let _ = self.root.SetIsVisible(false);
@@ -181,6 +219,20 @@ impl Drop for Reveal {
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_HIDE);
             let _ = DestroyWindow(self.hwnd);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn liquid_bridge_does_not_stretch_across_the_old_island_edge() {
+        for scale in [1.0, 1.5, 2.0] {
+            assert!(neck_height(0.9, 47.0 * scale, 20.0, scale) > 0.0);
+            assert_eq!(neck_height(0.9, 90.0 * scale, 20.0, scale), 0.0);
+            assert_eq!(neck_height(1.0, 47.0 * scale, 20.0, scale), 0.0);
         }
     }
 }
