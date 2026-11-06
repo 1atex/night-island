@@ -16,7 +16,7 @@ use crate::ui::gfx::{Gpu, Layer};
 pub(super) struct Reveal {
     hwnd: HWND,
     compositor: Compositor,
-    _target: DesktopWindowTarget,
+    target: DesktopWindowTarget,
     root: ContainerVisual,
     plate: Layer,
     bridge: SpriteVisual,
@@ -76,7 +76,7 @@ impl Reveal {
                 })
         };
         match target {
-            Ok(target) => Ok(Self { hwnd, compositor, _target: target, root, plate, bridge }),
+            Ok(target) => Ok(Self { hwnd, compositor, target, root, plate, bridge }),
             Err(error) => {
                 unsafe {
                     let _ = DestroyWindow(hwnd);
@@ -172,17 +172,14 @@ impl Reveal {
             let _ = SetWindowDisplayAffinity(self.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
         }
     }
-
-    pub fn hide(&self) {
-        unsafe {
-            let _ = ShowWindow(self.hwnd, SW_HIDE);
-        }
-    }
 }
 
 impl Drop for Reveal {
     fn drop(&mut self) {
+        let _ = self.root.SetIsVisible(false);
+        let _ = self.target.SetRoot(None::<&windows::UI::Composition::Visual>);
         unsafe {
+            let _ = ShowWindow(self.hwnd, SW_HIDE);
             let _ = DestroyWindow(self.hwnd);
         }
     }

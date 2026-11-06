@@ -393,6 +393,7 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
                         assert_eq!(wing.state.origin, wing.state.destination);
                         assert!(!wing.state.opening);
                         assert!(!wing.state.revealing.get());
+                        assert!(wing.state.reveal.borrow().is_none());
                     }
                 }
             }
@@ -458,6 +459,24 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
     }
     panel.left.state.hide();
     panel.right.state.hide();
+    let mut close_settings = settings.clone();
+    close_settings.entrance = PanelEntrance::Island;
+    panel.configure(&close_settings, 1.0);
+    let center = (panel.monitor.work.left + panel.monitor.work.right) as f32 / 2.0;
+    let island = (center - 100.0, panel.top() + 8.0, center + 100.0, panel.top() + 42.0);
+    panel.update(snapshot.clone(), island, false);
+    let right = &mut panel.right;
+    assert!(right.state.visible);
+    right.state.travel.seek(u64::from(close_settings.motion_ms / 2));
+    right.state.motion_frame();
+    right.place(right.state.destination, 1.0, false);
+    right.state.travel.seek(u64::from(close_settings.motion_ms) + 1);
+    unsafe { SendMessageW(right.state.hwnd, WM_TIMER, Some(WPARAM(FRAME)), None) };
+    assert!(!right.state.visible);
+    assert!(!right.state.revealing.get());
+    assert!(right.state.reveal.borrow().is_none());
+    assert!(!unsafe { IsWindowVisible(right.state.hwnd) }.as_bool());
+    panel.left.state.hide();
     let mut only_volume = settings.clone();
     only_volume.animations = false;
     struct Cursor(POINT);

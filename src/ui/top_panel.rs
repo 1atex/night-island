@@ -306,8 +306,8 @@ impl State {
             }
             visual.as_mut().is_some_and(|visual| visual.animate(self, edge, left).is_ok())
         });
-        if !started && let Some(visual) = &*visual {
-            visual.hide();
+        if !started {
+            visual.take();
         }
         drop(visual);
         if started {
@@ -906,6 +906,9 @@ impl State {
     }
 
     fn render(&self) {
+        if !self.visible {
+            return;
+        }
         if self.revealing.get() && self.opening && self.boundary.is_some() {
             if let Some(visual) = &*self.reveal.borrow() {
                 visual.opacity(self.ghost_alpha);
@@ -951,9 +954,7 @@ impl State {
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
             }
-            if let Some(visual) = &*self.reveal.borrow() {
-                visual.hide();
-            }
+            self.reveal.borrow_mut().take();
         }
         if self.feedback.active() {
             self.start_frames();
@@ -967,9 +968,9 @@ impl State {
         self.hover = None;
         self.visible = false;
         self.revealing.set(false);
-        if let Some(visual) = &*self.reveal.borrow() {
-            visual.hide();
-        }
+        self.reveal.borrow_mut().take();
+        self.opening = false;
+        self.relocation.show(true, 0, Instant::now());
         self.travel.show(false, 0, Instant::now());
         self.pressed = None;
         self.stop_frames();
