@@ -285,7 +285,7 @@ impl State {
             self.config.icon_size as f32,
             self.config.zoom,
         )
-        .saturating_sub(1);
+        .saturating_sub(usize::from(self.config.show_add));
         let targets: Vec<_> = self
             .entries
             .iter()
@@ -352,8 +352,12 @@ impl State {
         }
         let area = self.monitor.work;
         let icon = self.config.icon_size as f32;
-        let count =
-            (self.entries.len() + 1).min(capacity((area.right - area.left) as f32, self.scale, icon, self.config.zoom));
+        let count = (self.entries.len() + usize::from(self.config.show_add)).max(1).min(capacity(
+            (area.right - area.left) as f32,
+            self.scale,
+            icon,
+            self.config.zoom,
+        ));
         let width =
             ((count as f32 * (icon + 12.0) + 40.0 + icon * (self.config.zoom - 1.0) * 3.0) * self.scale).ceil() as i32;
         let height = ((icon * self.config.zoom + 64.0 + self.config.margin as f32) * self.scale).ceil() as i32;
@@ -394,15 +398,16 @@ impl State {
             self.config.icon_size as f32,
             self.config.zoom,
         )
-        .saturating_sub(1);
+        .saturating_sub(usize::from(self.config.show_add));
         let count = self.entries.len().saturating_sub(self.offset).min(slots);
         let pitch = icon + 12.0 * s;
-        let base_left = (width - (count + 1) as f32 * pitch) / 2.0;
+        let shown = count + usize::from(self.config.show_add || self.entries.is_empty());
+        let base_left = (width - shown as f32 * pitch) / 2.0;
         let hide = self.feedback.sample(10_000, if self.hidden { 1.0 } else { 0.0 }, 0.0, 220);
         let bottom = height - (self.config.margin as f32 + 12.0) * s;
         let shift = hide * (icon * self.config.zoom + (self.config.margin as f32 + 24.0) * s);
         let mut sizes = Vec::new();
-        for n in 0..=count {
+        for n in 0..shown {
             let i = if n == count { self.entries.len() } else { self.offset + n };
             let strength = self.pointer.filter(|_| self.config.zoom > 1.0).map_or(0.0, |p| {
                 let d = ((p.0 - (base_left + (n as f32 + 0.5) * pitch)) / (pitch * 1.8)).abs();
@@ -417,7 +422,7 @@ impl State {
             i > 0 && self.entries[i - 1].pinned && !self.entries[i].pinned
         });
         let gap = if self.config.separator && boundary.is_some() { 20.0 * s } else { 0.0 };
-        let total = sizes.iter().sum::<f32>() + (count as f32 + 2.0) * 10.0 * s + gap;
+        let total = sizes.iter().sum::<f32>() + (shown as f32 + 1.0) * 10.0 * s + gap;
         let left = (width - total) / 2.0;
         self.panel =
             (left - 4.0 * s, bottom - icon - 10.0 * s + shift, left + total + 4.0 * s, bottom + 10.0 * s + shift);
@@ -444,7 +449,12 @@ impl State {
             self.rects.push((i, rect));
             x += side + 10.0 * s;
         }
-        let hint = self.hover.and_then(|i| self.entries.get(i)).map(|e| e.pin.name.clone());
+        let hint = self.hover.map(|i| {
+            self.entries.get(i).map_or_else(
+                || crate::ui::i18n::tr("Drop an app here or right-click to add").into_owned(),
+                |entry| entry.pin.name.clone(),
+            )
+        });
         let label = self.label_rect();
         if let Some((backdrop, geometry)) = &self.backdrop {
             let _ = backdrop.SetIsVisible(self.config.blur && hide < 0.99);
@@ -518,8 +528,13 @@ impl State {
             self.config.icon_size as f32,
             self.config.zoom,
         )
-        .saturating_sub(1);
-        let hint = self.hover.and_then(|i| self.entries.get(i)).map(|e| e.pin.name.clone());
+        .saturating_sub(usize::from(self.config.show_add));
+        let hint = self.hover.map(|i| {
+            self.entries.get(i).map_or_else(
+                || crate::ui::i18n::tr("Drop an app here or right-click to add").into_owned(),
+                |entry| entry.pin.name.clone(),
+            )
+        });
         let label = self.label_rect();
 
         if hide > 0.99 {
@@ -609,7 +624,12 @@ impl State {
                     );
                 }
             } else {
-                let _ = p.glyph('\u{E710}', image, icon * 0.42, rgba(0.75, 0.75, 0.8, 0.9));
+                let _ = p.glyph(
+                    if self.entries.is_empty() { '\u{E8B7}' } else { '\u{E710}' },
+                    image,
+                    icon * 0.42,
+                    rgba(0.75, 0.75, 0.8, 0.9),
+                );
             }
         }
         if let Some(text) = &hint
@@ -944,7 +964,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                     state.config.icon_size as f32,
                     state.config.zoom,
                 )
-                .saturating_sub(1);
+                .saturating_sub(usize::from(state.config.show_add));
                 state.offset = if down {
                     (state.offset + 1).min(state.entries.len().saturating_sub(slots))
                 } else {

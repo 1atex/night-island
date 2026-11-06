@@ -287,6 +287,7 @@ pub enum Act {
 #[derive(Default)]
 pub struct SwUi {
     pub dock_status: String,
+    pub memory: MemoryUi,
     pub guide: Option<GuideUi>,
     pub group: usize,
     pub assistant_page: AssistantPage,
@@ -330,6 +331,7 @@ pub enum SwHit {
     Group(usize),
     AssistantPage(AssistantPage),
     Guide(GuideAction),
+    Memory(MemoryAction),
     Row(Sid, SetHit),
     Field(Field),
     Act(Act),
@@ -509,6 +511,10 @@ fn agent_items(ui: &UiState) -> Vec<Item> {
 fn metrics_items(ui: &UiState) -> Vec<Item> {
     use crate::platform::metrics::Metric;
     let mut out = vec![Item::Heading("System"), Item::Row(Sid::MetricsInterval, "Read every", Kind::Slider)];
+    out.push(Item::Row(Sid::MemoryTools, "Memory manager", Kind::Toggle));
+    if ui.cfg.memory_tools {
+        out.push(Item::Row(Sid::MemoryManager, "Free memory and watch applications", Kind::Button));
+    }
     out.push(Item::Section("Figures"));
     for (i, m) in Metric::ALL.into_iter().enumerate() {
         let on_tab = ui.cfg.metrics_tab.iter().any(|k| k == m.key());
@@ -1097,6 +1103,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockAnimations, "Animate dock interactions", Kind::Toggle),
         Item::Row(Sid::DockSeparator, "Separate pinned and running applications", Kind::Toggle),
         Item::Row(Sid::DockLockPins, "Lock dock icon positions", Kind::Toggle),
+        Item::Row(Sid::DockShowAdd, "Show the add button in the dock", Kind::Toggle),
         Item::Row(Sid::DockEconomy, "Economy animations (30 fps)", Kind::Toggle),
         Item::Section("Appearance"),
         Item::Row(Sid::DockIconSize, "Dock icon size", Kind::Slider),
@@ -1127,6 +1134,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
                 .unwrap_or_else(|| crate::ui::i18n::tr("Primary monitor").into_owned())
         }),
         Item::Section("Applications"),
+        Item::Row(Sid::DockImportTaskbar, "Import Windows taskbar pins", Kind::Button),
         Item::Row(Sid::DockImport, "Import applications from MyDockFinder", Kind::Button),
         Item::Row(Sid::DockAdd, "Add application or file", Kind::Button),
         Item::Note("Drop shortcuts onto the dock. Drag pinned icons to reorder."),
@@ -1368,6 +1376,9 @@ pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> O
     if let Some(i) = (0..GROUPS.len()).find(|&i| inside(group_rect(&l, scale, i), px, py)) {
         return Some(SwHit::Group(i));
     }
+    if ui.sw.memory.open {
+        return hit_memory(l.content, scale, ui, px, py).map(SwHit::Memory);
+    }
     if let Some(nav) = l.assistant_nav
         && let Some((page, _, _)) = assistant_nav_rects(nav, scale).find(|(_, _, rect)| inside(*rect, px, py))
     {
@@ -1595,6 +1606,9 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
         rgba(1.0, 1.0, 1.0, 0.6),
     )?;
 
+    if ui.sw.memory.open {
+        return paint_memory(p, l.content, scale, ui);
+    }
     if let Some(nav) = l.assistant_nav {
         for (page, label, rect) in assistant_nav_rects(nav, scale) {
             let selected = ui.sw.assistant_page == page;

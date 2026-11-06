@@ -403,6 +403,9 @@ pub struct Settings {
     pub metrics_tab: Vec<String>,
     pub metrics_pill: Vec<String>,
     pub metrics_secs: u32,
+    pub memory_tools: bool,
+    pub memory_watch: bool,
+    pub memory_excluded: Vec<String>,
     pub activity_track: bool,
     pub activity_ai: bool,
     pub vpn_pill: bool,
@@ -526,6 +529,9 @@ impl Default for Settings {
             metrics_tab: ["cpu", "ram", "net_down", "net_up", "gpu", "disk", "uptime"].map(String::from).to_vec(),
             metrics_pill: Vec::new(),
             metrics_secs: 2,
+            memory_tools: true,
+            memory_watch: true,
+            memory_excluded: Vec::new(),
             music_lyrics: true,
             music_progress: true,
             cover_mode: CoverMode::Fit,
@@ -948,7 +954,7 @@ impl Settings {
         Some(dir.join("settings.json"))
     }
 
-    const TOUR_REVISION: u8 = 3;
+    const TOUR_REVISION: u8 = 4;
 
     pub fn tour_pending(&self) -> bool {
         self.tour_revision < Self::TOUR_REVISION
@@ -1070,6 +1076,15 @@ impl Settings {
         self.hide_pill_secs = self.hide_pill_secs.clamp(5, 10);
         self.ghost_opacity = clamp_f(self.ghost_opacity, 0.05, 1.0, d.ghost_opacity);
         self.metrics_secs = self.metrics_secs.clamp(1, 10);
+        self.memory_excluded = self
+            .memory_excluded
+            .iter()
+            .take(128)
+            .filter(|path| path.len() <= 2048 && !path.contains(['\0', '\r', '\n']))
+            .map(|path| crate::data::desktop_dock::key(path))
+            .collect();
+        self.memory_excluded.sort();
+        self.memory_excluded.dedup();
         for list in [&mut self.metrics_tab, &mut self.metrics_pill] {
             let mut seen: Vec<String> = Vec::new();
             for key in std::mem::take(list) {

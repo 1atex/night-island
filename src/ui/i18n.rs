@@ -411,6 +411,69 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Ready" => "Готово",
         "Workspace preview" => "Так будет выглядеть Island",
         "On your desktop" => "На рабочем столе",
+        "Make Island yours" => "Настрой под себя",
+        "Start with the essentials or explore everything with a guide." => {
+            "Выбери быстрый старт или пройди настройку вместе с нами."
+        }
+        "Quick setup" => "Быстрый старт",
+        "Guided setup" => "Подробно",
+        "About 1 minute" => "Около 1 минуты",
+        "About 5 minutes" => "Около 5 минут",
+        "Layout, essential switches and assistant permissions." => "Пресет, главные настройки и доступ ассистента.",
+        "Everything in quick setup, hands-on practice, pet and voice models." => {
+            "Всё из быстрого старта, практика, питомец и голосовые модели."
+        }
+        "Change route" => "Сменить маршрут",
+        "Explore and set up voice" => "Попробовать функции и настроить голос",
+        "Try it" => "Практика",
+        "Try the real island" => "Попробуй остров",
+        "These are the same controls you will use on your desktop. Try them here." => {
+            "Это те же элементы, что на рабочем столе. Попробуй их прямо здесь."
+        }
+        "Live island preview" => "Остров в миниатюре",
+        "Music and volume" => "Музыка и громкость",
+        "Incoming notifications" => "Входящие уведомления",
+        "A pet on your desktop" => "Питомец на рабочем столе",
+        "Try pause, next track and the volume slider." => "Попробуй паузу, переключение трека и громкость.",
+        "Close the card with the cross, then try again." => "Закрой карточку крестиком и покажи её снова.",
+        "Drag your pet out. Bring it back to the island." => "Вытащи питомца мышью. Перенеси обратно на остров.",
+        "Sample track · no audio" => "Демо-трек · без звука",
+        "Night walk" => "Ночная прогулка",
+        "Quiet morning" => "Тихое утро",
+        "City lights" => "Огни города",
+        "More tools are available after setup." => "Остальные инструменты доступны после настройки.",
+        "Back on the island." => "Питомец вернулся на остров.",
+        "Notification dismissed" => "Уведомление закрыто",
+        "Show the add button in the dock" => "Показывать кнопку добавления в доке",
+        "Import Windows taskbar pins" => "Импортировать ярлыки панели задач Windows",
+        "Drop an app here or right-click to add" => "Перетащи приложение или добавь через ПКМ",
+        "Sort by growth" => "Сначала растущие",
+        "Refresh" => "Обновить",
+        "Now" => "Сейчас",
+        "Select minimized apps" => "Выбери свёрнутые приложения",
+        "Memory manager" => "Управление памятью",
+        "Free memory and watch applications" => "Освободить ОЗУ и посмотреть расход",
+        "Minimize apps you are not using, then choose which ones to clean. Apps stay open." => {
+            "Сверни ненужные сейчас приложения и выбери, какие очистить. Они останутся открыты."
+        }
+        "Could not read memory usage. Try refreshing." => "Не удалось прочитать расход памяти. Нажми «Обновить».",
+        "Free at cleanup" => "Свободно при очистке",
+        "Free memory" => "Свободно в системе",
+        "Reading running applications…" => "Проверяю запущенные приложения…",
+        "RAM / after / growth" => "Сейчас / после / рост",
+        "In use · skipped" => "Используется · пропускаем",
+        "No accessible desktop apps found." => "Доступные приложения с окнами не найдены.",
+        "Free selected memory" => "Освободить выбранную память",
+        "Watch regrowth for 2 minutes" => "Наблюдать за ростом расхода 2 минуты",
+        "Exclude" => "Исключить",
+        "Excluded" => "Исключено",
+        "Processes cleaned" => "Обработано процессов",
+        "Skipped" => "Пропущено",
+        "Watching regrowth" => "Наблюдаем за ростом",
+        "Observation finished" => "Наблюдение завершено",
+        "Windows may load these pages again when apps need them." => {
+            "Windows может вернуть данные в ОЗУ, когда приложениям они понадобятся."
+        }
         "Keep my layout" => "Оставить как есть",
         "Island only" => "Только остров",
         "Island and dock" => "Остров и док",

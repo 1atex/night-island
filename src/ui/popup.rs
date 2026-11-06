@@ -121,6 +121,7 @@ impl PopupSurface {
     pub fn pixels(&self) -> Vec<u8> {
         let mut bitmap = BITMAP::default();
         unsafe {
+            let _ = GdiFlush();
             assert_ne!(GetObjectW(self.bitmap.into(), size_of::<BITMAP>() as i32, Some((&raw mut bitmap).cast())), 0);
             std::slice::from_raw_parts(bitmap.bmBits.cast(), (self.size.0 * self.size.1 * 4) as usize).to_vec()
         }

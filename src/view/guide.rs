@@ -9,7 +9,50 @@ use crate::ui::characters::Character;
 use crate::view::*;
 
 const SCENE: Rect = (426.0, 151.0, 892.0, 556.0);
-const STEPS: [&str; 4] = ["Preset", "Essentials", "Voice", "Ready"];
+mod preview;
+use preview::IslandPreview;
+pub use preview::{PreviewAction, PreviewLesson};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GuideMode {
+    #[default]
+    Quick,
+    Detailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Page {
+    Welcome,
+    Preset,
+    Essentials,
+    Practice,
+    Voice,
+    Ready,
+}
+
+impl Page {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Welcome => "Welcome",
+            Self::Preset => "Preset",
+            Self::Essentials => "Essentials",
+            Self::Practice => "Try it",
+            Self::Voice => "Voice",
+            Self::Ready => "Ready",
+        }
+    }
+}
+
+impl GuideMode {
+    fn pages(self) -> &'static [Page] {
+        match self {
+            Self::Quick => &[Page::Welcome, Page::Preset, Page::Essentials, Page::Ready],
+            Self::Detailed => {
+                &[Page::Welcome, Page::Preset, Page::Essentials, Page::Practice, Page::Voice, Page::Ready]
+            }
+        }
+    }
+}
 const QUICK_ROWS: [QuickSetting; 8] = [
     QuickSetting::Dock,
     QuickSetting::Top,
@@ -244,6 +287,11 @@ pub enum GuideAction {
     Back,
     Skip,
     Resume,
+    Mode(GuideMode),
+    ChangeRoute,
+    Extend,
+    Lesson(PreviewLesson),
+    Preview(PreviewAction),
     Select(Preset),
     ToggleQuick(QuickSetting),
     ToggleAssistant,
@@ -256,6 +304,8 @@ pub enum GuideAction {
 
 pub struct GuideUi {
     page: usize,
+    mode: GuideMode,
+    preview: IslandPreview,
     pub visible: bool,
     pub preset: Preset,
     quick_before: [bool; QUICK_ROWS.len()],
@@ -281,6 +331,8 @@ impl GuideUi {
     pub fn new(settings: &Settings, animate: bool) -> Self {
         let mut guide = Self {
             page: 0,
+            mode: GuideMode::Quick,
+            preview: IslandPreview::new(settings),
             visible: true,
             preset: Preset::Keep,
             quick_before: QUICK_ROWS.map(|feature| feature.read(settings)),
@@ -380,16 +432,76 @@ impl GuideUi {
         (!wake.is_empty() && wake.split(", ").all(|name| seen.insert(name.to_lowercase()))).then_some(wake)
     }
 
+    fn current(&self) -> Page {
+        self.mode.pages()[self.page]
+    }
+
+    pub fn choose_mode(&mut self, mode: GuideMode, animate: bool) {
+        self.mode = mode;
+        self.page = 1;
+        self.demo_started = animate.then(Instant::now);
+        self.preview.release();
+    }
+
+    pub fn change_route(&mut self) {
+        self.page = 0;
+        self.preview.release();
+    }
+
+    pub fn extend(&mut self, animate: bool) {
+        self.mode = GuideMode::Detailed;
+        self.page = 3;
+        self.demo_started = animate.then(Instant::now);
+        self.preview.release();
+    }
+
+    pub fn lesson(&mut self, lesson: PreviewLesson, animate: bool) {
+        self.preview.select(lesson, animate);
+    }
+
+    pub fn preview_action(&mut self, action: PreviewAction) {
+        self.preview.act(action);
+    }
+
+    pub fn preview_dragging(&self) -> bool {
+        self.visible && self.preview.dragging()
+    }
+
+    pub fn preview_release(&mut self) -> bool {
+        self.preview.release()
+    }
+
+    fn interactive_preview(&self) -> bool {
+        matches!(self.current(), Page::Welcome | Page::Preset | Page::Practice)
+    }
+
+    pub fn preview_move(&mut self, size: (f32, f32), dpi: f32, x: f32, y: f32, down: bool) -> bool {
+        if !self.visible || !self.interactive_preview() {
+            return false;
+        }
+        self.preview.pointer(Layout::new(size, dpi), x, y, down)
+    }
+
+    pub fn preview_tick(&mut self) {
+        if self.preview_ticking() {
+            self.preview.tick();
+        }
+    }
+
+    pub fn preview_ticking(&self) -> bool {
+        self.visible && self.interactive_preview() && self.preview.ticking()
+    }
+
     pub fn last_page(&self) -> bool {
-        self.page + 1 == STEPS.len()
+        self.current() == Page::Ready
     }
 
     pub fn voice_page(&self) -> bool {
-        self.page == 2
+        self.current() == Page::Voice
     }
 
     pub fn essentials_page(&self) -> bool {
-        self.page == 1
+        self.current() == Page::Essentials
     }
 
     fn quick_value(&self, feature: QuickSetting) -> bool {
@@ -473,9 +585,13 @@ impl GuideUi {
     }
 
     pub fn move_by(&mut self, offset: isize, animate: bool) {
-        let page = self.page.saturating_add_signed(offset).min(STEPS.len() - 1);
+        let page = self.page.saturating_add_signed(offset).min(self.mode.pages().len() - 1);
         if page != self.page {
             self.page = page;
+            self.preview.release();
+            if self.current() != Page::Practice {
+                self.preview.select(PreviewLesson::Music, false);
+            }
             self.demo_started = animate.then(Instant::now);
         }
     }
@@ -496,7 +612,9 @@ impl GuideUi {
 
     pub fn animating(&self) -> bool {
         let duration = if self.voice_page() { 3500 } else { 1050 };
-        self.visible && !self.essentials_page() && self.elapsed() < Duration::from_millis(duration)
+        self.visible
+            && ((!self.essentials_page() && self.elapsed() < Duration::from_millis(duration))
+                || (self.interactive_preview() && self.preview.animating()))
     }
 
     fn panels(&self) -> (bool, bool) {
@@ -542,7 +660,24 @@ fn controls(guide: &GuideUi) -> Vec<(GuideAction, &'static str, Rect)> {
     if guide.page > 0 {
         buttons.push((Back, "Back", (591.0, 601.0, 694.0, 647.0)));
     }
-    if guide.page == 0 {
+    if guide.current() == Page::Welcome {
+        buttons.retain(|(action, _, _)| *action != Next);
+        buttons.push((Mode(GuideMode::Quick), "Quick setup", (48.0, 277.0, 404.0, 385.0)));
+        buttons.push((Mode(GuideMode::Detailed), "Guided setup", (48.0, 399.0, 404.0, 523.0)));
+    } else {
+        buttons.push((ChangeRoute, "Change route", (241.0, 601.0, 428.0, 647.0)));
+    }
+    if guide.current() == Page::Practice {
+        for (i, lesson) in PreviewLesson::ALL.into_iter().enumerate() {
+            let y = 276.0 + 66.0 * i as f32;
+            buttons.push((Lesson(lesson), lesson.label(), (48.0, y, 404.0, y + 54.0)));
+        }
+        buttons.push((Preview(PreviewAction::Reset), "Try again", (48.0, 495.0, 224.0, 534.0)));
+    }
+    if guide.last_page() && guide.mode == GuideMode::Quick {
+        buttons.push((Extend, "Explore and set up voice", (48.0, 521.0, 404.0, 560.0)));
+    }
+    if guide.current() == Page::Preset {
         buttons.extend(
             PRESET_ROWS.into_iter().enumerate().map(|(i, preset)| (Select(preset), preset.label(), preset_row(i))),
         );
@@ -578,7 +713,13 @@ fn controls(guide: &GuideUi) -> Vec<(GuideAction, &'static str, Rect)> {
 
 pub fn guide_hit(size: (f32, f32), dpi: f32, guide: &GuideUi, x: f32, y: f32) -> Option<GuideAction> {
     let layout = Layout::new(size, dpi);
-    controls(guide).into_iter().find(|(_, _, rect)| inside(layout.rect(*rect), x, y)).map(|(action, _, _)| action)
+    controls(guide)
+        .into_iter()
+        .find(|(_, _, rect)| inside(layout.rect(*rect), x, y))
+        .map(|(action, _, _)| action)
+        .or_else(|| {
+            guide.interactive_preview().then(|| guide.preview.hit(layout, x, y)).flatten().map(GuideAction::Preview)
+        })
 }
 
 pub fn guide_wake_rects(size: (f32, f32), dpi: f32, guide: &GuideUi) -> Option<(Rect, Rect)> {
@@ -691,36 +832,46 @@ impl Preview<'_> {
             color,
         )
     }
+}
 
-    fn home(&self, x: f32, y: f32) -> Result<()> {
-        self.round((x + 12.0, y + 12.0, x + 91.0, y + 39.0), 13.0, rgba(1.0, 1.0, 1.0, 0.15))?;
-        self.text("Home", (x + 24.0, y + 12.0, x + 90.0, y + 39.0), 11.5, true, WHITE)?;
-        for (i, glyph) in ['\u{E77F}', '\u{E70B}', '\u{F800}', '\u{E99A}', '\u{E718}'].into_iter().enumerate() {
-            let l = x + 100.0 + i as f32 * 45.0;
-            self.icon(glyph, (l, y + 12.0, l + 34.0, y + 39.0), 13.0)?;
-        }
-        self.text("More", (x + 331.0, y + 12.0, x + 372.0, y + 39.0), 11.0, true, WHITE)?;
-        self.round((x + 14.0, y + 49.0, x + 376.0, y + 158.0), 17.0, acc(0.22))?;
-        self.p.fill_round_gradient(
-            self.layout.rect((x + 28.0, y + 63.0, x + 81.0, y + 116.0)),
-            11.0 * self.layout.scale,
-            acc(0.88),
-            rgba(0.14, 0.24, 0.45, 1.0),
-        )?;
-        self.icon('\u{E189}', (x + 29.0, y + 64.0, x + 80.0, y + 115.0), 24.0)?;
-        self.text("Now playing", (x + 96.0, y + 62.0, x + 356.0, y + 82.0), 10.5, false, rgba(1.0, 1.0, 1.0, 0.67))?;
-        self.text("Midnight City", (x + 96.0, y + 81.0, x + 274.0, y + 108.0), 16.0, true, WHITE)?;
-        self.text("M83", (x + 96.0, y + 108.0, x + 274.0, y + 123.0), 11.0, false, rgba(1.0, 1.0, 1.0, 0.64))?;
-        self.round((x + 306.0, y + 77.0, x + 344.0, y + 115.0), 19.0, rgba(1.0, 1.0, 1.0, 0.16))?;
-        self.icon('\u{E769}', (x + 306.0, y + 77.0, x + 344.0, y + 115.0), 14.0)?;
-        self.round((x + 28.0, y + 132.0, x + 358.0, y + 135.0), 1.5, rgba(1.0, 1.0, 1.0, 0.2))?;
-        self.round((x + 28.0, y + 132.0, x + 187.0, y + 135.0), 1.5, acc(1.0))?;
-        self.round((x + 14.0, y + 168.0, x + 376.0, y + 209.0), 13.0, rgba(1.0, 1.0, 1.0, 0.09))?;
-        self.icon('\u{E767}', (x + 23.0, y + 171.0, x + 54.0, y + 207.0), 15.0)?;
-        self.round((x + 61.0, y + 187.0, x + 237.0, y + 191.0), 2.0, rgba(1.0, 1.0, 1.0, 0.22))?;
-        self.round((x + 61.0, y + 187.0, x + 166.0, y + 191.0), 2.0, rgba(1.0, 1.0, 1.0, 0.9))?;
-        self.icon('\u{E70F}', (x + 332.0, y + 171.0, x + 368.0, y + 207.0), 14.0)
-    }
+fn paint_route(v: &Preview<'_>, mode: GuideMode, rect: Rect, hover: bool) -> Result<()> {
+    let quick = mode == GuideMode::Quick;
+    let (l, t, r, b) = rect;
+    v.round(
+        rect,
+        18.0,
+        if quick {
+            acc(if hover { 0.28 } else { 0.18 })
+        } else {
+            rgba(1.0, 1.0, 1.0, if hover { 0.11 } else { 0.065 })
+        },
+    )?;
+    v.icon(if quick { '\u{E945}' } else { '\u{E8A5}' }, (l + 16.0, t + 16.0, l + 46.0, t + 46.0), 19.0)?;
+    v.text(
+        if quick { "Quick setup" } else { "Guided setup" },
+        (l + 57.0, t + 12.0, r - 20.0, t + 42.0),
+        18.0,
+        true,
+        WHITE,
+    )?;
+    v.text(
+        if quick { "About 1 minute" } else { "About 5 minutes" },
+        (l + 57.0, t + 42.0, r - 20.0, t + 64.0),
+        12.0,
+        false,
+        acc(1.0),
+    )?;
+    v.p.text_wrapped(
+        if quick {
+            "Layout, essential switches and assistant permissions."
+        } else {
+            "Everything in quick setup, hands-on practice, pet and voice models."
+        },
+        v.layout.rect((l + 18.0, t + 69.0, r - 18.0, b - 10.0)),
+        12.5 * v.layout.scale,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        rgba(1.0, 1.0, 1.0, 0.74),
+    )
 }
 
 fn paint_voice(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
@@ -778,7 +929,7 @@ fn paint_stage(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     let p = v.p;
     let l = v.layout;
     let stage = l.rect(SCENE);
-    let hero = guide.page == 0;
+    let hero = matches!(guide.current(), Page::Welcome | Page::Preset | Page::Practice);
     p.fill_round_gradient(stage, 26.0 * l.scale, rgba(0.065, 0.082, 0.15, 1.0), rgba(0.032, 0.037, 0.059, 1.0))?;
     v.glow((648.0, 321.0), (214.0, 142.0), acc(if hero { 0.29 } else { 0.15 }))?;
     v.glow((772.0, 399.0), (115.0, 99.0), rgba(0.16, 0.41, 0.69, 0.16))?;
@@ -810,9 +961,9 @@ fn paint_stage(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     backdrop?;
     p.stroke_round_rect(stage, 26.0 * l.scale, l.scale, rgba(0.7, 0.74, 1.0, 0.25))?;
     v.text(
-        match guide.page {
-            0 => "Workspace preview",
-            2 => "Voice preview",
+        match guide.current() {
+            Page::Welcome | Page::Preset | Page::Practice => "Live island preview",
+            Page::Voice => "Voice preview",
             _ => "On your desktop",
         },
         (453.0, 176.0, 701.0, 209.0),
@@ -823,9 +974,10 @@ fn paint_stage(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     v.round((744.0, 180.0, 865.0, 205.0), 12.5, rgba(1.0, 1.0, 1.0, 0.065))?;
     v.round((757.0, 190.0, 763.0, 196.0), 3.0, acc(0.98))?;
     v.text("Demo mode", (772.0, 180.0, 857.0, 205.0), 10.5, true, rgba(1.0, 1.0, 1.0, 0.75))?;
-    match guide.page {
-        0 => paint_workspace(v, guide),
-        2 => paint_voice(v, guide),
+    match guide.current() {
+        Page::Preset => paint_workspace(v, guide),
+        Page::Welcome | Page::Practice => guide.preview.paint(v),
+        Page::Voice => paint_voice(v, guide),
         _ => paint_ready(v, guide),
     }
 }
@@ -834,10 +986,10 @@ fn paint_workspace(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     let ms = guide.elapsed().as_millis();
     let t = eased(ms, 190, 590.0);
     let (dock, top) = guide.panels();
-    let width = 194.0 + 196.0 * t;
+    let width = 194.0 + 234.0 * t;
     let x = 659.0 - width / 2.0;
-    let y = 269.0 - 29.0 * t;
-    let height = 42.0 + 182.0 * t;
+    let y = 269.0 - 27.0 * t;
+    let height = 42.0 + 178.0 * t;
     v.glow((659.0, y + height * 0.7), (188.0, 80.0), rgba(0.01, 0.02, 0.07, 0.8))?;
     if top {
         let slide = 29.0 * eased(ms, 60, 460.0);
@@ -850,7 +1002,7 @@ fn paint_workspace(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     v.island(x, y, width, height)?;
     if t >= 0.36 {
         v.p.push_clip(v.layout.rect((x + 13.0, y + 7.0, x + width - 13.0, y + height - 10.0)));
-        let result = v.home(464.0, y);
+        let result = guide.preview.paint_music(v);
         v.p.pop_clip();
         result?;
     } else {
@@ -858,7 +1010,7 @@ fn paint_workspace(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
         v.center("21:08    18°", (x + 44.0, y, x + 181.0, y + 42.0), 14.0, WHITE)?;
     }
     if dock {
-        let y = 470.0 + 24.0 * (1.0 - eased(ms, 510, 460.0));
+        let y = 507.0 + 14.0 * (1.0 - eased(ms, 510, 460.0));
         v.round((533.0, y, 785.0, y + 40.0), 14.0, rgba(0.035, 0.047, 0.075, 1.0))?;
         for (i, (glyph, color)) in [
             ('\u{E8B7}', rgba(0.58, 0.42, 0.23, 1.0)),
@@ -877,7 +1029,7 @@ fn paint_workspace(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
             v.icon(glyph, r, 15.0)?;
         }
     }
-    v.center(guide.preset.label(), (453.0, 521.0, 865.0, 546.0), 11.5, rgba(1.0, 1.0, 1.0, 0.72))
+    Ok(())
 }
 
 fn paint_ready(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
@@ -1103,23 +1255,32 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
     v.round((48.0, 61.0, 80.0, 93.0), 9.0, acc(0.26))?;
     v.icon('\u{E7F4}', (48.0, 61.0, 80.0, 93.0), 16.0)?;
     v.text("Night Island", (91.0, 61.0, 300.0, 93.0), 17.0, true, WHITE)?;
-    for (i, label) in STEPS.iter().enumerate() {
-        let x = 408.0 + i as f32 * 121.0;
-        let color = if i == guide.page { WHITE } else { muted };
+    let steps = &guide.mode.pages()[1..];
+    let step_width = 484.0 / steps.len() as f32;
+    for (i, page) in steps.iter().enumerate() {
+        let label = page.label();
+        let x = 408.0 + i as f32 * step_width;
+        let selected = *page == guide.current();
+        let color = if selected { WHITE } else { muted };
         v.round(
-            (x, 61.0, x + 114.0, 94.0),
+            (x, 61.0, x + step_width - 7.0, 94.0),
             10.0,
-            if i == guide.page { acc(0.20) } else { rgba(1.0, 1.0, 1.0, 0.055) },
+            if selected { acc(0.20) } else { rgba(1.0, 1.0, 1.0, 0.055) },
         )?;
-        v.text(&format!("{:02}", i + 1), (x + 12.0, 61.0, x + 35.0, 94.0), 11.0, true, acc(1.0))?;
-        v.text(label, (x + 34.0, 61.0, x + 109.0, 94.0), 12.0, i == guide.page, color)?;
+        v.center(label, (x + 3.0, 61.0, x + step_width - 10.0, 94.0), 12.0, color)?;
     }
     v.round((48.0, 116.0, 892.0, 117.0), 0.5, rgba(1.0, 1.0, 1.0, 0.12))?;
-    let (title, summary) = match guide.page {
-        0 => ("Choose your layout", "Pick a preset to see how it looks. It applies when you finish."),
-        1 => ("Essentials", "Pick the features you want to use."),
-        2 => ("Make it respond to you", "Give the assistant a name and download the voice models you want."),
-        _ => ("Ready to use Island", "Check your choices and apply them. You can change them later in Settings."),
+    let (title, summary) = match guide.current() {
+        Page::Welcome => ("Make Island yours", "Start with the essentials or explore everything with a guide."),
+        Page::Preset => ("Choose your layout", "Pick a preset to see how it looks. It applies when you finish."),
+        Page::Essentials => ("Essentials", "Pick the features you want to use."),
+        Page::Practice => {
+            ("Try the real island", "These are the same controls you will use on your desktop. Try them here.")
+        }
+        Page::Voice => ("Make it respond to you", "Give the assistant a name and download the voice models you want."),
+        Page::Ready => {
+            ("Ready to use Island", "Check your choices and apply them. You can change them later in Settings.")
+        }
     };
     v.text(title, (48.0, 147.0, 414.0, 193.0), 28.0, true, WHITE)?;
     p.text_wrapped(
@@ -1172,6 +1333,10 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
     for (action, label, rect) in controls(guide) {
         let hover = ui.sw.hover == Some(SwHit::Guide(action));
         match action {
+            GuideAction::Mode(mode) => paint_route(&v, mode, rect, hover)?,
+            GuideAction::Lesson(lesson) => {
+                guide_button(p, l.rect(rect), l.scale, label, guide.preview.lesson == lesson, hover)?;
+            }
             GuideAction::Select(preset) => paint_preset(&v, guide, preset, rect, hover)?,
             GuideAction::ToggleQuick(feature) => {
                 let (glyph, _) = feature.visual();
@@ -1200,7 +1365,8 @@ mod tests {
         let mut guide = GuideUi::new(&Settings::default(), false);
         guide.move_by(-1, false);
         assert_eq!(guide.page, 0);
-        for step in 0..STEPS.len() {
+        guide.mode = GuideMode::Detailed;
+        for step in 0..guide.mode.pages().len() {
             for (size, dpi) in [((760.0, 550.0), 1.0), ((940.0, 680.0), 1.0), ((1880.0, 1360.0), 2.0)] {
                 let layout = Layout::new(size, dpi);
                 for (action, _, rect) in controls(&guide) {
@@ -1215,6 +1381,30 @@ mod tests {
         }
         assert!(guide.last_page());
         assert!(!guide.animating());
+    }
+
+    #[test]
+    fn switching_routes_keeps_choices_and_quick_setup_skips_voice() {
+        let mut guide = GuideUi::new(&Settings::default(), false);
+        guide.choose_mode(GuideMode::Quick, false);
+        guide.select(Preset::Desktop, false);
+        guide.toggle_quick(QuickSetting::Top);
+        guide.move_by(2, false);
+        assert!(guide.last_page());
+        assert!(!guide.voice_page());
+        guide.extend(false);
+        assert_eq!(guide.current(), Page::Practice);
+        assert_eq!(guide.preset, Preset::Desktop);
+        assert!(!guide.quick_value(QuickSetting::Top));
+        guide.move_by(1, false);
+        assert!(guide.voice_page());
+        guide.wake.set_text("Luna, Taburetka");
+        guide.change_route();
+        guide.choose_mode(GuideMode::Detailed, false);
+        assert_eq!(guide.wake.text(), "Luna, Taburetka");
+        assert!(!guide.quick_value(QuickSetting::Top));
+        guide.visible = false;
+        assert!(!guide.preview_ticking());
     }
 
     #[test]
@@ -1264,7 +1454,8 @@ mod tests {
     #[test]
     fn voice_setup_autoplays_and_installed_models_are_opt_in() {
         let mut guide = GuideUi::new(&Settings::default(), false);
-        guide.move_by(2, true);
+        guide.choose_mode(GuideMode::Detailed, false);
+        guide.move_by(3, true);
         assert!(guide.animating());
         guide.models = [ModelStatus::Installed, ModelStatus::Downloading(50)];
         assert!(!guide.can_download(VoiceModel::Local));

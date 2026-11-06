@@ -29,6 +29,7 @@ mod frame;
 mod guide;
 mod home;
 mod integrations;
+mod memory_tools;
 mod metrics;
 mod mixer;
 mod music_intro;
@@ -60,6 +61,7 @@ pub use self::{
     widgets::*, yandex::*,
 };
 pub use guide::*;
+pub use memory_tools::*;
 pub use pet_studio::*;
 
 pub type Rect = (f32, f32, f32, f32);

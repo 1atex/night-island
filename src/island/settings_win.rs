@@ -73,6 +73,16 @@ impl App {
         let animate = crate::ui::feedback::motion_allowed();
         match action {
             Back => guide.move_by(-1, animate),
+            Mode(mode) => guide.choose_mode(mode, animate),
+            ChangeRoute => guide.change_route(),
+            Extend => guide.extend(animate),
+            Lesson(lesson) => guide.lesson(lesson, animate),
+            Preview(action) => {
+                guide.preview_action(action);
+                if guide.preview_dragging() {
+                    unsafe { SetCapture(self.settings_win.unwrap_or(self.hwnd)) };
+                }
+            }
             Select(preset) => guide.select(preset, animate),
             ToggleQuick(feature) => guide.toggle_quick(feature),
             ToggleAssistant => guide.toggle_assistant(),
@@ -184,6 +194,7 @@ impl App {
     }
 
     pub(in crate::island) fn open_settings_at(&mut self, group: usize) {
+        self.close_memory_tools();
         self.open_settings_window();
         if self.settings_win.is_some() {
             self.ui.sw.group = group;
@@ -343,6 +354,8 @@ impl App {
         }
         if self.ui.feedback.active() || self.ui.sw.guide.as_ref().is_some_and(view::GuideUi::animating) {
             self.set_timer(Timer::SwAnim, 16);
+        } else if self.ui.sw.guide.as_ref().is_some_and(view::GuideUi::preview_ticking) {
+            self.set_timer(Timer::SwAnim, 100);
         } else if self.ui.sw.guide.as_ref().is_some_and(view::GuideUi::downloading) {
             self.set_timer(Timer::SwAnim, 180);
         }
@@ -350,6 +363,11 @@ impl App {
 
     pub(in crate::island) fn on_sw_move(&mut self, x: i32, y: i32, left_down: bool) {
         let size = self.sw_size();
+        if let Some(guide) = self.ui.sw.guide.as_mut().filter(|guide| guide.visible)
+            && guide.preview_move(size, self.dpi_scale, x as f32, y as f32, left_down)
+        {
+            self.render_settings_win();
+        }
         if left_down && self.ui.sw.drag.is_some() {
             return self.sw_drag(x);
         }
@@ -381,6 +399,9 @@ impl App {
         }
         if let Some(guide) = self.ui.sw.guide.as_mut().filter(|guide| guide.downloading()) {
             guide.poll_models();
+        }
+        if let Some(guide) = self.ui.sw.guide.as_mut() {
+            guide.preview_tick();
         }
         let now = view::Plate::of(self.ui.sw.hover);
         let mut moving = false;
@@ -431,11 +452,13 @@ impl App {
         self.sw_focus(None);
         match hit {
             Some(view::SwHit::Group(i)) => {
+                self.close_memory_tools();
                 self.ui.sw.group = i;
                 self.ui.sw.scroll = 0.0;
                 self.set_search("");
             }
             Some(view::SwHit::Guide(action)) => return self.on_guide_action(action),
+            Some(view::SwHit::Memory(action)) => return self.on_memory_action(action),
             Some(view::SwHit::AssistantPage(page)) => {
                 self.ui.sw.assistant_page = page;
                 self.ui.sw.scroll = 0.0;
@@ -965,9 +988,16 @@ impl App {
                 unsafe { SetCapture(self.settings_win.unwrap_or_default()) };
             }
             view::SetHit::Button => {
+                if id == view::Sid::MemoryManager {
+                    self.open_memory_tools();
+                }
                 if matches!(
                     id,
-                    view::Sid::DockImport | view::Sid::DockMonitor | view::Sid::DockAdd | view::Sid::DockTaskbar
+                    view::Sid::DockImport
+                        | view::Sid::DockImportTaskbar
+                        | view::Sid::DockMonitor
+                        | view::Sid::DockAdd
+                        | view::Sid::DockTaskbar
                 ) {
                     self.desktop_dock_setting(id);
                 }
@@ -1010,6 +1040,9 @@ impl App {
     }
 
     fn sync_search(&mut self) {
+        if !self.ui.int.search.is_empty() {
+            self.close_memory_tools();
+        }
         let text = self.ui.int.search.text();
         if text != self.ui.sw.search {
             self.ui.sw.search = text;
@@ -1024,6 +1057,11 @@ impl App {
             let _ = ReleaseCapture();
         }
         self.ui.sw.search_press = false;
+        if let Some(guide) = self.ui.sw.guide.as_mut()
+            && guide.preview_release()
+        {
+            self.render_settings_win();
+        }
         if self.ui.sw.drag.take().is_some() {
             self.finish_slider();
             self.render_settings_win();
@@ -1226,6 +1264,7 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_destroyed(&mut self) {
+        self.close_memory_tools();
         self.commit_wake();
         self.end_rebind();
         self.ui.int.search.set_text("");

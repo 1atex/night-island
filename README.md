@@ -22,6 +22,14 @@ A small floating pill at the top of the screen that grows into a panel on hover.
 - Themes, transparency and blur, free or docked position, global hotkeys
 - Russian and English interface
 
+### Guided setup and memory tools
+
+The setup wizard offers a quick route (layout, essential toggles and Assistant permissions) and a detailed route with hands-on practice and voice-model downloads. You can switch routes without losing your choices. The miniature uses the real player, notification card and pet renderer with isolated sample data: playback controls, seeking, volume and pet dragging do not affect desktop apps. Choices apply only when you finish. Reopen the wizard from **Settings → About**.
+
+On first activation, an untouched dock imports Windows taskbar shortcuts. **Import Windows taskbar pins** merges shortcuts into a configured dock without replacing its order; imported links are copied into Island's profile so unpinning them in Windows does not break them. This imports the taskbar's available `.lnk` files, not every packaged-app pin. The permanent add button is off by default; drag files to the dock or use its context menu. The button can be enabled in dock settings.
+
+**Settings → System → Memory manager**, also available from the dock menu, releases resident pages of selected minimized desktop apps without closing them. Active apps and Windows components are skipped. Persistent exclusions and an optional two-minute observation show which apps regain memory. System free-memory figures can also change due to unrelated activity; trimming does not fix leaks or guarantee a performance improvement. Monitoring stops after the observation period when the manager is closed.
+
 ### App volume and Windows notifications
 
 Left-click the **speaker on Home** to switch between system volume and the current player's application volume. Right-click it to unfold the application mixer; right-click again or press Escape to close it. The full panel is also available under **More → App mixer**. Paused applications remain available while they have an audio session. The mixer refreshes only while open.
@@ -129,6 +137,14 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 - Командная строка на `Alt+Space`: приложения, калькулятор, текстовые утилиты, QR-коды
 - Темы, прозрачность и размытие, свободное или закреплённое положение, глобальные горячие клавиши
 - Интерфейс на русском и английском
+
+### Знакомство и управление памятью
+
+В мастере есть быстрый маршрут — пресет, основные переключатели и разрешения ассистента — и подробный, с практикой и загрузкой голосовых моделей. Маршрут можно сменить без потери выбранных параметров. Миниатюра использует настоящий плеер, карточку уведомлений и отрисовку питомца с отдельными демонстрационными данными. Кнопки плеера, перемотка, громкость и перетаскивание питомца не влияют на приложения рабочего стола. Настройки применяются в конце. Повторный запуск — **Настройки → О программе**.
+
+При первом включении ненастроенный док импортирует ярлыки панели задач Windows. Кнопка **Импортировать ярлыки панели задач Windows** добавляет их и в уже настроенный док, сохраняя существующий порядок. Копии ссылок хранятся в профиле Island, поэтому открепление от панели задач Windows их не ломает. Импортируются доступные файлы `.lnk`; некоторые закреплённые приложения Microsoft Store могут отсутствовать. Постоянный «+» по умолчанию скрыт: добавляй приложения перетаскиванием или через ПКМ. Кнопку можно вернуть в настройках дока.
+
+**Настройки → Система → Управление памятью** также открывается из меню дока. Очистка освобождает резидентные страницы выбранных свёрнутых приложений, сохраняя сами процессы. Активные приложения и компоненты Windows пропускаются. Исключения запоминаются; наблюдение в течение двух минут показывает повторный рост расхода. Свободная память системы зависит и от других процессов: очистка не исправляет утечки и не гарантирует ускорение. Когда окно закрыто, после периода наблюдения опрос прекращается.
 
 ### Громкость приложений и уведомления Windows
 

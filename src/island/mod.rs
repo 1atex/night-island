@@ -84,6 +84,7 @@ mod hotkeys;
 mod input;
 mod liquid;
 mod lyric;
+mod memory_tools;
 mod motion;
 mod pet_studio;
 mod pill;

@@ -258,14 +258,58 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         let mut guide = crate::view::GuideUi::new(&ui.cfg, false);
         guide.select(crate::view::Preset::Desktop, false);
         ui.sw.guide = Some(guide);
-        for step in 0..4 {
-            if step == 1 {
-                ui.sw.guide.as_mut().unwrap().select_access(crate::view::Access::Full);
+        surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
+        save_surface(&surface, size, "guide-welcome")?;
+        for (mode, count, name) in
+            [(crate::view::GuideMode::Quick, 3, "quick"), (crate::view::GuideMode::Detailed, 5, "guided")]
+        {
+            ui.sw.guide.as_mut().unwrap().choose_mode(mode, false);
+            for step in 0..count {
+                if step == 1 {
+                    ui.sw.guide.as_mut().unwrap().select_access(crate::view::Access::Full);
+                }
+                surface
+                    .paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
+                save_surface(&surface, size, &format!("guide-{name}-{}", step + 1))?;
+                if name == "guided" && step == 2 {
+                    for lesson in [crate::view::PreviewLesson::Notification, crate::view::PreviewLesson::Pet] {
+                        ui.sw.guide.as_mut().unwrap().lesson(lesson, false);
+                        surface.paint(&gpu, |p| {
+                            crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui)
+                        })?;
+                        save_surface(&surface, size, &format!("guide-{lesson:?}"))?;
+                    }
+                }
+                ui.sw.guide.as_mut().unwrap().move_by(1, false);
             }
-            surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
-            save_surface(&surface, size, &format!("guide-{}", step + 1))?;
-            ui.sw.guide.as_mut().unwrap().move_by(1, false);
         }
+        ui.sw.guide = None;
+        ui.sw.group = crate::view::GROUPS.iter().position(|g| g.name == "System").unwrap();
+        ui.sw.memory.open = true;
+        ui.sw.memory.snapshot = Some(crate::platform::memory_tools::Snapshot {
+            total: 16 * 1024 * 1024 * 1024,
+            available: 7 * 1024 * 1024 * 1024,
+            available_before: Some(5 * 1024 * 1024 * 1024),
+            available_after: Some(8 * 1024 * 1024 * 1024),
+            trimmed: 14,
+            skipped: 2,
+            watching: true,
+            apps: (0..8)
+                .map(|i| crate::platform::memory_tools::Application {
+                    name: ["Browser", "Discord", "Steam", "Editor"][i % 4].into(),
+                    path: format!("application-{i}"),
+                    minimized: i % 2 == 0,
+                    working: (420 - i as u64 * 30) * 1024 * 1024,
+                    after: Some(90 * 1024 * 1024),
+                    growth: (330 - i as u64 * 30) * 1024 * 1024,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        });
+        ui.sw.memory.selected.insert("application-0".into());
+        surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
+        save_surface(&surface, size, "memory-manager")?;
         crate::ui::i18n::set_ru(false);
     }
     let parent = Window(unsafe {

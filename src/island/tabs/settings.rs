@@ -75,6 +75,13 @@ impl App {
         use view::Sid::*;
         if apply {
             match id {
+                MemoryTools if !self.settings.memory_tools => {
+                    self.close_memory_tools();
+                    crate::platform::memory_tools::send(
+                        self.hwnd,
+                        crate::platform::memory_tools::Command::Watch(false),
+                    );
+                }
                 Placement | Size | Edge => self.apply_layout(),
                 Style => self.apply_style(),
                 Tint => {
@@ -97,6 +104,7 @@ impl App {
                 | DockEconomy
                 | DockAnimations
                 | DockSeparator
+                | DockShowAdd
                 | DockLockPins
                 | DockIconSize
                 | DockZoom
