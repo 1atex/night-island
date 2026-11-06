@@ -1074,6 +1074,9 @@ impl Settings {
     }
 
     pub fn save(&self) {
+        if cfg!(test) {
+            return;
+        }
         let Some(path) = Self::path() else { return };
         let Some(dir) = path.parent() else { return };
         if fs::create_dir_all(dir).is_err() {
