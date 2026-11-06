@@ -215,7 +215,7 @@ impl App {
             self.pointer.seek_drag = false;
             self.ui.home.seek = None;
         }
-        if now.source != self.ui.media.source {
+        if now.source != self.ui.media.source && self.ui.tab != view::Tab::Yandex {
             self.pointer.vol_drag = false;
         }
         if now.title != self.ui.media.title

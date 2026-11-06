@@ -19,14 +19,22 @@ impl App {
         let animate = self.state == State::Expanded
             && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex)
             && self.settings.tab_anim != crate::data::settings::TabAnim::None;
+        let wave_volume_changed = next.config.volume != self.ui.yandex.state.config.volume;
         self.ui.yandex.accept(next, animate);
+        if wave_volume_changed
+            && self.ui.home.vol_track
+            && self.ui.media.source == yandex::SOURCE
+            && !self.pointer.vol_drag
+        {
+            self.ui.home.app_vol = f32::from(self.ui.yandex.state.config.volume) / 100.0;
+        }
         self.render_settings_win();
         if self.ui.yandex.colour_transition.is_some() {
             self.set_timer(Timer::UiAnim, self.frame_ms());
         }
         self.on_media();
         self.start_progress_timer();
-        if self.ui.tab == view::Tab::Yandex {
+        if self.ui.tab == view::Tab::Yandex || (wave_volume_changed && self.ui.tab == view::Tab::Home) {
             self.repaint_expanded();
         }
     }
@@ -46,6 +54,41 @@ impl App {
                 self.begin_seek(view::wave_fraction(self.pill_rect(true), self.scale, x as f32));
                 return;
             }
+            Some(Hit::Volume) => {
+                self.pointer.vol_drag = true;
+                unsafe {
+                    windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(self.hwnd);
+                }
+                self.drag_volume(x);
+                return;
+            }
+            Some(Hit::Library) => {
+                self.ui.yandex.show_library = !self.ui.yandex.show_library;
+                self.ui.yandex.hover = None;
+                self.repaint_expanded();
+                if !self.ui.yandex.show_library {
+                    return;
+                }
+                Command::Library(0)
+            }
+            Some(Hit::LibraryPage(dir)) => {
+                let Some(library) = &self.ui.yandex.state.library else { return };
+                Command::Library(library.page.saturating_add_signed(dir as isize))
+            }
+            Some(Hit::PlayLiked(index)) => {
+                let Some(track) = self.ui.yandex.state.library.as_ref().and_then(|page| page.tracks.get(index)) else {
+                    return;
+                };
+                if self.ui.yandex.state.current_id.as_ref() == Some(&track.id) {
+                    Command::Toggle
+                } else {
+                    Command::PlayLiked(track.id.clone())
+                }
+            }
+            Some(Hit::Rate(rating)) => {
+                let Some(id) = self.ui.yandex.state.current_id.clone() else { return };
+                Command::Rate(id, rating)
+            }
             Some(Hit::Connect) => Command::Connect,
             Some(Hit::Cancel) => Command::Cancel,
             Some(Hit::Disconnect) => Command::Disconnect,
@@ -53,6 +96,9 @@ impl App {
             Some(Hit::Previous) => Command::Previous,
             Some(Hit::Next) => Command::Next,
             Some(Hit::Stop) => Command::Stop,
+            Some(Hit::Retry) if self.ui.yandex.show_library => {
+                Command::Library(self.ui.yandex.state.library.as_ref().map_or(0, |page| page.page))
+            }
             Some(Hit::Retry) => Command::Retry,
             Some(Hit::Autoplay) => Command::Autoplay(!self.ui.yandex.state.config.autoplay),
             Some(Hit::Filter(index, dir)) => {
@@ -106,7 +152,8 @@ mod tests {
         let mut ui = view::UiState::new();
         ui.tab = view::Tab::Yandex;
         ui.cfg.header_tabs = vec!["My Wave".into(), "Weather".into(), "App mixer".into()];
-        use crate::services::yandex::Group;
+        use crate::services::yandex::{Group, LibraryPage, Rating, Track};
+        crate::ui::i18n::set_ru(true);
         use crate::ui::gfx::rgba;
         let groups = vec![
             Group {
@@ -138,6 +185,29 @@ mod tests {
                 ui.yandex.state.account = "Музыка для тебя".into();
                 ui.yandex.state.groups = groups.clone();
                 ui.yandex.state.active = true;
+                ui.yandex.state.current_id = Some("1".into());
+                ui.yandex.state.rating = Rating::Like;
+                ui.yandex.state.config.volume = 37;
+                ui.yandex.show_library = i == 3;
+                if ui.yandex.show_library {
+                    ui.yandex.state.library = Some(LibraryPage {
+                        page: 0,
+                        total: 12,
+                        tracks: ["Ночной город", "Маяк", "Тёплый вечер", "Дорога домой"]
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, title)| Track {
+                                id: (i + 1).to_string(),
+                                title: title.into(),
+                                artist: "Любимый исполнитель".into(),
+                                cover: String::new(),
+                                batch: String::new(),
+                                session: String::new(),
+                                palette: Default::default(),
+                            })
+                            .collect(),
+                    });
+                }
                 ui.yandex.state.config.selection.insert("moodEnergy".into(), "settingMoodEnergy:calm".into());
                 let rgb = if i < 2 { (238, 108, 48) } else { (50, 156, 230) };
                 ui.yandex.state.palette = crate::services::yandex::palette::Palette {

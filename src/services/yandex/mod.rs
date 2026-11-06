@@ -6,14 +6,17 @@ use crate::platform::media::{self, Media};
 use crate::services::integrations;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
+pub const LIBRARY_PAGE: usize = 4;
+
+pub const SOURCE: &str = "Night Island · Yandex Music";
 pub const WM_YANDEX: u32 = WM_APP + 58;
 static SENDER: OnceLock<mpsc::SyncSender<Command>> = OnceLock::new();
 static STATE: Mutex<Option<Snapshot>> = Mutex::new(None);
@@ -39,13 +42,47 @@ pub struct Snapshot {
     pub active: bool,
     pub media: Media,
     pub palette: palette::Palette,
+    pub current_id: Option<String>,
+    pub rating: Rating,
+    pub library: Option<LibraryPage>,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Rating {
+    #[default]
+    None,
+    Like,
+    Dislike,
+}
+
+#[derive(Clone)]
+pub struct LibraryPage {
+    pub page: usize,
+    pub total: usize,
+    pub tracks: Vec<Track>,
+}
+
+struct LibraryPlayback {
+    ids: Arc<Vec<String>>,
+    next: usize,
+}
+
+fn track_key(id: &str) -> &str {
+    id.split_once(':').map_or(id, |(track, _)| track)
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub selection: BTreeMap<String, String>,
     pub autoplay: bool,
+    pub volume: u8,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { selection: BTreeMap::new(), autoplay: false, volume: 100 }
+    }
 }
 
 impl Config {
@@ -109,6 +146,11 @@ pub enum Command {
     Previous,
     Stop,
     Seek(f32),
+    Volume(u8),
+    Ratings,
+    Rate(String, Rating),
+    Library(usize),
+    PlayLiked(String),
     Select(String, Option<String>),
     Autoplay(bool),
     Ended(u64),
@@ -119,6 +161,18 @@ pub enum Command {
 pub fn snapshot() -> Snapshot {
     STATE.lock().ok().and_then(|s| s.clone()).unwrap_or_default()
 }
+pub fn volume() -> Option<f32> {
+    let state = STATE.lock().ok()?;
+    Some(f32::from(state.as_ref()?.config.volume) / 100.0)
+}
+
+pub fn set_volume(level: f32) -> bool {
+    level.is_finite()
+        && SENDER
+            .get()
+            .is_some_and(|tx| tx.try_send(Command::Volume((level.clamp(0.0, 1.0) * 100.0).round() as u8)).is_ok())
+}
+
 pub fn media() -> Option<Media> {
     STATE.lock().ok().and_then(|s| s.as_ref().filter(|s| s.active).map(|s| s.media.clone()))
 }
@@ -188,6 +242,11 @@ struct Worker {
     tx: mpsc::SyncSender<Command>,
     api: api::Api,
     state: Snapshot,
+    account_id: Option<u64>,
+    likes: Option<Arc<Vec<String>>>,
+    dislikes: HashSet<String>,
+    dislikes_loaded: bool,
+    library_playback: Option<LibraryPlayback>,
     login: Option<Login>,
     player: Option<player::Player>,
     current: Option<Track>,
@@ -211,6 +270,11 @@ impl Worker {
             tx,
             api: api::Api::default(),
             state: Snapshot::default(),
+            account_id: None,
+            likes: None,
+            dislikes: HashSet::new(),
+            dislikes_loaded: false,
+            library_playback: None,
             login: None,
             player: None,
             current: None,
@@ -234,6 +298,7 @@ impl Worker {
             .filter(|b| b.len() < 16_384)
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
+        self.state.config.volume = self.state.config.volume.min(100);
         self.api.token = integrations::load_secret("yandex-music").unwrap_or_default();
         self.state.has_token = !self.api.token.is_empty();
         if !self.api.token.is_empty() {
@@ -255,18 +320,31 @@ impl Worker {
     }
 
     fn load_account(&mut self) -> api::Result<()> {
-        self.state.account = match self.api.account() {
+        let (account, uid) = match self.api.account() {
             Ok(account) => account,
             Err(error) => {
                 if error == api::SIGN_IN {
                     self.api.token.clear();
                     self.state.account.clear();
                     self.state.has_token = false;
+                    self.account_id = None;
+                    self.likes = None;
+                    self.dislikes.clear();
+                    self.dislikes_loaded = false;
+                    self.state.library = None;
                     integrations::delete_secret("yandex-music");
                 }
                 return Err(error);
             }
         };
+        if self.account_id != Some(uid) {
+            self.likes = None;
+            self.dislikes.clear();
+            self.dislikes_loaded = false;
+            self.state.library = None;
+        }
+        self.state.account = account;
+        self.account_id = Some(uid);
         self.state.has_token = true;
         match self.api.groups() {
             Ok(groups) if !groups.is_empty() => {
@@ -284,7 +362,12 @@ impl Worker {
 
     fn publish(&self) {
         if let Ok(mut s) = STATE.lock() {
-            *s = Some(self.state.clone());
+            let mut state = self.state.clone();
+            if let Some(track) = &self.current {
+                state.current_id = Some(track.id.clone());
+                state.rating = self.rating(&track.id);
+            }
+            *s = Some(state);
         }
         unsafe {
             let _ = PostMessageW(Some(HWND(self.hwnd as *mut _)), WM_YANDEX, WPARAM(0), LPARAM(0));
@@ -360,6 +443,10 @@ impl Worker {
                 self.login = None;
                 integrations::delete_secret("yandex-music");
                 self.api.token.clear();
+                self.account_id = None;
+                self.likes = None;
+                self.dislikes.clear();
+                self.dislikes_loaded = false;
                 self.state = Snapshot { config: self.state.config.clone(), ..Default::default() };
                 self.state.config.autoplay = false;
                 self.save_config();
@@ -398,6 +485,53 @@ impl Worker {
                 }
             }
             Command::Stop => self.stop(),
+            Command::Ratings => {
+                if let Some(uid) = self.account_id {
+                    if self.likes.is_none() {
+                        self.likes = self.api.library_ids(uid, false).ok().map(Arc::new);
+                    }
+                    if !self.dislikes_loaded
+                        && let Ok(ids) = self.api.library_ids(uid, true)
+                    {
+                        self.dislikes = ids.into_iter().map(|id| track_key(&id).to_owned()).collect();
+                        self.dislikes_loaded = true;
+                    }
+                }
+            }
+            Command::Library(page) => {
+                let uid = self.account_id.ok_or(api::SIGN_IN)?;
+                self.state.error.clear();
+                self.state.busy = true;
+                self.publish();
+                if page == 0 || self.likes.is_none() {
+                    self.likes = Some(Arc::new(self.api.library_ids(uid, false)?));
+                }
+                self.load_library(page)?;
+                self.state.busy = false;
+            }
+            Command::PlayLiked(id) => self.play_liked(&id)?,
+            Command::Rate(id, rating) => {
+                if let Some(track) = self.current.as_ref().filter(|track| track.id == id).cloned() {
+                    let kind = match (rating, self.rating(&id)) {
+                        (Rating::Like, Rating::Like) => "unlike",
+                        (Rating::Dislike, Rating::Dislike) => "undislike",
+                        (Rating::Like, _) => "like",
+                        (Rating::Dislike, _) => "dislike",
+                        _ => return Ok(()),
+                    };
+                    self.rate(track, kind)?;
+                }
+            }
+            Command::Volume(volume) => {
+                let volume = volume.min(100);
+                if self.state.config.volume != volume {
+                    if let Some(player) = &self.player {
+                        player.set_volume(volume).map_err(|_| "Could not change My Wave volume")?;
+                    }
+                    self.state.config.volume = volume;
+                    self.save_config();
+                }
+            }
             Command::Seek(seconds) => {
                 self.sample();
                 if let Some(p) = &self.player {
@@ -434,7 +568,7 @@ impl Worker {
                     self.state.config.selection.remove(&key);
                 }
                 self.save_config();
-                if self.state.active {
+                if self.state.active && self.library_playback.is_none() {
                     self.replace_pending = true;
                     self.queue.clear();
                 }
@@ -464,7 +598,7 @@ impl Worker {
         }
         match action {
             VoiceAction::Start => {
-                if self.station.is_some() || self.player.is_none() {
+                if self.station.is_some() || self.library_playback.is_some() || self.player.is_none() {
                     let old = self.station.take();
                     if let Err(error) = self.new_wave(false) {
                         self.station = old;
@@ -534,11 +668,8 @@ impl Worker {
                 return Ok("My Wave filters cleared".into());
             }
             VoiceAction::Rate(kind) => {
-                let track = self.current.as_ref().ok_or("No My Wave track is playing")?;
-                self.api.rate(track, kind)?;
-                if kind == "dislike" {
-                    self.advance(false)?;
-                }
+                let track = self.current.clone().ok_or("No My Wave track is playing")?;
+                self.rate(track, kind)?;
                 return Ok(format!("Saved track feedback: {kind}"));
             }
         }
@@ -547,6 +678,83 @@ impl Worker {
             || "My Wave is stopped".into(),
             |t| format!("My Wave {}: {} — {}", if playing { "playing" } else { "paused" }, t.artist, t.title),
         ))
+    }
+
+    fn rating(&self, id: &str) -> Rating {
+        let key = track_key(id);
+        if self.dislikes.contains(key) {
+            Rating::Dislike
+        } else if self.likes.as_ref().is_some_and(|ids| ids.iter().any(|id| track_key(id) == key)) {
+            Rating::Like
+        } else {
+            Rating::None
+        }
+    }
+
+    fn rate(&mut self, track: Track, kind: &str) -> api::Result<()> {
+        let uid = self.account_id.ok_or(api::SIGN_IN)?;
+        let key = track_key(&track.id);
+        self.state.error.clear();
+        self.state.busy = true;
+        self.publish();
+        self.api.rate(uid, &track, kind)?;
+        if matches!(kind, "like" | "unlike" | "dislike") {
+            if let Some(ids) = &mut self.likes {
+                let ids = Arc::make_mut(ids);
+                ids.retain(|id| track_key(id) != key);
+                if kind == "like" {
+                    ids.insert(0, track.id.clone());
+                }
+            } else {
+                self.likes = self.api.library_ids(uid, false).ok().map(Arc::new);
+            }
+        }
+        match kind {
+            "dislike" => {
+                self.dislikes.insert(key.to_owned());
+            }
+            "like" | "undislike" => {
+                self.dislikes.remove(key);
+            }
+            _ => {}
+        }
+        let page = self.state.library.as_ref().map(|library| library.page);
+        self.state.busy = false;
+        if kind == "dislike" {
+            self.advance(false)?;
+        }
+        if let Some(page) = page {
+            self.load_library(page)?;
+        }
+        Ok(())
+    }
+
+    fn load_library(&mut self, page: usize) -> api::Result<()> {
+        let ids = self.likes.as_ref().ok_or("Could not load liked tracks")?;
+        let total = ids.len();
+        let page = page.min(total.saturating_sub(1) / LIBRARY_PAGE);
+        let start = page * LIBRARY_PAGE;
+        let end = (start + LIBRARY_PAGE).min(total);
+        let tracks = self.api.library_tracks(&ids[start..end])?;
+        self.state.library = Some(LibraryPage { page, total, tracks });
+        Ok(())
+    }
+
+    fn play_liked(&mut self, id: &str) -> api::Result<()> {
+        let Some(page) = &self.state.library else { return Ok(()) };
+        let Some(index) = page.tracks.iter().position(|t| t.id == id) else { return Ok(()) };
+        let ids = self.likes.clone().ok_or("Could not load liked tracks")?;
+        let track = page.tracks[index].clone();
+        let queue = page.tracks[index + 1..].iter().cloned().collect();
+        let next = ((page.page + 1) * LIBRARY_PAGE).min(ids.len());
+        self.finish(false);
+        self.play_track(track)?;
+        self.history.clear();
+        self.queue = queue;
+        self.station = None;
+        self.session.clear();
+        self.library_playback = Some(LibraryPlayback { ids, next });
+        Ok(())
     }
 
     fn stop(&mut self) {
@@ -558,6 +766,7 @@ impl Worker {
         self.recent.clear();
         self.session.clear();
         self.station = None;
+        self.library_playback = None;
         self.state.active = false;
         self.state.media = Media::default();
         self.state.palette = Default::default();
@@ -593,6 +802,7 @@ impl Worker {
             track.session = session.clone();
         }
         self.session = session;
+        self.library_playback = None;
         self.queue = tracks.into();
         self.replace_pending = false;
         self.api.feedback(
@@ -692,7 +902,18 @@ impl Worker {
         self.state.busy = true;
         self.state.media.playing = false;
         self.publish();
-        if self.queue.is_empty() {
+        if let Some(library) = &mut self.library_playback {
+            while self.queue.is_empty() && library.next < library.ids.len() {
+                let end = (library.next + LIBRARY_PAGE).min(library.ids.len());
+                self.queue = self.api.library_tracks(&library.ids[library.next..end])?.into();
+                library.next = end;
+            }
+            if self.queue.is_empty() {
+                self.stop();
+                self.state.busy = false;
+                return Ok(());
+            }
+        } else if self.queue.is_empty() {
             self.refill()?;
         }
         let track = self.queue.pop_front().ok_or("My Wave returned no tracks. Try different settings.")?;
@@ -704,7 +925,7 @@ impl Worker {
         self.publish();
         let url = self.api.stream(&track.id)?;
         self.generation += 1;
-        let player = player::Player::open(&url, &track, self.generation, self.tx.clone())
+        let player = player::Player::open(&url, &track, self.generation, self.tx.clone(), self.state.config.volume)
             .map_err(|_| "Could not start the Windows audio player")?;
         self.player = Some(player);
         self.started = false;
@@ -717,11 +938,14 @@ impl Worker {
             accent: track.palette.accent.or(track.palette.average),
             title: track.title.clone(),
             artist: track.artist.clone(),
-            source: "Night Island · Yandex Music".into(),
+            source: SOURCE.into(),
             players: 1,
             ..Default::default()
         };
         self.current = Some(track.clone());
+        if self.likes.is_none() || !self.dislikes_loaded {
+            let _ = self.tx.try_send(Command::Ratings);
+        }
         self.state.busy = false;
         self.state.error.clear();
         self.publish();
@@ -836,6 +1060,12 @@ mod tests {
         assert_eq!(c.seeds(), ["user:onyourwave"]);
         c.selection.insert("language".into(), "settingLanguage:russian".into());
         assert_eq!(c.seeds(), ["settingLanguage:russian"]);
+        assert_eq!(serde_json::from_str::<Config>(r#"{"autoplay":true}"#).unwrap().volume, 100);
+        for volume in [0, 37, 100] {
+            c.volume = volume;
+            let saved = serde_json::to_string(&c).unwrap();
+            assert_eq!(serde_json::from_str::<Config>(&saved).unwrap().volume, volume);
+        }
     }
     #[test]
     fn stale_player_events_do_not_advance_or_stop_new_track() {

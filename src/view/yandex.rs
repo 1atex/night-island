@@ -1,4 +1,4 @@
-use crate::services::yandex::Snapshot;
+use crate::services::yandex::{LIBRARY_PAGE, Rating, Snapshot};
 use crate::view::*;
 
 #[derive(Default)]
@@ -6,6 +6,9 @@ pub struct YandexUi {
     pub state: Snapshot,
     pub hover: Option<YandexHit>,
     pub copied: bool,
+    pub show_library: bool,
+    pub ratings_hidden: bool,
+    pub volume_preview: Option<u8>,
     pub colour_transition: Option<(WaveColours, std::time::Instant)>,
 }
 
@@ -23,6 +26,13 @@ impl YandexUi {
         let from = self.colours();
         if next.code != self.state.code {
             self.copied = false;
+        }
+        if next.account.is_empty() {
+            self.show_library = false;
+        }
+        if self.volume_preview == Some(next.config.volume) || (!next.error.is_empty() && next.error != self.state.error)
+        {
+            self.volume_preview = None;
         }
         self.state = next;
         self.colour_transition = None;
@@ -57,6 +67,11 @@ pub enum YandexHit {
     Filter(usize, i32),
     Home,
     Seek,
+    Volume,
+    Library,
+    LibraryPage(i32),
+    PlayLiked(usize),
+    Rate(Rating),
 }
 
 pub fn wave_seek_rect(pill: Rect, s: f32) -> Rect {
@@ -66,6 +81,11 @@ pub fn wave_seek_rect(pill: Rect, s: f32) -> Rect {
 pub fn wave_fraction(pill: Rect, s: f32, x: f32) -> f32 {
     let r = wave_seek_rect(pill, s);
     ((x - r.0) / (r.2 - r.0).max(1.0)).clamp(0.0, 1.0)
+}
+
+pub fn wave_volume_level(pill: Rect, s: f32, x: f32) -> u8 {
+    let left = pill.0 + 30.0 * s;
+    (((x - left) / (150.0 * s)).clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
 pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHit)> {
@@ -90,9 +110,16 @@ pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHi
             (r(24.0, 244.0, 65.0, 280.0), YandexHit::Previous),
             (r(73.0, 244.0, 171.0, 280.0), YandexHit::Toggle),
             (r(179.0, 244.0, 220.0, 280.0), YandexHit::Next),
-            (r(24.0, 310.0, 320.0, 344.0), YandexHit::Autoplay),
+            (r(24.0, 322.0, 220.0, 346.0), YandexHit::Volume),
             (r(width - 106.0, 62.0, width - 24.0, 90.0), YandexHit::Disconnect),
         ];
+        if !ui.ratings_hidden {
+            controls.push((r(182.0, 62.0, 310.0, 90.0), YandexHit::Library));
+            if ui.state.current_id.is_some() {
+                controls.push((r(100.0, 144.0, 152.0, 176.0), YandexHit::Rate(Rating::Like)));
+                controls.push((r(156.0, 144.0, 208.0, 176.0), YandexHit::Rate(Rating::Dislike)));
+            }
+        }
         if ui.state.active {
             controls.push((r(width - 132.0, 310.0, width - 24.0, 344.0), YandexHit::Stop));
             controls.push((r(width - 238.0, 62.0, width - 118.0, 90.0), YandexHit::Home));
@@ -101,10 +128,26 @@ pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHi
         if !ui.state.error.is_empty() {
             controls.push((r(width - 116.0, 350.0, width - 24.0, 376.0), YandexHit::Retry));
         }
-        for (i, _) in ui.state.groups.iter().take(4).enumerate() {
-            let top = 107.0 + i as f32 * 47.0;
-            controls.push((r(244.0, top, width - 57.0, top + 40.0), YandexHit::Filter(i, -1)));
-            controls.push((r(width - 55.0, top, width - 24.0, top + 40.0), YandexHit::Filter(i, 1)));
+        if ui.show_library && !ui.ratings_hidden {
+            if let Some(library) = &ui.state.library {
+                for (i, _) in library.tracks.iter().enumerate() {
+                    let top = 105.0 + i as f32 * 47.0;
+                    controls.push((r(244.0, top, width - 24.0, top + 42.0), YandexHit::PlayLiked(i)));
+                }
+                if library.page > 0 {
+                    controls.push((r(244.0, 310.0, 278.0, 344.0), YandexHit::LibraryPage(-1)));
+                }
+                if (library.page + 1) * LIBRARY_PAGE < library.total {
+                    controls.push((r(369.0, 310.0, 403.0, 344.0), YandexHit::LibraryPage(1)));
+                }
+            }
+        } else {
+            controls.push((r(244.0, 310.0, width - 144.0, 344.0), YandexHit::Autoplay));
+            for (i, _) in ui.state.groups.iter().take(4).enumerate() {
+                let top = 107.0 + i as f32 * 47.0;
+                controls.push((r(244.0, top, width - 57.0, top + 40.0), YandexHit::Filter(i, -1)));
+                controls.push((r(width - 55.0, top, width - 24.0, top + 40.0), YandexHit::Filter(i, 1)));
+            }
         }
         controls
     }
@@ -115,6 +158,19 @@ pub fn hit_yandex(pill: Rect, scale: f32, ui: &YandexUi, x: f32, y: f32) -> Opti
         return None;
     }
     yandex_controls(pill, scale, ui).into_iter().find(|(r, _)| inside(*r, x, y)).map(|(_, h)| h)
+}
+
+pub fn yandex_tip(pill: Rect, scale: f32, ui: &YandexUi, x: f32, y: f32) -> Option<(String, Rect)> {
+    let (rect, hit) = yandex_controls(pill, scale, ui).into_iter().find(|(rect, _)| inside(*rect, x, y))?;
+    let label = match hit {
+        YandexHit::Rate(Rating::Like) if ui.state.rating == Rating::Like => "Remove like",
+        YandexHit::Rate(Rating::Like) => "Like",
+        YandexHit::Rate(Rating::Dislike) if ui.state.rating == Rating::Dislike => "Remove dislike",
+        YandexHit::Rate(Rating::Dislike) => "Dislike and skip",
+        YandexHit::Volume => "Yandex Music volume",
+        _ => return None,
+    };
+    Some((label.into(), rect))
 }
 
 pub fn paint_yandex(
@@ -148,8 +204,8 @@ pub fn paint_yandex(
         )
     };
     p.text(
-        "My Wave",
-        r(24.0, 62.0, width - 130.0, 90.0),
+        if ui.show_library && !ui.ratings_hidden { "Liked tracks" } else { "My Wave" },
+        r(24.0, 62.0, 179.0, 90.0),
         20.0 * s,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -201,7 +257,9 @@ pub fn paint_yandex(
             p.glyph('\u{E189}', cover, 27.0 * s, acc(1.0))?;
         }
         text("Yandex Music", r(103.0, 119.0, 208.0, 142.0), 11.5, 0.65)?;
-        text(&ui.state.account, r(103.0, 145.0, 208.0, 169.0), 12.0, 0.9)?;
+        if ui.ratings_hidden || ui.state.current_id.is_none() {
+            text(&ui.state.account, r(103.0, 145.0, 208.0, 169.0), 12.0, 0.9)?;
+        }
         text(
             if ui.state.media.title.is_empty() { "Made for you" } else { &ui.state.media.title },
             r(36.0, 181.0, 208.0, 207.0),
@@ -214,7 +272,27 @@ pub fn paint_yandex(
             11.5,
             0.65,
         )?;
-        if ui.state.groups.is_empty() {
+        if ui.show_library && !ui.ratings_hidden {
+            if ui.state.busy && ui.state.library.is_none() {
+                text("Loading liked tracks…", r(244.0, 112.0, width - 24.0, 146.0), 13.0, 0.8)?;
+            } else if let Some(library) = &ui.state.library {
+                if library.tracks.is_empty() {
+                    let label =
+                        if library.total == 0 { "No liked tracks yet" } else { "No available tracks on this page" };
+                    text(label, r(244.0, 112.0, width - 24.0, 146.0), 13.0, 0.8)?;
+                }
+                if library.total > 0 {
+                    p.text(
+                        &format!("{} / {}", library.page + 1, library.total.div_ceil(LIBRARY_PAGE)),
+                        r(278.0, 310.0, 369.0, 344.0),
+                        12.0 * s,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_TEXT_ALIGNMENT_CENTER,
+                        wave_colour(colours.text, 0.75),
+                    )?;
+                }
+            }
+        } else if ui.state.groups.is_empty() {
             p.text_wrapped_trimmed(
                 &crate::ui::i18n::tr("Wave settings are unavailable. Press Try again to reload."),
                 r(244.0, 124.0, width - 24.0, 220.0),
@@ -225,6 +303,19 @@ pub fn paint_yandex(
         }
     }
     for (rect, hit) in yandex_controls(pill, s, ui) {
+        if hit == YandexHit::Volume {
+            let level = ui.volume_preview.unwrap_or(ui.state.config.volume);
+            text("Music volume", r(30.0, 307.0, 218.0, 322.0), 11.0, 0.7)?;
+            let (left, right, y) = (x + 30.0 * s, x + 180.0 * s, y + 333.0 * s);
+            let thumb = left + (right - left) * f32::from(level) / 100.0;
+            p.fill_round_rect((left, y - 2.0 * s, right, y + 2.0 * s), 2.0 * s, rgba(1.0, 1.0, 1.0, 0.2))?;
+            if thumb > left {
+                p.fill_round_rect((left, y - 2.0 * s, thumb, y + 2.0 * s), 2.0 * s, wave_colour(colours.accent, 1.0))?;
+            }
+            p.fill_ellipse(thumb, y, 4.5 * s, 4.5 * s, wave_colour(colours.text, 1.0))?;
+            text(&format!("{level}%"), r(187.0, 322.0, 224.0, 345.0), 11.0, 0.9)?;
+            continue;
+        }
         if hit == YandexHit::Seek {
             let (pos, len) = progress.unwrap_or_default();
             let pos = seek.map_or(pos, |f| f * len);
@@ -254,7 +345,14 @@ pub fn paint_yandex(
             continue;
         }
         let hover = !ui.state.busy && ui.hover == Some(hit);
-        let primary = matches!(hit, YandexHit::Connect | YandexHit::Toggle | YandexHit::Browser);
+        let selected = match hit {
+            YandexHit::Rate(rating) => ui.state.rating == rating,
+            YandexHit::PlayLiked(i) => {
+                ui.state.library.as_ref().is_some_and(|page| ui.state.current_id.as_ref() == Some(&page.tracks[i].id))
+            }
+            _ => false,
+        };
+        let primary = selected || matches!(hit, YandexHit::Connect | YandexHit::Toggle | YandexHit::Browser);
         p.fill_round_rect(
             rect,
             11.0 * s,
@@ -266,7 +364,44 @@ pub fn paint_yandex(
         )?;
         let label = match hit {
             YandexHit::Home => "Open main player",
-            YandexHit::Seek => unreachable!(),
+            YandexHit::Seek | YandexHit::Volume => unreachable!(),
+            YandexHit::Library => {
+                if ui.show_library {
+                    "My Wave"
+                } else {
+                    "Liked tracks"
+                }
+            }
+            YandexHit::LibraryPage(dir) => {
+                p.glyph(if dir < 0 { '\u{E76B}' } else { '\u{E76C}' }, rect, 11.0 * s, WHITE)?;
+                continue;
+            }
+            YandexHit::Rate(rating) => {
+                p.glyph(if rating == Rating::Like { '\u{E8E1}' } else { '\u{E8E0}' }, rect, 15.0 * s, WHITE)?;
+                continue;
+            }
+            YandexHit::PlayLiked(i) => {
+                let track = &ui.state.library.as_ref().unwrap().tracks[i];
+                p.glyph(
+                    if selected && ui.state.media.playing { '\u{E769}' } else { '\u{E768}' },
+                    (rect.0 + 4.0 * s, rect.1, rect.0 + 38.0 * s, rect.3),
+                    13.0 * s,
+                    WHITE,
+                )?;
+                text(
+                    &track.title,
+                    (rect.0 + 40.0 * s, rect.1 + 3.0 * s, rect.2 - 10.0 * s, rect.1 + 23.0 * s),
+                    13.0,
+                    1.0,
+                )?;
+                text(
+                    &track.artist,
+                    (rect.0 + 40.0 * s, rect.1 + 22.0 * s, rect.2 - 10.0 * s, rect.3 - 3.0 * s),
+                    11.0,
+                    0.65,
+                )?;
+                continue;
+            }
             YandexHit::Connect => {
                 if ui.state.busy {
                     "Connecting…"
@@ -310,12 +445,7 @@ pub fn paint_yandex(
                     16.0 * s,
                     if ui.state.config.autoplay { acc(1.0) } else { WHITE },
                 )?;
-                text(
-                    "Start wave when Island starts",
-                    (rect.0 + 42.0 * s, rect.1, rect.2 - 8.0 * s, rect.3),
-                    11.5,
-                    0.8,
-                )?;
+                text("Start with Island", (rect.0 + 42.0 * s, rect.1, rect.2 - 8.0 * s, rect.3), 11.5, 0.8)?;
                 continue;
             }
             YandexHit::Previous | YandexHit::Next => {

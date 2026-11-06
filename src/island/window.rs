@@ -231,6 +231,12 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 a.finish_tile_press();
                 a.pointer.selecting = false;
                 a.pointer.reading = false;
+                if a.pointer.vol_drag && a.ui.tab == view::Tab::Yandex {
+                    a.drag_volume(point_from(lparam).0);
+                    unsafe {
+                        let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+                    }
+                }
                 a.pointer.vol_drag = false;
                 a.finish_note_drag();
                 a.mouse_up();
@@ -242,6 +248,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_CAPTURECHANGED => {
             with_app(|a| {
+                a.pointer.vol_drag = false;
                 if a.ui.pressed_action.take().is_some() {
                     a.repaint_expanded();
                 }

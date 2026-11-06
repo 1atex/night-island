@@ -107,6 +107,12 @@ impl App {
                 | DockTintSaturation
                 | DockTintBrightness => self.configure_desktop_dock(),
                 SystemNotifications => self.configure_system_notifications(),
+                WaveRatings => {
+                    self.ui.yandex.ratings_hidden = !self.settings.wave_ratings;
+                    if self.ui.yandex.ratings_hidden {
+                        self.ui.yandex.show_library = false;
+                    }
+                }
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
                 VpnPill => {

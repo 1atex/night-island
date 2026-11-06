@@ -140,6 +140,7 @@ impl App {
         app.store = Store::open();
         app.apply_character();
         app.ui.cfg = app.settings.clone();
+        app.ui.yandex.ratings_hidden = !app.settings.wave_ratings;
         app.ui.char_inset = if app.attached_character_on() { CHAR_INSET } else { 0.0 };
         app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
         if app.settings.hang() != Hang::Down {
