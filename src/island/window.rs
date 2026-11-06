@@ -132,7 +132,9 @@ fn show_header_menu(hwnd: HWND) {
             }
             Some(103) => {}
             Some(100) => {
-                if let Some(group) = view::tab_settings_group(a.ui.tab) {
+                if matches!(a.ui.tab, view::Tab::Chat | view::Tab::Ai) {
+                    a.open_ai_settings();
+                } else if let Some(group) = view::tab_settings_group(a.ui.tab) {
                     a.open_settings_at(group);
                 }
             }

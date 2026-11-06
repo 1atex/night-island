@@ -238,8 +238,24 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         ui.sw.group = crate::view::GROUPS.iter().position(|group| group.name == "Assistant").unwrap();
         let size = (940, 680);
         let surface = PopupSurface::new(size)?;
-        surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
-        save_surface(&surface, size, "master-assistant-settings")?;
+        use crate::view::AssistantPage;
+        crate::ui::i18n::set_ru(true);
+        ui.cfg.ai.voice_separate = true;
+        ui.cfg.assistant.natural_voice = true;
+        ui.cfg.assistant.tts_provider = crate::services::assistant::TtsProvider::Fish;
+        for (page, name) in [
+            (AssistantPage::Overview, "assistant-overview"),
+            (AssistantPage::Model, "assistant-model"),
+            (AssistantPage::Recognition, "assistant-recognition"),
+            (AssistantPage::Voice, "assistant-voice"),
+            (AssistantPage::Permissions, "assistant-permissions"),
+            (AssistantPage::Advanced, "assistant-advanced"),
+        ] {
+            ui.sw.assistant_page = page;
+            surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
+            save_surface(&surface, size, name)?;
+        }
+        crate::ui::i18n::set_ru(false);
     }
     let parent = Window(unsafe {
         CreateWindowExW(

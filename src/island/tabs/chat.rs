@@ -26,11 +26,9 @@ impl App {
     }
 
     pub(in crate::island) fn open_ai_settings(&mut self) {
-        self.open_settings_window();
-        if let Some(group) = view::GROUPS.iter().position(|g| g.name == "AI") {
-            self.ui.sw.group = group;
-            self.ui.sw.scroll = 0.0;
-            self.render_settings_win();
+        if let Some(group) = view::tab_settings_group(view::Tab::Chat) {
+            self.ui.sw.assistant_page = view::AssistantPage::Model;
+            self.open_settings_at(group);
         }
     }
 

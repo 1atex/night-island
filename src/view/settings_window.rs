@@ -23,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 17] = [
+const ISLAND: [(Sid, &str, Kind); 15] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -35,8 +35,6 @@ const ISLAND: [(Sid, &str, Kind); 17] = [
     (Sid::Character, "Character", Kind::Cycle),
     (Sid::CharacterDetached, "Release the pet from the island", Kind::Toggle),
     (Sid::PetPerformance, "Pet animation quality", Kind::Cycle),
-    (Sid::PetVoice, "Pet reacts to voice assistant", Kind::Toggle),
-    (Sid::PetVoiceInput, "Talk to the detached pet", Kind::Toggle),
     (Sid::PetAutonomy, "Pet walks, rests and sleeps on its own", Kind::Toggle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
@@ -82,12 +80,10 @@ const PILL: [(Sid, &str, Kind); 20] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 22] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 19] = [
     (Sid::SystemNotifications, "Windows notifications from the island", Kind::Toggle),
     (Sid::NotificationTiles, "Notification preview size", Kind::Cycle),
     (Sid::NotificationOpenApp, "Click a notification to open its app", Kind::Toggle),
-    (Sid::AiNotificationCards, "Show AI answers as cards", Kind::Toggle),
-    (Sid::PetNotifications, "Show cards by the detached pet", Kind::Toggle),
     (Sid::WindowsNotificationsSettings, "Windows notification settings", Kind::Button),
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
@@ -100,55 +96,13 @@ const NOTIFICATIONS: [(Sid, &str, Kind); 22] = [
     (Sid::NotifyClipboardText, "Show the copied text", Kind::Toggle),
     (Sid::NotifyLockKeys, "Caps, Num and Scroll Lock", Kind::Toggle),
     (Sid::NotifyBattery, "Charger and low battery", Kind::Toggle),
-    (Sid::NotifyAi, "AI answers", Kind::Toggle),
     (Sid::NotifyUpdate, "New version available", Kind::Toggle),
     (Sid::NotifyPrivacy, "Screen capture by other programs", Kind::Toggle),
     (Sid::NotifyAgents, "Coding agents (waiting, finished)", Kind::Toggle),
     (Sid::NotifySteam, "Steam games (started, ended)", Kind::Toggle),
 ];
 
-const AI: [(Sid, &str, Kind); 3] = [
-    (Sid::AgyAuto, "AGY auto-approve", Kind::Toggle),
-    (Sid::VoicePaste, "Paste dictated text", Kind::Toggle),
-    (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
-];
-
-const ASSISTANT: [(Sid, &str, Kind); 30] = [
-    (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
-    (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
-    (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
-    (Sid::AsstSounds, "Sound cues", Kind::Toggle),
-    (Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
-    (Sid::AsstLocal, "Local voice Piper (free, works offline, a little CPU while speaking)", Kind::Toggle),
-    (Sid::AsstLocalInstall, "Download the local voice (up to 44 MB)", Kind::Button),
-    (Sid::AsstNatural, "Natural voice from the speech service (paid, no load on the PC)", Kind::Toggle),
-    (Sid::AsstFollowUp, "Keep listening after an answer", Kind::Toggle),
-    (Sid::AsstSteps, "Steps per request", Kind::Slider),
-    (Sid::AsstTokens, "Model answer limit per step", Kind::Slider),
-    (Sid::AsstSeconds, "Time limit of one command", Kind::Slider),
-    (Sid::AsstOutput, "Command output kept for the model", Kind::Slider),
-    (Sid::AsstReview, "Check commands with a second model call when asking first", Kind::Toggle),
-    (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
-    (Sid::AsstInstructions, "Edit the assistant's own instructions", Kind::Button),
-    (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
-    (Sid::AsstYandex, "Voice commands for My Wave", Kind::Toggle),
-    (Sid::AsstControls, "Volume, mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
-    (Sid::AsstOpen, "Open programs and games", Kind::Cycle),
-    (Sid::AsstReminders, "Reminders and timers", Kind::Cycle),
-    (Sid::AsstMemory, "Remember things about you", Kind::Cycle),
-    (Sid::AsstWebSearch, "Search the internet", Kind::Cycle),
-    (Sid::AsstFilesRead, "Read and search files", Kind::Cycle),
-    (Sid::AsstFilesWrite, "Create and change files", Kind::Cycle),
-    (Sid::AsstShell, "Command line", Kind::Cycle),
-    (Sid::AsstBrowser, "Browser (open sites, read pages)", Kind::Cycle),
-    (Sid::AsstPower, "Shut down, restart, sleep", Kind::Cycle),
-    (Sid::AsstScreen, "Look at the screen (preview, needs a model that sees images)", Kind::Cycle),
-    (Sid::AsstIsland, "Island data: weather, music, Spotify, Discord, Steam, notes", Kind::Cycle),
-];
-
 const ACTIVITY: [(Sid, &str, Kind); 1] = [(Sid::ActivityAi, "Sort unknown programs with AI", Kind::Toggle)];
-
-const AI_PROVIDER: (Sid, &str, Kind) = (Sid::AiProvider, "Service", Kind::Cycle);
 
 const ABOUT: [(Sid, &str, Kind); 3] = [
     (Sid::UpdateCheck, "Check for updates", Kind::Toggle),
@@ -174,9 +128,9 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
-    [(0, "Application"), (6, "Look and feel"), (10, "Monitoring"), (13, "Services"), (17, "Program")];
+    [(0, "Application"), (6, "Look and feel"), (10, "Monitoring"), (13, "Services"), (16, "Program")];
 
-pub const GROUPS: [Group; 18] = [
+pub const GROUPS: [Group; 17] = [
     Group {
         glyph: '\u{E713}',
         name: "General",
@@ -189,7 +143,7 @@ pub const GROUPS: [Group; 18] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (15, "Open and close")],
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (13, "Open and close")],
     },
     Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
     Group { glyph: '\u{E8A9}', name: "Top panel", rows: &[], custom: Some(top_panel_items), sections: &[] },
@@ -222,14 +176,19 @@ pub const GROUPS: [Group; 18] = [
         name: "Notifications",
         rows: &NOTIFICATIONS,
         custom: None,
-        sections: &[(0, "System"), (11, "Clipboard and keys"), (15, "Apps and services")],
+        sections: &[(0, "System"), (11, "Clipboard and keys"), (14, "Apps and services")],
     },
     Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
     Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items), sections: &[] },
-    Group { glyph: '\u{E99A}', name: "AI", rows: &AI, custom: Some(ai_items), sections: &[] },
-    Group { glyph: '\u{E720}', name: "Assistant", rows: &ASSISTANT, custom: Some(assistant_items), sections: &[] },
-    Group { glyph: '\u{E756}', name: "Agents", rows: &[], custom: Some(agent_items), sections: &[] },
+    Group { glyph: '\u{E720}', name: "Assistant", rows: &[], custom: Some(assistant_items), sections: &[] },
+    Group {
+        glyph: '\u{E756}',
+        name: "Agents",
+        rows: &[(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle)],
+        custom: Some(agent_items),
+        sections: &[],
+    },
     Group { glyph: '\u{E946}', name: "About", rows: &ABOUT, custom: Some(about_items), sections: &[] },
 ];
 
@@ -242,7 +201,7 @@ pub fn tab_settings_group(tab: crate::view::Tab) -> Option<usize> {
         Tab::Weather => "General",
         Tab::Activity => "Activity",
         Tab::Controls => "System",
-        Tab::Chat | Tab::Ai => "AI",
+        Tab::Chat | Tab::Ai => "Assistant",
         Tab::Agy => "Agents",
         Tab::Steam => "Integrations",
         _ => return None,
@@ -327,6 +286,7 @@ pub enum Act {
 pub struct SwUi {
     pub dock_status: String,
     pub group: usize,
+    pub assistant_page: AssistantPage,
     pub scroll: f32,
     pub search: String,
     pub hover: Option<SwHit>,
@@ -365,6 +325,7 @@ pub enum SwHit {
     Minimize,
     Close,
     Group(usize),
+    AssistantPage(AssistantPage),
     Row(Sid, SetHit),
     Field(Field),
     Act(Act),
@@ -515,7 +476,7 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
 
 fn agent_items(ui: &UiState) -> Vec<Item> {
     use crate::services::agents::{self, Agent, State};
-    let mut out = vec![Item::Heading("Coding agents")];
+    let mut out = vec![Item::Heading("Coding agents"), Item::Row(Sid::AgyAuto, "AGY auto-approve", Kind::Toggle)];
     out.push(Item::Note("The island shows when an agent works, waits for you or finishes."));
     out.push(Item::Note("Nothing is changed in their settings until you connect."));
     for (i, agent) in Agent::ALL.into_iter().enumerate() {
@@ -751,17 +712,19 @@ fn pill_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
+fn hotkey_item(ui: &UiState, hotkey: Hotkey) -> Item {
+    let capturing = ui.sw.capturing == Some(hotkey);
+    let text = if capturing {
+        "Press the new keys (Esc clears)…".to_string()
+    } else {
+        crate::ui::i18n::tr(&ui.cfg.combo(hotkey).text()).into_owned()
+    };
+    Item::Pair(Act::Rebind(hotkey), hotkey.label().into(), text, capturing)
+}
+
 fn key_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![Item::Heading("Keys")];
-    for h in Hotkey::ALL {
-        let capturing = ui.sw.capturing == Some(h);
-        let text = if capturing {
-            "Press the new keys (Esc clears)…".to_string()
-        } else {
-            crate::ui::i18n::tr(&ui.cfg.combo(h).text()).into_owned()
-        };
-        out.push(Item::Pair(Act::Rebind(h), h.label().into(), text, capturing));
-    }
+    out.extend(Hotkey::ALL.into_iter().filter(|h| *h != Hotkey::Dictate).map(|h| hotkey_item(ui, h)));
     out.push(Item::Note("Click a key, then press the new combination with Ctrl, Alt, Shift or Win."));
     out.push(Item::Note("Esc cancels, Delete brings the default back."));
     out.push(Item::Button(Act::KeysReset, "Reset all keys".into(), !ui.cfg.keys.is_empty()));
@@ -834,83 +797,91 @@ fn activity_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
-fn assistant_items(ui: &UiState) -> Vec<Item> {
-    let mut out = Vec::new();
-    for &(id, label, kind) in &ASSISTANT {
-        match id {
-            Sid::AsstEnabled => out.push(Item::Section("Voice")),
-            Sid::AsstSteps => out.push(Item::Section("How it works")),
-            Sid::AsstMedia => out.push(Item::Section("What it may do")),
-            _ => {}
-        }
-        out.push(Item::Row(id, label, kind));
-        if id == Sid::AsstNatural && ui.cfg.assistant.natural_voice {
-            let (saved, shared) = (ui.int.tts_key_saved, ui.int.tts_key_shared);
-            let provider = ui.cfg.assistant.tts_provider;
-            let eleven = provider == crate::services::assistant::TtsProvider::Eleven;
-            let fish = provider == crate::services::assistant::TtsProvider::Fish;
-            out.push(Item::Row(Sid::AsstTtsProvider, "Cloud voice service", Kind::Cycle));
-            out.push(Item::Field(
-                Field::TtsKey,
-                "Voice API key",
-                if saved {
-                    "Saved: type a new one to replace it"
-                } else if shared {
-                    "Same server: the speech service key is used"
-                } else {
-                    "Paste the key here"
-                },
-            ));
-            let (base_hint, model_hint, voice_hint) = provider.defaults();
-            out.push(Item::Field(Field::TtsBase, "Voice server address", base_hint));
-            out.push(Item::Field(Field::TtsModel, "Voice model", model_hint));
-            out.push(Item::Field(Field::TtsVoice, if eleven || fish { "Voice ID" } else { "Voice name" }, voice_hint));
-            out.push(Item::Button(Act::TtsSave, "Save the voice service".into(), true));
-            if saved {
-                out.push(Item::Button(Act::TtsRemoveKey, "Remove the voice key".into(), true));
-            }
-            if fish {
-                out.push(Item::Row(Sid::AsstFishStream, "Stream Fish Audio playback", Kind::Toggle));
-                out.push(Item::Row(Sid::AsstFishExpressions, "Expressive Fish Audio delivery", Kind::Toggle));
-                out.push(Item::Note("Fish Audio: the key is in fish.audio, Developers, API keys."));
-                out.push(Item::Note(
-                    "The voice ID is the ID of a voice model from fish.audio/discovery; \"default\" uses the stock voice.",
-                ));
-                out.push(Item::Note(
-                    "Models: s2.1-pro (default), s2-pro, s1; s2.1-pro-free is the free developer tier.",
-                ));
-            } else if eleven {
-                out.push(Item::Note(
-                    "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota).",
-                ));
-                out.push(Item::Note(
-                    "The voice ID is under Voices, the ID of a voice you added; the default is a stock voice.",
-                ));
-                out.push(Item::Note("Models: eleven_multilingual_v2 (speaks Russian), eleven_flash_v2_5 (faster)."));
-            } else {
-                out.push(Item::Note(
-                    "Any OpenAI-compatible server with /audio/speech. The address is where requests go:",
-                ));
-                out.push(Item::Note(
-                    "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own",
-                ));
-                out.push(Item::Note(
-                    "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key.",
-                ));
-                out.push(Item::Note("OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."));
-            }
-            out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
-        }
-    }
-    out
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AssistantPage {
+    #[default]
+    Overview,
+    Model,
+    Recognition,
+    Voice,
+    Permissions,
+    Advanced,
 }
 
-fn ai_items(ui: &UiState) -> Vec<Item> {
+impl AssistantPage {
+    const ALL: [(Self, &'static str); 6] = [
+        (Self::Overview, "Assistant overview"),
+        (Self::Model, "AI model"),
+        (Self::Recognition, "Speech recognition"),
+        (Self::Voice, "Voice"),
+        (Self::Permissions, "Assistant permissions"),
+        (Self::Advanced, "Advanced"),
+    ];
+}
+
+fn assistant_items(ui: &UiState) -> Vec<Item> {
+    assistant_page_items(ui, ui.sw.assistant_page)
+}
+
+fn assistant_page_items(ui: &UiState, page: AssistantPage) -> Vec<Item> {
+    use AssistantPage::*;
+    use Kind::{Button, Slider, Toggle};
+    match page {
+        Overview => vec![
+            Item::Heading("Assistant"),
+            Item::Row(Sid::AsstEnabled, "Voice assistant", Toggle),
+            Item::Row(Sid::AsstFollowUp, "Keep listening after an answer", Toggle),
+            Item::Section("Assistant replies"),
+            Item::Row(Sid::NotifyAi, "AI answers", Toggle),
+            Item::Row(Sid::AiNotificationCards, "Show AI answers as cards", Toggle),
+            Item::Section("Desktop pet"),
+            Item::Row(Sid::PetVoice, "Pet reacts to voice assistant", Toggle),
+            Item::Row(Sid::PetVoiceInput, "Talk to the detached pet", Toggle),
+            Item::Row(Sid::PetNotifications, "Show cards by the detached pet", Toggle),
+        ],
+        Model => assistant_model_items(ui),
+        Recognition => assistant_recognition_items(ui),
+        Voice => assistant_voice_items(ui),
+        Permissions => {
+            let permission = |id, label| Item::Row(id, label, Kind::Cycle);
+            vec![
+                Item::Heading("What it may do"),
+                permission(Sid::AsstMedia, "Music and media keys"),
+                Item::Row(Sid::AsstYandex, "Voice commands for My Wave", Toggle),
+                permission(Sid::AsstControls, "Assistant system controls"),
+                Item::Note("Volume, mic, Wi-Fi, Bluetooth, theme, lock"),
+                permission(Sid::AsstOpen, "Open programs and games"),
+                permission(Sid::AsstReminders, "Reminders and timers"),
+                permission(Sid::AsstMemory, "Remember things about you"),
+                permission(Sid::AsstWebSearch, "Search the internet"),
+                permission(Sid::AsstFilesRead, "Read and search files"),
+                permission(Sid::AsstFilesWrite, "Create and change files"),
+                permission(Sid::AsstShell, "Command line"),
+                permission(Sid::AsstBrowser, "Browser (open sites, read pages)"),
+                permission(Sid::AsstPower, "Shut down, restart, sleep"),
+                permission(Sid::AsstScreen, "View screen with an image-capable model"),
+                permission(Sid::AsstIsland, "Read Island data"),
+            ]
+        }
+        Advanced => vec![
+            Item::Heading("How it works"),
+            Item::Row(Sid::AsstInstructions, "Edit assistant instructions", Button),
+            Item::Row(Sid::AsstReview, "Review commands before confirmation", Toggle),
+            Item::Row(Sid::AsstWebAsk, "Ask first after reading web pages", Toggle),
+            Item::Section("Request limits"),
+            Item::Row(Sid::AsstSteps, "Steps per request", Slider),
+            Item::Row(Sid::AsstTokens, "Tokens per step", Slider),
+            Item::Row(Sid::AsstSeconds, "Command time limit in seconds", Slider),
+            Item::Row(Sid::AsstOutput, "Characters of command output kept", Slider),
+        ],
+    }
+}
+
+fn assistant_model_items(ui: &UiState) -> Vec<Item> {
     use crate::data::settings::AiProvider;
     let provider = ui.cfg.ai.provider;
     let saved = ui.int.ai_key_saved;
-    let (id, label, kind) = AI_PROVIDER;
-    let mut out = vec![Item::Heading("AI"), Item::Row(id, label, kind)];
+    let mut out = vec![Item::Heading("AI model"), Item::Row(Sid::AiProvider, "Service", Kind::Cycle)];
     out.push(Item::Service {
         name: provider.name(),
         glyph: '\u{E99A}',
@@ -933,15 +904,25 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
     out.push(Item::Note("Ask in the command bar (Alt+Space): start with ?, for example  ? what is DPAPI"));
     out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
     out.push(Item::Note("OpenAI-compatible: OpenAI, OpenRouter, or a local server such as LM Studio."));
-    out.push(Item::Note("A chat service may not support speech. If needed, enable a separate speech service below."));
-    for &(id, label, kind) in &AI {
-        out.push(Item::Row(id, label, kind));
+    out
+}
+
+fn assistant_recognition_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![
+        Item::Heading("Speech recognition"),
+        Item::Row(Sid::AsstWake, "Listen for the call word", Kind::Toggle),
+        Item::Field(Field::WakeWord, "Voice command name", "Island, Айленд"),
+        Item::Button(Act::WakeSave, "Save command name".into(), true),
+        Item::Row(Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
+        Item::Section("Dictation"),
+        hotkey_item(ui, Hotkey::Dictate),
+        Item::Row(Sid::VoicePaste, "Paste dictated text", Kind::Toggle),
+        Item::Section("Speech service"),
+        Item::Row(Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
+    ];
+    if !ui.cfg.ai.voice_separate {
+        out.push(Item::Note("Uses the model service. Enable a separate speech service if it cannot transcribe."));
     }
-    out.push(Item::Field(Field::WakeWord, "Voice command name", "Island, Айленд"));
-    out.push(Item::Button(Act::WakeSave, "Save command name".into(), true));
-    out.push(Item::Note(
-        "Dictate the name first: \"Island, next track\", \"Island, remind me in 10 min\". Empty: off.",
-    ));
     if ui.cfg.ai.voice_separate {
         let saved = ui.int.voice_key_saved;
         let shared = ui.int.voice_key_shared;
@@ -963,6 +944,75 @@ fn ai_items(ui: &UiState) -> Vec<Item> {
             out.push(Item::Button(Act::VoiceRemoveKey, "Remove the speech key".into(), true));
         }
         out.push(Item::Note("Any OpenAI-compatible /audio/transcriptions server: OpenAI, Groq, your own Whisper."));
+    }
+    out
+}
+
+fn assistant_voice_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![
+        Item::Heading("Voice"),
+        Item::Row(Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
+        Item::Row(Sid::AsstSounds, "Sound cues", Kind::Toggle),
+        Item::Row(Sid::AsstVolume, "Assistant volume", Kind::Slider),
+        Item::Section("Voice source"),
+        Item::Row(Sid::AsstLocal, "Local Piper voice", Kind::Toggle),
+    ];
+    if ui.cfg.assistant.local_voice {
+        out.push(Item::Row(Sid::AsstLocalInstall, "Download the local voice (up to 44 MB)", Kind::Button));
+    }
+    out.push(Item::Row(Sid::AsstNatural, "Cloud voice", Kind::Toggle));
+    if ui.cfg.assistant.natural_voice {
+        let (saved, shared) = (ui.int.tts_key_saved, ui.int.tts_key_shared);
+        let provider = ui.cfg.assistant.tts_provider;
+        let eleven = provider == crate::services::assistant::TtsProvider::Eleven;
+        let fish = provider == crate::services::assistant::TtsProvider::Fish;
+        out.push(Item::Row(Sid::AsstTtsProvider, "Cloud voice service", Kind::Cycle));
+        out.push(Item::Field(
+            Field::TtsKey,
+            "Voice API key",
+            if saved {
+                "Saved: type a new one to replace it"
+            } else if shared {
+                "Same server: the speech service key is used"
+            } else {
+                "Paste the key here"
+            },
+        ));
+        let (base_hint, model_hint, voice_hint) = provider.defaults();
+        out.push(Item::Field(Field::TtsBase, "Voice server address", base_hint));
+        out.push(Item::Field(Field::TtsModel, "Voice model", model_hint));
+        out.push(Item::Field(Field::TtsVoice, if eleven || fish { "Voice ID" } else { "Voice name" }, voice_hint));
+        out.push(Item::Button(Act::TtsSave, "Save the voice service".into(), true));
+        if saved {
+            out.push(Item::Button(Act::TtsRemoveKey, "Remove the voice key".into(), true));
+        }
+        if fish {
+            out.push(Item::Row(Sid::AsstFishStream, "Stream Fish Audio playback", Kind::Toggle));
+            out.push(Item::Row(Sid::AsstFishExpressions, "Expressive Fish Audio delivery", Kind::Toggle));
+            out.push(Item::Note("Fish Audio: the key is in fish.audio, Developers, API keys."));
+            out.push(Item::Note(
+                "The voice ID is the ID of a voice model from fish.audio/discovery; \"default\" uses the stock voice.",
+            ));
+            out.push(Item::Note("Models: s2.1-pro (default), s2-pro, s1; s2.1-pro-free is the free developer tier."));
+        } else if eleven {
+            out.push(Item::Note(
+                "ElevenLabs: the key is in elevenlabs.io, profile, API keys (paid after the free quota).",
+            ));
+            out.push(Item::Note(
+                "The voice ID is under Voices, the ID of a voice you added; the default is a stock voice.",
+            ));
+            out.push(Item::Note("Models: eleven_multilingual_v2 (speaks Russian), eleven_flash_v2_5 (faster)."));
+        } else {
+            out.push(Item::Note("Any OpenAI-compatible server with /audio/speech. The address is where requests go:"));
+            out.push(Item::Note(
+                "OpenAI https://api.openai.com/v1 (key: platform.openai.com/api-keys, paid), or your own",
+            ));
+            out.push(Item::Note(
+                "server (Kokoro-FastAPI, openedai-speech), e.g. http://localhost:8880/v1 with any key.",
+            ));
+            out.push(Item::Note("OpenAI voices: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer."));
+        }
+        out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
     }
     out
 }
@@ -1106,11 +1156,6 @@ fn rows_with_sections(group: &Group) -> Vec<Item> {
         if id == Sid::PetAutonomy {
             out.push(Item::Note("Pets pause near the pointer and during chat. Reduced motion stops walking."));
         }
-        if id == Sid::PetVoice {
-            out.push(Item::Note(
-                "Start dictation with the shortcut in Keys. Your pet listens and waits with the assistant.",
-            ));
-        }
     }
     out
 }
@@ -1127,6 +1172,32 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
         return out;
     }
     for group in &GROUPS {
+        if group.name == "Assistant" {
+            let start = out.len();
+            for (page, title) in AssistantPage::ALL {
+                let page_matches = matches(title, &ui.sw.search);
+                let found: Vec<_> = assistant_page_items(ui, page)
+                    .into_iter()
+                    .filter(|item| match item {
+                        Item::Row(_, label, _) | Item::Field(_, label, _) => {
+                            page_matches || matches(label, &ui.sw.search)
+                        }
+                        Item::Pair(_, label, _, _) | Item::Button(_, label, _) => {
+                            page_matches || matches(label, &ui.sw.search)
+                        }
+                        _ => false,
+                    })
+                    .collect();
+                if !found.is_empty() {
+                    out.push(Item::Section(title));
+                    out.extend(found);
+                }
+            }
+            if out.len() != start {
+                out.insert(start, Item::Heading(group.name));
+            }
+            continue;
+        }
         let found: Vec<_> = group.rows.iter().filter(|r| matches(r.1, &ui.sw.search)).collect();
         if found.is_empty() {
             continue;
@@ -1140,18 +1211,33 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
 struct Layout {
     sidebar: Rect,
     search: Rect,
+    assistant_nav: Option<Rect>,
     content: Rect,
 }
 
-fn layout(size: (f32, f32), scale: f32) -> Layout {
+fn layout(size: (f32, f32), scale: f32, ui: &UiState) -> Layout {
     let (w, h) = size;
     let left = (SIDEBAR_W + PAD) * scale;
     let top = TITLE_H * scale;
+    let right = w - PAD * scale;
+    let body = top + (18.0 + SEARCH_H + 10.0) * scale;
+    let assistant_nav = (ui.sw.search.trim().is_empty()
+        && GROUPS.get(ui.sw.group).is_some_and(|group| group.name == "Assistant"))
+    .then_some((left, body, right, body + 34.0 * scale));
     Layout {
         sidebar: (0.0, top, SIDEBAR_W * scale, h),
-        search: (left, top + 18.0 * scale, w - PAD * scale, top + (18.0 + SEARCH_H) * scale),
-        content: (left, top + (18.0 + SEARCH_H + 10.0) * scale, w - PAD * scale, h - 12.0 * scale),
+        search: (left, top + 18.0 * scale, right, top + (18.0 + SEARCH_H) * scale),
+        assistant_nav,
+        content: (left, assistant_nav.map_or(body, |nav| nav.3 + 8.0 * scale), right, h - 12.0 * scale),
     }
+}
+
+fn assistant_nav_rects(nav: Rect, scale: f32) -> impl Iterator<Item = (AssistantPage, &'static str, Rect)> {
+    let step = (nav.2 - nav.0 + 4.0 * scale) / AssistantPage::ALL.len() as f32;
+    AssistantPage::ALL.into_iter().enumerate().map(move |(i, (page, label))| {
+        let x = nav.0 + step * i as f32;
+        (page, label, (x, nav.1, x + step - 4.0 * scale, nav.3))
+    })
 }
 
 fn group_rect(l: &Layout, scale: f32, i: usize) -> Rect {
@@ -1161,7 +1247,7 @@ fn group_rect(l: &Layout, scale: f32, i: usize) -> Rect {
 }
 
 fn placed(size: (f32, f32), scale: f32, ui: &UiState) -> Vec<(Item, f32)> {
-    let l = layout(size, scale);
+    let l = layout(size, scale, ui);
     let mut y = l.content.1 - ui.sw.scroll;
     items(ui)
         .into_iter()
@@ -1174,7 +1260,7 @@ fn placed(size: (f32, f32), scale: f32, ui: &UiState) -> Vec<(Item, f32)> {
 }
 
 pub fn max_scroll(size: (f32, f32), scale: f32, ui: &UiState) -> f32 {
-    let l = layout(size, scale);
+    let l = layout(size, scale, ui);
     let total: f32 = items(ui).iter().map(Item::height).sum::<f32>() * scale;
     (total - (l.content.3 - l.content.1)).max(0.0)
 }
@@ -1193,7 +1279,7 @@ fn dropdown_rects(size: (f32, f32), scale: f32, ui: &UiState) -> Option<(Rect, V
     if names.is_empty() {
         return None;
     }
-    let l = layout(size, scale);
+    let l = layout(size, scale, ui);
     let top = placed(size, scale, ui).into_iter().find_map(|(item, top)| match item {
         Item::Row(row_id, ..) if row_id == id => Some(top),
         _ => None,
@@ -1233,7 +1319,7 @@ pub fn sw_title_zone(size: (f32, f32), scale: f32, px: f32, py: f32) -> Option<T
 }
 
 pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> Option<SwHit> {
-    let l = layout(size, scale);
+    let l = layout(size, scale, ui);
     if let Some((list, items)) = dropdown_rects(size, scale, ui) {
         if let (Some(id), Some(k)) = (ui.sw.dropdown, items.iter().position(|r| inside(*r, px, py))) {
             return Some(SwHit::Pick(id, k));
@@ -1254,6 +1340,11 @@ pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> O
     }
     if let Some(i) = (0..GROUPS.len()).find(|&i| inside(group_rect(&l, scale, i), px, py)) {
         return Some(SwHit::Group(i));
+    }
+    if let Some(nav) = l.assistant_nav
+        && let Some((page, _, _)) = assistant_nav_rects(nav, scale).find(|(_, _, rect)| inside(*rect, px, py))
+    {
+        return Some(SwHit::AssistantPage(page));
     }
     if !inside(l.content, px, py) {
         return None;
@@ -1294,7 +1385,7 @@ pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> O
 }
 
 pub fn sw_slider_track(size: (f32, f32), scale: f32, ui: &UiState, id: Sid) -> Option<(f32, f32)> {
-    let l = layout(size, scale);
+    let l = layout(size, scale, ui);
     let top = placed(size, scale, ui).into_iter().find_map(|(item, top)| match item {
         Item::Row(row_id, ..) if row_id == id => Some(top),
         _ => None,
@@ -1304,7 +1395,7 @@ pub fn sw_slider_track(size: (f32, f32), scale: f32, ui: &UiState, id: Sid) -> O
 }
 
 pub fn sw_field_rects(size: (f32, f32), scale: f32, ui: &UiState, field: Field) -> Option<(Rect, Rect)> {
-    let l = layout(size, scale);
+    let l = layout(size, scale, ui);
     if field == Field::Search {
         let s = l.search;
         return Some((s, (s.0 + 40.0 * scale, s.1, s.2 - 12.0 * scale, s.3)));
@@ -1365,7 +1456,7 @@ fn row_hover(p: &Painter, row: Rect, scale: f32, ui: &UiState, plate: Plate) -> 
 const HOVER_BLEED: f32 = 14.0;
 
 pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiState) -> Result<()> {
-    let l = layout(size, scale);
+    let l = layout(size, scale, ui);
     let (pr, pg, pb) = crate::ui::theme::panel();
     p.fill_rect((0.0, 0.0, size.0, size.1), rgba(pr, pg, pb, 1.0))?;
     p.fill_rect(l.sidebar, rgba(1.0, 1.0, 1.0, 0.045))?;
@@ -1456,6 +1547,23 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
         14.0 * scale,
         rgba(1.0, 1.0, 1.0, 0.6),
     )?;
+
+    if let Some(nav) = l.assistant_nav {
+        for (page, label, rect) in assistant_nav_rects(nav, scale) {
+            let selected = ui.sw.assistant_page == page;
+            let hovered = ui.sw.hover == Some(SwHit::AssistantPage(page));
+            let fill = if selected { acc(0.26) } else { rgba(1.0, 1.0, 1.0, if hovered { 0.10 } else { 0.05 }) };
+            p.fill_round_rect(rect, 10.0 * scale, fill)?;
+            p.text(
+                label,
+                rect,
+                12.0 * scale,
+                if selected { DWRITE_FONT_WEIGHT_SEMI_BOLD } else { DWRITE_FONT_WEIGHT_NORMAL },
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+                rgba(1.0, 1.0, 1.0, if selected || hovered { 1.0 } else { 0.78 }),
+            )?;
+        }
+    }
 
     p.push_clip((l.content.0 - HOVER_BLEED * scale, l.content.1, l.content.2 + HOVER_BLEED * scale, l.content.3));
     let result = (|| -> Result<()> {
@@ -1744,7 +1852,7 @@ mod tests {
         assert_eq!(restored.desktop_dock.hidden_apps.len(), 1);
         for scale in [1.0, 1.5, 2.0] {
             let size = (SW_SIZE.0 * scale, SW_SIZE.1 * scale);
-            assert!(group_rect(&layout(size, scale), scale, GROUPS.len() - 1).3 <= size.1);
+            assert!(group_rect(&layout(size, scale, &UiState::new()), scale, GROUPS.len() - 1).3 <= size.1);
         }
     }
 
@@ -1791,6 +1899,38 @@ mod tests {
         assert!(matches("Synced lyrics", "lyr"));
         assert!(matches("Synced lyrics", "  "));
         assert!(!matches("Synced lyrics", "battery"));
+    }
+
+    #[test]
+    fn assistant_pages_keep_setup_and_controls_in_one_section() {
+        let mut ui = UiState::new();
+        let group = tab_settings_group(Tab::Chat).unwrap();
+        ui.sw.group = group;
+        ui.cfg.ai.voice_separate = true;
+        ui.cfg.assistant.natural_voice = true;
+        assert_eq!(GROUPS[group].name, "Assistant");
+        assert!(!GROUPS.iter().any(|group| group.name == "AI"));
+        for scale in [0.8, 1.0, 1.5, 2.0] {
+            let size = (SW_SIZE.0 * scale, SW_SIZE.1 * scale);
+            let nav = layout(size, scale, &ui).assistant_nav.unwrap();
+            for (page, _, rect) in assistant_nav_rects(nav, scale) {
+                assert_eq!(
+                    sw_hit(size, scale, &ui, (rect.0 + rect.2) / 2.0, (rect.1 + rect.3) / 2.0),
+                    Some(SwHit::AssistantPage(page)),
+                );
+            }
+        }
+        ui.sw.assistant_page = AssistantPage::Model;
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Field(Field::AiKey, ..))));
+        ui.sw.assistant_page = AssistantPage::Recognition;
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Field(Field::VoiceKey, ..))));
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Pair(Act::Rebind(Hotkey::Dictate), ..))));
+        ui.sw.assistant_page = AssistantPage::Voice;
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::AsstVolume, ..))));
+        ui.sw.search = "Voice API key".into();
+        assert!(layout(SW_SIZE, 1.0, &ui).assistant_nav.is_none());
+        assert!(items(&ui).iter().any(|item| matches!(item, Item::Field(Field::TtsKey, ..))));
+        assert!(!items(&ui).iter().any(|item| matches!(item, Item::Field(Field::AiKey, ..))));
     }
 
     #[test]

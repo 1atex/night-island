@@ -282,6 +282,10 @@ impl App {
                 self.ui.sw.scroll = 0.0;
                 self.set_search("");
             }
+            Some(view::SwHit::AssistantPage(page)) => {
+                self.ui.sw.assistant_page = page;
+                self.ui.sw.scroll = 0.0;
+            }
             Some(view::SwHit::Row(id, hit)) => self.sw_row(id, hit, x),
             Some(view::SwHit::Act(act)) => self.sw_act(act),
             Some(view::SwHit::Theme(hit)) => {
