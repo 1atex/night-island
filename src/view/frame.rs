@@ -453,7 +453,15 @@ fn paint_tab(p: &Painter, tab: Tab, pill: Rect, scale: f32, ui: &UiState, clips:
             paint_controls(p, pill, scale, ui)?;
             paint_metrics_row(p, pill, scale, ui)?;
         }
-        Tab::Yandex => paint_yandex(p, pill, scale, &ui.yandex, ui.home.seek, crate::services::yandex::progress())?,
+        Tab::Yandex => paint_yandex(
+            p,
+            pill,
+            scale,
+            &ui.yandex,
+            (ui.editing && !ui.cmd.open, ui.caret_on),
+            ui.home.seek,
+            crate::services::yandex::progress(),
+        )?,
         Tab::Mixer => paint_mixer(p, pill, scale, &ui.mixer)?,
         Tab::Notifications => paint_notifications(
             p,

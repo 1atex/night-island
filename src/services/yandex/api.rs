@@ -96,6 +96,19 @@ impl Api {
         Ok((format!("{kind}:{id}"), name.chars().take(160).collect()))
     }
 
+    pub fn search_tracks(&self, query: &str) -> Result<Vec<Track>> {
+        let result = self.call(&format!("/search?text={}&type=track&nocorrect=False&page=0", pct(query)), None)?;
+        let mut seen = std::collections::HashSet::new();
+        let best = (result["best"]["type"] == "track").then(|| &result["best"]["result"]);
+        Ok(best
+            .into_iter()
+            .chain(result["tracks"]["results"].as_array().into_iter().flatten())
+            .filter_map(|item| parse_track(item, ""))
+            .filter(|track| seen.insert(super::track_key(&track.id).to_owned()))
+            .take(20)
+            .collect())
+    }
+
     pub fn library_ids(&self, uid: u64, disliked: bool) -> Result<Vec<String>> {
         let (list, revision) =
             if disliked { ("dislikes", "if_modified_since_revision") } else { ("likes", "if-modified-since-revision") };
@@ -402,8 +415,11 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "Reads the signed-in Yandex Music account and catalog without changing the library"]
+    #[ignore = "Reads the configured Yandex account and plays a catalog track muted without changing the library"]
     fn configured_account_can_read_wave_filters_and_search_a_station() {
+        unsafe {
+            let _ = windows::Win32::System::WinRT::RoInitialize(windows::Win32::System::WinRT::RO_INIT_MULTITHREADED);
+        }
         let api = Api {
             token: crate::services::integrations::load_secret("yandex-music").expect("Yandex Music sign-in required"),
             base: None,
@@ -418,6 +434,23 @@ mod tests {
         assert!(!api.groups().unwrap().is_empty());
         let (seed, label) = api.station("Daft Punk", true).unwrap();
         assert!(seed.starts_with("artist:") && label.to_lowercase().contains("daft punk"));
+        let (tx, _rx) = std::sync::mpsc::sync_channel(16);
+        let mut worker = super::super::Worker::new(0, tx);
+        worker.api = api;
+        worker.state.config.volume = 0;
+        let result = worker
+            .voice(super::super::VoiceAction::Track { title: "Around the World".into(), artist: "Daft Punk".into() })
+            .unwrap();
+        assert!(result.ends_with("in Island"));
+        let player = worker.player.as_ref().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(12);
+        while !player.state().2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(player.state().2, "exact catalog track must start in the local player");
+        assert_eq!(worker.state.media.title, "Around the World");
+        assert_eq!(worker.state.media.artist, "Daft Punk");
+        worker.stop();
     }
     fn server(responses: Vec<(u16, &'static str)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
         use std::io::{Read, Write};

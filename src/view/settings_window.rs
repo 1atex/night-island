@@ -462,6 +462,7 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     }
     out.push(Item::Button(Act::YandexWave, "Open My Wave".into(), true));
     out.push(Item::Row(Sid::WaveRatings, "Liked tracks and ratings in My Wave", Kind::Toggle));
+    out.push(Item::Row(Sid::WaveSearch, "Track search in My Wave", Kind::Toggle));
 
     let (status, live) = discord_status_text(&ui.discord);
     out.push(Item::Service { name: "Discord", glyph: '\u{E8F2}', status, live });

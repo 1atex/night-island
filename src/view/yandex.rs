@@ -7,12 +7,37 @@ pub struct YandexUi {
     pub hover: Option<YandexHit>,
     pub copied: bool,
     pub show_library: bool,
+    pub search_open: bool,
+    pub search_hidden: bool,
+    pub search_input: edit::TextEdit,
+    pub search_sent: Option<(u64, String)>,
+    pub search_page: usize,
+    pub search_selected: Option<usize>,
     pub ratings_hidden: bool,
     pub volume_preview: Option<u8>,
     pub colour_transition: Option<(WaveColours, std::time::Instant)>,
 }
 
 impl YandexUi {
+    pub fn search_query(&self) -> String {
+        self.search_input.text().trim().to_owned()
+    }
+
+    pub fn search_result(&self) -> Option<&crate::services::yandex::SearchResult> {
+        let query = self.search_query();
+        self.state.search.as_ref().filter(|result| {
+            result.query == query
+                && self.search_sent.as_ref().is_none_or(|(request, sent)| sent != &query || *request == result.request)
+        })
+    }
+
+    pub fn search_rows(&self) -> &[crate::services::yandex::Track] {
+        let Some(result) = self.search_result() else { return &[] };
+        let start = (self.search_page * SEARCH_ROWS).min(result.tracks.len());
+        let end = (start + SEARCH_ROWS).min(result.tracks.len());
+        &result.tracks[start..end]
+    }
+
     pub fn colours(&self) -> WaveColours {
         let target =
             WaveColours::new(self.state.palette, self.state.media.accent.unwrap_or_else(crate::ui::theme::accent_u8));
@@ -29,6 +54,8 @@ impl YandexUi {
         }
         if next.account.is_empty() {
             self.show_library = false;
+            self.search_open = false;
+            self.search_sent = None;
         }
         if self.volume_preview == Some(next.config.volume) || (!next.error.is_empty() && next.error != self.state.error)
         {
@@ -71,6 +98,10 @@ pub enum YandexHit {
     Library,
     LibraryPage(i32),
     PlayLiked(usize),
+    Search,
+    SearchInput,
+    SearchPage(i32),
+    PlaySearch(usize),
     Rate(Rating),
 }
 
@@ -86,6 +117,14 @@ pub fn wave_fraction(pill: Rect, s: f32, x: f32) -> f32 {
 pub fn wave_volume_level(pill: Rect, s: f32, x: f32) -> u8 {
     let left = pill.0 + 30.0 * s;
     (((x - left) / (150.0 * s)).clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
+pub const SEARCH_ROWS: usize = 3;
+pub const SEARCH_MAX_CHARS: usize = 180;
+
+pub fn wave_search_field((x, y, w, _): Rect, s: f32) -> (Rect, Rect) {
+    let frame = (x + 244.0 * s, y + 105.0 * s, x + w - 24.0 * s, y + 141.0 * s);
+    (frame, (frame.0 + 12.0 * s, frame.1, frame.2 - 12.0 * s, frame.3))
 }
 
 pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHit)> {
@@ -113,6 +152,9 @@ pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHi
             (r(24.0, 322.0, 220.0, 346.0), YandexHit::Volume),
             (r(width - 106.0, 62.0, width - 24.0, 90.0), YandexHit::Disconnect),
         ];
+        if !ui.search_hidden {
+            controls.push((r(316.0, 62.0, 394.0, 90.0), YandexHit::Search));
+        }
         if !ui.ratings_hidden {
             controls.push((r(182.0, 62.0, 310.0, 90.0), YandexHit::Library));
             if ui.state.current_id.is_some() {
@@ -128,7 +170,21 @@ pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHi
         if !ui.state.error.is_empty() {
             controls.push((r(width - 116.0, 350.0, width - 24.0, 376.0), YandexHit::Retry));
         }
-        if ui.show_library && !ui.ratings_hidden {
+        if ui.search_open {
+            controls.push((wave_search_field(pill, s).0, YandexHit::SearchInput));
+            for (i, _) in ui.search_rows().iter().enumerate() {
+                let top = 149.0 + i as f32 * 50.0;
+                controls.push((r(244.0, top, width - 24.0, top + 42.0), YandexHit::PlaySearch(i)));
+            }
+            if let Some(result) = ui.search_result() {
+                if ui.search_page > 0 {
+                    controls.push((r(244.0, 310.0, 278.0, 344.0), YandexHit::SearchPage(-1)));
+                }
+                if (ui.search_page + 1) * SEARCH_ROWS < result.tracks.len() {
+                    controls.push((r(369.0, 310.0, 403.0, 344.0), YandexHit::SearchPage(1)));
+                }
+            }
+        } else if ui.show_library && !ui.ratings_hidden {
             if let Some(library) = &ui.state.library {
                 for (i, _) in library.tracks.iter().enumerate() {
                     let top = 105.0 + i as f32 * 47.0;
@@ -178,6 +234,7 @@ pub fn paint_yandex(
     pill: Rect,
     s: f32,
     ui: &YandexUi,
+    (editing, caret): (bool, bool),
     seek: Option<f32>,
     progress: Option<(f32, f32)>,
 ) -> Result<()> {
@@ -272,7 +329,34 @@ pub fn paint_yandex(
             11.5,
             0.65,
         )?;
-        if ui.show_library && !ui.ratings_hidden {
+        if ui.search_open {
+            let (frame, inner) = wave_search_field(pill, s);
+            paint_line_edit(p, frame, inner, &ui.search_input, false, "Track title or artist", editing, caret, s)?;
+            if let Some(result) = ui.search_result() {
+                if let Some(error) = result.error {
+                    text(error, r(244.0, 152.0, width - 24.0, 185.0), 12.0, 0.9)?;
+                    text("Press Enter to try again", r(244.0, 190.0, width - 24.0, 222.0), 12.0, 0.7)?;
+                } else if result.tracks.is_empty() {
+                    text(
+                        "No tracks found. Try another title or artist.",
+                        r(244.0, 152.0, width - 24.0, 190.0),
+                        13.0,
+                        0.8,
+                    )?;
+                } else {
+                    p.text(
+                        &format!("{} / {}", ui.search_page + 1, result.tracks.len().div_ceil(SEARCH_ROWS)),
+                        r(278.0, 310.0, 369.0, 344.0),
+                        12.0 * s,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_TEXT_ALIGNMENT_CENTER,
+                        wave_colour(colours.text, 0.75),
+                    )?;
+                }
+            } else if !ui.search_query().is_empty() {
+                text("Searching Yandex Music…", r(244.0, 152.0, width - 24.0, 190.0), 13.0, 0.8)?;
+            }
+        } else if ui.show_library && !ui.ratings_hidden {
             if ui.state.busy && ui.state.library.is_none() {
                 text("Loading liked tracks…", r(244.0, 112.0, width - 24.0, 146.0), 13.0, 0.8)?;
             } else if let Some(library) = &ui.state.library {
@@ -303,6 +387,9 @@ pub fn paint_yandex(
         }
     }
     for (rect, hit) in yandex_controls(pill, s, ui) {
+        if hit == YandexHit::SearchInput {
+            continue;
+        }
         if hit == YandexHit::Volume {
             let level = ui.volume_preview.unwrap_or(ui.state.config.volume);
             text("Music volume", r(30.0, 307.0, 218.0, 322.0), 11.0, 0.7)?;
@@ -347,12 +434,16 @@ pub fn paint_yandex(
         let hover = !ui.state.busy && ui.hover == Some(hit);
         let selected = match hit {
             YandexHit::Rate(rating) => ui.state.rating == rating,
+            YandexHit::PlaySearch(i) => ui.state.current_id.as_ref() == Some(&ui.search_rows()[i].id),
             YandexHit::PlayLiked(i) => {
                 ui.state.library.as_ref().is_some_and(|page| ui.state.current_id.as_ref() == Some(&page.tracks[i].id))
             }
             _ => false,
         };
-        let primary = selected || matches!(hit, YandexHit::Connect | YandexHit::Toggle | YandexHit::Browser);
+        let primary = selected
+            || matches!(hit, YandexHit::Search) && ui.search_open
+            || matches!(hit, YandexHit::PlaySearch(i) if ui.search_selected == Some(i))
+            || matches!(hit, YandexHit::Connect | YandexHit::Toggle | YandexHit::Browser);
         p.fill_round_rect(
             rect,
             11.0 * s,
@@ -364,7 +455,8 @@ pub fn paint_yandex(
         )?;
         let label = match hit {
             YandexHit::Home => "Open main player",
-            YandexHit::Seek | YandexHit::Volume => unreachable!(),
+            YandexHit::Seek | YandexHit::Volume | YandexHit::SearchInput => unreachable!(),
+            YandexHit::Search => "Search tracks",
             YandexHit::Library => {
                 if ui.show_library {
                     "My Wave"
@@ -372,7 +464,7 @@ pub fn paint_yandex(
                     "Liked tracks"
                 }
             }
-            YandexHit::LibraryPage(dir) => {
+            YandexHit::LibraryPage(dir) | YandexHit::SearchPage(dir) => {
                 p.glyph(if dir < 0 { '\u{E76B}' } else { '\u{E76C}' }, rect, 11.0 * s, WHITE)?;
                 continue;
             }
@@ -380,8 +472,13 @@ pub fn paint_yandex(
                 p.glyph(if rating == Rating::Like { '\u{E8E1}' } else { '\u{E8E0}' }, rect, 15.0 * s, WHITE)?;
                 continue;
             }
-            YandexHit::PlayLiked(i) => {
-                let track = &ui.state.library.as_ref().unwrap().tracks[i];
+            YandexHit::PlayLiked(i) | YandexHit::PlaySearch(i) => {
+                let track = if matches!(hit, YandexHit::PlaySearch(_)) {
+                    &ui.search_rows()[i]
+                } else {
+                    &ui.state.library.as_ref().unwrap().tracks[i]
+                };
+                let selected = ui.state.current_id.as_ref() == Some(&track.id);
                 p.glyph(
                     if selected && ui.state.media.playing { '\u{E769}' } else { '\u{E768}' },
                     (rect.0 + 4.0 * s, rect.1, rect.0 + 38.0 * s, rect.3),
@@ -528,6 +625,38 @@ mod tests {
             assert_eq!(wave_fraction(pill, s, seek.0 - 10.0), 0.0);
             assert_eq!(wave_fraction(pill, s, seek.2 + 10.0), 1.0);
         }
+    }
+
+    #[test]
+    fn search_never_exposes_results_for_a_different_query() {
+        let mut ui = YandexUi::default();
+        ui.state.account = "Fixture".into();
+        ui.state.active = true;
+        ui.search_open = true;
+        ui.search_input.set_text("Небо");
+        ui.state.search = Some(crate::services::yandex::SearchResult {
+            request: 1,
+            query: "Небо".into(),
+            error: None,
+            tracks: vec![crate::services::yandex::Track {
+                id: "1".into(),
+                title: "Небо".into(),
+                artist: "Группа".into(),
+                cover: String::new(),
+                batch: String::new(),
+                session: String::new(),
+                palette: Default::default(),
+            }],
+        });
+        for scale in [0.8, 1.0, 1.5, 2.0] {
+            let pill = (10.0, 12.0, 640.0 * scale, 384.0 * scale);
+            for (rect, hit) in yandex_controls(pill, scale, &ui) {
+                assert_eq!(hit_yandex(pill, scale, &ui, (rect.0 + rect.2) / 2.0, (rect.1 + rect.3) / 2.0), Some(hit));
+            }
+        }
+        assert_eq!(ui.search_rows().len(), 1);
+        ui.search_input.set_text("Облака");
+        assert!(ui.search_rows().is_empty());
     }
 
     #[test]

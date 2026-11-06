@@ -66,6 +66,7 @@ impl Tool {
             Tool::Spotify { query, .. } => query,
             Tool::Yandex(action) => match action {
                 crate::services::yandex::VoiceAction::Station { query, .. } => query,
+                crate::services::yandex::VoiceAction::Track { title, .. } => title,
                 crate::services::yandex::VoiceAction::Rate(kind) => kind,
                 _ => "My Wave",
             },

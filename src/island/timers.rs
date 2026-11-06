@@ -94,10 +94,11 @@ pub(in crate::island) enum Timer {
     NotificationExpire = 40,
     NotificationHover = 41,
     TopPanel = 42,
+    WaveSearch = 43,
 }
 
 impl Timer {
-    const ALL: [Timer; 42] = [
+    const ALL: [Timer; 43] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -140,6 +141,7 @@ impl Timer {
         Timer::NotificationExpire,
         Timer::NotificationHover,
         Timer::TopPanel,
+        Timer::WaveSearch,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -267,6 +269,7 @@ impl App {
             Timer::VpnWait => self.vpn_wait_over(),
             Timer::SteamPoll => self.on_steam_poll(),
             Timer::Tip => self.show_tip(),
+            Timer::WaveSearch => self.submit_wave_search(),
             Timer::Geo => {
                 if self.ui.tab == view::Tab::Weather && self.ui.editing {
                     weather::search(self.hwnd, &self.ui.city.input.text());

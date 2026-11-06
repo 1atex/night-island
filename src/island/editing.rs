@@ -139,6 +139,7 @@ impl App {
                 || self.rename_active()
                 || self.clip_search()
                 || self.steam_search()
+                || self.wave_search()
                 || self.extra_field().is_some() =>
             {
                 return;
@@ -148,7 +149,7 @@ impl App {
             {
                 return;
             }
-            0x09 if self.extra_field().is_some() => return,
+            0x09 if self.extra_field().is_some() || self.wave_search() => return,
             0x0D => '\n',
             0x09 => '\t',
             0xD800..=0xDBFF => {
@@ -240,23 +241,34 @@ impl App {
         if self.steam_search() && vk == VK_RETURN.0 {
             return self.launch_first_steam_game();
         }
+        if self.wave_search() {
+            let selected = self.ui.yandex.search_selected;
+            let len = self.ui.yandex.search_rows().len();
+            match vk {
+                v if v == VK_RETURN.0 => {
+                    return if let Some(index) = selected {
+                        self.play_wave_result(index)
+                    } else {
+                        self.submit_wave_search()
+                    };
+                }
+                v if len > 0 && (v == VK_UP.0 || v == VK_DOWN.0) => {
+                    self.ui.yandex.search_selected = Some(if v == VK_UP.0 {
+                        selected.map_or(len - 1, |index| index.saturating_sub(1))
+                    } else {
+                        selected.map_or(0, |index| (index + 1).min(len - 1))
+                    });
+                    return self.repaint_expanded();
+                }
+                _ => {}
+            }
+        }
         let extra = self.extra_field();
         if extra.is_some() && vk == VK_RETURN.0 {
             return self.save_city();
         }
-        let single = command || self.clip_search() || self.steam_search() || extra.is_some();
-        let n = if command {
-            &mut self.ui.cmd.input
-        } else if let Some(k) = extra {
-            let _ = k;
-            &mut self.ui.city.input
-        } else if self.steam_search() {
-            &mut self.ui.steam.query
-        } else if single {
-            &mut self.ui.clip.query
-        } else {
-            self.multi_mut()
-        };
+        let single = command || self.clip_search() || self.steam_search() || self.wave_search() || extra.is_some();
+        let n = self.edit_mut();
         match vk {
             v if v == VK_ESCAPE.0 => return self.end_edit(true),
             v if v == VK_LEFT.0 => n.left(shift, ctrl),
@@ -322,6 +334,8 @@ impl App {
             &mut self.ui.clip.query
         } else if self.steam_search() {
             &mut self.ui.steam.query
+        } else if self.wave_search() {
+            &mut self.ui.yandex.search_input
         } else {
             self.multi_mut()
         }
@@ -353,6 +367,15 @@ impl App {
                 &self.ui.steam.query.text(),
                 100_000.0,
                 view::STEAM_SEARCH_FONT * self.scale,
+            )
+            .ok();
+        }
+        if self.wave_search() {
+            return crate::ui::gfx::make_layout(
+                self.gpu.dwrite(),
+                &self.ui.yandex.search_input.text(),
+                100_000.0,
+                13.0 * self.scale,
             )
             .ok();
         }

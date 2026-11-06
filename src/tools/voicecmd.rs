@@ -41,8 +41,8 @@ pub fn strip_wake(text: &str, wakes: &[String]) -> Option<String> {
 }
 
 pub const YANDEX_PROMPT: &str = r#"
-{"action":"yandex","do":"start"|"resume"|"pause"|"next"|"previous"|"stop"|"status"|"filters"|"set"|"reset"|"artist"|"track"|"like"|"unlike"|"dislike","query":"artist or track name","group":"filter group key","seed":"seed ID or null for any"}
-Use this for Yandex Music and Моя волна. Artist/track starts a station based on the requested item. For mood, activity, language or other filters, call filters first and use its exact keys. Only rate the current track when the user explicitly requests it.
+{"action":"yandex","do":"start"|"resume"|"pause"|"next"|"previous"|"stop"|"status"|"filters"|"set"|"reset"|"artist"|"track"|"wave_track"|"speaker"|"like"|"unlike"|"dislike","query":"track title or artist name","artist":"performer of the track when known","group":"filter group key","seed":"seed ID or null for any"}
+If Yandex Music is connected, a request to play a named song defaults to Yandex Music inside Island. Use do=track for the exact song, with only the title in query and the performer in artist. Use Spotify when explicitly requested. Use wave_track or artist only for a recommendation wave based on a track or artist. Use speaker only when the user explicitly requests a physical Yandex Station or Alice speaker. Do not use browser, shell or general media commands as a fallback for these requests. For mood, activity, language or other filters, call filters first and use its exact keys. Only rate the current track when the user explicitly requests it.
 "#;
 
 pub fn system_prompt(allowed: &[Cap], can_ask: bool, notes: &str, facts: &str) -> String {
@@ -660,7 +660,12 @@ fn from_value(value: &Value) -> Command {
                 Some("like") => Wave::Rate("like"),
                 Some("unlike") => Wave::Rate("unlike"),
                 Some("dislike") => Wave::Rate("dislike"),
-                Some("artist" | "track") => {
+                Some("speaker") => Wave::Speaker,
+                Some("track") => {
+                    let Some(title) = text("query", 180) else { return Command::Unknown };
+                    Wave::Track { title, artist: text("artist", 120).unwrap_or_default() }
+                }
+                Some("artist" | "wave_track") => {
                     let Some(query) = text("query", 180) else { return Command::Unknown };
                     Wave::Station { query, artist: value["do"] == "artist" }
                 }
@@ -1063,11 +1068,47 @@ mod tests {
             Command::Tool(Tool::Yandex(VoiceAction::Station { query: "Daft Punk".into(), artist: true }))
         );
         assert_eq!(cap_of(&station), Some(Cap::Media));
+        let track = parse(r#"{"action":"yandex","do":"track","query":"Around the World","artist":"Daft Punk"}"#);
+        assert_eq!(
+            track,
+            Command::Tool(Tool::Yandex(VoiceAction::Track {
+                title: "Around the World".into(),
+                artist: "Daft Punk".into(),
+            }))
+        );
+        assert_eq!(cap_of(&track), Some(Cap::Media));
+        assert_eq!(
+            parse(r#"{"action":"yandex","do":"wave_track","query":"Around the World"}"#),
+            Command::Tool(Tool::Yandex(VoiceAction::Station { query: "Around the World".into(), artist: false }))
+        );
+        assert_eq!(parse(r#"{"action":"yandex","do":"speaker"}"#), Command::Tool(Tool::Yandex(VoiceAction::Speaker)));
         assert_eq!(
             parse(r#"{"action":"yandex","do":"set","group":"mood","seed":null}"#),
             Command::Tool(Tool::Yandex(VoiceAction::Set { group: "mood".into(), seed: None }))
         );
         assert_eq!(parse(r#"{"action":"yandex","do":"set","group":"mood"}"#), Command::Unknown);
+    }
+
+    #[test]
+    #[ignore = "Queries the configured assistant model with synthetic requests and executes no commands"]
+    fn configured_assistant_routes_named_tracks_and_speaker_requests_separately() {
+        use crate::services::{ai, yandex::VoiceAction};
+        ai::configure(&crate::data::settings::Settings::load().ai);
+        let mut prompt = system_prompt(&[Cap::Media], true, "", "Yandex Music is connected. My Wave: stopped.");
+        prompt.push_str(YANDEX_PROMPT);
+        for (text, on_speaker) in [
+            ("Включи песню Around the World группы Daft Punk", false),
+            ("Включи песню Around the World группы Daft Punk на колонке Яндекс Станция", true),
+        ] {
+            let answer = ai::complete(&prompt, text, 400).expect("assistant model is available");
+            let action = parse(&answer);
+            if on_speaker {
+                assert_eq!(action, Command::Tool(Tool::Yandex(VoiceAction::Speaker)));
+            } else {
+                assert!(matches!(action, Command::Tool(Tool::Yandex(VoiceAction::Track { title, artist }))
+                    if title.eq_ignore_ascii_case("Around the World") && artist.eq_ignore_ascii_case("Daft Punk")));
+            }
+        }
     }
 
     #[test]

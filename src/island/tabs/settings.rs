@@ -113,6 +113,12 @@ impl App {
                         self.ui.yandex.show_library = false;
                     }
                 }
+                WaveSearch => {
+                    self.ui.yandex.search_hidden = !self.settings.wave_search;
+                    if self.ui.yandex.search_hidden {
+                        self.close_wave_search();
+                    }
+                }
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
                 VpnPill => {

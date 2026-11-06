@@ -21,6 +21,7 @@ pub const WM_YANDEX: u32 = WM_APP + 58;
 static SENDER: OnceLock<mpsc::SyncSender<Command>> = OnceLock::new();
 static STATE: Mutex<Option<Snapshot>> = Mutex::new(None);
 static AUTH_EPOCH: AtomicU64 = AtomicU64::new(0);
+static SEARCH_REQUEST: AtomicU64 = AtomicU64::new(0);
 static POSITION: Mutex<Option<(f32, f32, Instant, bool)>> = Mutex::new(None);
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -45,6 +46,7 @@ pub struct Snapshot {
     pub current_id: Option<String>,
     pub rating: Rating,
     pub library: Option<LibraryPage>,
+    pub search: Option<SearchResult>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -60,6 +62,42 @@ pub struct LibraryPage {
     pub page: usize,
     pub total: usize,
     pub tracks: Vec<Track>,
+}
+
+#[derive(Clone)]
+pub struct SearchResult {
+    pub request: u64,
+    pub query: String,
+    pub tracks: Vec<Track>,
+    pub error: Option<&'static str>,
+}
+
+fn search_key(text: &str) -> String {
+    text.to_lowercase()
+        .replace('ё', "е")
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn match_track<'a>(tracks: &'a [Track], title: &str, artist: &str) -> Option<&'a Track> {
+    let title = search_key(title);
+    let artist = search_key(artist);
+    tracks.iter().find(|track| {
+        let name = search_key(&track.title);
+        if name.is_empty() {
+            return false;
+        }
+        if artist.is_empty() {
+            let performer = search_key(&track.artist);
+            title == name || title == format!("{name} {performer}") || title == format!("{performer} {name}")
+        } else {
+            name == title
+                && (search_key(&track.artist) == artist
+                    || track.artist.split(", ").any(|name| search_key(name) == artist))
+        }
+    })
 }
 
 struct LibraryPlayback {
@@ -119,6 +157,8 @@ pub enum VoiceAction {
     Set { group: String, seed: Option<String> },
     Reset,
     Station { query: String, artist: bool },
+    Track { title: String, artist: String },
+    Speaker,
     Rate(&'static str),
 }
 
@@ -151,6 +191,9 @@ pub enum Command {
     Rate(String, Rating),
     Library(usize),
     PlayLiked(String),
+    Search { request: u64, query: String },
+    SearchDone { account: u64, result: SearchResult },
+    PlaySearch { query: String, id: String },
     Select(String, Option<String>),
     Autoplay(bool),
     Ended(u64),
@@ -187,6 +230,13 @@ pub fn debug_timeline(pos: f32, len: f32) {
         *position = Some((pos, len, Instant::now(), false));
     }
 }
+pub fn search(query: String) -> Option<u64> {
+    let tx = SENDER.get()?;
+    let request = SEARCH_REQUEST.fetch_add(1, Ordering::AcqRel) + 1;
+    tx.try_send(Command::Search { request, query }).ok()?;
+    Some(request)
+}
+
 pub fn send(command: Command) {
     if matches!(command, Command::Cancel | Command::Disconnect) {
         AUTH_EPOCH.fetch_add(1, Ordering::AcqRel);
@@ -332,6 +382,7 @@ impl Worker {
                     self.dislikes.clear();
                     self.dislikes_loaded = false;
                     self.state.library = None;
+                    self.state.search = None;
                     integrations::delete_secret("yandex-music");
                 }
                 return Err(error);
@@ -342,6 +393,7 @@ impl Worker {
             self.dislikes.clear();
             self.dislikes_loaded = false;
             self.state.library = None;
+            self.state.search = None;
         }
         self.state.account = account;
         self.account_id = Some(uid);
@@ -510,6 +562,40 @@ impl Worker {
                 self.state.busy = false;
             }
             Command::PlayLiked(id) => self.play_liked(&id)?,
+            Command::Search { request, query } => {
+                if let Some(account) = self.account_id.filter(|_| request == SEARCH_REQUEST.load(Ordering::Acquire)) {
+                    let api = self.api.clone();
+                    let tx = self.tx.clone();
+                    std::thread::spawn(move || {
+                        unsafe {
+                            let _ = RoInitialize(RO_INIT_MULTITHREADED);
+                        }
+                        let tracks = api.search_tracks(&query);
+                        if request == SEARCH_REQUEST.load(Ordering::Acquire) {
+                            let error = tracks.as_ref().err().copied();
+                            let result = SearchResult { request, query, tracks: tracks.unwrap_or_default(), error };
+                            let _ = tx.send(Command::SearchDone { account, result });
+                        }
+                    });
+                }
+            }
+            Command::SearchDone { account, result } => {
+                if self.account_id == Some(account) && result.request == SEARCH_REQUEST.load(Ordering::Acquire) {
+                    self.state.search = Some(result);
+                }
+            }
+            Command::PlaySearch { query, id } => {
+                if let Some(track) = self
+                    .state
+                    .search
+                    .as_ref()
+                    .filter(|s| s.query == query)
+                    .and_then(|s| s.tracks.iter().find(|track| track.id == id))
+                    .cloned()
+                {
+                    self.play_catalog_track(track)?;
+                }
+            }
             Command::Rate(id, rating) => {
                 if let Some(track) = self.current.as_ref().filter(|track| track.id == id).cloned() {
                     let kind = match (rating, self.rating(&id)) {
@@ -593,12 +679,19 @@ impl Worker {
     }
 
     fn voice(&mut self, action: VoiceAction) -> VoiceReply {
+        if action == VoiceAction::Speaker {
+            return Err("Island has no direct control of Yandex Station. Use Alice on the speaker.");
+        }
         if self.api.token.is_empty() {
             return Err(api::SIGN_IN);
         }
         match action {
             VoiceAction::Start => {
-                if self.station.is_some() || self.library_playback.is_some() || self.player.is_none() {
+                if self.station.is_some()
+                    || self.library_playback.is_some()
+                    || self.session.is_empty()
+                    || self.player.is_none()
+                {
                     let old = self.station.take();
                     if let Err(error) = self.new_wave(false) {
                         self.station = old;
@@ -617,6 +710,15 @@ impl Worker {
                 }
                 return Ok(format!("Started a Yandex Music station based on {name}"));
             }
+            VoiceAction::Track { title, artist } => {
+                let query = if artist.is_empty() { title.clone() } else { format!("{title} {artist}") };
+                let tracks = self.api.search_tracks(&query)?;
+                let track = match_track(&tracks, &title, &artist)
+                    .ok_or("No matching track in Yandex Music. Check the title or specify the artist.")?;
+                self.play_catalog_track(track.clone())?;
+                return Ok(format!("Playing {} — {} in Island", track.title, track.artist));
+            }
+            VoiceAction::Speaker => unreachable!(),
             VoiceAction::Resume | VoiceAction::Pause | VoiceAction::Next | VoiceAction::Previous => {
                 if self.player.is_none() {
                     return Err("My Wave is not playing");
@@ -737,6 +839,21 @@ impl Worker {
         let end = (start + LIBRARY_PAGE).min(total);
         let tracks = self.api.library_tracks(&ids[start..end])?;
         self.state.library = Some(LibraryPage { page, total, tracks });
+        Ok(())
+    }
+
+    fn play_catalog_track(&mut self, track: Track) -> api::Result<()> {
+        let previous = self.current.clone();
+        self.play_track(track)?;
+        if self.library_playback.take().is_some() {
+            self.queue.clear();
+        }
+        if let Some(previous) = previous {
+            self.history.push(previous);
+            if self.history.len() > 20 {
+                self.history.remove(0);
+            }
+        }
         Ok(())
     }
 
@@ -924,9 +1041,16 @@ impl Worker {
         self.state.busy = true;
         self.publish();
         let url = self.api.stream(&track.id)?;
-        self.generation += 1;
-        let player = player::Player::open(&url, &track, self.generation, self.tx.clone(), self.state.config.volume)
+        let generation = self.generation + 1;
+        let player = player::Player::open(&url, &track, generation, self.tx.clone(), self.state.config.volume)
             .map_err(|_| "Could not start the Windows audio player")?;
+        if self.player.is_some() {
+            self.finish(false);
+        }
+        if let Ok(mut position) = POSITION.lock() {
+            *position = None;
+        }
+        self.generation = generation;
         self.player = Some(player);
         self.started = false;
         self.played = 0.0;
@@ -1067,6 +1191,25 @@ mod tests {
             assert_eq!(serde_json::from_str::<Config>(&saved).unwrap().volume, volume);
         }
     }
+    #[test]
+    fn exact_track_request_matches_title_and_performer() {
+        let tracks = [("1", "Небо", "Первый"), ("2", "Небо", "Второй, Третий"), ("3", "Огонёк!", "Группа")].map(
+            |(id, title, artist)| Track {
+                id: id.into(),
+                title: title.into(),
+                artist: artist.into(),
+                cover: String::new(),
+                batch: String::new(),
+                session: String::new(),
+                palette: Default::default(),
+            },
+        );
+        assert_eq!(match_track(&tracks, "«Небо»", "ВТОРОЙ").unwrap().id, "2");
+        assert_eq!(match_track(&tracks, "Группа Огонек", "").unwrap().id, "3");
+        assert!(match_track(&tracks, "Небо", "Другой").is_none());
+        assert!(match_track(&tracks, "Небо в огне", "").is_none());
+    }
+
     #[test]
     fn stale_player_events_do_not_advance_or_stop_new_track() {
         let (tx, _) = mpsc::sync_channel(8);
