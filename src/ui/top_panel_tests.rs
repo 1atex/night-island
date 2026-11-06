@@ -255,21 +255,13 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
             surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
             save_surface(&surface, size, name)?;
         }
-        ui.sw.guide = Some(crate::view::GuideUi::new(""));
-        for step in 0..6 {
-            let guide = ui.sw.guide.as_mut().unwrap();
-            if matches!(step, 2..=5) {
-                guide.play_demo(false);
-            }
+        let mut guide = crate::view::GuideUi::new(&ui.cfg, false);
+        guide.select(crate::view::Preset::Desktop, false);
+        ui.sw.guide = Some(guide);
+        for step in 0..3 {
             surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
             save_surface(&surface, size, &format!("guide-{}", step + 1))?;
-            if step == 0 {
-                ui.sw.guide.as_mut().unwrap().play_demo(false);
-                surface
-                    .paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
-                save_surface(&surface, size, "guide-1-open")?;
-            }
-            ui.sw.guide.as_mut().unwrap().move_by(1);
+            ui.sw.guide.as_mut().unwrap().move_by(1, false);
         }
         crate::ui::i18n::set_ru(false);
     }

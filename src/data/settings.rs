@@ -948,7 +948,7 @@ impl Settings {
         Some(dir.join("settings.json"))
     }
 
-    const TOUR_REVISION: u8 = 1;
+    const TOUR_REVISION: u8 = 2;
 
     pub fn tour_pending(&self) -> bool {
         self.tour_revision < Self::TOUR_REVISION
@@ -1122,7 +1122,7 @@ mod tests {
     fn the_current_tour_opens_for_new_and_existing_profiles_once() {
         let path = std::env::temp_dir().join(format!("ni-tour-settings-{}.json", std::process::id()));
         assert!(Settings::load_from(Some(path.clone())).tour_pending());
-        fs::write(&path, r#"{"scale_percent":120,"tour_pending":false}"#).unwrap();
+        fs::write(&path, r#"{"scale_percent":120,"tour_revision":1}"#).unwrap();
         let mut settings = Settings::load_from(Some(path.clone()));
         assert!(settings.tour_pending());
         assert_eq!(settings.scale_percent, 120);

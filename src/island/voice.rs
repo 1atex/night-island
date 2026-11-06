@@ -161,11 +161,14 @@ impl App {
         if localvoice::install(self.hwnd) {
             self.show_notice_for('\u{E896}', "Downloading the local voice…", 120_000);
         } else {
-            self.notify_for(Notice::Error, '\u{E783}', "The local voice is already being downloaded", 3000);
+            self.notify_for(Notice::Error, '\u{E783}', "Another voice model is being downloaded", 3000);
         }
     }
 
     pub(in crate::island) fn on_local_voice_setup(&mut self) {
+        if self.refresh_guide_voice() {
+            return self.render_settings_win();
+        }
         self.clear_notice();
         match localvoice::state() {
             localvoice::State::Ready => {
@@ -189,11 +192,15 @@ impl App {
         if wake_install::start(self.hwnd) {
             self.show_notice_for('\u{E896}', "Downloading the wake-word model…", 120_000);
         } else {
-            self.notify_for(Notice::Error, '\u{E783}', "The wake-word model is already being downloaded", 3000);
+            self.notify_for(Notice::Error, '\u{E783}', "Another voice model is being downloaded", 3000);
         }
     }
 
     pub(in crate::island) fn on_wake_setup(&mut self) {
+        if self.refresh_guide_voice() {
+            self.sync_wake();
+            return self.render_settings_win();
+        }
         self.clear_notice();
         match wake_install::state() {
             wake_install::State::Ready => {

@@ -2,54 +2,232 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
+use crate::data::settings::Settings;
+use crate::platform::{localvoice, wake, wake_install};
 use crate::view::*;
 
-const DEMO_TIME: Duration = Duration::from_millis(430);
-const VOICE_DEMO_TIME: Duration = Duration::from_millis(3600);
-const SCENE: Rect = (426.0, 163.0, 892.0, 556.0);
-const PET_DOCK: Rect = (462.0, 215.0, 657.0, 254.0);
-const PET_DOCKED: (f32, f32) = (488.5, 234.5);
-const PET_RELEASED: (f32, f32) = (712.0, 284.0);
+const SCENE: Rect = (426.0, 151.0, 892.0, 556.0);
+const SCENES: [&str; 3] = ["Workspace preview", "Voice preview", "On your desktop"];
+const STEPS: [&str; 3] = ["Workspace", "Voice", "Ready"];
+const PRESET_ROWS: [Preset; 4] = [Preset::Keep, Preset::Island, Preset::Dock, Preset::Desktop];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Preset {
+    #[default]
+    Keep,
+    Island,
+    Dock,
+    Desktop,
+}
+
+impl Preset {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Keep => "Keep my layout",
+            Self::Island => "Island only",
+            Self::Dock => "Island and dock",
+            Self::Desktop => "Full workspace",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Keep => "Use the panels you already have.",
+            Self::Island => "A compact island and the Windows taskbar.",
+            Self::Dock => "Add an auto-hiding app dock.",
+            Self::Desktop => "Add the dock and system controls at the top.",
+        }
+    }
+
+    pub fn apply(self, settings: &mut Settings) {
+        if self == Self::Keep {
+            return;
+        }
+        let dock = matches!(self, Self::Dock | Self::Desktop);
+        settings.desktop_dock.enabled = dock;
+        settings.top_panel.enabled = self == Self::Desktop;
+        if dock {
+            settings.desktop_dock.auto_hide = true;
+            settings.desktop_dock.replace_taskbar = false;
+        }
+        if self == Self::Desktop {
+            settings.top_panel.auto_hide = true;
+            settings.top_panel.reserve_space = false;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoiceModel {
+    Wake,
+    Local,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ModelStatus {
+    #[default]
+    Missing,
+    Downloading(u8),
+    Installed,
+    Failed(&'static str),
+}
+
+impl VoiceModel {
+    fn index(self) -> usize {
+        usize::from(self == Self::Local)
+    }
+
+    fn status(self) -> ModelStatus {
+        match self {
+            Self::Wake => match wake_install::state() {
+                wake_install::State::Idle => ModelStatus::Missing,
+                wake_install::State::Working(step) => ModelStatus::Downloading(step),
+                wake_install::State::Ready => ModelStatus::Installed,
+                wake_install::State::Failed(why) => ModelStatus::Failed(why),
+            },
+            Self::Local => match localvoice::state() {
+                localvoice::State::Idle => ModelStatus::Missing,
+                localvoice::State::Working(step) => ModelStatus::Downloading(step),
+                localvoice::State::Ready => ModelStatus::Installed,
+                localvoice::State::Failed(why) => ModelStatus::Failed(why),
+            },
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Wake => "Wake-word model",
+            Self::Local => "Local voice (Piper)",
+        }
+    }
+
+    fn detail(self) -> &'static str {
+        match self {
+            Self::Wake => "Local detection · about 46 MB",
+            Self::Local => "Offline speech · up to 44 MB",
+        }
+    }
+
+    fn row(self) -> Rect {
+        let y = 349.0 + self.index() as f32 * 75.0;
+        (48.0, y, 404.0, y + 65.0)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuideAction {
     Next,
     Back,
-    Chapter(usize),
     Skip,
     Resume,
-    Demo,
-    OpenIsland,
-    OpenDock,
-    OpenTop,
-    OpenNotifications,
+    Select(Preset),
+    SuggestWake,
+    Download(VoiceModel),
+    ToggleModel(VoiceModel),
     OpenAssistant,
-    OpenWake,
-    SaveWake,
 }
 
-#[derive(Default)]
 pub struct GuideUi {
     page: usize,
     pub visible: bool,
-    expanded: bool,
-    transition: Option<(Instant, f32)>,
-    pet_drag: Option<PetDrag>,
-    pet_drop: Option<(Instant, (f32, f32))>,
+    pub preset: Preset,
+    layout_before: (bool, bool),
+    demo_started: Option<Instant>,
     pub wake: TextEdit,
-    pub wake_feedback: Option<(&'static str, bool)>,
-}
-
-struct PetDrag {
-    pointer_offset: (f32, f32),
-    center: (f32, f32),
+    wake_before_text: String,
+    pub invalid_wake: bool,
+    pub connect_speech: bool,
+    pub connect_model: bool,
+    pub wake_enabled: Option<bool>,
+    pub local_enabled: Option<bool>,
+    wake_before: bool,
+    local_before: bool,
+    models: [ModelStatus; 2],
 }
 
 impl GuideUi {
-    pub fn new(wake: &str) -> Self {
-        let mut guide = Self { visible: true, ..Default::default() };
-        guide.wake.set_text(wake);
+    pub fn new(settings: &Settings, animate: bool) -> Self {
+        let mut guide = Self {
+            page: 0,
+            visible: true,
+            preset: Preset::Keep,
+            layout_before: (settings.desktop_dock.enabled, settings.top_panel.enabled),
+            demo_started: animate.then(Instant::now),
+            wake: TextEdit::default(),
+            wake_before_text: settings.ai.voice_wake.clone(),
+            invalid_wake: false,
+            connect_speech: false,
+            connect_model: false,
+            wake_enabled: None,
+            local_enabled: None,
+            wake_before: settings.assistant.wake && settings.assistant.perms.enabled,
+            local_before: settings.assistant.local_voice && settings.assistant.speak,
+            models: [ModelStatus::Missing; 2],
+        };
+        guide.wake.set_text(&settings.ai.voice_wake);
         guide
+    }
+
+    pub fn refresh_settings(&mut self, settings: &Settings) {
+        if !self.wake_changed() {
+            self.wake.set_text(&settings.ai.voice_wake);
+        }
+        self.wake_before_text.clone_from(&settings.ai.voice_wake);
+        self.wake_before = settings.assistant.wake && settings.assistant.perms.enabled;
+        self.local_before = settings.assistant.local_voice && settings.assistant.speak;
+    }
+
+    pub fn wake_changed(&self) -> bool {
+        self.wake.text() != self.wake_before_text
+    }
+
+    pub fn refresh_models(&mut self) {
+        for (model, installed) in [(VoiceModel::Wake, wake::installed()), (VoiceModel::Local, localvoice::ready())] {
+            self.models[model.index()] = match (model.status(), installed) {
+                (ModelStatus::Missing, true) => ModelStatus::Installed,
+                (status, _) => status,
+            };
+        }
+    }
+
+    pub fn poll_models(&mut self) {
+        for model in [VoiceModel::Wake, VoiceModel::Local] {
+            let status = model.status();
+            let cached = &mut self.models[model.index()];
+            if status != ModelStatus::Missing || *cached != ModelStatus::Installed {
+                *cached = status;
+            }
+        }
+    }
+
+    pub fn downloading(&self) -> bool {
+        self.visible && self.page == 1 && self.models.iter().any(|s| matches!(s, ModelStatus::Downloading(_)))
+    }
+
+    pub fn can_download(&self, model: VoiceModel) -> bool {
+        !self.downloading() && matches!(self.models[model.index()], ModelStatus::Missing | ModelStatus::Failed(_))
+    }
+
+    fn enabled(&self, model: VoiceModel) -> bool {
+        match model {
+            VoiceModel::Wake => self.wake_enabled.unwrap_or(self.wake_before),
+            VoiceModel::Local => self.local_enabled.unwrap_or(self.local_before),
+        }
+    }
+
+    fn can_toggle(&self, model: VoiceModel) -> bool {
+        self.models[model.index()] == ModelStatus::Installed
+            && (model == VoiceModel::Local || self.enabled(model) || (self.connect_model && self.connect_speech))
+    }
+
+    pub fn toggle_model(&mut self, model: VoiceModel) {
+        if self.can_toggle(model) {
+            let enabled = !self.enabled(model);
+            match model {
+                VoiceModel::Wake => self.wake_enabled = Some(enabled),
+                VoiceModel::Local => self.local_enabled = Some(enabled),
+            }
+        }
     }
 
     pub fn validated_wake(&self) -> Option<String> {
@@ -58,197 +236,62 @@ impl GuideUi {
         (!wake.is_empty() && wake.split(", ").all(|name| seen.insert(name.to_lowercase()))).then_some(wake)
     }
 
-    pub fn has_demo(&self) -> bool {
-        self.page != 1
-    }
-
     pub fn last_page(&self) -> bool {
         self.page + 1 == STEPS.len()
     }
 
-    pub fn move_by(&mut self, offset: isize) {
-        self.open_page(self.page.saturating_add_signed(offset).min(STEPS.len() - 1));
+    pub fn voice_page(&self) -> bool {
+        self.page == 1
     }
 
-    pub fn open_page(&mut self, page: usize) {
-        if page != self.page && page < STEPS.len() {
+    pub fn select(&mut self, preset: Preset, animate: bool) {
+        if self.preset != preset {
+            self.preset = preset;
+            self.demo_started = animate.then(Instant::now);
+        }
+    }
+
+    pub fn move_by(&mut self, offset: isize, animate: bool) {
+        let page = self.page.saturating_add_signed(offset).min(STEPS.len() - 1);
+        if page != self.page {
             self.page = page;
-            self.expanded = false;
-            self.transition = None;
-            self.pet_drag = None;
-            self.pet_drop = None;
+            self.demo_started = animate.then(Instant::now);
         }
     }
 
-    pub fn play_demo(&mut self, animate: bool) {
-        self.pet_drop = None;
-        let replay = matches!(self.page, 3 | 4);
-        let from = if replay { 0.0 } else { self.progress() };
-        self.expanded = replay || !self.expanded;
-        self.transition = animate.then(|| (Instant::now(), from));
-    }
-
-    fn progress(&self) -> f32 {
-        let target = f32::from(self.expanded);
-        self.transition.map_or(target, |(started, from)| from + (target - from) * demo_ease(started))
-    }
-
-    fn pet_center(&self) -> (f32, f32) {
-        if let Some(drag) = &self.pet_drag {
-            return drag.center;
-        }
-        if let Some((started, from)) = self.pet_drop {
-            return mix_point(from, mix_point(PET_DOCKED, PET_RELEASED, f32::from(self.expanded)), demo_ease(started));
-        }
-        mix_point(PET_DOCKED, PET_RELEASED, self.progress())
-    }
-
-    pub fn begin_pet_drag(&mut self, size: (f32, f32), dpi: f32, point: (f32, f32)) -> bool {
-        if !self.visible || !self.last_page() {
-            return false;
-        }
-        let point = Layout::new(size, dpi).local(point);
-        let (x, y) = self.pet_center();
-        let radius = 20.0 + 15.0 * self.progress();
-        if !inside((x - radius, y - radius, x + radius, y + radius), point.0, point.1) {
-            return false;
-        }
-        self.pet_drop = None;
-        self.pet_drag = Some(PetDrag { pointer_offset: (x - point.0, y - point.1), center: (x, y) });
-        true
-    }
-
-    pub fn move_pet(&mut self, size: (f32, f32), dpi: f32, point: (f32, f32)) -> bool {
-        let Some(drag) = self.pet_drag.as_mut() else { return false };
-        let (x, y) = Layout::new(size, dpi).local(point);
-        drag.center =
-            ((x + drag.pointer_offset.0).clamp(481.0, 827.0), (y + drag.pointer_offset.1).clamp(230.0, 310.0));
-        true
-    }
-
-    pub fn drop_pet(&mut self, animate: bool) -> bool {
-        let Some(drag) = self.pet_drag.take() else { return false };
-        let (x, y) = drag.center;
-        let from = self.progress();
-        self.expanded = !inside(PET_DOCK, x, y);
-        let now = Instant::now();
-        self.pet_drop = animate.then_some((now, (x, y)));
-        self.transition = animate.then_some((now, from));
-        true
+    fn elapsed(&self) -> Duration {
+        self.demo_started.map_or(Duration::MAX, |started| started.elapsed())
     }
 
     fn voice_phase(&self) -> usize {
-        if !self.expanded {
-            return 0;
-        }
-        let elapsed = self.transition.map_or(VOICE_DEMO_TIME, |(started, _)| started.elapsed());
-        match elapsed.as_millis() {
-            0..=999 => 1,
-            1000..=1899 => 2,
-            1900..=3599 => 3,
+        match self.elapsed().as_millis() {
+            0..=349 => 0,
+            350..=1299 => 1,
+            1300..=2099 => 2,
+            2100..=3499 => 3,
             _ => 4,
         }
     }
 
     pub fn animating(&self) -> bool {
-        let duration = if self.page == 4 { VOICE_DEMO_TIME } else { DEMO_TIME };
-        self.visible && self.transition.is_some_and(|(started, _)| started.elapsed() < duration)
+        let duration = if self.page == 1 { 3500 } else { 1050 };
+        self.visible && self.elapsed() < Duration::from_millis(duration)
+    }
+
+    fn panels(&self) -> (bool, bool) {
+        match self.preset {
+            Preset::Keep => self.layout_before,
+            Preset::Island => (false, false),
+            Preset::Dock => (true, false),
+            Preset::Desktop => (true, true),
+        }
     }
 }
 
-fn demo_ease(started: Instant) -> f32 {
-    let t = (started.elapsed().as_secs_f32() / DEMO_TIME.as_secs_f32()).min(1.0);
+fn eased(ms: u128, delay: u128, duration: f32) -> f32 {
+    let t = (ms.saturating_sub(delay) as f32 / duration).min(1.0);
     t * t * (3.0 - 2.0 * t)
 }
-
-fn mix_point(from: (f32, f32), to: (f32, f32), t: f32) -> (f32, f32) {
-    (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t)
-}
-
-struct Step {
-    chapter: &'static str,
-    scene: &'static str,
-    title: &'static str,
-    summary: &'static str,
-    features: [(char, &'static str, &'static str); 3],
-}
-
-const STEPS: [Step; 6] = [
-    Step {
-        chapter: "The island",
-        scene: "Your desktop",
-        title: "An island on your desktop",
-        summary: "Music, messages and a little companion. All from a small island at the edge of your screen.",
-        features: [
-            ('\u{E8A7}', "Open on hover", "Move the pointer over the island to open it. Move away to close it."),
-            ('\u{E718}', "Keep it open", "Use the pin when you want the panel to stay open."),
-            ('\u{E713}', "Make it yours", "Adjust the position, shape and animation in Settings."),
-        ],
-    },
-    Step {
-        chapter: "Tools",
-        scene: "Home preview",
-        title: "The tools you use daily",
-        summary: "Start on Home. Open More to find the rest of your tools and change the tab bar.",
-        features: [
-            ('\u{E189}', "Music and sound", "Control playback, seek through a track and adjust app volume."),
-            ('\u{E77F}', "Clipboard and notes", "Find something you copied or jot down a reminder."),
-            ('\u{E713}', "Your shortcuts", "Edit the tiles on Home to keep the actions you use within reach."),
-        ],
-    },
-    Step {
-        chapter: "Desktop",
-        scene: "Desktop preview",
-        title: "Organize your desktop",
-        summary: "Choose what sits around the island, from favorite apps to the system tray.",
-        features: [
-            ('\u{E7F4}', "Bottom dock", "Pin and reorder apps. Hover to preview their windows."),
-            ('\u{E8A9}', "Top panel", "Choose the tray, active app and system controls you want to see."),
-            ('\u{E9D9}', "Screen edges", "Set panels to appear on hover and hide them in fullscreen apps."),
-        ],
-    },
-    Step {
-        chapter: "Notifications",
-        scene: "Notification preview",
-        title: "Notifications at a glance",
-        summary: "Windows notifications can appear as animated cards beside the island.",
-        features: [
-            ('\u{EA8F}', "Connect Windows notifications", "Open the Notifications tab to grant access."),
-            ('\u{E8A7}', "Read at your pace", "Hover to pause the card, then open the full message."),
-            ('\u{E7ED}', "Choose where alerts appear", "Use Windows Do not disturb to quiet system banners."),
-        ],
-    },
-    Step {
-        chapter: "Assistant",
-        scene: "Voice preview",
-        title: "Talk to the Assistant",
-        summary: "Ask a question, control music or set a reminder. Start with a model and speech recognition.",
-        features: [
-            ('\u{E99A}', "Connect a model", "Add a model provider in Settings, under Assistant."),
-            ('\u{E720}', "Set up speech", "Choose how speech is recognized and how answers are spoken."),
-            ('\u{EA18}', "Choose permissions", "Decide which actions run directly and which ask first."),
-        ],
-    },
-    Step {
-        chapter: "Pet",
-        scene: "Meet Spark",
-        title: "Give your pet a name",
-        summary: "Your pet can sit on the island or join you on the desktop.",
-        features: [
-            ('\u{E7C9}', "Bring your pet out", "Drag it away from the island. Drag it back to dock it again."),
-            (
-                '\u{E8F2}',
-                "Talk to your pet",
-                "Use the pet’s voice action or say its wake word when listening is enabled.",
-            ),
-            (
-                '\u{E720}',
-                "Pick two distinct words",
-                "Use short names that sound different. Either one can wake the Assistant.",
-            ),
-        ],
-    },
-];
 
 #[derive(Clone, Copy)]
 struct Layout {
@@ -264,62 +307,48 @@ impl Layout {
         Self { x: (w - 940.0 * scale) / 2.0, y: h - 680.0 * scale - (available - 640.0 * scale) / 2.0, scale }
     }
 
-    fn local(self, (x, y): (f32, f32)) -> (f32, f32) {
-        ((x - self.x) / self.scale, (y - self.y) / self.scale)
-    }
-
     fn rect(self, (l, t, r, b): Rect) -> Rect {
         (self.x + l * self.scale, self.y + t * self.scale, self.x + r * self.scale, self.y + b * self.scale)
     }
 }
 
+fn preset_row(index: usize) -> Rect {
+    let y = 270.0 + 69.0 * index as f32;
+    (48.0, y, 404.0, y + 60.0)
+}
+
 fn controls(guide: &GuideUi) -> Vec<(GuideAction, &'static str, Rect)> {
     use GuideAction::*;
     let mut buttons = vec![
-        (Skip, "Skip tour", (48.0, 601.0, 176.0, 647.0)),
-        (
-            Next,
-            match guide.page {
-                0 => "Start the tour",
-                _ if guide.last_page() => "Finish tour",
-                _ => "Next",
-            },
-            (714.0, 601.0, 892.0, 647.0),
-        ),
+        (Skip, "Skip setup", (48.0, 601.0, 219.0, 647.0)),
+        (Next, if guide.last_page() { "Apply and finish" } else { "Continue" }, (706.0, 601.0, 892.0, 647.0)),
     ];
     if guide.page > 0 {
-        buttons.push((Back, "Back", (592.0, 601.0, 702.0, 647.0)));
+        buttons.push((Back, "Back", (591.0, 601.0, 694.0, 647.0)));
     }
-    for (i, step) in STEPS.iter().enumerate() {
-        let x = 48.0 + 142.0 * i as f32;
-        buttons.push((Chapter(i), step.chapter, (x, 100.0, x + 134.0, 136.0)));
+    if guide.page == 0 {
+        buttons.extend(
+            PRESET_ROWS.into_iter().enumerate().map(|(i, preset)| (Select(preset), preset.label(), preset_row(i))),
+        );
     }
-    let wide = (453.0, 490.0, 865.0, 535.0);
-    let split = |a, b| [(a, (453.0, 490.0, 653.0, 535.0)), (b, (665.0, 490.0, 865.0, 535.0))];
-    match guide.page {
-        0 => buttons.push((Demo, if guide.expanded { "Collapse the example" } else { "Open the example" }, wide)),
-        1 => buttons.push((OpenIsland, "Open Home", wide)),
-        2 => buttons.extend(
-            split((OpenDock, "Dock settings"), (OpenTop, "Top panel settings")).map(|((a, label), r)| (a, label, r)),
-        ),
-        3 => buttons.extend(
-            split((Demo, "Show example"), (OpenNotifications, "Open Notifications"))
-                .map(|((a, label), r)| (a, label, r)),
-        ),
-        4 => buttons.extend(
-            split((Demo, "Try a voice command"), (OpenAssistant, "Set up the Assistant"))
-                .map(|((a, label), r)| (a, label, r)),
-        ),
-        _ => {
-            buttons.push((
-                Demo,
-                if guide.expanded { "Dock the example pet" } else { "Release the example pet" },
-                (453.0, 273.0, 651.0, 315.0),
-            ));
-            buttons.extend(
-                split((SaveWake, "Save wake words"), (OpenWake, "Voice activation settings"))
-                    .map(|((a, label), r)| (a, label, r)),
-            );
+    if guide.voice_page() {
+        buttons.push((SuggestWake, "Suggest names", (264.0, 248.0, 404.0, 274.0)));
+        if !guide.connect_model || !guide.connect_speech {
+            let label = if guide.connect_model { "Connect speech recognition" } else { "Connect an AI service" };
+            buttons.push((OpenAssistant, label, (453.0, 496.0, 865.0, 535.0)));
+        }
+        for model in [VoiceModel::Wake, VoiceModel::Local] {
+            let label = match guide.models[model.index()] {
+                ModelStatus::Failed(_) => "Retry",
+                _ => "Download",
+            };
+            let (_, top, _, bottom) = model.row();
+            let r = (295.0, top + 15.0, 391.0, bottom - 15.0);
+            if guide.can_download(model) {
+                buttons.push((Download(model), label, r));
+            } else if guide.can_toggle(model) {
+                buttons.push((ToggleModel(model), if guide.enabled(model) { "On" } else { "Enable" }, r));
+            }
         }
     }
     buttons
@@ -327,26 +356,15 @@ fn controls(guide: &GuideUi) -> Vec<(GuideAction, &'static str, Rect)> {
 
 pub fn guide_hit(size: (f32, f32), dpi: f32, guide: &GuideUi, x: f32, y: f32) -> Option<GuideAction> {
     let layout = Layout::new(size, dpi);
-    controls(guide)
-        .into_iter()
-        .find(|(_, _, rect)| inside(layout.rect(*rect), x, y))
-        .map(|(action, _, _)| action)
-        .or_else(|| {
-            let demo = match guide.page {
-                0 => (460.0, 223.0, 858.0, 470.0),
-                2 => (504.0, 378.0, 815.0, 439.0),
-                _ => return None,
-            };
-            inside(layout.rect(demo), x, y).then_some(GuideAction::Demo)
-        })
+    controls(guide).into_iter().find(|(_, _, rect)| inside(layout.rect(*rect), x, y)).map(|(action, _, _)| action)
 }
 
 pub fn guide_wake_rects(size: (f32, f32), dpi: f32, guide: &GuideUi) -> Option<(Rect, Rect)> {
-    if !guide.last_page() {
+    if !guide.voice_page() {
         return None;
     }
     let layout = Layout::new(size, dpi);
-    Some((layout.rect((453.0, 375.0, 865.0, 420.0)), layout.rect((467.0, 375.0, 851.0, 420.0))))
+    Some((layout.rect((48.0, 277.0, 404.0, 321.0)), layout.rect((61.0, 277.0, 391.0, 321.0))))
 }
 
 pub fn guide_button(p: &Painter, r: Rect, s: f32, label: &str, primary: bool, hover: bool) -> Result<()> {
@@ -483,197 +501,58 @@ impl Preview<'_> {
     }
 }
 
-fn paint_preview(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
+fn paint_voice(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     let p = v.p;
     let l = v.layout;
-    let t = guide.progress();
-    match guide.page {
-        0 | 1 => {
-            let t = if guide.page == 1 { 1.0 } else { t };
-            let width = 252.0 + 138.0 * t;
-            let x = 659.0 - width / 2.0;
-            let y = 283.0 - 57.0 * t;
-            let height = 48.0 + 176.0 * t;
-            v.glow((659.0, y + height * 0.72), (187.0, 85.0), rgba(0.01, 0.02, 0.07, 0.87))?;
-            if t < 1.0 {
-                let center = 659.0;
-                let base = y + height - 2.0;
-                let depth = (1.0 - t) * (5.0 + 22.0 * t);
-                let point = |x, y| {
-                    let (x, y, _, _) = l.rect((x, y, x, y));
-                    (x, y)
-                };
-                p.fill_curves(
-                    point(center - 72.0, base),
-                    &[
-                        [point(center - 34.0, base), point(center - 26.0, base + depth), point(center, base + depth)],
-                        [point(center + 26.0, base + depth), point(center + 34.0, base), point(center + 72.0, base)],
-                    ],
-                    rgba(0.015, 0.018, 0.023, 1.0),
-                )?;
-            }
-            v.round((x, y, x + width, y + height), 24.0, rgba(0.015, 0.018, 0.023, 1.0))?;
-            if t >= 0.45 {
-                p.push_clip(l.rect((x + 15.0, y + 8.0, x + width - 15.0, y + height - 12.0)));
-                let result = v.home(464.0, y);
-                p.pop_clip();
-                result?;
-            } else {
-                v.pet(x + 10.0, y + 5.0, 40.0)?;
-                v.text("21:08", (x + 62.0, y, x + 136.0, y + 48.0), 17.0, true, WHITE)?;
-                v.icon('\u{F800}', (x + 133.0, y, x + 161.0, y + 48.0), 16.0)?;
-                v.text("18°", (x + 165.0, y, x + 199.0, y + 48.0), 13.0, true, WHITE)?;
-                v.icon('\u{E76C}', (x + 209.0, y, x + 239.0, y + 48.0), 11.0)?;
-            }
-            if guide.page == 0 && t < 0.1 {
-                v.center("Tap the island to open it", (469.0, 363.0, 849.0, 393.0), 14.0, WHITE)?;
-                v.center(
-                    "On your desktop it opens on hover",
-                    (469.0, 394.0, 849.0, 416.0),
-                    12.0,
-                    rgba(1.0, 1.0, 1.0, 0.71),
-                )?;
-            }
-        }
-        2 => {
-            v.island(453.0, 216.0, 92.0, 34.0)?;
-            v.island(570.0, 216.0, 178.0, 34.0)?;
-            v.island(773.0, 216.0, 92.0, 34.0)?;
-            v.text("Explorer", (466.0, 216.0, 539.0, 250.0), 10.5, true, WHITE)?;
-            v.text("21:08       18°", (619.0, 216.0, 730.0, 250.0), 12.0, true, WHITE)?;
-            v.icon('\u{E701}', (780.0, 216.0, 814.0, 250.0), 12.0)?;
-            v.icon('\u{E767}', (813.0, 216.0, 855.0, 250.0), 12.0)?;
-            if t > 0.0 {
-                let top = 378.0 - 106.0 * t;
-                v.island(578.0, top, 163.0, 94.0 * t)?;
-                if t > 0.72 {
-                    v.round((588.0, top + 10.0, 731.0, top + 60.0), 8.0, acc(0.23))?;
-                    v.icon('\u{E189}', (588.0, top + 10.0, 731.0, top + 60.0), 19.0)?;
-                    v.center("Midnight City", (588.0, top + 62.0, 731.0, top + 90.0), 11.5, WHITE)?;
-                }
-            }
-            v.round((504.0, 378.0, 815.0, 439.0), 18.0, rgba(0.06, 0.075, 0.12, 0.96))?;
-            for (i, glyph) in
-                ['\u{E8B7}', '\u{E774}', '\u{E189}', '\u{E8F2}', '\u{E70B}', '\u{E713}'].into_iter().enumerate()
-            {
-                let x = 516.0 + i as f32 * 48.0;
-                let tones = [
-                    rgba(0.52, 0.38, 0.20, 0.92),
-                    rgba(0.26, 0.38, 0.66, 0.92),
-                    acc(0.68 + 0.32 * t),
-                    rgba(0.30, 0.25, 0.60, 0.92),
-                    rgba(0.20, 0.45, 0.42, 0.92),
-                    rgba(0.30, 0.33, 0.40, 0.92),
-                ];
-                v.round((x, 389.0, x + 37.0, 425.0), 9.0, tones[i])?;
-                v.icon(glyph, (x, 389.0, x + 37.0, 425.0), 17.0)?;
-            }
-            v.center(
-                "Tap the dock to preview a window",
-                (453.0, 447.0, 865.0, 475.0),
-                12.0,
-                rgba(1.0, 1.0, 1.0, 0.73),
-            )?;
-        }
-        3 => {
-            let width = 191.0 + 169.0 * t;
-            let height = 38.0 + 124.0 * t;
-            let x = 659.0 - width / 2.0;
-            v.glow((659.0, 306.0), (194.0, 99.0), acc(0.17 + 0.16 * t))?;
-            v.island(x, 247.0, width, height)?;
-            if t >= 0.7 {
-                let record = crate::platform::notifications::Record {
-                    id: 0,
-                    created: 0,
-                    app_id: String::new(),
-                    app: "Night Island".into(),
-                    title: crate::ui::i18n::tr("Example notification").into_owned(),
-                    body: crate::ui::i18n::tr("Your message appears here. Hover to keep it visible.").into_owned(),
-                    icon: None,
-                    avatar: None,
-                };
-                let r = l.rect((x, 247.0, x + width, 247.0 + height));
-                let _ = paint_notification_card(p, (r.0, r.1, r.2 - r.0, r.3 - r.1), l.scale, &record, 0, false, None)?;
-            } else {
-                v.icon('\u{EA8F}', (x + 12.0, 247.0, x + 45.0, 285.0), 14.0)?;
-                v.text("Night Island", (x + 49.0, 247.0, x + 174.0, 285.0), 12.0, true, WHITE)?;
-                v.center("Send yourself a sample card", (453.0, 365.0, 865.0, 397.0), 14.0, WHITE)?;
-            }
-        }
-        4 => {
-            use crate::ui::characters::Reaction;
-            let phase = guide.voice_phase();
-            let elapsed = guide.transition.map_or(0.0, |(started, _)| started.elapsed().as_secs_f32());
-            let mouth = if phase == 3 { 0.18 + 0.69 * (elapsed * 16.0).sin().abs() } else { 0.0 };
-            v.island(474.0, 220.0, 370.0, 235.0)?;
-            v.pose_pet(
-                490.0,
-                230.0,
-                46.0,
-                match phase {
-                    0 => Reaction::Idle,
-                    3 | 4 => Reaction::Done,
-                    _ => Reaction::Attention,
-                },
-                mouth,
-            )?;
-            v.text("Assistant", (548.0, 232.0, 824.0, 259.0), 16.0, true, WHITE)?;
-            v.text(
-                "Example only · microphone off",
-                (548.0, 259.0, 826.0, 277.0),
-                11.0,
-                false,
-                rgba(1.0, 1.0, 1.0, 0.64),
-            )?;
-            for (i, (icon, label)) in [('\u{E720}', "Listening…"), ('\u{E99A}', "Thinking…"), ('\u{E8F2}', "Speaking")]
-                .into_iter()
-                .enumerate()
-            {
-                let x = 495.0 + i as f32 * 109.0;
-                let active = phase == i + 1;
-                v.round((x, 288.0, x + 101.0, 350.0), 12.0, acc(if active { 0.42 } else { 0.11 }))?;
-                v.icon(icon, (x + 7.0, 290.0, x + 94.0, 322.0), 15.0)?;
-                p.text(
-                    label,
-                    l.rect((x + 3.0, 322.0, x + 98.0, 347.0)),
-                    11.0 * l.scale,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    DWRITE_TEXT_ALIGNMENT_CENTER,
-                    rgba(1.0, 1.0, 1.0, if active { 1.0 } else { 0.63 }),
-                )?;
-            }
-            v.round((495.0, 366.0, 823.0, 434.0), 12.0, rgba(1.0, 1.0, 1.0, 0.075))?;
-            v.text("Remind me in ten minutes.", (510.0, 371.0, 809.0, 399.0), 13.0, false, rgba(1.0, 1.0, 1.0, 0.71))?;
-            if phase >= 3 {
-                v.text("I’ll remind you in ten minutes.", (510.0, 399.0, 809.0, 426.0), 13.0, true, WHITE)?;
-            } else if phase > 0 {
-                for i in 0..12 {
-                    let x = 512.0 + 6.0 * i as f32;
-                    let h = 4.0 + 12.0 * (elapsed * 13.0 - i as f32 * 0.7).sin().abs();
-                    v.round((x, 413.0 - h / 2.0, x + 3.0, 413.0 + h / 2.0), 1.5, acc(0.75))?;
-                }
-            }
-        }
-        _ => {
-            v.island(462.0, 215.0, 195.0, 39.0)?;
-            if guide.pet_drag.is_some() {
-                p.stroke_round_rect(l.rect(PET_DOCK), 19.5 * l.scale, l.scale, acc(0.75))?;
-            }
-            v.text("21:08       18°", (520.0, 215.0, 644.0, 254.0), 12.0, true, WHITE)?;
-            if t > 0.12 {
-                v.round((713.0, 216.0, 857.0, 252.0), 14.0, acc(0.24 * t))?;
-                v.text("Listening…", (728.0, 216.0, 849.0, 252.0), 12.0, true, WHITE)?;
-            }
-            let (x, y) = guide.pet_center();
-            let size = 31.0 + 37.0 * t;
-            v.pet(x - size / 2.0, y - size / 2.0, size)?;
-            v.text("Drag Spark to try it", (454.0, 317.0, 865.0, 337.0), 11.5, false, rgba(1.0, 1.0, 1.0, 0.72))?;
+    use crate::ui::characters::Reaction;
+    let phase = guide.voice_phase();
+    let elapsed = guide.elapsed().as_secs_f32().min(3.5);
+    let mouth = if phase == 3 { 0.18 + 0.69 * (elapsed * 16.0).sin().abs() } else { 0.0 };
+    v.island(474.0, 220.0, 370.0, 235.0)?;
+    v.pose_pet(
+        490.0,
+        230.0,
+        46.0,
+        match phase {
+            0 => Reaction::Idle,
+            3 | 4 => Reaction::Done,
+            _ => Reaction::Attention,
+        },
+        mouth,
+    )?;
+    v.text("Assistant", (548.0, 232.0, 824.0, 259.0), 16.0, true, WHITE)?;
+    v.text("Example only · microphone off", (548.0, 259.0, 826.0, 277.0), 11.0, false, rgba(1.0, 1.0, 1.0, 0.64))?;
+    for (i, (icon, label)) in
+        [('\u{E720}', "Listening…"), ('\u{E99A}', "Thinking…"), ('\u{E8F2}', "Speaking")].into_iter().enumerate()
+    {
+        let x = 495.0 + i as f32 * 109.0;
+        let active = phase == i + 1;
+        v.round((x, 288.0, x + 101.0, 350.0), 12.0, acc(if active { 0.42 } else { 0.11 }))?;
+        v.icon(icon, (x + 7.0, 290.0, x + 94.0, 322.0), 15.0)?;
+        p.text(
+            label,
+            l.rect((x + 3.0, 322.0, x + 98.0, 347.0)),
+            11.0 * l.scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_CENTER,
+            rgba(1.0, 1.0, 1.0, if active { 1.0 } else { 0.63 }),
+        )?;
+    }
+    v.round((495.0, 366.0, 823.0, 434.0), 12.0, rgba(1.0, 1.0, 1.0, 0.075))?;
+    v.text("Remind me in ten minutes.", (510.0, 371.0, 809.0, 399.0), 13.0, false, rgba(1.0, 1.0, 1.0, 0.71))?;
+    if phase >= 3 {
+        v.text("I’ll remind you in ten minutes.", (510.0, 399.0, 809.0, 426.0), 13.0, true, WHITE)?;
+    } else if phase > 0 {
+        for i in 0..12 {
+            let x = 512.0 + 6.0 * i as f32;
+            let h = 4.0 + 12.0 * (elapsed * 13.0 - i as f32 * 0.7).sin().abs();
+            v.round((x, 413.0 - h / 2.0, x + 3.0, 413.0 + h / 2.0), 1.5, acc(0.75))?;
         }
     }
     Ok(())
 }
 
-fn paint_stage(v: &Preview<'_>, guide: &GuideUi, hover: bool) -> Result<()> {
+fn paint_stage(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     let p = v.p;
     let l = v.layout;
     let stage = l.rect(SCENE);
@@ -708,63 +587,228 @@ fn paint_stage(v: &Preview<'_>, guide: &GuideUi, hover: bool) -> Result<()> {
     p.pop_clip();
     backdrop?;
     p.stroke_round_rect(stage, 26.0 * l.scale, l.scale, rgba(0.7, 0.74, 1.0, 0.25))?;
-    v.text(STEPS[guide.page].scene, (453.0, 176.0, 701.0, 209.0), 13.0, true, WHITE)?;
-    v.round((744.0, 180.0, 865.0, 205.0), 12.5, rgba(1.0, 1.0, 1.0, if hover { 0.13 } else { 0.065 }))?;
+    v.text(SCENES[guide.page], (453.0, 176.0, 701.0, 209.0), 13.0, true, WHITE)?;
+    v.round((744.0, 180.0, 865.0, 205.0), 12.5, rgba(1.0, 1.0, 1.0, 0.065))?;
     v.round((757.0, 190.0, 763.0, 196.0), 3.0, acc(0.98))?;
     v.text("Demo mode", (772.0, 180.0, 857.0, 205.0), 10.5, true, rgba(1.0, 1.0, 1.0, 0.75))?;
-    paint_preview(v, guide)
+    match guide.page {
+        0 => paint_workspace(v, guide),
+        1 => paint_voice(v, guide),
+        _ => paint_ready(v, guide),
+    }
+}
+
+fn paint_workspace(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
+    let ms = guide.elapsed().as_millis();
+    let t = eased(ms, 190, 590.0);
+    let (dock, top) = guide.panels();
+    let width = 194.0 + 196.0 * t;
+    let x = 659.0 - width / 2.0;
+    let y = 269.0 - 29.0 * t;
+    let height = 42.0 + 182.0 * t;
+    v.glow((659.0, y + height * 0.7), (188.0, 80.0), rgba(0.01, 0.02, 0.07, 0.8))?;
+    if top {
+        let slide = 29.0 * eased(ms, 60, 460.0);
+        v.island(480.0 - slide, 215.0, 110.0, 27.0)?;
+        v.island(728.0 + slide, 215.0, 110.0, 27.0)?;
+        v.center("Explorer", (483.0 - slide, 215.0, 586.0 - slide, 242.0), 10.0, WHITE)?;
+        v.icon('\u{E701}', (733.0 + slide, 215.0, 778.0 + slide, 242.0), 12.0)?;
+        v.icon('\u{E767}', (783.0 + slide, 215.0, 828.0 + slide, 242.0), 12.0)?;
+    }
+    v.island(x, y, width, height)?;
+    if t >= 0.36 {
+        v.p.push_clip(v.layout.rect((x + 13.0, y + 7.0, x + width - 13.0, y + height - 10.0)));
+        let result = v.home(464.0, y);
+        v.p.pop_clip();
+        result?;
+    } else {
+        v.pet(x + 8.0, y + 3.0, 35.0)?;
+        v.center("21:08    18°", (x + 44.0, y, x + 181.0, y + 42.0), 14.0, WHITE)?;
+    }
+    if dock {
+        let y = 470.0 + 24.0 * (1.0 - eased(ms, 510, 460.0));
+        v.round((533.0, y, 785.0, y + 40.0), 14.0, rgba(0.035, 0.047, 0.075, 1.0))?;
+        for (i, (glyph, color)) in [
+            ('\u{E8B7}', rgba(0.58, 0.42, 0.23, 1.0)),
+            ('\u{E774}', rgba(0.29, 0.42, 0.73, 1.0)),
+            ('\u{E189}', acc(0.7)),
+            ('\u{E8F2}', rgba(0.35, 0.30, 0.67, 1.0)),
+            ('\u{E70B}', rgba(0.23, 0.49, 0.45, 1.0)),
+            ('\u{E713}', rgba(0.34, 0.37, 0.45, 1.0)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let x = 542.0 + 40.0 * i as f32;
+            let r = (x, y + 5.0, x + 31.0, y + 35.0);
+            v.round(r, 8.0, color)?;
+            v.icon(glyph, r, 15.0)?;
+        }
+    }
+    v.center(guide.preset.label(), (453.0, 521.0, 865.0, 546.0), 11.5, rgba(1.0, 1.0, 1.0, 0.72))
+}
+
+fn paint_ready(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
+    let ms = guide.elapsed().as_millis();
+    let card_y = 234.0 - 20.0 * (1.0 - eased(ms, 70, 530.0));
+    let card = v.layout.rect((479.0, card_y, 839.0, card_y + 147.0));
+    let record = crate::platform::notifications::Record {
+        id: 0,
+        created: 0,
+        app_id: String::new(),
+        app: "Night Island".into(),
+        title: crate::ui::i18n::tr("Example notification").into_owned(),
+        body: crate::ui::i18n::tr("New messages can appear here while you work.").into_owned(),
+        icon: None,
+        avatar: None,
+    };
+    v.island(479.0, card_y, 360.0, 147.0)?;
+    let _ = paint_notification_card(
+        v.p,
+        (card.0, card.1, card.2 - card.0, card.3 - card.1),
+        v.layout.scale,
+        &record,
+        0,
+        false,
+        None,
+    )?;
+    let pet = eased(ms, 360, 610.0);
+    v.island(479.0, 423.0, 170.0, 37.0)?;
+    v.center("21:08    18°", (525.0, 423.0, 636.0, 460.0), 12.0, WHITE)?;
+    v.pet(485.0 + 247.0 * pet, 426.0 + 21.0 * pet, 33.0 + 33.0 * pet)?;
+    v.text(
+        "Drag Spark off the island to let it roam.",
+        (479.0, 509.0, 839.0, 539.0),
+        12.0,
+        true,
+        rgba(1.0, 1.0, 1.0, 0.72),
+    )
+}
+
+fn paint_preset(v: &Preview<'_>, guide: &GuideUi, preset: Preset, rect: Rect, hover: bool) -> Result<()> {
+    let (x, y, r, b) = rect;
+    let selected = preset == guide.preset;
+    let fill = if selected { acc(0.18) } else { rgba(1.0, 1.0, 1.0, if hover { 0.11 } else { 0.055 }) };
+    v.round(rect, 13.0, fill)?;
+    if selected {
+        v.p.stroke_round_rect(v.layout.rect(rect), 13.0 * v.layout.scale, v.layout.scale, acc(0.64))?;
+    }
+    let glyph = match preset {
+        Preset::Keep => '\u{E73E}',
+        Preset::Island => '\u{E737}',
+        Preset::Dock => '\u{E7F4}',
+        Preset::Desktop => '\u{E8A9}',
+    };
+    v.round((x + 13.0, y + 12.0, x + 49.0, b - 12.0), 10.0, acc(if selected { 0.35 } else { 0.16 }))?;
+    v.icon(glyph, (x + 13.0, y + 12.0, x + 49.0, b - 12.0), 15.0)?;
+    v.text(preset.label(), (x + 62.0, y + 8.0, r - 37.0, y + 32.0), 14.0, true, WHITE)?;
+    v.text(preset.description(), (x + 62.0, y + 32.0, r - 20.0, b - 8.0), 11.5, false, rgba(1.0, 1.0, 1.0, 0.70))?;
+    if selected {
+        v.icon('\u{E73E}', (r - 32.0, y + 6.0, r - 9.0, y + 29.0), 12.0)?;
+    }
+    Ok(())
+}
+
+fn paint_models(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
+    for model in [VoiceModel::Wake, VoiceModel::Local] {
+        let (x, y, r, b) = model.row();
+        v.round((x, y, r, b), 13.0, rgba(1.0, 1.0, 1.0, 0.065))?;
+        v.text(model.label(), (x + 13.0, y + 8.0, r - 116.0, y + 33.0), 13.5, true, WHITE)?;
+        let status = guide.models[model.index()];
+        let detail = match status {
+            ModelStatus::Missing => model.detail(),
+            ModelStatus::Downloading(_) => "Downloading model…",
+            ModelStatus::Installed => "Installed",
+            ModelStatus::Failed(_) => "Download failed",
+        };
+        v.text(detail, (x + 13.0, y + 33.0, r - 116.0, b - 8.0), 11.5, false, rgba(1.0, 1.0, 1.0, 0.70))?;
+        if let ModelStatus::Downloading(step) = status {
+            let left = r - 106.0;
+            v.round((left, y + 34.0, r - 14.0, y + 38.0), 2.0, acc(0.18))?;
+            v.round((left, y + 34.0, left + 92.0 * (0.10 + f32::from(step) / 112.0), y + 38.0), 2.0, acc(0.9))?;
+        }
+    }
+    let failure = guide.models.iter().find_map(|status| match status {
+        ModelStatus::Failed(why) => Some(*why),
+        _ => None,
+    });
+    if let Some(why) = failure {
+        v.p.text_wrapped(
+            why,
+            v.layout.rect((48.0, 503.0, 404.0, 549.0)),
+            11.5 * v.layout.scale,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            rgba(1.0, 0.68, 0.62, 1.0),
+        )?;
+    } else {
+        let hint = if guide.downloading() {
+            "You can continue while the model downloads."
+        } else {
+            "Both downloads are optional."
+        };
+        v.text(hint, (48.0, 500.0, 404.0, 525.0), 11.5, false, rgba(1.0, 1.0, 1.0, 0.66))?;
+    }
+    Ok(())
+}
+
+fn paint_ready_summary(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
+    for (i, (icon, title, body)) in [
+        ('\u{E7F4}', "Workspace", guide.preset.label()),
+        ('\u{EA8F}', "Windows notifications", "Grant access from the Notifications tab."),
+        (
+            '\u{E99A}',
+            "Voice assistant",
+            if guide.enabled(VoiceModel::Wake) {
+                "Wake-word listening is selected."
+            } else if guide.connect_model && guide.connect_speech {
+                "Voice services are connected."
+            } else {
+                "Connect voice services later under Assistant."
+            },
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let y = 277.0 + 82.0 * i as f32;
+        v.round((48.0, y, 404.0, y + 72.0), 14.0, rgba(1.0, 1.0, 1.0, 0.055))?;
+        v.round((62.0, y + 15.0, 102.0, y + 55.0), 11.0, acc(0.18))?;
+        v.icon(icon, (62.0, y + 15.0, 102.0, y + 55.0), 17.0)?;
+        v.text(title, (117.0, y + 9.0, 394.0, y + 36.0), 14.0, true, WHITE)?;
+        v.text(body, (117.0, y + 36.0, 394.0, y + 61.0), 11.5, false, rgba(1.0, 1.0, 1.0, 0.70))?;
+    }
+    Ok(())
 }
 
 pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui: &UiState) -> Result<()> {
     let l = Layout::new(size, dpi);
     let v = Preview { p, layout: l };
-    let step = &STEPS[guide.page];
-    let muted = rgba(1.0, 1.0, 1.0, 0.7);
-    v.round((48.0, 59.0, 77.0, 88.0), 9.0, acc(0.24))?;
-    v.icon('\u{E7F4}', (48.0, 59.0, 77.0, 88.0), 14.0)?;
-    v.text("Night Island", (87.0, 59.0, 310.0, 88.0), 16.0, true, WHITE)?;
-    v.text(&format!("{:02} / {:02}", guide.page + 1, STEPS.len()), (837.0, 59.0, 892.0, 88.0), 12.5, true, muted)?;
-    v.text(
-        if guide.page == 0 { "Welcome to Night Island" } else { step.chapter },
-        (48.0, 163.0, 396.0, 189.0),
-        13.0,
-        true,
-        acc(1.0),
-    )?;
-    p.text_wrapped(
-        step.title,
-        l.rect((48.0, 193.0, 405.0, 279.0)),
-        if guide.page == 0 { 36.0 * l.scale } else { 32.0 * l.scale },
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        WHITE,
-    )?;
-    p.text_wrapped(
-        step.summary,
-        l.rect((48.0, 281.0, 395.0, 342.0)),
-        15.0 * l.scale,
-        DWRITE_FONT_WEIGHT_NORMAL,
-        muted,
-    )?;
-    for (i, &(glyph, title, description)) in step.features.iter().enumerate() {
-        let y = 350.0 + i as f32 * 67.0;
-        v.round((48.0, y + 4.0, 86.0, y + 42.0), 11.0, acc(0.18))?;
-        v.icon(glyph, (48.0, y + 4.0, 86.0, y + 42.0), 16.0)?;
-        v.text(title, (100.0, y, 407.0, y + 24.0), 14.0, true, WHITE)?;
-        p.text_wrapped(
-            description,
-            l.rect((100.0, y + 25.0, 407.0, y + 64.0)),
-            12.5 * l.scale,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            muted,
+    let muted = rgba(1.0, 1.0, 1.0, 0.73);
+    v.round((48.0, 61.0, 80.0, 93.0), 9.0, acc(0.26))?;
+    v.icon('\u{E7F4}', (48.0, 61.0, 80.0, 93.0), 16.0)?;
+    v.text("Night Island", (91.0, 61.0, 300.0, 93.0), 17.0, true, WHITE)?;
+    for (i, label) in STEPS.iter().enumerate() {
+        let x = 438.0 + i as f32 * 151.0;
+        let color = if i == guide.page { WHITE } else { muted };
+        v.round(
+            (x, 61.0, x + 144.0, 94.0),
+            10.0,
+            if i == guide.page { acc(0.20) } else { rgba(1.0, 1.0, 1.0, 0.055) },
         )?;
+        v.text(&format!("{:02}", i + 1), (x + 12.0, 61.0, x + 35.0, 94.0), 11.0, true, acc(1.0))?;
+        v.text(label, (x + 34.0, 61.0, x + 137.0, 94.0), 12.0, i == guide.page, color)?;
     }
-    paint_stage(&v, guide, ui.sw.hover == Some(SwHit::Guide(GuideAction::Demo)))?;
-    v.round((48.0, 578.0, 892.0, 579.0), 0.5, rgba(1.0, 1.0, 1.0, 0.12))?;
-    if guide.page == 0 {
-        v.text("About 2 minutes", (197.0, 601.0, 448.0, 647.0), 12.0, false, muted)?;
-    }
+    v.round((48.0, 116.0, 892.0, 117.0), 0.5, rgba(1.0, 1.0, 1.0, 0.12))?;
+    let (title, summary) = match guide.page {
+        0 => ("Choose your layout", "Pick a preset to see how it looks. It applies when you finish."),
+        1 => ("Make it respond to you", "Give the assistant a name and download the voice models you want."),
+        _ => ("Ready to use Island", "Check your choices and apply them. You can change them later in Settings."),
+    };
+    v.text(title, (48.0, 147.0, 414.0, 193.0), 28.0, true, WHITE)?;
+    p.text_wrapped(summary, l.rect((48.0, 201.0, 404.0, 252.0)), 14.0 * l.scale, DWRITE_FONT_WEIGHT_NORMAL, muted)?;
+    paint_stage(&v, guide)?;
     if let Some((field, inner)) = guide_wake_rects(size, dpi, guide) {
-        v.text("Assistant wake words", (453.0, 342.0, 865.0, 370.0), 14.0, true, WHITE)?;
+        v.text("Assistant wake words", (48.0, 248.0, 255.0, 274.0), 13.0, true, WHITE)?;
         paint_line_edit(
             p,
             field,
@@ -776,44 +820,37 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
             ui.sw.caret_on,
             l.scale,
         )?;
-        let (status, error) = guide.wake_feedback.unwrap_or(("Separate the names with a comma.", false));
-        p.text_wrapped(
-            status,
-            l.rect((453.0, 425.0, 865.0, 477.0)),
-            12.5 * l.scale,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            if error { rgba(1.0, 0.55, 0.51, 1.0) } else { muted },
+        v.text(
+            if guide.invalid_wake {
+                "Enter distinct names of up to 24 characters."
+            } else {
+                "Use two different-sounding names, separated by commas."
+            },
+            (48.0, 321.0, 404.0, 347.0),
+            11.5,
+            false,
+            if guide.invalid_wake { rgba(1.0, 0.65, 0.60, 1.0) } else { muted },
         )?;
+        paint_models(&v, guide)?;
+        let hint = if guide.connect_model && guide.connect_speech {
+            "Voice services are connected."
+        } else {
+            "Voice commands also need AI and speech recognition."
+        };
+        v.center(hint, (453.0, 461.0, 865.0, 487.0), 11.5, muted)?;
+    } else if guide.last_page() {
+        paint_ready_summary(&v, guide)?;
     }
+    v.round((48.0, 578.0, 892.0, 579.0), 0.5, rgba(1.0, 1.0, 1.0, 0.12))?;
     for (action, label, rect) in controls(guide) {
         let hover = ui.sw.hover == Some(SwHit::Guide(action));
-        if let GuideAction::Chapter(page) = action {
-            let selected = page == guide.page;
-            let (x, top, right, bottom) = rect;
-            let color = if selected { WHITE } else { muted };
-            v.round(
-                rect,
-                9.0,
-                if selected { acc(0.22) } else { rgba(1.0, 1.0, 1.0, if hover { 0.12 } else { 0.045 }) },
-            )?;
-            v.text(
-                &format!("{:02}", page + 1),
-                (x + 10.0, top, x + 30.0, bottom),
-                10.5,
-                true,
-                if selected { acc(1.0) } else { muted },
-            )?;
-            v.text(label, (x + 31.0, top, right - 5.0, bottom), 12.0, selected, color)?;
-            continue;
+        if let GuideAction::Select(preset) = action {
+            paint_preset(&v, guide, preset, rect, hover)?;
+        } else {
+            let primary = matches!(action, GuideAction::Next | GuideAction::Download(VoiceModel::Wake))
+                || matches!(action, GuideAction::ToggleModel(model) if guide.enabled(model));
+            guide_button(p, l.rect(rect), l.scale, label, primary, hover)?;
         }
-        guide_button(
-            p,
-            l.rect(rect),
-            l.scale,
-            label,
-            matches!(action, GuideAction::Next | GuideAction::SaveWake),
-            hover,
-        )?;
     }
     Ok(())
 }
@@ -823,74 +860,61 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tour_navigation_and_wake_field_fit_small_windows_and_high_dpi() {
-        let mut guide = GuideUi::new("");
-        guide.move_by(-1);
+    fn setup_controls_fit_small_windows_and_high_dpi() {
+        let mut guide = GuideUi::new(&Settings::default(), false);
+        guide.move_by(-1, false);
         assert_eq!(guide.page, 0);
         for step in 0..STEPS.len() {
             for (size, dpi) in [((760.0, 550.0), 1.0), ((940.0, 680.0), 1.0), ((1880.0, 1360.0), 2.0)] {
                 let layout = Layout::new(size, dpi);
-                let buttons = controls(&guide);
-                for (action, _, r) in &buttons {
-                    let r = layout.rect(*r);
+                for (action, _, rect) in controls(&guide) {
+                    let r = layout.rect(rect);
                     assert!(r.0 >= 0.0 && r.1 >= 40.0 * dpi && r.2 <= size.0 && r.3 <= size.1);
-                    assert_eq!(guide_hit(size, dpi, &guide, (r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0), Some(*action));
+                    assert_eq!(guide_hit(size, dpi, &guide, (r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0), Some(action));
                 }
-                assert!(buttons.iter().any(|(action, _, _)| *action == GuideAction::Skip));
-                assert_eq!(guide_wake_rects(size, dpi, &guide).is_some(), guide.last_page());
+                assert_eq!(guide_wake_rects(size, dpi, &guide).is_some(), guide.voice_page());
             }
             assert_eq!(guide.page, step);
-            guide.move_by(1);
+            guide.move_by(1, false);
         }
         assert!(guide.last_page());
-        guide.play_demo(false);
-        assert_eq!(guide.progress(), 1.0);
         assert!(!guide.animating());
     }
 
     #[test]
-    fn the_example_pet_can_be_dragged_out_and_back_at_high_dpi() {
-        let mut guide = GuideUi::new("");
-        guide.open_page(5);
-        let size = (1880.0, 1360.0);
-        let dpi = 2.0;
-        let screen = |(x, y): (f32, f32)| (x * dpi, y * dpi);
-        assert!(guide.begin_pet_drag(size, dpi, screen(PET_DOCKED)));
-        assert!(guide.move_pet(size, dpi, screen(PET_RELEASED)));
-        assert!(guide.drop_pet(false));
-        assert!(guide.expanded);
-        assert_eq!(guide.pet_center(), PET_RELEASED);
-        assert!(guide.begin_pet_drag(size, dpi, screen(PET_RELEASED)));
-        assert!(guide.move_pet(size, dpi, screen(PET_DOCKED)));
-        assert!(guide.drop_pet(false));
-        assert!(!guide.expanded);
-        assert_eq!(guide.pet_center(), PET_DOCKED);
+    fn presets_do_not_replace_taskbar_or_change_pins_and_other_settings() {
+        let mut settings = Settings { scale_percent: 120, ..Settings::default() };
+        let pins = settings.desktop_dock.pins.clone();
+        let unchanged = serde_json::to_vec(&settings).unwrap();
+        Preset::Keep.apply(&mut settings);
+        assert_eq!(serde_json::to_vec(&settings).unwrap(), unchanged);
+        Preset::Desktop.apply(&mut settings);
+        assert!(settings.desktop_dock.enabled && settings.top_panel.enabled);
+        assert!(!settings.desktop_dock.replace_taskbar && !settings.top_panel.reserve_space);
+        Preset::Island.apply(&mut settings);
+        assert!(!settings.desktop_dock.enabled && !settings.top_panel.enabled);
+        assert_eq!(settings.desktop_dock.pins, pins);
+        assert_eq!(settings.scale_percent, 120);
     }
 
     #[test]
-    fn the_voice_example_can_finish_with_reduced_motion() {
-        let mut guide = GuideUi::new("");
-        guide.open_page(4);
-        assert_eq!(guide.voice_phase(), 0);
-        guide.play_demo(false);
-        assert_eq!(guide.voice_phase(), 4);
-        assert!(!guide.animating());
-        guide.play_demo(true);
-        assert_eq!(guide.voice_phase(), 1);
+    fn voice_setup_autoplays_and_installed_models_are_opt_in() {
+        let mut guide = GuideUi::new(&Settings::default(), false);
+        guide.move_by(1, true);
         assert!(guide.animating());
-        guide.open_page(5);
+        guide.models = [ModelStatus::Installed, ModelStatus::Downloading(50)];
+        assert!(!guide.can_download(VoiceModel::Local));
+        guide.toggle_model(VoiceModel::Wake);
+        assert_eq!(guide.wake_enabled, None);
+        guide.connect_model = true;
+        guide.connect_speech = true;
+        guide.toggle_model(VoiceModel::Wake);
+        assert_eq!(guide.wake_enabled, Some(true));
+        guide.wake.set_text(" Luna, Taburetka ");
+        assert_eq!(guide.validated_wake().as_deref(), Some("Luna, Taburetka"));
+        guide.wake.set_text("Luna, luna");
+        assert!(guide.validated_wake().is_none());
+        guide.move_by(1, false);
         assert!(!guide.animating());
-    }
-
-    #[test]
-    fn wake_words_keep_both_distinct_names_and_reject_duplicates() {
-        let mut guide = GuideUi::new(" Луна, Табуретка ");
-        assert_eq!(guide.validated_wake().as_deref(), Some("Луна, Табуретка"));
-        guide.wake.set_text("Луна, луна");
-        assert!(guide.validated_wake().is_none());
-        guide.wake.set_text(" ");
-        assert!(guide.validated_wake().is_none());
-        guide.wake.set_text(&"а".repeat(25));
-        assert!(guide.validated_wake().is_none());
     }
 }
