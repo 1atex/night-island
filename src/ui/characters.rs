@@ -4,6 +4,8 @@ use windows::core::Result;
 
 use crate::ui::gfx::{Painter, rgba};
 
+mod old;
+
 pub const BOX_W: f32 = 40.0;
 pub const BOX_H: f32 = 30.0;
 
@@ -20,10 +22,16 @@ pub enum Character {
     Blob,
     Bear,
     Custom,
+    PixelOld,
+    SparkOld,
+    EyesOld,
+    CatOld,
+    RobotOld,
+    BlobOld,
 }
 
 impl Character {
-    pub const ALL: [Character; 9] = [
+    pub const ALL: [Character; 15] = [
         Character::None,
         Character::Pixel,
         Character::Spark,
@@ -33,6 +41,12 @@ impl Character {
         Character::Blob,
         Character::Bear,
         Character::Custom,
+        Character::PixelOld,
+        Character::SparkOld,
+        Character::EyesOld,
+        Character::CatOld,
+        Character::RobotOld,
+        Character::BlobOld,
     ];
 
     pub fn name(self) -> &'static str {
@@ -46,6 +60,12 @@ impl Character {
             Character::Blob => "Blob",
             Character::Bear => "Bear",
             Character::Custom => "Custom pet",
+            Character::PixelOld => "Pixel (old)",
+            Character::SparkOld => "Spark (old)",
+            Character::EyesOld => "Eyes (old)",
+            Character::CatOld => "Cat (old)",
+            Character::RobotOld => "Robot (old)",
+            Character::BlobOld => "Blob (old)",
         }
     }
 
@@ -230,6 +250,12 @@ pub fn draw_with_design(
         Character::Blob => draw_blob(p, s, &pose),
         Character::Bear => draw_designed(p, s, &pose, super::pet_design::PetDesign::bear()),
         Character::Custom => draw_designed(p, s, &pose, design.unwrap_or_else(|| super::pet_design::PetDesign::bear())),
+        Character::PixelOld
+        | Character::SparkOld
+        | Character::EyesOld
+        | Character::CatOld
+        | Character::RobotOld
+        | Character::BlobOld => old::draw(p, s, &pose, character),
     };
     p.set_transform(&old);
     result?;
@@ -815,8 +841,8 @@ mod tests {
 
     #[test]
     fn stepping_wraps_in_both_directions() {
-        assert_eq!(Character::None.step(false), Character::Custom);
-        assert_eq!(Character::Custom.step(true), Character::None);
+        assert_eq!(Character::None.step(false), Character::BlobOld);
+        assert_eq!(Character::BlobOld.step(true), Character::None);
         assert_eq!(Character::Pixel.step(true), Character::Spark);
         assert_eq!(Character::Pixel.step(false), Character::None);
     }

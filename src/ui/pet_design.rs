@@ -78,11 +78,13 @@ impl PetDesign {
             return custom.clone();
         }
         let (body, fur, belly, tail) = match character {
-            Character::Cat => (PetBody::Cat, [111, 116, 139], [195, 199, 216], true),
-            Character::Robot => (PetBody::Robot, [149, 164, 184], [56, 63, 82], false),
-            Character::Pixel => (PetBody::Robot, [108, 205, 162], [178, 232, 203], false),
-            Character::Blob => (PetBody::Ghost, [177, 160, 229], [217, 206, 250], false),
-            Character::Spark | Character::Eyes => (PetBody::Ghost, [239, 239, 247], [255, 255, 255], false),
+            Character::Cat | Character::CatOld => (PetBody::Cat, [111, 116, 139], [195, 199, 216], true),
+            Character::Robot | Character::RobotOld => (PetBody::Robot, [149, 164, 184], [56, 63, 82], false),
+            Character::Pixel | Character::PixelOld => (PetBody::Robot, [108, 205, 162], [178, 232, 203], false),
+            Character::Blob | Character::BlobOld => (PetBody::Ghost, [177, 160, 229], [217, 206, 250], false),
+            Character::Spark | Character::Eyes | Character::SparkOld | Character::EyesOld => {
+                (PetBody::Ghost, [239, 239, 247], [255, 255, 255], false)
+            }
             _ => return Self::default(),
         };
         Self { name: character.name().into(), body, fur, belly, tail, ..Default::default() }
