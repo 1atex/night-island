@@ -388,10 +388,30 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Open quick tour" => "Открыть быстрый старт",
         "Resume quick tour" => "Продолжить знакомство",
         "The island" => "Остров",
-        "Meet your island" => "Знакомься, Island",
-        "A small panel at the edge of the screen that opens when you need it." => {
-            "Компактная панель у края экрана раскрывается, когда она нужна."
+        "Tools" => "Инструменты",
+        "Pet" => "Питомец",
+        "Welcome to Night Island" => "Добро пожаловать в Night Island",
+        "An island on your desktop" => "Остров на твоём экране",
+        "Music, messages and a little companion. All from a small island at the edge of your screen." => {
+            "Музыка, сообщения и маленький питомец на острове у края экрана."
         }
+        "Your desktop" => "Твой рабочий стол",
+        "Home preview" => "Главная на острове",
+        "Desktop preview" => "Панели на экране",
+        "Notification preview" => "Карточка на острове",
+        "Voice preview" => "Голосовой сценарий",
+        "Meet Spark" => "Знакомься, Спарк",
+        "Drag Spark to try it" => "Попробуй перетащить Спарка мышью",
+        "Demo mode" => "Демонстрация",
+        "Start the tour" => "Начать знакомство",
+        "About 2 minutes" => "Около 2 минут",
+        "Tap the island to open it" => "Нажми на остров, чтобы раскрыть его",
+        "On your desktop it opens on hover" => "На рабочем столе достаточно навести курсор",
+        "Tap the dock to preview a window" => "Нажми на док, чтобы увидеть предпросмотр окна",
+        "Send yourself a sample card" => "Попробуй показать карточку",
+        "Try a voice command" => "Попробовать команду",
+        "Example only · microphone off" => "Пример · микрофон выключен",
+        "Remind me in ten minutes." => "Напомни мне через десять минут.",
         "Open on hover" => "Раскрытие по наведению",
         "Move the pointer over the island to open it. Move away to close it." => {
             "Наведи курсор на остров, чтобы открыть его. Уведи курсор, чтобы свернуть."

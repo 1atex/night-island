@@ -125,7 +125,7 @@ pub fn run() -> Result<()> {
         discord::start(hwnd);
         with_app(|a| {
             a.start_game_watch();
-            if a.settings.tour_pending && !cfg!(feature = "demo") {
+            if a.settings.tour_pending() && !cfg!(feature = "demo") {
                 a.open_guide();
             }
         });

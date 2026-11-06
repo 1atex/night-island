@@ -363,7 +363,7 @@ impl ProgressStyle {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
-    pub tour_pending: bool,
+    pub tour_revision: u8,
     pub top_panel: crate::data::top_panel::TopPanelSettings,
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
@@ -480,7 +480,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            tour_pending: false,
+            tour_revision: 0,
             top_panel: Default::default(),
             desktop_dock: Default::default(),
             language: Language::Ru,
@@ -948,6 +948,16 @@ impl Settings {
         Some(dir.join("settings.json"))
     }
 
+    const TOUR_REVISION: u8 = 1;
+
+    pub fn tour_pending(&self) -> bool {
+        self.tour_revision < Self::TOUR_REVISION
+    }
+
+    pub fn dismiss_tour(&mut self) {
+        self.tour_revision = self.tour_revision.max(Self::TOUR_REVISION);
+    }
+
     pub fn load() -> Self {
         Self::load_from(Self::path())
     }
@@ -965,8 +975,13 @@ impl Settings {
         if existed && parsed.is_none() {
             crate::log_warn!("settings.json is unreadable, using defaults");
         }
-        let mut s = parsed.unwrap_or_default();
-        s.tour_pending |= fresh;
+        let mut s = parsed.unwrap_or_else(|| {
+            let mut defaults = Self::default();
+            if !fresh {
+                defaults.dismiss_tour();
+            }
+            defaults
+        });
         s.sanitize();
         s
     }
@@ -1104,18 +1119,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_new_profile_starts_the_tour_automatically() {
+    fn the_current_tour_opens_for_new_and_existing_profiles_once() {
         let path = std::env::temp_dir().join(format!("ni-tour-settings-{}.json", std::process::id()));
-        assert!(Settings::load_from(Some(path.clone())).tour_pending);
-        for (json, pending) in [
-            (r#"{"scale_percent":120}"#, false),
-            (r#"{"tour_pending":false}"#, false),
-            (r#"{"tour_pending":true}"#, true),
-            ("invalid", false),
-        ] {
-            fs::write(&path, json).unwrap();
-            assert_eq!(Settings::load_from(Some(path.clone())).tour_pending, pending);
-        }
+        assert!(Settings::load_from(Some(path.clone())).tour_pending());
+        fs::write(&path, r#"{"scale_percent":120,"tour_pending":false}"#).unwrap();
+        let mut settings = Settings::load_from(Some(path.clone()));
+        assert!(settings.tour_pending());
+        assert_eq!(settings.scale_percent, 120);
+        settings.dismiss_tour();
+        fs::write(&path, serde_json::to_vec(&settings).unwrap()).unwrap();
+        let settings = Settings::load_from(Some(path.clone()));
+        assert!(!settings.tour_pending());
+        assert_eq!(settings.scale_percent, 120);
+        fs::write(&path, "invalid").unwrap();
+        assert!(!Settings::load_from(Some(path.clone())).tour_pending());
         fs::remove_file(path).unwrap();
     }
 

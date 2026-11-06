@@ -258,11 +258,17 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         ui.sw.guide = Some(crate::view::GuideUi::new(""));
         for step in 0..6 {
             let guide = ui.sw.guide.as_mut().unwrap();
-            if step == 3 || step == 5 {
+            if matches!(step, 2..=5) {
                 guide.play_demo(false);
             }
             surface.paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
             save_surface(&surface, size, &format!("guide-{}", step + 1))?;
+            if step == 0 {
+                ui.sw.guide.as_mut().unwrap().play_demo(false);
+                surface
+                    .paint(&gpu, |p| crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, &ui))?;
+                save_surface(&surface, size, "guide-1-open")?;
+            }
             ui.sw.guide.as_mut().unwrap().move_by(1);
         }
         crate::ui::i18n::set_ru(false);

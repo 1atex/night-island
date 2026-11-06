@@ -7,7 +7,7 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
     DeleteDC, DeleteObject, EndPaint, GetDC, PAINTSTRUCT, ReleaseDC, SRCCOPY, SelectObject,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, SetFocus};
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, SetFocus, VK_SPACE};
 
 use crate::island::*;
 
@@ -57,6 +57,10 @@ impl App {
         self.ui.sw.hover = None;
         match action {
             Back => guide.move_by(-1),
+            Chapter(page) => {
+                guide.open_page(page);
+                self.sw_focus(None);
+            }
             Next if !guide.last_page() => guide.move_by(1),
             Next | Skip => {
                 let typed = guide.wake.text();
@@ -291,6 +295,16 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_move(&mut self, x: i32, y: i32, left_down: bool) {
+        let size = self.sw_size();
+        if let Some(guide) = self.ui.sw.guide.as_mut().filter(|guide| guide.visible)
+            && if left_down {
+                guide.move_pet(size, self.dpi_scale, (x as f32, y as f32))
+            } else {
+                guide.drop_pet(crate::ui::feedback::motion_allowed())
+            }
+        {
+            return self.render_settings_win();
+        }
         if left_down && self.ui.sw.drag.is_some() {
             return self.sw_drag(x);
         }
@@ -298,7 +312,7 @@ impl App {
             self.sw_click_field(view::Field::Search, x, true, true);
             return self.render_settings_win();
         }
-        let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
+        let hit = view::sw_hit(size, self.dpi_scale, &self.ui, x as f32, y as f32);
         if hit != self.ui.sw.hover {
             self.ui.sw.hover = hit;
             self.sw_plates_move();
@@ -337,7 +351,17 @@ impl App {
 
     pub(in crate::island) fn on_sw_down(&mut self, x: i32, y: i32) {
         self.set_timer(Timer::SwAnim, 16);
-        let hit = view::sw_hit(self.sw_size(), self.dpi_scale, &self.ui, x as f32, y as f32);
+        let size = self.sw_size();
+        if let Some(guide) = self.ui.sw.guide.as_mut()
+            && guide.begin_pet_drag(size, self.dpi_scale, (x as f32, y as f32))
+        {
+            self.sw_focus(None);
+            unsafe {
+                let _ = SetCapture(self.settings_win.unwrap_or(self.hwnd));
+            }
+            return self.render_settings_win();
+        }
+        let hit = view::sw_hit(size, self.dpi_scale, &self.ui, x as f32, y as f32);
         if let Some(id) = self.ui.sw.dropdown.take() {
             if let Some(view::SwHit::Pick(_, k)) = hit {
                 view::cycle_pick(id, &mut self.settings, k);
@@ -372,7 +396,7 @@ impl App {
                 self.ui.sw.scroll = 0.0;
                 self.set_search("");
             }
-            Some(view::SwHit::Guide(action)) => self.on_guide_action(action),
+            Some(view::SwHit::Guide(action)) => return self.on_guide_action(action),
             Some(view::SwHit::AssistantPage(page)) => {
                 self.ui.sw.assistant_page = page;
                 self.ui.sw.scroll = 0.0;
@@ -961,6 +985,11 @@ impl App {
             let _ = ReleaseCapture();
         }
         self.ui.sw.search_press = false;
+        if let Some(guide) = self.ui.sw.guide.as_mut()
+            && guide.drop_pet(crate::ui::feedback::motion_allowed())
+        {
+            return self.render_settings_win();
+        }
         if self.ui.sw.drag.take().is_some() {
             self.finish_slider();
             self.render_settings_win();
@@ -1132,6 +1161,7 @@ impl App {
                 v if v == VK_LEFT.0 => view::GuideAction::Back,
                 v if v == VK_RIGHT.0 && !guide.last_page() => view::GuideAction::Next,
                 v if v == VK_RETURN.0 => view::GuideAction::Next,
+                v if v == VK_SPACE.0 && guide.has_demo() => view::GuideAction::Demo,
                 _ => return false,
             };
             self.on_guide_action(action);
@@ -1170,9 +1200,9 @@ impl App {
         self.settings_win = None;
         self.pointer.slider = None;
         let guide = self.ui.sw.guide.take();
-        if guide.as_ref().is_some_and(|guide| guide.visible) && self.settings.tour_pending {
-            self.settings.tour_pending = false;
-            self.ui.cfg.tour_pending = false;
+        if guide.as_ref().is_some_and(|guide| guide.visible) && self.settings.tour_pending() {
+            self.settings.dismiss_tour();
+            self.ui.cfg.dismiss_tour();
             self.settings.save();
         }
         self.ui.sw = view::SwUi { guide: guide.filter(|guide| !guide.visible), ..Default::default() };
