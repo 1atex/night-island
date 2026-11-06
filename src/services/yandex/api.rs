@@ -441,7 +441,7 @@ mod tests {
         let result = worker
             .voice(super::super::VoiceAction::Track { title: "Around the World".into(), artist: "Daft Punk".into() })
             .unwrap();
-        assert!(result.ends_with("in Island"));
+        assert!(result.contains("Around the World"));
         let player = worker.player.as_ref().unwrap();
         let deadline = Instant::now() + Duration::from_secs(12);
         while !player.state().2 && Instant::now() < deadline {
@@ -452,6 +452,35 @@ mod tests {
         assert_eq!(worker.state.media.artist, "Daft Punk");
         worker.stop();
     }
+    #[test]
+    #[ignore = "Uses the configured Yandex catalog and starts the requested track muted"]
+    fn spoken_jesus_starts_the_requested_recording() {
+        use super::super::Worker;
+        unsafe {
+            let _ = windows::Win32::System::WinRT::RoInitialize(windows::Win32::System::WinRT::RO_INIT_MULTITHREADED);
+        }
+        let (tx, _rx) = std::sync::mpsc::sync_channel(16);
+        let mut worker = Worker::new(0, tx);
+        worker.api.token = crate::services::integrations::load_secret("yandex-music").expect("Yandex Music sign-in");
+        worker.state.config.volume = 0;
+        for phrase in [
+            "Включи в моей волне трек Jesus от группы курящих нет",
+            "Найди в моей волне трек «Джезус» от группы «Курящих нет» и включи его.",
+        ] {
+            let action = crate::tools::voicecmd::local_yandex(phrase).expect("direct request");
+            worker.voice(action).unwrap_or_else(|error| panic!("{phrase}: {error}"));
+            let player = worker.player.as_ref().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(12);
+            while !player.state().2 && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            assert!(player.state().2, "requested track must start");
+            assert!(worker.state.media.title.eq_ignore_ascii_case("Jesus"));
+            assert_eq!(worker.state.media.artist.to_lowercase(), "курящих нет");
+        }
+        worker.stop();
+    }
+
     fn server(responses: Vec<(u16, &'static str)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -495,6 +524,28 @@ mod tests {
             requests
         });
         (base, handle)
+    }
+
+    #[test]
+    #[ignore = "Needs native WinRT HTTP"]
+    fn starting_my_wave_leaves_the_station_and_uses_saved_filters() {
+        use super::super::Worker;
+        unsafe {
+            let _ = windows::Win32::System::WinRT::RoInitialize(windows::Win32::System::WinRT::RO_INIT_MULTITHREADED);
+        }
+        let (base, server) = server(vec![(200, r#"{"result":{"radioSessionId":"fixture","sequence":[]}}"#)]);
+        let (tx, _rx) = std::sync::mpsc::sync_channel(16);
+        let mut worker = Worker::new(0, tx);
+        worker.api = Api { token: "fixture-token".into(), base: Some(base) };
+        worker.station = Some("artist:8".into());
+        worker.state.config.selection.insert("language".into(), "settingLanguage:russian".into());
+        let action = crate::tools::voicecmd::local_yandex("Включи мою волну.").unwrap();
+        assert!(worker.voice(action).is_err());
+        assert_eq!(worker.station.as_deref(), Some("artist:8"));
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /rotor/session/new "));
+        let body: Value = serde_json::from_str(requests[0].split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body["seeds"], json!(["user:onyourwave", "settingLanguage:russian"]));
     }
 
     #[test]

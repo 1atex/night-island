@@ -290,7 +290,20 @@ impl App {
             self.show_notice_for('\u{E720}', "Say a command after the name", 2200);
             return self.end_wake_session();
         }
+        let request: String = command.chars().take(600).collect();
+        crate::log_info!("Assistant request: {}", brief(&request, 300));
         let perms = &self.settings.assistant.perms;
+        if self.settings.assistant.yandex_voice
+            && let Some(action) = voicecmd::local_yandex(&request)
+        {
+            crate::log_info!("Assistant action from speech: Yandex({action:?})");
+            self.run_serial += 1;
+            let mut run = Run::new(String::new(), &request, &[]);
+            run.id = self.run_serial;
+            run.direct = true;
+            self.agent = Some(run);
+            return self.handle_tool(Tool::Yandex(action), false, false);
+        }
         let mut notes = String::new();
         if perms.command_level(Cap::Memory, false) != Level::Off {
             notes = memory::prompt_block(&memory::load(), 1500);
@@ -313,8 +326,6 @@ impl App {
                 speech::FISH_CUES.join(" "),
             ));
         }
-        let request: String = command.chars().take(600).collect();
-        crate::log_info!("Assistant request: {}", brief(&request, 300));
         agent::fresh(&mut self.dialog);
         let mut run = Run::new(system, &request, &self.dialog);
         run.max_steps = usize::from(self.settings.assistant.max_steps);
@@ -563,7 +574,11 @@ impl App {
         crate::log_info!("Assistant tool {}: level {level:?}, tainted {tainted}, confirmed {confirmed}", tool.name());
         if level == Level::Off {
             let text = format!("{}: {}", tr(cap.title()), tr("off in the Assistant settings"));
-            return self.fail_by_voice(&text);
+            self.fail_by_voice(&text);
+            if self.agent.as_ref().is_some_and(|run| run.direct) {
+                self.end_wake_session();
+            }
+            return;
         }
         let asks = level == Level::Ask && !confirmed && !tool.looks_only();
         if asks && tool.script() && self.settings.assistant.review && !reviewed {
@@ -588,7 +603,7 @@ impl App {
             self.pending_ask = Some((voicecmd::Command::Tool(tool), std::time::Instant::now()));
             return self.ask_user('\u{E756}', &text);
         }
-        let signature = format!("{}:{}", tool.name(), tool.detail());
+        let signature = tool.signature();
         if self.agent.as_ref().is_some_and(|r| r.repeated(&signature)) {
             crate::log_warn!("Assistant: the same {} was asked for twice, not running it again", tool.name());
             if let Some(run) = self.agent.as_mut() {
@@ -643,7 +658,18 @@ impl App {
                 if result.is_ok() && tool.external() {
                     run.tainted = true;
                 }
-                run.did_tool(tool.name(), tool.detail(), format!("{}:{}", tool.name(), tool.detail()), result.is_ok());
+                run.did_tool(tool.name(), tool.detail(), tool.signature(), result.is_ok());
+                if run.direct {
+                    let text = result.unwrap_or_else(|why| {
+                        self.cue(sounds::Cue::Error);
+                        tr(&why).into_owned()
+                    });
+                    if let Some(run) = self.agent.as_mut() {
+                        run.said(&serde_json::json!({"action":"answer", "text":text}).to_string());
+                    }
+                    self.say(&text);
+                    return self.end_wake_session();
+                }
                 run.result(tool.name(), &result);
                 self.call_agent();
             }
@@ -881,6 +907,24 @@ impl App {
             Ok(text) if self.agent.as_ref().is_some_and(|r| r.phase == Phase::Listening) => {
                 let wakes = voicecmd::wake_words(&self.settings.ai.voice_wake);
                 let reply = voicecmd::strip_wake(&text, &wakes).filter(|r| !r.is_empty()).unwrap_or(text);
+                if self.agent.as_ref().is_some_and(|run| run.direct) {
+                    let reply = reply.trim_matches(|c: char| c.is_whitespace() || ".!?,".contains(c)).to_lowercase();
+                    if let Some((command, at)) = self.pending_ask.take()
+                        && at.elapsed().as_secs() <= voicecmd::CONFIRM_SECS
+                        && matches!(
+                            reply.as_str(),
+                            "да" | "да подтверждаю"
+                                | "да, подтверждаю"
+                                | "подтверждаю"
+                                | "yes"
+                                | "confirm"
+                        )
+                    {
+                        return self.handle_command(command, true);
+                    }
+                    self.show_notice_for('\u{E711}', "Cancelled", 1500);
+                    return self.end_wake_session();
+                }
                 if let Some(mut run) = self.agent.take() {
                     if run.following {
                         self.keep_run(&run);

@@ -40,9 +40,48 @@ pub fn strip_wake(text: &str, wakes: &[String]) -> Option<String> {
     None
 }
 
+fn personal_wave_name(text: &str) -> bool {
+    matches!(
+        text.trim_matches(|c: char| c.is_whitespace() || "«»\"'“”".contains(c)),
+        "моя волна" | "мою волну" | "my wave"
+    )
+}
+
+pub fn local_yandex(request: &str) -> Option<crate::services::yandex::VoiceAction> {
+    use crate::services::yandex::VoiceAction;
+    let text = request.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let text = text.trim_end_matches(['.', '!', '?']);
+    let text = text.strip_prefix("пожалуйста, ").or_else(|| text.strip_prefix("пожалуйста ")).unwrap_or(text);
+    let text = text.strip_suffix(", пожалуйста").or_else(|| text.strip_suffix(" пожалуйста")).unwrap_or(text);
+    let object = ["включи ", "запусти ", "поставь ", "play ", "start "]
+        .into_iter()
+        .find_map(|prefix| text.strip_prefix(prefix))
+        .or_else(|| text.strip_prefix("найди ")?.strip_suffix(" и включи его"))?;
+    let object = object.strip_prefix("мне ").unwrap_or(object);
+    if personal_wave_name(object) {
+        return Some(VoiceAction::Start);
+    }
+    let object = object.strip_prefix("в моей волне ")?;
+    let track = ["трек ", "песню ", "композицию "].into_iter().find_map(|prefix| object.strip_prefix(prefix));
+    let (title, artist) = [" от группы ", " от исполнителя ", " от ", " группы "]
+        .into_iter()
+        .find_map(|separator| track.unwrap_or(object).rsplit_once(separator))
+        .or_else(|| track.map(|title| (title, "")))?;
+    if [" на колонке", " на станции", " в спотифае", " в spotify", " и включи ", " и потом ", " а затем "]
+        .into_iter()
+        .any(|suffix| object.contains(suffix))
+    {
+        return None;
+    }
+    let clean = |text: &str| text.trim_matches(|c: char| c.is_whitespace() || "«»\"'“”".contains(c)).to_owned();
+    let (title, artist) = (clean(title), clean(artist));
+    (!title.is_empty() && title.chars().count() <= 180 && artist.chars().count() <= 120)
+        .then_some(VoiceAction::Track { title, artist })
+}
+
 pub const YANDEX_PROMPT: &str = r#"
 {"action":"yandex","do":"start"|"resume"|"pause"|"next"|"previous"|"stop"|"status"|"filters"|"set"|"reset"|"artist"|"track"|"wave_track"|"speaker"|"like"|"unlike"|"dislike","query":"track title or artist name","artist":"performer of the track when known","group":"filter group key","seed":"seed ID or null for any"}
-If Yandex Music is connected, a request to play a named song defaults to Yandex Music inside Island. Use do=track for the exact song, with only the title in query and the performer in artist. Use Spotify when explicitly requested. Use wave_track or artist only for a recommendation wave based on a track or artist. Use speaker only when the user explicitly requests a physical Yandex Station or Alice speaker. Do not use browser, shell or general media commands as a fallback for these requests. For mood, activity, language or other filters, call filters first and use its exact keys. Only rate the current track when the user explicitly requests it.
+If Yandex Music is connected, a request to play a named song defaults to Yandex Music inside Island. Use do=track for the exact song, with only the title in query and the performer in artist. Use Spotify when explicitly requested. Use start for "Включи мою волну" or "play My Wave"; My Wave is a personal feed, never a search term or an artist. In "Включи в моей волне трек X от Y", "в моей волне" selects the player and the operation is track, with query X and artist Y. Only use wave_track or artist for a recommendation wave when the user explicitly asks for recommendations based on the track or artist. Never substitute a recommendation wave when an exact track was requested. Never reset saved filters unless explicitly requested. Use speaker only when the user explicitly requests a physical Yandex Station or Alice speaker. Do not use browser, shell or general media commands as a fallback for these requests. For mood, activity, language or other filters, call filters first and use its exact keys. Only rate the current track when the user explicitly requests it.
 "#;
 
 pub fn system_prompt(allowed: &[Cap], can_ask: bool, notes: &str, facts: &str) -> String {
@@ -667,7 +706,11 @@ fn from_value(value: &Value) -> Command {
                 }
                 Some("artist" | "wave_track") => {
                     let Some(query) = text("query", 180) else { return Command::Unknown };
-                    Wave::Station { query, artist: value["do"] == "artist" }
+                    if personal_wave_name(&query.to_lowercase()) {
+                        Wave::Start
+                    } else {
+                        Wave::Station { query, artist: value["do"] == "artist" }
+                    }
                 }
                 Some("set") => {
                     let Some(group) = text("group", 80) else { return Command::Unknown };
@@ -1056,6 +1099,39 @@ mod tests {
         assert_eq!(
             cap_of(&Command::Tool(Tool::Spotify { query: "x".into(), kind: String::new(), artist: String::new() })),
             Some(Cap::Media)
+        );
+    }
+
+    #[test]
+    fn spoken_my_wave_uses_distinct_local_track_and_personal_actions() {
+        use crate::services::yandex::VoiceAction;
+        for command in ["Включи мою волну.", "Пожалуйста, запусти «Мою волну»", "Play My Wave"]
+        {
+            assert_eq!(local_yandex(command), Some(VoiceAction::Start), "{command}");
+        }
+        for (command, title) in [
+            ("Включи мне в моей волне Jesus от курящих нет.", "jesus"),
+            ("Включи в моей волне трек Jesus от группы курящих нет", "jesus"),
+            ("Найди в моей волне трек «Джезус» от группы «Курящих нет» и включи его.", "джезус"),
+        ] {
+            assert_eq!(
+                local_yandex(command),
+                Some(VoiceAction::Track { title: title.into(), artist: "курящих нет".into() }),
+                "{command}"
+            );
+        }
+        for command in [
+            "Включи волну по треку Jesus",
+            "Включи в моей волне трек",
+            "Включи в моей волне трек Jesus на станции",
+            "Найди в моей волне трек Jesus от группы Курящих нет.",
+            "Не включай мою волну.",
+        ] {
+            assert_eq!(local_yandex(command), None, "{command}");
+        }
+        assert_eq!(
+            parse(r#"{"action":"yandex","do":"artist","query":"Моя волна"}"#),
+            Command::Tool(Tool::Yandex(VoiceAction::Start))
         );
     }
 

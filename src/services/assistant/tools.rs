@@ -74,6 +74,13 @@ impl Tool {
         }
     }
 
+    pub fn signature(&self) -> String {
+        match self {
+            Tool::Yandex(action) => format!("{}:{action:?}", self.name()),
+            _ => format!("{}:{}", self.name(), self.detail()),
+        }
+    }
+
     pub fn script(&self) -> bool {
         matches!(
             self,

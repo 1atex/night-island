@@ -387,6 +387,11 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Stream Fish Audio playback" => "Потоковое воспроизведение Fish Audio",
         "Expressive Fish Audio delivery" => "Эмоции и интонации Fish Audio",
         "Voice commands for My Wave are disabled" => "Голосовые команды для Моей волны выключены",
+        "Starting your My Wave" => "Запускаю персональную волну.",
+        "Starting in Island" => "Запускаю в Island",
+        "No matching track in Yandex Music. Check the title or specify the artist." => {
+            "Не нашёл такой трек в Яндекс Музыке. Проверь название или уточни исполнителя."
+        }
         "Error" => "Ошибка",
         "Yandex Music inside your island" => "Яндекс Музыка в острове",
         "Sign in in your browser. Your password stays with Yandex." => {

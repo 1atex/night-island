@@ -84,7 +84,7 @@ fn search_key(text: &str) -> String {
 fn match_track<'a>(tracks: &'a [Track], title: &str, artist: &str) -> Option<&'a Track> {
     let title = search_key(title);
     let artist = search_key(artist);
-    tracks.iter().find(|track| {
+    let exact = tracks.iter().find(|track| {
         let name = search_key(&track.title);
         if name.is_empty() {
             return false;
@@ -97,7 +97,21 @@ fn match_track<'a>(tracks: &'a [Track], title: &str, artist: &str) -> Option<&'a
                 && (search_key(&track.artist) == artist
                     || track.artist.split(", ").any(|name| search_key(name) == artist))
         }
-    })
+    });
+    if exact.is_some() || artist.is_empty() || !title.chars().any(|ch| matches!(ch, 'а'..='я' | 'ё')) {
+        return exact;
+    }
+
+    let spoken_key = |name: &str| crate::tools::texttools::translit(name).replace("dzh", "j").replace('z', "s");
+    let spoken = spoken_key(&title);
+    let mut matches = tracks.iter().filter(|track| {
+        let name = search_key(&track.title);
+        name.is_ascii()
+            && spoken == spoken_key(&name)
+            && track.artist.split(", ").any(|name| search_key(name) == artist)
+    });
+    let only = matches.next()?;
+    matches.next().is_none().then_some(only)
 }
 
 struct LibraryPlayback {
@@ -125,11 +139,10 @@ impl Default for Config {
 
 impl Config {
     fn seeds(&self) -> Vec<String> {
-        if self.selection.is_empty() {
-            vec!["user:onyourwave".into()]
-        } else {
-            self.selection.values().cloned().collect()
-        }
+        let context = self.selection.get("context").cloned().unwrap_or_else(|| "user:onyourwave".into());
+        std::iter::once(context)
+            .chain(self.selection.iter().filter(|(group, _)| group.as_str() != "context").map(|(_, seed)| seed.clone()))
+            .collect()
     }
 }
 
@@ -687,11 +700,15 @@ impl Worker {
         }
         match action {
             VoiceAction::Start => {
-                if self.station.is_some()
-                    || self.library_playback.is_some()
-                    || self.session.is_empty()
-                    || self.player.is_none()
-                {
+                let playing_personal = self.station.is_none()
+                    && self.library_playback.is_none()
+                    && !self.replace_pending
+                    && self.player.is_some()
+                    && self
+                        .current
+                        .as_ref()
+                        .is_some_and(|track| !track.session.is_empty() && track.session == self.session);
+                if !playing_personal {
                     let old = self.station.take();
                     if let Err(error) = self.new_wave(false) {
                         self.station = old;
@@ -700,6 +717,7 @@ impl Worker {
                 } else {
                     self.command(Command::Resume)?;
                 }
+                return Ok(crate::ui::i18n::tr("Starting your My Wave").into_owned());
             }
             VoiceAction::Station { query, artist } => {
                 let (seed, name) = self.api.station(&query, artist)?;
@@ -716,7 +734,7 @@ impl Worker {
                 let track = match_track(&tracks, &title, &artist)
                     .ok_or("No matching track in Yandex Music. Check the title or specify the artist.")?;
                 self.play_catalog_track(track.clone())?;
-                return Ok(format!("Playing {} — {} in Island", track.title, track.artist));
+                return Ok(format!("{} {} — {}", crate::ui::i18n::tr("Starting in Island"), track.artist, track.title));
             }
             VoiceAction::Speaker => unreachable!(),
             VoiceAction::Resume | VoiceAction::Pause | VoiceAction::Next | VoiceAction::Previous => {
@@ -1183,7 +1201,9 @@ mod tests {
         assert!(!c.autoplay);
         assert_eq!(c.seeds(), ["user:onyourwave"]);
         c.selection.insert("language".into(), "settingLanguage:russian".into());
-        assert_eq!(c.seeds(), ["settingLanguage:russian"]);
+        assert_eq!(c.seeds(), ["user:onyourwave", "settingLanguage:russian"]);
+        c.selection.insert("context".into(), "activity:work-background".into());
+        assert_eq!(c.seeds(), ["activity:work-background", "settingLanguage:russian"]);
         assert_eq!(serde_json::from_str::<Config>(r#"{"autoplay":true}"#).unwrap().volume, 100);
         for volume in [0, 37, 100] {
             c.volume = volume;
