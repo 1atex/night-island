@@ -52,6 +52,10 @@ impl Travel {
         }
     }
 
+    pub fn remaining(&self, now: Instant) -> Duration {
+        self.duration.saturating_sub(now.saturating_duration_since(self.started))
+    }
+
     pub fn active(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.started) < self.duration
     }

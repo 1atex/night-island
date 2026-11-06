@@ -22,6 +22,8 @@ use crate::data::top_panel::{PanelEntrance, TopPanelSettings};
 
 #[path = "panel_motion.rs"]
 mod motion;
+#[path = "panel_reveal.rs"]
+mod panel_reveal;
 use crate::platform::{apps, desktop_dock as desktop, system::Radios};
 use crate::ui::{
     gfx::{Gpu, Painter, rgba},
@@ -133,6 +135,8 @@ struct State {
     visible: bool,
     opening: bool,
     frame_timer: Cell<bool>,
+    reveal: RefCell<Option<panel_reveal::Reveal>>,
+    revealing: Cell<bool>,
     travel: motion::Travel,
     relocation: motion::Travel,
     displacement: (f32, f32),
@@ -282,21 +286,48 @@ impl State {
         }
     }
 
+    fn position_at(&self, now: Instant) -> (f32, f32) {
+        let progress = self.travel.value(now);
+        let remaining = 1.0 - self.relocation.value(now);
+        let coordinate = |from: i32, to: i32, displacement: f32| {
+            from as f32 + (to - from) as f32 * progress + displacement * remaining
+        };
+        (
+            coordinate(self.departure.0, self.destination.0, self.displacement.0),
+            coordinate(self.departure.1, self.destination.1, self.displacement.1),
+        )
+    }
+
+    fn animate_reveal(&self) {
+        let mut visual = self.reveal.borrow_mut();
+        let started = self.boundary.is_some_and(|(edge, left)| {
+            if visual.is_none() {
+                *visual = panel_reveal::Reveal::new(&self.gpu).ok();
+            }
+            visual.as_mut().is_some_and(|visual| visual.animate(self, edge, left).is_ok())
+        });
+        if !started && let Some(visual) = &*visual {
+            visual.hide();
+        }
+        drop(visual);
+        if started {
+            self.revealing.set(true);
+            unsafe {
+                let _ = ShowWindow(self.hwnd, SW_HIDE);
+            }
+        } else if self.revealing.replace(false) {
+            unsafe {
+                let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+            }
+        }
+    }
+
     fn motion_frame(&mut self) {
         let now = Instant::now();
         let progress = self.travel.value(now);
-        let remaining = 1.0 - self.relocation.value(now);
         if !matches!(self.role, Role::Card(_)) {
-            self.origin = (
-                (self.departure.0 as f32
-                    + (self.destination.0 - self.departure.0) as f32 * progress
-                    + self.displacement.0 * remaining)
-                    .round() as i32,
-                (self.departure.1 as f32
-                    + (self.destination.1 - self.departure.1) as f32 * progress
-                    + self.displacement.1 * remaining)
-                    .round() as i32,
-            );
+            let (x, y) = self.position_at(now);
+            self.origin = (x.round() as i32, y.round() as i32);
         }
         self.alpha = (progress * 255.0).round() as u8;
         self.opening = self.travel.active(now) || self.relocation.active(now);
@@ -875,6 +906,12 @@ impl State {
     }
 
     fn render(&self) {
+        if self.revealing.get() && self.opening && self.boundary.is_some() {
+            if let Some(visual) = &*self.reveal.borrow() {
+                visual.opacity(self.ghost_alpha);
+            }
+            return;
+        }
         let mut surface = self.surface.borrow_mut();
         if surface.as_ref().is_none_or(|surface| !surface.fits(self.size)) {
             let capacity = if matches!(self.role, Role::Right) {
@@ -910,6 +947,14 @@ impl State {
                 (u16::from(self.alpha) * u16::from(self.ghost_alpha) / 255) as u8,
             );
         }
+        if self.revealing.replace(false) {
+            unsafe {
+                let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+            }
+            if let Some(visual) = &*self.reveal.borrow() {
+                visual.hide();
+            }
+        }
         if self.feedback.active() {
             self.start_frames();
         }
@@ -921,6 +966,10 @@ impl State {
         }
         self.hover = None;
         self.visible = false;
+        self.revealing.set(false);
+        if let Some(visual) = &*self.reveal.borrow() {
+            visual.hide();
+        }
         self.travel.show(false, 0, Instant::now());
         self.pressed = None;
         self.stop_frames();
@@ -1263,6 +1312,8 @@ impl Wing {
             relocation: Default::default(),
             displacement: (0.0, 0.0),
             frame_timer: Cell::new(false),
+            reveal: RefCell::new(None),
+            revealing: Cell::new(false),
             destination: (0, 0),
             departure: (0, 0),
             boundary: None,
@@ -1293,8 +1344,13 @@ impl Wing {
         let ms = if animated { self.state.settings.motion_ms } else { 0 };
         if !visible {
             if self.state.visible {
+                let changed = self.state.travel.shown();
                 self.state.travel.show(false, ms, now);
                 if self.state.travel.active(now) {
+                    if changed {
+                        self.state.motion_frame();
+                        self.state.animate_reveal();
+                    }
                     self.state.start_frames();
                 } else {
                     self.state.hide();
@@ -1314,6 +1370,7 @@ impl Wing {
             self.state.origin = origin;
             self.state.departure = origin;
         }
+        let reversed = !self.state.travel.shown();
         self.state.travel.show(true, ms, now);
         if fresh || (moved && !matches!(self.state.role, Role::Card(_))) {
             self.state.displacement = (0.0, 0.0);
@@ -1329,6 +1386,9 @@ impl Wing {
         self.state.motion_frame();
         self.state.visible = true;
         self.state.layout();
+        if self.state.opening && (fresh || moved || reversed) {
+            self.state.animate_reveal();
+        }
         unsafe {
             if fresh && matches!(self.state.role, Role::Card(_)) {
                 SetTimer(Some(self.state.hwnd), DISMISS, 50, None);
@@ -1340,7 +1400,7 @@ impl Wing {
                 self.state.render();
                 self.state.dirty = false;
             }
-            if fresh {
+            if fresh && !self.state.revealing.get() {
                 let _ = ShowWindow(self.state.hwnd, SW_SHOWNOACTIVATE);
             }
         }
@@ -1714,6 +1774,9 @@ impl TopPanel {
 
     pub fn set_capture_hidden(&self, hidden: bool) {
         for wing in [&self.left, &self.right, &self.card] {
+            if let Some(visual) = &*wing.state.reveal.borrow() {
+                visual.capture_hidden(hidden);
+            }
             unsafe {
                 let _ =
                     SetWindowDisplayAffinity(wing.state.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });

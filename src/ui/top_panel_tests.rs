@@ -371,6 +371,9 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
             panel.update(snapshot.clone(), island, false);
             let mut previous = [0u8; 2];
             if entrance == PanelEntrance::Island {
+                if crate::ui::feedback::motion_allowed() {
+                    assert!(panel.left.state.revealing.get() && panel.right.state.revealing.get());
+                }
                 assert!(panel.interacting_at(
                     island,
                     (
@@ -389,6 +392,7 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
                     if elapsed == 400 {
                         assert_eq!(wing.state.origin, wing.state.destination);
                         assert!(!wing.state.opening);
+                        assert!(!wing.state.revealing.get());
                     }
                 }
             }
