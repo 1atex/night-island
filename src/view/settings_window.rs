@@ -243,6 +243,7 @@ pub enum Field {
     TtsModel,
     TtsVoice,
     WakeWord,
+    GuideWake,
     GroupName,
     Search,
 }
@@ -280,11 +281,13 @@ pub enum Act {
     DockHiddenRemove(usize),
     Metric(usize),
     Agent(usize),
+    OpenGuide,
 }
 
 #[derive(Default)]
 pub struct SwUi {
     pub dock_status: String,
+    pub guide: Option<GuideUi>,
     pub group: usize,
     pub assistant_page: AssistantPage,
     pub scroll: f32,
@@ -326,6 +329,7 @@ pub enum SwHit {
     Close,
     Group(usize),
     AssistantPage(AssistantPage),
+    Guide(GuideAction),
     Row(Sid, SetHit),
     Field(Field),
     Act(Act),
@@ -733,7 +737,11 @@ fn key_items(ui: &UiState) -> Vec<Item> {
 
 fn about_items(ui: &UiState) -> Vec<Item> {
     use crate::services::update::{self, Status as U};
-    let mut out = vec![Item::Heading("About"), Item::Text(format!("Night Island {}", update::CURRENT))];
+    let mut out = vec![
+        Item::Heading("About"),
+        Item::Text(format!("Night Island {}", update::CURRENT)),
+        Item::Button(Act::OpenGuide, "Open quick tour".into(), true),
+    ];
     let line = match &ui.update {
         U::Unknown | U::NotConfigured if !update::configured() => {
             "Updates are off: this build has no release key".to_string()
@@ -1212,6 +1220,7 @@ struct Layout {
     sidebar: Rect,
     search: Rect,
     assistant_nav: Option<Rect>,
+    resume_guide: Option<Rect>,
     content: Rect,
 }
 
@@ -1224,10 +1233,19 @@ fn layout(size: (f32, f32), scale: f32, ui: &UiState) -> Layout {
     let assistant_nav = (ui.sw.search.trim().is_empty()
         && GROUPS.get(ui.sw.group).is_some_and(|group| group.name == "Assistant"))
     .then_some((left, body, right, body + 34.0 * scale));
+    let search_top = top + 18.0 * scale;
+    let search_bottom = search_top + SEARCH_H * scale;
+    let resume_guide = ui
+        .sw
+        .guide
+        .as_ref()
+        .filter(|guide| !guide.visible)
+        .map(|_| (right - 184.0 * scale, search_top, right, search_bottom));
     Layout {
         sidebar: (0.0, top, SIDEBAR_W * scale, h),
-        search: (left, top + 18.0 * scale, right, top + (18.0 + SEARCH_H) * scale),
+        search: (left, search_top, resume_guide.map_or(right, |r| r.0 - 8.0 * scale), search_bottom),
         assistant_nav,
+        resume_guide,
         content: (left, assistant_nav.map_or(body, |nav| nav.3 + 8.0 * scale), right, h - 12.0 * scale),
     }
 }
@@ -1335,6 +1353,15 @@ pub fn sw_hit(size: (f32, f32), scale: f32, ui: &UiState, px: f32, py: f32) -> O
     if inside(close, px, py) {
         return Some(SwHit::Close);
     }
+    if let Some(guide) = ui.sw.guide.as_ref().filter(|guide| guide.visible) {
+        if guide_wake_rects(size, scale, guide).is_some_and(|(rect, _)| inside(rect, px, py)) {
+            return Some(SwHit::Field(Field::GuideWake));
+        }
+        return guide_hit(size, scale, guide, px, py).map(SwHit::Guide);
+    }
+    if l.resume_guide.is_some_and(|rect| inside(rect, px, py)) {
+        return Some(SwHit::Guide(GuideAction::Resume));
+    }
     if inside(l.search, px, py) {
         return Some(SwHit::Field(Field::Search));
     }
@@ -1395,6 +1422,9 @@ pub fn sw_slider_track(size: (f32, f32), scale: f32, ui: &UiState, id: Sid) -> O
 }
 
 pub fn sw_field_rects(size: (f32, f32), scale: f32, ui: &UiState, field: Field) -> Option<(Rect, Rect)> {
+    if field == Field::GuideWake {
+        return guide_wake_rects(size, scale, ui.sw.guide.as_ref().filter(|guide| guide.visible)?);
+    }
     let l = layout(size, scale, ui);
     if field == Field::Search {
         let s = l.search;
@@ -1436,6 +1466,7 @@ pub fn field_edit(ui: &UiState, field: Field) -> &TextEdit {
         Field::TtsModel => &ui.int.tts_model,
         Field::TtsVoice => &ui.int.tts_voice,
         Field::WakeWord => &ui.int.wake,
+        Field::GuideWake => ui.sw.guide.as_ref().map_or(&ui.int.wake, |guide| &guide.wake),
         Field::GroupName => &ui.int.group_name,
         Field::Search => &ui.int.search,
     }
@@ -1459,14 +1490,17 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
     let l = layout(size, scale, ui);
     let (pr, pg, pb) = crate::ui::theme::panel();
     p.fill_rect((0.0, 0.0, size.0, size.1), rgba(pr, pg, pb, 1.0))?;
-    p.fill_rect(l.sidebar, rgba(1.0, 1.0, 1.0, 0.045))?;
+    let guide = ui.sw.guide.as_ref().filter(|guide| guide.visible);
+    if guide.is_none() {
+        p.fill_rect(l.sidebar, rgba(1.0, 1.0, 1.0, 0.045))?;
+    }
 
     let bar = (0.0, 0.0, size.0, TITLE_H * scale);
     p.fill_rect(bar, rgba(0.0, 0.0, 0.0, 0.18))?;
     p.fill_rect((0.0, bar.3 - 1.0, size.0, bar.3), rgba(1.0, 1.0, 1.0, 0.07))?;
     p.glyph('\u{E713}', (14.0 * scale, 0.0, 38.0 * scale, bar.3), 15.0 * scale, rgba(1.0, 1.0, 1.0, 0.8))?;
     p.text(
-        "Settings",
+        if guide.is_some() { "Quick tour" } else { "Settings" },
         (42.0 * scale, 0.0, size.0 / 2.0, bar.3),
         13.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
@@ -1484,6 +1518,9 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
     let (cx, cy) = ((min.0 + min.2) / 2.0, (min.1 + min.3) / 2.0);
     p.fill_rect((cx - 5.0 * scale, cy, cx + 5.0 * scale, cy + scale.max(1.0)), rgba(1.0, 1.0, 1.0, 0.9))?;
     p.glyph('\u{E711}', close, 14.0 * scale, WHITE)?;
+    if let Some(guide) = guide {
+        return paint_guide(p, size, scale, guide, ui);
+    }
 
     let searching = !ui.sw.search.trim().is_empty();
     for (n, &(first, title)) in SIDEBAR_SECTIONS.iter().enumerate() {
@@ -1529,6 +1566,16 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
         )?;
     }
 
+    if let Some(rect) = l.resume_guide {
+        guide_button(
+            p,
+            rect,
+            scale,
+            "Resume quick tour",
+            true,
+            ui.sw.hover == Some(SwHit::Guide(GuideAction::Resume)),
+        )?;
+    }
     let search_inner = (l.search.0 + 40.0 * scale, l.search.1, l.search.2 - 12.0 * scale, l.search.3);
     paint_line_edit(
         p,

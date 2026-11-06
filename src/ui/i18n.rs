@@ -384,6 +384,125 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Show AI answers as cards" => "Показывать ответы ИИ карточками",
         "Show cards by the detached pet" => "Показывать карточки у вынесенного питомца",
         "Voice commands for My Wave" => "Голосовые команды для Моей волны",
+        "Quick tour" => "Быстрый старт",
+        "Open quick tour" => "Открыть быстрый старт",
+        "Resume quick tour" => "Продолжить знакомство",
+        "The island" => "Остров",
+        "Meet your island" => "Знакомься, Island",
+        "A small panel at the edge of the screen that opens when you need it." => {
+            "Компактная панель у края экрана раскрывается, когда она нужна."
+        }
+        "Open on hover" => "Раскрытие по наведению",
+        "Move the pointer over the island to open it. Move away to close it." => {
+            "Наведи курсор на остров, чтобы открыть его. Уведи курсор, чтобы свернуть."
+        }
+        "Keep it open" => "Закрепление",
+        "Use the pin when you want the panel to stay open." => "Нажми на булавку, чтобы оставить панель раскрытой.",
+        "Make it yours" => "Остров под себя",
+        "Adjust the position, shape and animation in Settings." => "Положение, форма и анимация меняются в настройках.",
+        "Everyday tools" => "На каждый день",
+        "The tools you use daily" => "Всё нужное под рукой",
+        "Start on Home. Open More to find the rest of your tools and change the tab bar." => {
+            "Начни с «Главной». В меню «Ещё» можно найти остальные инструменты и настроить вкладки."
+        }
+        "Music and sound" => "Музыка и звук",
+        "Control playback, seek through a track and adjust app volume." => {
+            "Управляй воспроизведением, перематывай треки и меняй громкость приложений."
+        }
+        "Clipboard and notes" => "Буфер и заметки",
+        "Find something you copied or jot down a reminder." => "Найди скопированное или запиши напоминание.",
+        "Your shortcuts" => "Быстрые действия",
+        "Edit the tiles on Home to keep the actions you use within reach." => {
+            "Добавь нужные действия в плитки на «Главной»."
+        }
+        "Organize your desktop" => "Панели рабочего стола",
+        "Choose what sits around the island, from favorite apps to the system tray." => {
+            "Собери панели вокруг острова из любимых приложений и системных кнопок."
+        }
+        "Bottom dock" => "Нижний док",
+        "Pin and reorder apps. Hover to preview their windows." => {
+            "Закрепляй и переставляй ярлыки. Наведи на значок для предпросмотра окна."
+        }
+        "Choose the tray, active app and system controls you want to see." => {
+            "Выбери, где показывать трей, активное приложение и системные кнопки."
+        }
+        "Screen edges" => "Края экрана",
+        "Set panels to appear on hover and hide them in fullscreen apps." => {
+            "Панели могут появляться по наведению и скрываться в полноэкранных приложениях."
+        }
+        "Notifications at a glance" => "Карточки уведомлений",
+        "Windows notifications can appear as animated cards beside the island." => {
+            "Уведомления Windows могут появляться в анимированных карточках рядом с островом."
+        }
+        "Connect Windows notifications" => "Подключение Windows",
+        "Open the Notifications tab to grant access." => "Открой «Уведомления» и разреши доступ.",
+        "Read at your pace" => "Чтение без спешки",
+        "Hover to pause the card, then open the full message." => {
+            "Наведи на карточку, чтобы задержать её, или открой полный текст."
+        }
+        "Choose where alerts appear" => "Системные баннеры",
+        "Use Windows Do not disturb to quiet system banners." => {
+            "Режим «Не беспокоить» в Windows скрывает обычные всплывающие баннеры."
+        }
+        "Talk to the Assistant" => "Команды голосом",
+        "Ask a question, control music or set a reminder. Start with a model and speech recognition." => {
+            "Задай вопрос, включи музыку или поставь напоминание. Для начала подключи модель и распознавание речи."
+        }
+        "Connect a model" => "Подключение модели",
+        "Add a model provider in Settings, under Assistant." => "В настройках Ассистента выбери сервис и добавь ключ.",
+        "Set up speech" => "Распознавание и голос",
+        "Choose how speech is recognized and how answers are spoken." => {
+            "Выбери сервис для распознавания речи и голос для ответов."
+        }
+        "Choose permissions" => "Разрешения",
+        "Decide which actions run directly and which ask first." => {
+            "Укажи, какие действия разрешены сразу, а какие требуют подтверждения."
+        }
+        "Pet and wake words" => "Питомец и голосовой запуск",
+        "Give your pet a name" => "Дай питомцу имя",
+        "Your pet can sit on the island or join you on the desktop." => {
+            "Питомец может сидеть на острове или жить отдельно на рабочем столе."
+        }
+        "Bring your pet out" => "Вынести питомца",
+        "Drag it away from the island. Drag it back to dock it again." => {
+            "Перетащи питомца с острова. Чтобы вернуть его, перетащи обратно."
+        }
+        "Talk to your pet" => "Разговор с питомцем",
+        "Use the pet’s voice action or say its wake word when listening is enabled." => {
+            "Нажми микрофон у питомца или произнеси кличку, когда голосовой запуск включён."
+        }
+        "Pick two distinct words" => "Две разные клички",
+        "Use short names that sound different. Either one can wake the Assistant." => {
+            "Выбери короткие слова, которые различаются на слух. Сработает любое из них."
+        }
+        "Skip tour" => "Пропустить",
+        "Finish tour" => "Завершить",
+        "Collapse the example" => "Свернуть пример",
+        "Open the example" => "Раскрыть пример",
+        "Open Home" => "Открыть «Главную»",
+        "Dock settings" => "Настройки дока",
+        "Top panel settings" => "Настройки верхней панели",
+        "Open Notifications" => "Открыть уведомления",
+        "Set up the Assistant" => "Настроить Ассистента",
+        "Dock the example pet" => "Вернуть питомца",
+        "Release the example pet" => "Вынести питомца",
+        "Save wake words" => "Сохранить клички",
+        "Voice activation settings" => "Настроить голосовой запуск",
+        "Now playing" => "Сейчас играет",
+        "Explorer" => "Проводник",
+        "Example notification" => "Пример уведомления",
+        "Your message appears here. Hover to keep it visible." => {
+            "Здесь появится сообщение. Наведи курсор, чтобы карточка осталась открытой."
+        }
+        "Speaking" => "Отвечаю",
+        "I’ll remind you in ten minutes." => "Напомню через десять минут.",
+        "Assistant wake words" => "Клички ассистента",
+        "Luna, Taburetka" => "Луна, Табуретка",
+        "Separate the names with a comma." => "Раздели клички запятой. Пример — «Луна, Табуретка».",
+        "Wake words saved" => "Клички сохранены.",
+        "Use different names of up to 24 characters, separated by commas." => {
+            "Укажи разные клички длиной до 24 символов через запятую."
+        }
         "Assistant overview" => "Обзор",
         "AI model" => "Модель",
         "Speech recognition" => "Распознавание",

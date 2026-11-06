@@ -226,6 +226,7 @@ impl App {
         match id {
             tray::ID_TOGGLE => self.toggle(),
             tray::ID_SETTINGS => self.open_settings_window(),
+            tray::ID_GUIDE => self.open_guide(),
             tray::ID_RESET_POS => self.reset_position(),
             _ => {}
         }

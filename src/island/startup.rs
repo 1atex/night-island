@@ -123,7 +123,12 @@ pub fn run() -> Result<()> {
         weather::start(hwnd, weather_on);
         spotify::init(hwnd);
         discord::start(hwnd);
-        with_app(|a| a.start_game_watch());
+        with_app(|a| {
+            a.start_game_watch();
+            if a.settings.tour_pending && !cfg!(feature = "demo") {
+                a.open_guide();
+            }
+        });
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {

@@ -26,6 +26,7 @@ mod companion_popup;
 mod controls;
 mod discord;
 mod frame;
+mod guide;
 mod home;
 mod integrations;
 mod metrics;
@@ -58,6 +59,7 @@ pub use self::{
     pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
     widgets::*, yandex::*,
 };
+pub use guide::*;
 pub use pet_studio::*;
 
 pub type Rect = (f32, f32, f32, f32);

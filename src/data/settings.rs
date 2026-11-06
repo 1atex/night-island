@@ -363,6 +363,7 @@ impl ProgressStyle {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    pub tour_pending: bool,
     pub top_panel: crate::data::top_panel::TopPanelSettings,
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
@@ -479,6 +480,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            tour_pending: false,
             top_panel: Default::default(),
             desktop_dock: Default::default(),
             language: Language::Ru,
@@ -947,7 +949,13 @@ impl Settings {
     }
 
     pub fn load() -> Self {
-        let file = Self::path().and_then(|p| fs::File::open(p).ok());
+        Self::load_from(Self::path())
+    }
+
+    fn load_from(path: Option<PathBuf>) -> Self {
+        let file = path.map(fs::File::open);
+        let fresh = file.as_ref().is_some_and(|f| f.as_ref().is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound));
+        let file = file.and_then(Result::ok);
         let existed = file.is_some();
         let parsed = file.and_then(|f| {
             let mut buf = String::new();
@@ -958,6 +966,7 @@ impl Settings {
             crate::log_warn!("settings.json is unreadable, using defaults");
         }
         let mut s = parsed.unwrap_or_default();
+        s.tour_pending |= fresh;
         s.sanitize();
         s
     }
@@ -1093,6 +1102,22 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_new_profile_starts_the_tour_automatically() {
+        let path = std::env::temp_dir().join(format!("ni-tour-settings-{}.json", std::process::id()));
+        assert!(Settings::load_from(Some(path.clone())).tour_pending);
+        for (json, pending) in [
+            (r#"{"scale_percent":120}"#, false),
+            (r#"{"tour_pending":false}"#, false),
+            (r#"{"tour_pending":true}"#, true),
+            ("invalid", false),
+        ] {
+            fs::write(&path, json).unwrap();
+            assert_eq!(Settings::load_from(Some(path.clone())).tour_pending, pending);
+        }
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn older_settings_keep_spark_and_custom_pets_survive_restarts() {

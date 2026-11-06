@@ -38,6 +38,95 @@ pub(in crate::island) fn on_settings_window_changed() {
 }
 
 impl App {
+    pub(in crate::island) fn open_guide(&mut self) {
+        self.sw_focus(None);
+        self.end_rebind();
+        self.ui.sw.dropdown = None;
+        self.ui.sw.hover = None;
+        self.ui.sw.guide.get_or_insert_with(|| view::GuideUi::new(&self.settings.ai.voice_wake)).visible = true;
+        self.open_settings_window();
+        self.render_settings_win();
+    }
+
+    fn on_guide_action(&mut self, action: view::GuideAction) {
+        use view::GuideAction::*;
+        if action == Resume {
+            return self.open_guide();
+        }
+        let Some(guide) = self.ui.sw.guide.as_mut().filter(|guide| guide.visible) else { return };
+        self.ui.sw.hover = None;
+        match action {
+            Back => guide.move_by(-1),
+            Next if !guide.last_page() => guide.move_by(1),
+            Next | Skip => {
+                let typed = guide.wake.text();
+                if action == Next
+                    && !typed.trim().is_empty()
+                    && typed != self.settings.ai.voice_wake
+                    && !self.save_guide_wake()
+                {
+                    return;
+                }
+                if let Some(hwnd) = self.settings_win {
+                    unsafe {
+                        let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+                    }
+                }
+                return;
+            }
+            Demo => guide.play_demo(crate::ui::feedback::motion_allowed()),
+            SaveWake => {
+                self.save_guide_wake();
+                return;
+            }
+            OpenIsland | OpenNotifications => {
+                guide.visible = false;
+                if let Some(hwnd) = self.settings_win {
+                    unsafe {
+                        let _ = ShowWindow(hwnd, SW_MINIMIZE);
+                    }
+                }
+                self.restore_pill();
+                self.open_tab(if action == OpenNotifications { view::Tab::Notifications } else { view::Tab::Home });
+            }
+            OpenDock | OpenTop | OpenAssistant | OpenWake => {
+                guide.visible = false;
+                let name = match action {
+                    OpenDock => "Desktop dock",
+                    OpenTop => "Top panel",
+                    _ => "Assistant",
+                };
+                if action == OpenAssistant {
+                    self.ui.sw.assistant_page = view::AssistantPage::Model;
+                } else if action == OpenWake {
+                    self.ui.sw.assistant_page = view::AssistantPage::Recognition;
+                }
+                if let Some(group) = view::GROUPS.iter().position(|group| group.name == name) {
+                    self.open_settings_at(group);
+                }
+            }
+            Resume => {}
+        }
+        self.render_settings_win();
+    }
+
+    fn save_guide_wake(&mut self) -> bool {
+        let Some(guide) = self.ui.sw.guide.as_mut() else { return false };
+        let wake = guide.validated_wake();
+        let saved = wake.is_some();
+        match wake {
+            Some(wake) => {
+                guide.wake.set_text(&wake);
+                guide.wake_feedback = Some(("Wake words saved", false));
+                self.ui.int.wake.set_text(&wake);
+                self.commit_wake();
+            }
+            _ => guide.wake_feedback = Some(("Use different names of up to 24 characters, separated by commas.", true)),
+        }
+        self.render_settings_win();
+        saved
+    }
+
     pub(in crate::island) fn open_settings_at(&mut self, group: usize) {
         self.open_settings_window();
         if self.settings_win.is_some() {
@@ -124,7 +213,8 @@ impl App {
                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
             self.settings_win = Some(hwnd);
-            self.ui.sw = view::SwUi::default();
+            let guide = self.ui.sw.guide.take();
+            self.ui.sw = view::SwUi { guide, ..Default::default() };
             self.ui.int.spotify_id.set_text(&spotify::own_client_id());
             self.sync_voice_fields();
             self.reload_groups();
@@ -195,7 +285,7 @@ impl App {
             let _ = DeleteDC(mem);
             ReleaseDC(Some(hwnd), screen);
         }
-        if self.ui.feedback.active() {
+        if self.ui.feedback.active() || self.ui.sw.guide.as_ref().is_some_and(|guide| guide.animating()) {
             self.set_timer(Timer::SwAnim, 16);
         }
     }
@@ -282,6 +372,7 @@ impl App {
                 self.ui.sw.scroll = 0.0;
                 self.set_search("");
             }
+            Some(view::SwHit::Guide(action)) => self.on_guide_action(action),
             Some(view::SwHit::AssistantPage(page)) => {
                 self.ui.sw.assistant_page = page;
                 self.ui.sw.scroll = 0.0;
@@ -346,6 +437,7 @@ impl App {
             view::Field::TtsModel => &mut self.ui.int.tts_model,
             view::Field::TtsVoice => &mut self.ui.int.tts_voice,
             view::Field::WakeWord => &mut self.ui.int.wake,
+            view::Field::GuideWake => &mut self.ui.sw.guide.as_mut()?.wake,
             view::Field::GroupName => &mut self.ui.int.group_name,
             view::Field::Search => &mut self.ui.int.search,
         })
@@ -581,6 +673,7 @@ impl App {
 
     fn sw_act(&mut self, act: view::Act) {
         match act {
+            view::Act::OpenGuide => self.open_guide(),
             view::Act::Rebind(hotkey) => self.begin_rebind(hotkey),
             view::Act::KeysReset => {
                 self.settings.keys.clear();
@@ -875,6 +968,9 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_wheel(&mut self, delta: i32) {
+        if self.ui.sw.guide.as_ref().is_some_and(|guide| guide.visible) {
+            return;
+        }
         self.ui.sw.dropdown = None;
         let max = view::max_scroll(self.sw_size(), self.dpi_scale, &self.ui);
         let scroll = (self.ui.sw.scroll - delta as f32 / 120.0 * SCROLL_STEP * self.dpi_scale).clamp(0.0, max);
@@ -885,6 +981,25 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_char(&mut self, c: u16) -> bool {
+        if let Some(guide) = self.ui.sw.guide.as_mut().filter(|guide| guide.visible) {
+            if c == 0x09 && guide.last_page() {
+                let focused = self.ui.sw.field == Some(view::Field::GuideWake);
+                self.sw_focus((!focused).then_some(view::Field::GuideWake));
+                self.render_settings_win();
+                return false;
+            }
+            if self.ui.sw.field == Some(view::Field::GuideWake) {
+                if c == 0x0D {
+                    self.save_guide_wake();
+                } else {
+                    guide.wake_feedback = None;
+                    self.on_sw_field_char(c);
+                    self.render_settings_win();
+                }
+                return false;
+            }
+            return c == 0x1B;
+        }
         if c == 0x1B && self.ui.sw.dropdown.take().is_some() {
             self.render_settings_win();
             return false;
@@ -924,7 +1039,11 @@ impl App {
 
     fn on_sw_field_char(&mut self, unit: u16) {
         let Some(field) = self.ui.sw.field else { return };
-        let max_chars = if field == view::Field::Search { MAX_SEARCH_CHARS } else { 400 };
+        let max_chars = match field {
+            view::Field::Search => MAX_SEARCH_CHARS,
+            view::Field::GuideWake => crate::tools::voicecmd::MAX_WAKES * (crate::tools::voicecmd::MAX_WAKE_CHARS + 2),
+            _ => 400,
+        };
         let hwnd = self.settings_win.unwrap_or(self.hwnd);
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
         match unit {
@@ -1006,6 +1125,18 @@ impl App {
     }
 
     pub(in crate::island) fn on_sw_keydown(&mut self, vk: u16) -> bool {
+        if self.ui.sw.field != Some(view::Field::GuideWake)
+            && let Some(guide) = self.ui.sw.guide.as_ref().filter(|guide| guide.visible)
+        {
+            let action = match vk {
+                v if v == VK_LEFT.0 => view::GuideAction::Back,
+                v if v == VK_RIGHT.0 && !guide.last_page() => view::GuideAction::Next,
+                v if v == VK_RETURN.0 => view::GuideAction::Next,
+                _ => return false,
+            };
+            self.on_guide_action(action);
+            return true;
+        }
         if let Some(hotkey) = self.ui.sw.capturing {
             self.capture_key(hotkey, vk);
             return true;
@@ -1038,7 +1169,13 @@ impl App {
         self.kill_timer(Timer::SwCaret);
         self.settings_win = None;
         self.pointer.slider = None;
-        self.ui.sw = view::SwUi::default();
+        let guide = self.ui.sw.guide.take();
+        if guide.as_ref().is_some_and(|guide| guide.visible) && self.settings.tour_pending {
+            self.settings.tour_pending = false;
+            self.ui.cfg.tour_pending = false;
+            self.settings.save();
+        }
+        self.ui.sw = view::SwUi { guide: guide.filter(|guide| !guide.visible), ..Default::default() };
     }
 }
 
