@@ -360,6 +360,15 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Loading music…" => "Загружаем…",
 
         "My Wave" => "Моя волна",
+        "Notification" => "Уведомление",
+        "Talk to the detached pet" => "Разговор с вынесенным питомцем",
+        "Show AI answers as cards" => "Показывать ответы ИИ карточками",
+        "Show cards by the detached pet" => "Показывать карточки у вынесенного питомца",
+        "Voice commands for My Wave" => "Голосовые команды для Моей волны",
+        "Stream Fish Audio playback" => "Потоковое воспроизведение Fish Audio",
+        "Expressive Fish Audio delivery" => "Эмоции и интонации Fish Audio",
+        "Voice commands for My Wave are disabled" => "Голосовые команды для Моей волны выключены",
+        "Error" => "Ошибка",
         "Yandex Music inside your island" => "Яндекс Музыка в острове",
         "Sign in in your browser. Your password stays with Yandex." => {
             "Войди через браузер. Пароль остаётся у Яндекса."

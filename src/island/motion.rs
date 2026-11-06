@@ -145,6 +145,7 @@ impl App {
         self.repaint_collapsed();
         self.settle_layers();
         self.sync_metrics();
+        self.maybe_show_notification();
     }
 
     pub(in crate::island) fn settle_layers(&self) {

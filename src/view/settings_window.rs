@@ -23,7 +23,7 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 16] = [
+const ISLAND: [(Sid, &str, Kind); 17] = [
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -36,6 +36,7 @@ const ISLAND: [(Sid, &str, Kind); 16] = [
     (Sid::CharacterDetached, "Release the pet from the island", Kind::Toggle),
     (Sid::PetPerformance, "Pet animation quality", Kind::Cycle),
     (Sid::PetVoice, "Pet reacts to voice assistant", Kind::Toggle),
+    (Sid::PetVoiceInput, "Talk to the detached pet", Kind::Toggle),
     (Sid::PetAutonomy, "Pet walks, rests and sleeps on its own", Kind::Toggle),
     (Sid::Size, "Size", Kind::Slider),
     (Sid::OpenDelay, "Open delay", Kind::Slider),
@@ -81,10 +82,12 @@ const PILL: [(Sid, &str, Kind); 20] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 20] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 22] = [
     (Sid::SystemNotifications, "Windows notifications from the island", Kind::Toggle),
     (Sid::NotificationTiles, "Notification preview size", Kind::Cycle),
     (Sid::NotificationOpenApp, "Click a notification to open its app", Kind::Toggle),
+    (Sid::AiNotificationCards, "Show AI answers as cards", Kind::Toggle),
+    (Sid::PetNotifications, "Show cards by the detached pet", Kind::Toggle),
     (Sid::WindowsNotificationsSettings, "Windows notification settings", Kind::Button),
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
@@ -110,7 +113,7 @@ const AI: [(Sid, &str, Kind); 3] = [
     (Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
 ];
 
-const ASSISTANT: [(Sid, &str, Kind); 29] = [
+const ASSISTANT: [(Sid, &str, Kind); 30] = [
     (Sid::AsstEnabled, "Voice assistant", Kind::Toggle),
     (Sid::AsstWake, "Listen for the call word", Kind::Toggle),
     (Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
@@ -128,6 +131,7 @@ const ASSISTANT: [(Sid, &str, Kind); 29] = [
     (Sid::AsstWebAsk, "Ask first after reading web pages", Kind::Toggle),
     (Sid::AsstInstructions, "Edit the assistant's own instructions", Kind::Button),
     (Sid::AsstMedia, "Music and media keys", Kind::Cycle),
+    (Sid::AsstYandex, "Voice commands for My Wave", Kind::Toggle),
     (Sid::AsstControls, "Volume, mic, Wi-Fi, Bluetooth, theme, lock", Kind::Cycle),
     (Sid::AsstOpen, "Open programs and games", Kind::Cycle),
     (Sid::AsstReminders, "Reminders and timers", Kind::Cycle),
@@ -185,7 +189,7 @@ pub const GROUPS: [Group; 18] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (14, "Open and close")],
+        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (15, "Open and close")],
     },
     Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
     Group { glyph: '\u{E8A9}', name: "Top panel", rows: &[], custom: Some(top_panel_items), sections: &[] },
@@ -218,7 +222,7 @@ pub const GROUPS: [Group; 18] = [
         name: "Notifications",
         rows: &NOTIFICATIONS,
         custom: None,
-        sections: &[(0, "System"), (9, "Clipboard and keys"), (13, "Apps and services")],
+        sections: &[(0, "System"), (11, "Clipboard and keys"), (15, "Apps and services")],
     },
     Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
     Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
@@ -864,6 +868,8 @@ fn assistant_items(ui: &UiState) -> Vec<Item> {
                 out.push(Item::Button(Act::TtsRemoveKey, "Remove the voice key".into(), true));
             }
             if fish {
+                out.push(Item::Row(Sid::AsstFishStream, "Stream Fish Audio playback", Kind::Toggle));
+                out.push(Item::Row(Sid::AsstFishExpressions, "Expressive Fish Audio delivery", Kind::Toggle));
                 out.push(Item::Note("Fish Audio: the key is in fish.audio, Developers, API keys."));
                 out.push(Item::Note(
                     "The voice ID is the ID of a voice model from fish.audio/discovery; \"default\" uses the stock voice.",

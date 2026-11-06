@@ -69,7 +69,35 @@ pub struct Track {
     pub palette: palette::Palette,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VoiceAction {
+    Start,
+    Resume,
+    Pause,
+    Next,
+    Previous,
+    Stop,
+    Status,
+    Filters,
+    Set { group: String, seed: Option<String> },
+    Reset,
+    Station { query: String, artist: bool },
+    Rate(&'static str),
+}
+
+type VoiceReply = std::result::Result<String, &'static str>;
+
+pub fn voice(action: VoiceAction) -> VoiceReply {
+    let sender = SENDER.get().ok_or("Yandex Music is not ready")?;
+    let (tx, rx) = mpsc::sync_channel(1);
+    let deadline = Instant::now() + Duration::from_secs(25);
+    sender.try_send(Command::Voice(action, deadline, tx)).map_err(|_| "Yandex Music is busy")?;
+    rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .map_err(|_| "Yandex Music did not answer in time")?
+}
+
 pub enum Command {
+    Voice(VoiceAction, Instant, mpsc::SyncSender<VoiceReply>),
     Connect,
     Cancel,
     Disconnect,
@@ -167,6 +195,7 @@ struct Worker {
     history: Vec<Track>,
     recent: VecDeque<String>,
     session: String,
+    station: Option<String>,
     generation: u64,
     played: f64,
     sampled: Instant,
@@ -189,6 +218,7 @@ impl Worker {
             history: Vec::new(),
             recent: VecDeque::new(),
             session: String::new(),
+            station: None,
             generation: 0,
             played: 0.0,
             sampled: Instant::now(),
@@ -278,6 +308,19 @@ impl Worker {
 
     fn command(&mut self, command: Command) -> api::Result<()> {
         match command {
+            Command::Voice(action, deadline, reply) => {
+                let result = if Instant::now() < deadline {
+                    self.voice(action)
+                } else {
+                    Err("Yandex Music did not answer in time")
+                };
+                if let Err(error) = result {
+                    self.state.error = error.into();
+                    self.state.busy = false;
+                }
+                self.publish();
+                let _ = reply.try_send(result);
+            }
             Command::Connect => {
                 if self.login.is_some() {
                     return Ok(());
@@ -415,6 +458,97 @@ impl Worker {
         Ok(())
     }
 
+    fn voice(&mut self, action: VoiceAction) -> VoiceReply {
+        if self.api.token.is_empty() {
+            return Err(api::SIGN_IN);
+        }
+        match action {
+            VoiceAction::Start => {
+                if self.station.is_some() || self.player.is_none() {
+                    let old = self.station.take();
+                    if let Err(error) = self.new_wave(false) {
+                        self.station = old;
+                        return Err(error);
+                    }
+                } else {
+                    self.command(Command::Resume)?;
+                }
+            }
+            VoiceAction::Station { query, artist } => {
+                let (seed, name) = self.api.station(&query, artist)?;
+                let old = self.station.replace(seed);
+                if let Err(error) = self.new_wave(false) {
+                    self.station = old;
+                    return Err(error);
+                }
+                return Ok(format!("Started a Yandex Music station based on {name}"));
+            }
+            VoiceAction::Resume | VoiceAction::Pause | VoiceAction::Next | VoiceAction::Previous => {
+                if self.player.is_none() {
+                    return Err("My Wave is not playing");
+                }
+                self.command(match action {
+                    VoiceAction::Resume => Command::Resume,
+                    VoiceAction::Pause => Command::Pause,
+                    VoiceAction::Next => Command::Next,
+                    _ => Command::Previous,
+                })?;
+            }
+            VoiceAction::Stop => self.stop(),
+            VoiceAction::Status => {}
+            VoiceAction::Filters => {
+                let filters = self
+                    .state
+                    .groups
+                    .iter()
+                    .map(|group| {
+                        let active = self.state.config.selection.get(&group.key).map_or("any", String::as_str);
+                        let items = group
+                            .items
+                            .iter()
+                            .map(|(name, seed)| format!("{name} = {seed}"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{} ({}), selected {active}: {items}", group.name, group.key)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                return Ok(filters.chars().take(3500).collect());
+            }
+            VoiceAction::Set { group, seed } => {
+                if !self
+                    .state
+                    .groups
+                    .iter()
+                    .any(|g| g.key == group && seed.as_ref().is_none_or(|s| g.items.iter().any(|item| item.1 == *s)))
+                {
+                    return Err("Unknown My Wave filter. Read the available filters first.");
+                }
+                self.command(Command::Select(group, seed))?;
+                return Ok("My Wave filter saved".into());
+            }
+            VoiceAction::Reset => {
+                for key in self.state.config.selection.keys().cloned().collect::<Vec<_>>() {
+                    self.command(Command::Select(key, None))?;
+                }
+                return Ok("My Wave filters cleared".into());
+            }
+            VoiceAction::Rate(kind) => {
+                let track = self.current.as_ref().ok_or("No My Wave track is playing")?;
+                self.api.rate(track, kind)?;
+                if kind == "dislike" {
+                    self.advance(false)?;
+                }
+                return Ok(format!("Saved track feedback: {kind}"));
+            }
+        }
+        let playing = self.player.as_ref().is_some_and(|p| p.state().2);
+        Ok(self.current.as_ref().map_or_else(
+            || "My Wave is stopped".into(),
+            |t| format!("My Wave {}: {} — {}", if playing { "playing" } else { "paused" }, t.artist, t.title),
+        ))
+    }
+
     fn stop(&mut self) {
         self.finish(false);
         self.player = None;
@@ -423,6 +557,7 @@ impl Worker {
         self.history.clear();
         self.recent.clear();
         self.session.clear();
+        self.station = None;
         self.state.active = false;
         self.state.media = Media::default();
         self.state.palette = Default::default();
@@ -443,7 +578,7 @@ impl Worker {
         self.publish();
         let result = self.api.call(
             "/rotor/session/new",
-            Some(json!({"seeds":self.state.config.seeds(),"queue":self.recent,"includeTracksInResponse":true})),
+            Some(json!({"seeds":self.station.as_ref().map_or_else(|| self.state.config.seeds(), |seed| vec![seed.clone()]),"queue":self.recent,"includeTracksInResponse":true})),
         )?;
         let session = result["radioSessionId"]
             .as_str()

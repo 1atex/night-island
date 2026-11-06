@@ -41,6 +41,7 @@ impl App {
         }
         if let Some(chat) = &mut self.pet.chat {
             chat.window.set_capture_hidden(self.settings.capture_hidden);
+            chat.window.set_voice_enabled(self.settings.pet_voice_input);
             chat.refresh(&format!(
                 "{} · {}",
                 self.settings.ai.provider.name(),
@@ -57,6 +58,11 @@ impl App {
             return;
         }
         match action {
+            mini_chat::VOICE => return self.pet_voice_input(),
+            mini_chat::VOICE_CANCEL => {
+                self.cancel_voice_input();
+                return;
+            }
             mini_chat::PET => return self.toggle_pet_studio(),
             mini_chat::PET_APPLY => return self.pet_studio_action(view::PetStudioHit::Apply),
             mini_chat::PET_PHOTO => return self.pet_studio_action(view::PetStudioHit::Photo),
@@ -107,6 +113,7 @@ impl App {
     pub(in crate::island) fn finish_companion_chat(&mut self, answer: std::result::Result<String, String>) {
         let Some(chat) = &mut self.pet.chat else { return };
         chat.pending = false;
+        let notification = answer.as_ref().ok().cloned();
         match answer {
             Ok(text) => {
                 chat.turns.push(ChatTurn::text(true, text));
@@ -128,5 +135,8 @@ impl App {
             self.settings.ai.provider.name(),
             self.settings.ai.model(self.settings.ai.provider)
         ));
+        if let Some(text) = notification {
+            self.notify_for(Notice::Ai, '\u{E8F2}', &text, 8000);
+        }
     }
 }

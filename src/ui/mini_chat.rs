@@ -24,6 +24,8 @@ pub const PET_APPLY: usize = 5;
 pub const PET_PHOTO: usize = 6;
 pub const PET_TEXT: usize = 7;
 pub const PET_BODY: usize = 8;
+pub const VOICE: usize = 9;
+pub const VOICE_CANCEL: usize = 10;
 
 fn pet_action(action: view::PetStudioHit) -> usize {
     match action {
@@ -81,7 +83,7 @@ impl State {
         {
             return view::hit_pet_studio(layout.history, self.scale, (x, y), &self.ui.chat.pet).map(Hit::PetAction);
         }
-        view::hit_companion_chat(&layout, x, y)
+        view::hit_companion_chat(&layout, x, y).filter(|hit| *hit != Hit::Voice || self.ui.voice_enabled)
     }
 
     fn can_send(&self) -> bool {
@@ -166,11 +168,15 @@ impl State {
         let down = |key: VIRTUAL_KEY| unsafe { GetKeyState(key.0 as i32) < 0 };
         let (ctrl, shift) = (down(VK_CONTROL), down(VK_SHIFT));
         if vk == VK_ESCAPE.0 {
+            self.notify(hwnd, VOICE_CANCEL);
             self.close(hwnd);
             return;
         }
         if vk == VK_TAB.0 {
-            let mut order = vec![Hit::Input, Hit::Send, Hit::Pet, Hit::Setup, Hit::Close];
+            let mut order = vec![Hit::Input, Hit::Send, Hit::Voice, Hit::Pet, Hit::Setup, Hit::Close];
+            if !self.ui.voice_enabled {
+                order.retain(|hit| *hit != Hit::Voice);
+            }
             if self.ui.chat.pet.enabled {
                 order.extend([
                     Hit::PetAction(view::PetStudioHit::Body),
@@ -189,6 +195,7 @@ impl State {
                     self.ui.focus = Hit::Input;
                     self.notify(hwnd, SEND);
                 }
+                Hit::Voice => self.notify(hwnd, VOICE),
                 Hit::Setup => self.notify(hwnd, SETUP),
                 Hit::Pet => self.notify(hwnd, PET),
                 Hit::PetAction(action) => self.notify(hwnd, pet_action(action)),
@@ -476,6 +483,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 if !dragged && pressed == state.hit(x, y) {
                     match pressed {
                         Some(Hit::Close) => state.close(hwnd),
+                        Some(Hit::Voice) => state.notify(hwnd, VOICE),
                         Some(Hit::Setup) => state.notify(hwnd, SETUP),
                         Some(Hit::Pet) => state.notify(hwnd, PET),
                         Some(Hit::PetAction(action)) => state.notify(hwnd, pet_action(action)),
@@ -536,7 +544,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT
                 let cursor = match state.ui.hover {
                     Some(Hit::Input | Hit::History) => IDC_IBEAM,
                     Some(Hit::Resize) => IDC_SIZENWSE,
-                    Some(Hit::Send | Hit::Setup | Hit::Close) => IDC_HAND,
+                    Some(Hit::Send | Hit::Voice | Hit::Setup | Hit::Close) => IDC_HAND,
                     _ => IDC_ARROW,
                 };
                 SetCursor(LoadCursorW(None, cursor).ok());
@@ -691,6 +699,15 @@ impl MiniChatWindow {
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, if hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
         }
+    }
+
+    pub fn set_voice_enabled(&mut self, enabled: bool) {
+        let mut state = self.state.borrow_mut();
+        state.ui.voice_enabled = enabled;
+        if !enabled && state.ui.focus == Hit::Voice {
+            state.ui.focus = Hit::Input;
+        }
+        state.redraw(self.hwnd);
     }
 
     pub fn repaint(&mut self) {

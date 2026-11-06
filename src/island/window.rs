@@ -477,7 +477,9 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             LRESULT(0)
         }
         crate::platform::speech::WM_SPOKEN => {
-            with_app(|a| a.on_spoken());
+            if crate::platform::speech::current(wparam.0 as u32) {
+                with_app(|a| a.on_spoken());
+            }
             LRESULT(0)
         }
         wake::WM_WAKE => {

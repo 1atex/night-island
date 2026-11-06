@@ -157,6 +157,11 @@ pub fn send_bytes(
 
 pub fn post_json(url: &str, headers: &[(&str, &str)], body: &str, agent: Option<&str>) -> Option<Response> {
     let client = HttpClient::new().ok()?;
+    let message = json_request(url, headers, body, agent)?;
+    bounded_response(&client, &message, Duration::from_secs(60))
+}
+
+fn json_request(url: &str, headers: &[(&str, &str)], body: &str, agent: Option<&str>) -> Option<HttpRequestMessage> {
     let message =
         HttpRequestMessage::Create(&HttpMethod::Post().ok()?, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
     let sent = message.Headers().ok()?;
@@ -175,7 +180,44 @@ pub fn post_json(url: &str, headers: &[(&str, &str)], body: &str, agent: Option<
     )
     .ok()?;
     message.SetContent(&content).ok()?;
-    bounded_response(&client, &message, Duration::from_secs(60))
+    Some(message)
+}
+
+pub fn post_json_stream(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+    running: impl Fn() -> bool,
+    mut consume: impl FnMut(&[u8]) -> Option<()>,
+) -> Option<u16> {
+    use windows::Storage::Streams::InputStreamOptions;
+    let client = HttpClient::new().ok()?;
+    let message = json_request(url, headers, body, Some("NightIsland/0.1"))?;
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let operation = client.SendRequestWithOptionAsync(&message, HttpCompletionOption::ResponseHeadersRead).ok()?;
+    wait_response_while(&operation.cast().ok()?, deadline, &running)?;
+    let reply = operation.GetResults().ok()?;
+    let status = reply.StatusCode().ok()?.0 as u16;
+    if status != 200 {
+        return Some(status);
+    }
+    let operation = reply.Content().ok()?.ReadAsInputStreamAsync().ok()?;
+    wait_response_while(&operation.cast().ok()?, deadline, &running)?;
+    let stream = operation.GetResults().ok()?;
+    let reader = DataReader::CreateDataReader(&stream).ok()?;
+    reader.SetInputStreamOptions(InputStreamOptions::Partial).ok()?;
+    while running() {
+        let operation = reader.LoadAsync(8192).ok()?;
+        wait_response_while(&operation.cast().ok()?, deadline, &running)?;
+        let count = operation.GetResults().ok()? as usize;
+        if count == 0 {
+            break;
+        }
+        let mut bytes = vec![0; count];
+        reader.ReadBytes(&mut bytes).ok()?;
+        consume(&bytes)?;
+    }
+    Some(status)
 }
 
 pub fn post_json_for_bytes(
@@ -186,24 +228,7 @@ pub fn post_json_for_bytes(
     agent: Option<&str>,
 ) -> Option<BytesReply> {
     let client = HttpClient::new().ok()?;
-    let message =
-        HttpRequestMessage::Create(&HttpMethod::Post().ok()?, &Uri::CreateUri(&HSTRING::from(url)).ok()?).ok()?;
-    let sent = message.Headers().ok()?;
-    if let Some(agent) = agent {
-        sent.UserAgent().ok()?.TryParseAdd(&HSTRING::from(agent)).ok()?;
-    }
-    for (name, value) in headers {
-        if !sent.TryAppendWithoutValidation(&HSTRING::from(*name), &HSTRING::from(*value)).ok()? {
-            return None;
-        }
-    }
-    let content = HttpStringContent::CreateFromStringWithEncodingAndMediaType(
-        &HSTRING::from(body),
-        UnicodeEncoding::Utf8,
-        &HSTRING::from("application/json"),
-    )
-    .ok()?;
-    message.SetContent(&content).ok()?;
+    let message = json_request(url, headers, body, agent)?;
     let reply = client.SendRequestAsync(&message).ok()?.join().ok()?;
     let status = reply.StatusCode().ok()?.0 as u16;
     let buffer = reply.Content().ok()?.ReadAsBufferAsync().ok()?.join().ok()?;
@@ -251,8 +276,12 @@ pub fn post_bytes(
 }
 
 fn wait_response(operation: &IAsyncInfo, deadline: Instant) -> Option<()> {
+    wait_response_while(operation, deadline, &|| true)
+}
+
+fn wait_response_while(operation: &IAsyncInfo, deadline: Instant, running: &impl Fn() -> bool) -> Option<()> {
     while operation.Status().ok()? == AsyncStatus::Started {
-        if Instant::now() >= deadline {
+        if Instant::now() >= deadline || !running() {
             let _ = operation.Cancel();
             return None;
         }

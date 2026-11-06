@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,8 @@ pub enum Action {
     Dismiss = 3,
     History = 4,
     Hover = 5,
+    ScrollUp = 6,
+    ScrollDown = 7,
 }
 
 struct State {
@@ -42,6 +45,8 @@ struct State {
     tracking: bool,
     hover_close: bool,
     closing: bool,
+    scroll: Option<f32>,
+    scroll_max: Cell<f32>,
 }
 
 impl State {
@@ -124,6 +129,11 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 notify(hwnd, state, Action::Leave);
                 LRESULT(0)
             }
+            WM_MOUSEWHEEL if state.scroll.is_some() && !state.closing => {
+                let action = if (wparam.0 >> 16) as i16 > 0 { Action::ScrollUp } else { Action::ScrollDown };
+                notify(hwnd, state, action);
+                LRESULT(0)
+            }
             WM_LBUTTONUP if !state.closing => {
                 notify(hwnd, state, if state.hover_close { Action::Dismiss } else { Action::History });
                 LRESULT(0)
@@ -152,6 +162,18 @@ pub fn card_target(source: Rect, work: Rect, edge: Option<Edge>, scale: f32) -> 
         _ => source.1,
     };
     (x.clamp(left, (right - width).max(left)), y.clamp(top, (bottom - height).max(top)), width, height)
+}
+
+pub fn pet_card_target(source: Rect, work: Rect, scale: f32, expanded: bool) -> Rect {
+    let mut target = card_target(source, work, None, scale);
+    let gap = 8.0 * scale;
+    if expanded {
+        let space = (source.1 - work.1).max(work.3 - source.1 - source.3) - gap;
+        target.3 = target.3.max((330.0 * scale).min(space));
+    }
+    let above = source.1 - target.3 - gap;
+    target.1 = if above >= work.1 { above } else { (source.1 + source.3 + gap).min(work.3 - target.3).max(work.1) };
+    target
 }
 
 pub struct NotificationCard {
@@ -216,6 +238,8 @@ impl NotificationCard {
             tracking: false,
             hover_close: false,
             closing: false,
+            scroll: None,
+            scroll_max: Cell::new(0.0),
         });
         let target = unsafe { compositor.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, true)? };
         let root = compositor.CreateContainerVisual()?;
@@ -311,20 +335,14 @@ impl NotificationCard {
         Ok(())
     }
 
-    pub fn show(
-        &mut self,
-        record: &Record,
-        pending: usize,
-        source: Rect,
-        work: Rect,
-        edge: Option<Edge>,
-        scale: f32,
-    ) -> Result<()> {
+    pub fn show(&mut self, record: &Record, pending: usize, source: Rect, target: Rect, scale: f32) -> Result<()> {
         self.state.scale = scale;
         self.state.closing = false;
+        self.state.scroll = None;
+        self.state.scroll_max.set(0.0);
         self.state.tracking = false;
         self.state.hover_close = false;
-        self.card = card_target(source, work, edge, scale);
+        self.card = target;
         self.transition(source, self.card, OPEN_MS)?;
         self.update(record, pending)?;
         let fade = self.compositor.CreateScalarKeyFrameAnimation()?;
@@ -339,12 +357,40 @@ impl NotificationCard {
         Ok(())
     }
 
+    pub fn expand(&mut self, source: Rect, work: Rect, record: &Record, pending: usize) -> Result<()> {
+        if self.state.scroll.is_some() {
+            return Ok(());
+        }
+        let from = self.state.rect();
+        self.card = pet_card_target(source, work, self.state.scale, true);
+        self.state.scroll = Some(0.0);
+        self.transition(from, self.card, OPEN_MS)?;
+        self.update(record, pending)
+    }
+
+    pub fn scroll(&mut self, down: bool) {
+        if let Some(scroll) = &mut self.state.scroll {
+            let delta = if down { 44.0 } else { -44.0 } * self.state.scale;
+            *scroll = (*scroll + delta).clamp(0.0, self.state.scroll_max.get());
+        }
+    }
+
     pub fn update(&self, record: &Record, pending: usize) -> Result<()> {
         let (r, g, b) = super::theme::panel_u8();
         self.background.SetBrush(&self.compositor.CreateColorBrushWithColor(Color { A: 255, R: r, G: g, B: b })?)?;
         let rect = (self.card.0 - self.state.frame.0, self.card.1 - self.state.frame.1, self.card.2, self.card.3);
         self.content.paint(&self.gpu, |p| {
-            let _ = view::paint_notification_card(p, rect, self.state.scale, record, pending, self.state.hover_close);
+            if let Ok(max) = view::paint_notification_card(
+                p,
+                rect,
+                self.state.scale,
+                record,
+                pending,
+                self.state.hover_close,
+                self.state.scroll,
+            ) {
+                self.state.scroll_max.set(max);
+            }
         })
     }
 

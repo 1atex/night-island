@@ -286,9 +286,7 @@ impl App {
                 chat.turns.drain(..overflow);
                 chat.saved = chat.saved.saturating_sub(overflow);
                 if self.state != State::Expanded || self.ui.tab != view::Tab::Chat {
-                    let short: String =
-                        text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(70).collect();
-                    self.notify_for(Notice::Ai, '\u{E8F2}', &format!("AI: {short}"), 7000);
+                    self.notify_for(Notice::Ai, '\u{E8F2}', &text, 7000);
                 }
             }
             Err(why) => {

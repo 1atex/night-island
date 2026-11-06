@@ -40,6 +40,11 @@ pub fn strip_wake(text: &str, wakes: &[String]) -> Option<String> {
     None
 }
 
+pub const YANDEX_PROMPT: &str = r#"
+{"action":"yandex","do":"start"|"resume"|"pause"|"next"|"previous"|"stop"|"status"|"filters"|"set"|"reset"|"artist"|"track"|"like"|"unlike"|"dislike","query":"artist or track name","group":"filter group key","seed":"seed ID or null for any"}
+Use this for Yandex Music and Моя волна. Artist/track starts a station based on the requested item. For mood, activity, language or other filters, call filters first and use its exact keys. Only rate the current track when the user explicitly requests it.
+"#;
+
 pub fn system_prompt(allowed: &[Cap], can_ask: bool, notes: &str, facts: &str) -> String {
     let mut out = String::from(
         "You are the voice assistant of the user's Windows computer. You work for the user here and now: you do what \
@@ -640,6 +645,41 @@ fn from_value(value: &Value) -> Command {
             "undeafen" => Command::Discord(DiscordOp::Deafen(false)),
             _ => Command::Unknown,
         },
+        "yandex" => {
+            use crate::services::yandex::VoiceAction as Wave;
+            let action = match value["do"].as_str() {
+                Some("start") => Wave::Start,
+                Some("resume") => Wave::Resume,
+                Some("pause") => Wave::Pause,
+                Some("next") => Wave::Next,
+                Some("previous") => Wave::Previous,
+                Some("stop") => Wave::Stop,
+                Some("status") => Wave::Status,
+                Some("filters") => Wave::Filters,
+                Some("reset") => Wave::Reset,
+                Some("like") => Wave::Rate("like"),
+                Some("unlike") => Wave::Rate("unlike"),
+                Some("dislike") => Wave::Rate("dislike"),
+                Some("artist" | "track") => {
+                    let Some(query) = text("query", 180) else { return Command::Unknown };
+                    Wave::Station { query, artist: value["do"] == "artist" }
+                }
+                Some("set") => {
+                    let Some(group) = text("group", 80) else { return Command::Unknown };
+                    let seed = match value.get("seed") {
+                        Some(Value::Null) => None,
+                        Some(Value::String(_)) => {
+                            let Some(seed) = text("seed", 100) else { return Command::Unknown };
+                            Some(seed)
+                        }
+                        _ => return Command::Unknown,
+                    };
+                    Wave::Set { group, seed }
+                }
+                _ => return Command::Unknown,
+            };
+            Command::Tool(Tool::Yandex(action))
+        }
         "spotify" => {
             let artist = text("artist", MAX_NAME_CHARS).unwrap_or_default();
             match text("query", MAX_PHRASE_CHARS)
@@ -1012,6 +1052,22 @@ mod tests {
             cap_of(&Command::Tool(Tool::Spotify { query: "x".into(), kind: String::new(), artist: String::new() })),
             Some(Cap::Media)
         );
+    }
+
+    #[test]
+    fn my_wave_filters_and_station_use_the_media_permission() {
+        use crate::services::yandex::VoiceAction;
+        let station = parse(r#"{"action":"yandex","do":"artist","query":"Daft Punk"}"#);
+        assert_eq!(
+            station,
+            Command::Tool(Tool::Yandex(VoiceAction::Station { query: "Daft Punk".into(), artist: true }))
+        );
+        assert_eq!(cap_of(&station), Some(Cap::Media));
+        assert_eq!(
+            parse(r#"{"action":"yandex","do":"set","group":"mood","seed":null}"#),
+            Command::Tool(Tool::Yandex(VoiceAction::Set { group: "mood".into(), seed: None }))
+        );
+        assert_eq!(parse(r#"{"action":"yandex","do":"set","group":"mood"}"#), Command::Unknown);
     }
 
     #[test]

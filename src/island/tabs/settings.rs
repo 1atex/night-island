@@ -115,7 +115,26 @@ impl App {
                     self.repaint_collapsed();
                 }
                 MetricsInterval => self.sync_metrics(),
-                AsstEnabled | AsstWake => self.sync_wake(),
+                AsstEnabled | AsstWake => {
+                    if id == AsstEnabled && !self.settings.assistant.perms.enabled {
+                        self.cancel_voice_input();
+                    }
+                    self.sync_wake();
+                }
+                PetVoiceInput => {
+                    if !self.settings.pet_voice_input && self.pet.desktop.is_some() {
+                        self.cancel_voice_input();
+                    }
+                    if let Some(chat) = &mut self.pet.chat {
+                        chat.window.set_voice_enabled(self.settings.pet_voice_input);
+                    }
+                }
+                PetNotifications => {
+                    if !self.settings.pet_notifications && self.pet_notification_visible() {
+                        self.hide_notification_card();
+                    }
+                    self.maybe_show_notification();
+                }
                 AsstTtsProvider => self.sync_voice_fields(),
                 AutoHide => {
                     if self.settings.auto_hide {

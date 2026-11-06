@@ -20,7 +20,21 @@ impl App {
 
     pub(in crate::island) fn notify_for(&mut self, kind: Notice, glyph: char, text: &str, ms: u32) {
         if self.settings.notify.on(kind) {
-            self.show_notice_for(glyph, text, ms);
+            let card = if kind == Notice::Ai {
+                self.settings.ai_notification_cards
+            } else {
+                self.settings.pet_notifications && self.pet.desktop.is_some()
+            };
+            if card {
+                let title = match kind {
+                    Notice::Ai => "Assistant",
+                    Notice::Error => "Error",
+                    _ => "Notification",
+                };
+                self.post_local_notification(title, text);
+            } else {
+                self.show_notice_for(glyph, text, ms);
+            }
         }
     }
 

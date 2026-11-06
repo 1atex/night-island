@@ -33,6 +33,37 @@ impl App {
     }
 
     pub(in crate::island) fn toggle_dictation(&mut self) {
+        self.toggle_voice_input(self.settings.pet_voice_input && self.pet.desktop.is_some());
+    }
+
+    pub(in crate::island) fn pet_voice_input(&mut self) {
+        if !self.settings.pet_voice_input {
+            return;
+        }
+        if self.pet.voice_phase.pending() && !dictation::active()
+            || speech::busy()
+            || self.agent.as_ref().is_some_and(|run| run.phase == Phase::Speaking)
+        {
+            self.cancel_voice_input();
+        } else {
+            self.toggle_voice_input(true);
+        }
+    }
+
+    pub(in crate::island) fn cancel_voice_input(&mut self) -> bool {
+        if self.pet.voice_phase == VoicePhase::Idle && self.agent.is_none() && !speech::busy() {
+            return false;
+        }
+        dictation::stop();
+        speech::stop();
+        self.pending_power = None;
+        self.pending_ask = None;
+        self.clear_notice();
+        self.end_wake_session();
+        true
+    }
+
+    fn toggle_voice_input(&mut self, directed: bool) {
         if dictation::active() {
             dictation::stop();
             self.voice_phase(VoicePhase::Transcribing);
@@ -50,6 +81,7 @@ impl App {
         wake::pause();
         speech::stop();
         if dictation::start(self.hwnd) {
+            self.wake_session = directed;
             self.voice_phase(VoicePhase::Recording);
             self.cue(sounds::Cue::Heard);
             self.show_notice_for(
@@ -113,6 +145,8 @@ impl App {
     fn voice_choice(&self) -> speech::Voice {
         let a = &self.settings.assistant;
         speech::Voice {
+            fish_streaming: a.fish_streaming,
+            fish_expressions: a.fish_expressions,
             local: a.local_voice && localvoice::ready(),
             natural: a.natural_voice.then(|| speech::Natural {
                 provider: a.tts_provider,
@@ -218,8 +252,14 @@ impl App {
     }
 
     pub(in crate::island) fn on_voice(&mut self) {
+        let recording = self.pet.voice_phase != VoicePhase::Idle;
+        let outcome = dictation::take();
+        if !recording {
+            self.sync_wake();
+            return;
+        }
         self.voice_phase(VoicePhase::Idle);
-        match dictation::take() {
+        match outcome {
             Some(Ok(wav)) => {
                 if self.wake_session {
                     self.cue(sounds::Cue::Done);
@@ -260,7 +300,19 @@ impl App {
             }
         }
         let (offered, can_ask) = (perms.commands_offered(), perms.enabled);
-        let system = voicecmd::system_prompt(&offered, can_ask, &notes, &self.facts());
+        let mut system = voicecmd::system_prompt(&offered, can_ask, &notes, &self.facts());
+        if self.settings.assistant.yandex_voice && offered.contains(&Cap::Media) {
+            system.push_str(voicecmd::YANDEX_PROMPT);
+        }
+        if self.settings.assistant.natural_voice
+            && self.settings.assistant.fish_expressions
+            && self.settings.assistant.tts_provider == crate::services::assistant::TtsProvider::Fish
+        {
+            system.push_str(&format!(
+                "\nFish Audio reads answer and ask aloud. When it suits the user's request, add a short delivery cue to the spoken text only. Allowed cues: {}. Keep the opening sentence short and informative.",
+                speech::FISH_CUES.join(" "),
+            ));
+        }
         let request: String = command.chars().take(600).collect();
         crate::log_info!("Assistant request: {}", brief(&request, 300));
         agent::fresh(&mut self.dialog);
@@ -309,14 +361,14 @@ impl App {
     }
 
     fn say(&mut self, text: &str) {
-        self.last_spoken = text.to_string();
-        let short: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
-        self.notify_for(Notice::Ai, '\u{E8F2}', &short, 8000);
+        self.last_spoken = speech::plain_text(text);
+        let visible_text = self.last_spoken.clone();
+        self.notify_for(Notice::Ai, '\u{E8F2}', &visible_text, 8000);
         let (volume, voice) = (self.settings.assistant.voice_volume(), self.voice_choice());
         let chat = self.agent.as_ref().is_some_and(|r| r.did.is_empty() && r.follow_ups < agent::MAX_FOLLOW_UPS);
         let follow = chat && self.settings.assistant.follow_up && self.settings.assistant.perms.enabled;
         if let Some(run) = self.agent.as_mut() {
-            run.spoken = text.to_string();
+            run.spoken.clone_from(&self.last_spoken);
             if follow {
                 run.waiting = true;
                 run.following = true;
@@ -333,6 +385,7 @@ impl App {
     }
 
     fn wait_for_result(&mut self) {
+        self.voice_phase(VoicePhase::Command);
         if let Some(run) = self.agent.as_mut() {
             run.waiting = true;
         }
@@ -347,8 +400,9 @@ impl App {
     }
 
     fn ask_user(&mut self, glyph: char, text: &str) {
-        self.last_spoken = text.to_string();
-        self.notify_for(Notice::Integrations, glyph, text, (voicecmd::CONFIRM_SECS * 1000) as u32);
+        self.last_spoken = speech::plain_text(text);
+        let visible_text = self.last_spoken.clone();
+        self.notify_for(Notice::Integrations, glyph, &visible_text, (voicecmd::CONFIRM_SECS * 1000) as u32);
         if !self.settings.assistant.perms.enabled || self.agent.is_none() {
             return;
         }
@@ -478,6 +532,13 @@ impl App {
                 "The user's own standing instructions (written by the user, follow them):\n{rules}"
             ));
         }
+        let wave = crate::services::yandex::snapshot();
+        if wave.has_token {
+            extra.push_str(&format!(
+                "Yandex Music is connected. My Wave: {}.\n",
+                if wave.active { "active" } else { "stopped" }
+            ));
+        }
         let scripts = tools::scripts_prompt(700);
         if !scripts.is_empty() {
             extra.push_str(&format!("Saved scripts (run_script): {scripts}\n"));
@@ -492,6 +553,10 @@ impl App {
     }
 
     fn handle_tool(&mut self, tool: Tool, reviewed: bool, confirmed: bool) {
+        if matches!(tool, Tool::Yandex(_)) && !self.settings.assistant.yandex_voice {
+            self.fail_by_voice("Voice commands for My Wave are disabled");
+            return self.end_wake_session();
+        }
         let cap = tool.cap();
         let tainted = self.settings.assistant.ask_after_web && self.agent.as_ref().is_some_and(|r| r.tainted);
         let level = self.settings.assistant.perms.command_level(cap, tainted);
@@ -513,6 +578,7 @@ impl App {
                 Tool::Cmd(_) | Tool::PowerShell(_) | Tool::Wsl(_) | Tool::RunScript { .. } => "Run:",
                 Tool::SaveScript { .. } => "Save the script:",
                 Tool::Spotify { .. } => "Play on Spotify:",
+                Tool::Yandex(_) => "My Wave",
                 Tool::Fetch(_) | Tool::Render(_) => "Open the page:",
                 Tool::Search(_) => "Search the web:",
                 Tool::ReadFile(_) => "Read:",
@@ -778,6 +844,7 @@ impl App {
             voicecmd::Command::Cancel => {
                 self.pending_power = None;
                 self.pending_ask = None;
+                self.cancel_voice_input();
                 self.show_notice_for('\u{E711}', "Cancelled", 1500);
             }
             voicecmd::Command::Answer(text) => self.say(&text),
@@ -794,6 +861,9 @@ impl App {
 
     pub(in crate::island) fn on_transcribed(&mut self) {
         let Some(answer) = ai::take_transcript() else { return };
+        if self.pet.voice_phase != VoicePhase::Transcribing {
+            return;
+        }
         self.voice_phase(VoicePhase::Idle);
         self.clear_notice();
         match &answer {

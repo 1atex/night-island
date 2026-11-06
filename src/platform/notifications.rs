@@ -13,6 +13,8 @@ use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUnini
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 use windows::core::Result;
 
+pub const LOCAL_APP_ID: &str = "night-island-local";
+
 pub const WM_NOTIFICATIONS: u32 = WM_APP + 55;
 pub const WM_NOTIFICATION_ACCESS: u32 = WM_APP + 56;
 

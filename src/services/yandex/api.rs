@@ -66,6 +66,45 @@ impl Api {
         Ok(parse_groups(&v))
     }
 
+    pub fn station(&self, query: &str, artist: bool) -> Result<(String, String)> {
+        let (kind, list, label) = if artist { ("artist", "artists", "name") } else { ("track", "tracks", "title") };
+        let result = self.call(&format!("/search?text={}&type={kind}&nocorrect=False&page=0", pct(query)), None)?;
+        let item = if result["best"]["type"] == kind {
+            &result["best"]["result"]
+        } else {
+            result[list]["results"]
+                .as_array()
+                .and_then(|items| items.first())
+                .ok_or("No matching Yandex Music result")?
+        };
+        let id = match &item["id"] {
+            Value::String(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) => s.clone(),
+            Value::Number(n) if n.is_u64() => n.to_string(),
+            _ => return Err("No matching Yandex Music result"),
+        };
+        let name = item[label].as_str().ok_or("No matching Yandex Music result")?;
+        Ok((format!("{kind}:{id}"), name.chars().take(160).collect()))
+    }
+
+    pub fn rate(&self, track: &Track, kind: &str) -> Result<()> {
+        let account = self.call("/account/status", None)?;
+        let uid = account["account"]["uid"].as_u64().ok_or(SIGN_IN)?;
+        let (list, action) = match kind {
+            "like" => ("likes", "add-multiple"),
+            "unlike" => ("likes", "remove"),
+            "dislike" => ("dislikes", "add-multiple"),
+            _ => return Err("Unknown My Wave feedback"),
+        };
+        let path = format!("https://api.music.yandex.net/users/{uid}/{list}/tracks/{action}");
+        let form = format!("track-ids={}", pct(&track.id));
+        let (status, _) = request(&path, Some(&self.token), Some(&form), "application/x-www-form-urlencoded")?;
+        if !(200..300).contains(&status) {
+            return Err("Yandex Music could not save the track rating");
+        }
+        self.feedback(&track.session, &track.batch, kind, Some(&track.id), 0.0);
+        Ok(())
+    }
+
     pub fn stream(&self, id: &str) -> Result<String> {
         let v = self.call(&format!("/tracks/{}/download-info", pct(id)), None)?;
         let best = v
@@ -313,6 +352,19 @@ pub fn parse_groups(v: &Value) -> Vec<Group> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "Reads the signed-in Yandex Music account and catalog without changing the library"]
+    fn configured_account_can_read_wave_filters_and_search_a_station() {
+        let api = Api {
+            token: crate::services::integrations::load_secret("yandex-music").expect("Yandex Music sign-in required"),
+            base: None,
+        };
+        assert!(!api.account().unwrap().is_empty());
+        assert!(!api.groups().unwrap().is_empty());
+        let (seed, label) = api.station("Daft Punk", true).unwrap();
+        assert!(seed.starts_with("artist:") && label.to_lowercase().contains("daft punk"));
+    }
     fn server(responses: Vec<(u16, &'static str)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

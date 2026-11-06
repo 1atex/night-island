@@ -175,6 +175,9 @@ impl App {
     }
 
     pub(in crate::island) fn on_keydown(&mut self, vk: u16) {
+        if vk == VK_ESCAPE.0 && self.cancel_voice_input() {
+            return;
+        }
         if vk == VK_ESCAPE.0 && self.ui.home.mixer_open {
             self.close_home_mixer();
             self.repaint_expanded();

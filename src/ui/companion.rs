@@ -37,6 +37,7 @@ pub enum Action {
     PlayPause = 6,
     Next = 7,
     Dropped = 8,
+    Voice = 9,
 }
 
 impl Action {
@@ -50,6 +51,7 @@ impl Action {
             6 => Some(Self::PlayPause),
             7 => Some(Self::Next),
             8 => Some(Self::Dropped),
+            9 => Some(Self::Voice),
             _ => None,
         }
     }
@@ -180,6 +182,10 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             }
             WM_CAPTURECHANGED => {
                 (*ptr).drag = None;
+                LRESULT(0)
+            }
+            WM_MBUTTONUP => {
+                notify(hwnd, &*ptr, Action::Voice);
                 LRESULT(0)
             }
             WM_RBUTTONUP => {
@@ -322,6 +328,14 @@ impl CompanionWindow {
     pub fn center(&self) -> (f32, f32) {
         let [x, y] = self.position();
         (x as f32 + self.surface.side as f32 / 2.0, y as f32 + self.surface.side as f32 / 2.0)
+    }
+
+    pub fn notification_anchor(&self) -> (crate::view::Rect, crate::view::Rect) {
+        let (x, y) = self.center();
+        let side = self.surface.side as f32;
+        let source = (x - side * 0.29, y - side * 0.25, side * 0.58, side * 0.6);
+        let [left, top, right, bottom] = self.walking_bounds();
+        (source, (left, top, right + side, bottom + side))
     }
 
     pub fn walking_bounds(&self) -> [f32; 4] {

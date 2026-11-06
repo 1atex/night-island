@@ -169,6 +169,9 @@ fn paint_notification_detail(
         .zip(["Back", "Open sender app", "Dismiss"])
         .zip([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss])
     {
+        if hit == NotificationsHit::OpenApp && record.app_id == crate::platform::notifications::LOCAL_APP_ID {
+            continue;
+        }
         p.fill_round_rect(rect, 11.0 * scale, rgba(1.0, 1.0, 1.0, if ui.hover == Some(hit) { 0.14 } else { 0.07 }))?;
         p.text(label, rect, 12.0 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
     }
@@ -198,11 +201,17 @@ pub fn hit_notifications(
     ui: &NotificationsUi,
     _open_app: bool,
 ) -> Option<NotificationsHit> {
-    if ui.full && ui.preview.is_some() {
+    if ui.full
+        && let Some(record) = &ui.preview
+    {
         return notification_detail_buttons(pill, scale)
             .into_iter()
             .zip([NotificationsHit::Back, NotificationsHit::OpenApp, NotificationsHit::Dismiss])
-            .find_map(|(rect, hit)| inside(rect, x, y).then_some(hit));
+            .find_map(|(rect, hit)| {
+                let available =
+                    hit != NotificationsHit::OpenApp || record.app_id != crate::platform::notifications::LOCAL_APP_ID;
+                (available && inside(rect, x, y)).then_some(hit)
+            });
     }
     for (rect, hit) in
         notification_sections(pill, scale).into_iter().zip([NotificationsHit::Setup, NotificationsHit::History])
@@ -267,7 +276,8 @@ pub fn paint_notification_card(
     record: &Record,
     pending: usize,
     hover_close: bool,
-) -> Result<()> {
+    scroll: Option<f32>,
+) -> Result<f32> {
     let (x, y, w, h) = rect;
     let size = if record.avatar.is_some() { 40.0 } else { 32.0 } * scale;
     let icon = (x + 18.0 * scale, y + 14.0 * scale, x + 18.0 * scale + size, y + 14.0 * scale + size);
@@ -304,7 +314,20 @@ pub fn paint_notification_card(
         WHITE,
     )?;
     let body = (x + 18.0 * scale, y + 84.0 * scale, x + w - 18.0 * scale, y + h - 16.0 * scale);
-    p.text_wrapped_trimmed(&record.body, body, 13.0 * scale, DWRITE_FONT_WEIGHT_NORMAL, rgba(1.0, 1.0, 1.0, 0.72))
+    let color = rgba(1.0, 1.0, 1.0, 0.72);
+    if let Some(scroll) = scroll {
+        let max = p.text_scrolled(&record.body, body, 13.0 * scale, scroll, color)?;
+        if max > 0.0 {
+            let height = body.3 - body.1;
+            let thumb = (height * height / (height + max)).max(12.0 * scale);
+            let top = body.1 + (height - thumb) * scroll.clamp(0.0, max) / max;
+            p.fill_round_rect((body.2 + 3.0 * scale, top, body.2 + 6.0 * scale, top + thumb), scale, color)?;
+        }
+        Ok(max)
+    } else {
+        p.text_wrapped_trimmed(&record.body, body, 13.0 * scale, DWRITE_FONT_WEIGHT_NORMAL, color)?;
+        Ok(0.0)
+    }
 }
 
 pub fn notification_status(status: Status) -> &'static str {

@@ -198,6 +198,7 @@ impl App {
             return;
         }
         match crate::ui::companion::Action::from_id(id) {
+            Some(crate::ui::companion::Action::Voice) => self.pet_voice_input(),
             Some(crate::ui::companion::Action::Chat) => {
                 self.react(Reaction::Done, 700);
                 self.open_companion_chat();
@@ -336,8 +337,23 @@ impl App {
         let chat_pending =
             self.pet.chat.as_ref().is_some_and(|chat| chat.pending) || self.ui.chat.pet.pending || self.ui.chat.pending;
         use crate::ui::pet_speech::SpeechCue;
-        let speech_cue = if self.settings.pet_voice_reactions && self.pet.voice_phase.cue().engaged() {
-            self.pet.voice_phase.cue()
+        let voice_cue = if self.settings.pet_voice_reactions {
+            let phase = self.pet.voice_phase.cue();
+            crate::platform::speech::level().map_or_else(
+                || {
+                    if phase == SpeechCue::Quiet && crate::platform::speech::busy() {
+                        SpeechCue::Thinking
+                    } else {
+                        phase
+                    }
+                },
+                |amplitude| SpeechCue::Speaking { amplitude },
+            )
+        } else {
+            SpeechCue::Quiet
+        };
+        let speech_cue = if voice_cue.engaged() {
+            voice_cue
         } else if self.pet.speech_cue.engaged() {
             self.pet.speech_cue
         } else if chat_pending {
@@ -346,13 +362,14 @@ impl App {
             SpeechCue::Quiet
         };
         let urgent = self.ui.remind.alert.is_some() || self.pet.reaction_until.is_some_and(|(_, until)| now < until);
+        let pet_card = self.pet_notification_visible();
         let behavior = self.pet.desktop.as_ref().map(|desktop| {
             self.pet.behavior.advance(&crate::ui::pet_behavior::Environment {
                 dt,
                 enabled: self.settings.pet_autonomy,
                 reduced_motion: still,
                 held,
-                engaged: near || desktop.controls_visible() || chat_open || speech_cue.engaged() || urgent,
+                engaged: near || desktop.controls_visible() || chat_open || speech_cue.engaged() || urgent || pet_card,
                 position: desktop.position().map(|v| v as f32),
                 bounds: desktop.walking_bounds(),
                 scale: self.scale,
