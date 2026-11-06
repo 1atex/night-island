@@ -4,11 +4,23 @@ use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
 use crate::data::settings::Settings;
 use crate::platform::{localvoice, wake, wake_install};
+use crate::services::assistant::{Level, Permissions, perms};
+use crate::ui::characters::Character;
 use crate::view::*;
 
 const SCENE: Rect = (426.0, 151.0, 892.0, 556.0);
-const SCENES: [&str; 3] = ["Workspace preview", "Voice preview", "On your desktop"];
-const STEPS: [&str; 3] = ["Workspace", "Voice", "Ready"];
+const STEPS: [&str; 4] = ["Preset", "Essentials", "Voice", "Ready"];
+const QUICK_ROWS: [QuickSetting; 8] = [
+    QuickSetting::Dock,
+    QuickSetting::Top,
+    QuickSetting::Weather,
+    QuickSetting::Notifications,
+    QuickSetting::Pet,
+    QuickSetting::Equalizer,
+    QuickSetting::Lyrics,
+    QuickSetting::Game,
+];
+const ACCESS_ROWS: [Access; 4] = [Access::Keep, Access::Basic, Access::Confirm, Access::Full];
 const PRESET_ROWS: [Preset; 4] = [Preset::Keep, Preset::Island, Preset::Dock, Preset::Desktop];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -56,6 +68,118 @@ impl Preset {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuickSetting {
+    Dock,
+    Top,
+    Weather,
+    Notifications,
+    Pet,
+    Equalizer,
+    Lyrics,
+    Game,
+}
+
+impl QuickSetting {
+    fn setting(self) -> Option<Sid> {
+        match self {
+            Self::Dock => Some(Sid::DockEnabled),
+            Self::Top => Some(Sid::TopEnabled),
+            Self::Weather => Some(Sid::Weather),
+            Self::Notifications => Some(Sid::SystemNotifications),
+            Self::Pet => None,
+            Self::Equalizer => Some(Sid::MusicEq),
+            Self::Lyrics => Some(Sid::MusicLyrics),
+            Self::Game => Some(Sid::GameMode),
+        }
+    }
+
+    fn read(self, settings: &Settings) -> bool {
+        self.setting().map_or(settings.character != Character::None, |id| toggle_get(id, settings))
+    }
+
+    fn write(self, settings: &mut Settings, enabled: bool) {
+        if let Some(id) = self.setting() {
+            toggle_set(id, settings, enabled);
+        } else if !enabled {
+            settings.character = Character::None;
+        } else if settings.character == Character::None {
+            settings.character = Character::Spark;
+        }
+    }
+
+    fn visual(self) -> (char, &'static str) {
+        match self {
+            Self::Dock => ('\u{E7F4}', "Desktop dock"),
+            Self::Top => ('\u{E8A9}', "Top panel"),
+            Self::Weather => ('\u{F800}', "Weather"),
+            Self::Notifications => ('\u{EA8F}', "Windows notifications"),
+            Self::Pet => ('\u{E7C9}', "Pet"),
+            Self::Equalizer => ('\u{E9D9}', "Equalizer"),
+            Self::Lyrics => ('\u{E8D2}', "Track lyrics"),
+            Self::Game => ('\u{E7FC}', "Game mode"),
+        }
+    }
+
+    fn rect(self) -> Rect {
+        let y = 220.0 + self as u8 as f32 * 42.0;
+        (48.0, y, 414.0, y + 39.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Access {
+    #[default]
+    Keep,
+    Basic,
+    Confirm,
+    Full,
+}
+
+impl Access {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Keep => "Keep current permissions",
+            Self::Basic => "Basic access",
+            Self::Confirm => "Ask before actions",
+            Self::Full => "Full access",
+        }
+    }
+
+    fn detail(self) -> &'static str {
+        match self {
+            Self::Keep => "Keep the access already configured for each tool.",
+            Self::Basic => "Music, reminders and apps. Files and terminal stay locked.",
+            Self::Confirm => "Allow all tools and confirm actions before they run.",
+            Self::Full => "Allow files, terminal, browser and screen without routine prompts.",
+        }
+    }
+
+    fn rect(self) -> Rect {
+        let y = 251.0 + self as u8 as f32 * 71.0;
+        (460.0, y, 874.0, y + 64.0)
+    }
+
+    fn apply(self, perms: &mut Permissions) {
+        if self == Self::Keep {
+            return;
+        }
+        for cap in perms::ALL {
+            perms.set(
+                cap,
+                match self {
+                    Self::Basic => cap.default_level(),
+                    Self::Confirm => Level::Ask,
+                    Self::Full => Level::Auto,
+                    Self::Keep => unreachable!(),
+                },
+            );
+        }
+    }
+}
+
+const ASSISTANT_ROW: Rect = (460.0, 201.0, 874.0, 242.0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoiceModel {
@@ -121,6 +245,9 @@ pub enum GuideAction {
     Skip,
     Resume,
     Select(Preset),
+    ToggleQuick(QuickSetting),
+    ToggleAssistant,
+    SelectAccess(Access),
     SuggestWake,
     Download(VoiceModel),
     ToggleModel(VoiceModel),
@@ -131,15 +258,20 @@ pub struct GuideUi {
     page: usize,
     pub visible: bool,
     pub preset: Preset,
-    layout_before: (bool, bool),
+    quick_before: [bool; QUICK_ROWS.len()],
+    quick: [Option<bool>; QUICK_ROWS.len()],
+    assistant_before: bool,
+    assistant: Option<bool>,
+    access: Access,
+    before_full: Option<(Access, Option<bool>)>,
     demo_started: Option<Instant>,
     pub wake: TextEdit,
     wake_before_text: String,
     pub invalid_wake: bool,
     pub connect_speech: bool,
     pub connect_model: bool,
-    pub wake_enabled: Option<bool>,
-    pub local_enabled: Option<bool>,
+    wake_enabled: Option<bool>,
+    local_enabled: Option<bool>,
     wake_before: bool,
     local_before: bool,
     models: [ModelStatus; 2],
@@ -151,7 +283,12 @@ impl GuideUi {
             page: 0,
             visible: true,
             preset: Preset::Keep,
-            layout_before: (settings.desktop_dock.enabled, settings.top_panel.enabled),
+            quick_before: QUICK_ROWS.map(|feature| feature.read(settings)),
+            quick: [None; QUICK_ROWS.len()],
+            assistant_before: settings.assistant.perms.enabled,
+            assistant: None,
+            access: Access::Keep,
+            before_full: None,
             demo_started: animate.then(Instant::now),
             wake: TextEdit::default(),
             wake_before_text: settings.ai.voice_wake.clone(),
@@ -160,7 +297,7 @@ impl GuideUi {
             connect_model: false,
             wake_enabled: None,
             local_enabled: None,
-            wake_before: settings.assistant.wake && settings.assistant.perms.enabled,
+            wake_before: settings.assistant.wake,
             local_before: settings.assistant.local_voice && settings.assistant.speak,
             models: [ModelStatus::Missing; 2],
         };
@@ -173,7 +310,9 @@ impl GuideUi {
             self.wake.set_text(&settings.ai.voice_wake);
         }
         self.wake_before_text.clone_from(&settings.ai.voice_wake);
-        self.wake_before = settings.assistant.wake && settings.assistant.perms.enabled;
+        self.quick_before = QUICK_ROWS.map(|feature| feature.read(settings));
+        self.assistant_before = settings.assistant.perms.enabled;
+        self.wake_before = settings.assistant.wake;
         self.local_before = settings.assistant.local_voice && settings.assistant.speak;
     }
 
@@ -201,7 +340,7 @@ impl GuideUi {
     }
 
     pub fn downloading(&self) -> bool {
-        self.visible && self.page == 1 && self.models.iter().any(|s| matches!(s, ModelStatus::Downloading(_)))
+        self.visible && self.voice_page() && self.models.iter().any(|s| matches!(s, ModelStatus::Downloading(_)))
     }
 
     pub fn can_download(&self, model: VoiceModel) -> bool {
@@ -210,7 +349,7 @@ impl GuideUi {
 
     fn enabled(&self, model: VoiceModel) -> bool {
         match model {
-            VoiceModel::Wake => self.wake_enabled.unwrap_or(self.wake_before),
+            VoiceModel::Wake => self.assistant_enabled() && self.wake_enabled.unwrap_or(self.wake_before),
             VoiceModel::Local => self.local_enabled.unwrap_or(self.local_before),
         }
     }
@@ -224,7 +363,12 @@ impl GuideUi {
         if self.can_toggle(model) {
             let enabled = !self.enabled(model);
             match model {
-                VoiceModel::Wake => self.wake_enabled = Some(enabled),
+                VoiceModel::Wake => {
+                    self.wake_enabled = Some(enabled);
+                    if enabled {
+                        self.assistant = Some(true);
+                    }
+                }
                 VoiceModel::Local => self.local_enabled = Some(enabled),
             }
         }
@@ -241,7 +385,84 @@ impl GuideUi {
     }
 
     pub fn voice_page(&self) -> bool {
+        self.page == 2
+    }
+
+    pub fn essentials_page(&self) -> bool {
         self.page == 1
+    }
+
+    fn quick_value(&self, feature: QuickSetting) -> bool {
+        let index = feature as usize;
+        self.quick[index].unwrap_or(match (feature, self.preset) {
+            (QuickSetting::Dock, Preset::Island) | (QuickSetting::Top, Preset::Island | Preset::Dock) => false,
+            (QuickSetting::Dock, Preset::Dock | Preset::Desktop) | (QuickSetting::Top, Preset::Desktop) => true,
+            _ => self.quick_before[index],
+        })
+    }
+
+    pub fn toggle_quick(&mut self, feature: QuickSetting) {
+        self.quick[feature as usize] = Some(!self.quick_value(feature));
+    }
+
+    fn assistant_enabled(&self) -> bool {
+        self.assistant.unwrap_or(self.assistant_before)
+    }
+
+    pub fn toggle_assistant(&mut self) {
+        self.assistant = Some(!self.assistant_enabled());
+    }
+
+    pub fn select_access(&mut self, access: Access) {
+        if access == Access::Full {
+            if let Some((previous, assistant)) = self.before_full.take() {
+                self.access = previous;
+                self.assistant = assistant;
+                return;
+            }
+            self.before_full = Some((self.access, self.assistant));
+        } else {
+            self.before_full = None;
+        }
+        self.access = access;
+        if access != Access::Keep {
+            self.assistant = Some(true);
+        }
+    }
+
+    pub fn apply_choices(&self, settings: &mut Settings) {
+        self.preset.apply(settings);
+        for feature in QUICK_ROWS {
+            if let Some(enabled) = self.quick[feature as usize] {
+                if enabled && !feature.read(settings) {
+                    match feature {
+                        QuickSetting::Dock => {
+                            settings.desktop_dock.replace_taskbar = false;
+                            settings.desktop_dock.auto_hide = true;
+                        }
+                        QuickSetting::Top => {
+                            settings.top_panel.reserve_space = false;
+                            settings.top_panel.auto_hide = true;
+                        }
+                        _ => {}
+                    }
+                }
+                feature.write(settings, enabled);
+            }
+        }
+        self.access.apply(&mut settings.assistant.perms);
+        if let Some(enabled) = self.assistant {
+            settings.assistant.perms.enabled = enabled;
+        }
+        if let Some(enabled) = self.wake_enabled {
+            settings.assistant.wake = enabled;
+        }
+        if let Some(enabled) = self.local_enabled {
+            settings.assistant.local_voice = enabled;
+            if enabled {
+                settings.assistant.speak = true;
+            }
+        }
     }
 
     pub fn select(&mut self, preset: Preset, animate: bool) {
@@ -274,17 +495,12 @@ impl GuideUi {
     }
 
     pub fn animating(&self) -> bool {
-        let duration = if self.page == 1 { 3500 } else { 1050 };
-        self.visible && self.elapsed() < Duration::from_millis(duration)
+        let duration = if self.voice_page() { 3500 } else { 1050 };
+        self.visible && !self.essentials_page() && self.elapsed() < Duration::from_millis(duration)
     }
 
     fn panels(&self) -> (bool, bool) {
-        match self.preset {
-            Preset::Keep => self.layout_before,
-            Preset::Island => (false, false),
-            Preset::Dock => (true, false),
-            Preset::Desktop => (true, true),
-        }
+        (self.quick_value(QuickSetting::Dock), self.quick_value(QuickSetting::Top))
     }
 }
 
@@ -330,6 +546,12 @@ fn controls(guide: &GuideUi) -> Vec<(GuideAction, &'static str, Rect)> {
         buttons.extend(
             PRESET_ROWS.into_iter().enumerate().map(|(i, preset)| (Select(preset), preset.label(), preset_row(i))),
         );
+    }
+    if guide.essentials_page() {
+        buttons
+            .extend(QUICK_ROWS.into_iter().map(|feature| (ToggleQuick(feature), feature.visual().1, feature.rect())));
+        buttons.push((ToggleAssistant, "Voice assistant", ASSISTANT_ROW));
+        buttons.extend(ACCESS_ROWS.into_iter().map(|access| (SelectAccess(access), access.label(), access.rect())));
     }
     if guide.voice_page() {
         buttons.push((SuggestWake, "Suggest names", (264.0, 248.0, 404.0, 274.0)));
@@ -587,13 +809,23 @@ fn paint_stage(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     p.pop_clip();
     backdrop?;
     p.stroke_round_rect(stage, 26.0 * l.scale, l.scale, rgba(0.7, 0.74, 1.0, 0.25))?;
-    v.text(SCENES[guide.page], (453.0, 176.0, 701.0, 209.0), 13.0, true, WHITE)?;
+    v.text(
+        match guide.page {
+            0 => "Workspace preview",
+            2 => "Voice preview",
+            _ => "On your desktop",
+        },
+        (453.0, 176.0, 701.0, 209.0),
+        13.0,
+        true,
+        WHITE,
+    )?;
     v.round((744.0, 180.0, 865.0, 205.0), 12.5, rgba(1.0, 1.0, 1.0, 0.065))?;
     v.round((757.0, 190.0, 763.0, 196.0), 3.0, acc(0.98))?;
     v.text("Demo mode", (772.0, 180.0, 857.0, 205.0), 10.5, true, rgba(1.0, 1.0, 1.0, 0.75))?;
     match guide.page {
         0 => paint_workspace(v, guide),
-        1 => paint_voice(v, guide),
+        2 => paint_voice(v, guide),
         _ => paint_ready(v, guide),
     }
 }
@@ -709,6 +941,80 @@ fn paint_preset(v: &Preview<'_>, guide: &GuideUi, preset: Preset, rect: Rect, ho
     Ok(())
 }
 
+fn paint_quick_toggle(v: &Preview<'_>, rect: Rect, glyph: char, label: &str, enabled: bool, hover: bool) -> Result<()> {
+    let (x, y, r, b) = rect;
+    let mid = (y + b) / 2.0;
+    v.round(rect, 11.0, rgba(1.0, 1.0, 1.0, if hover { 0.11 } else { 0.055 }))?;
+    v.icon(glyph, (x + 9.0, y, x + 39.0, b), 15.0)?;
+    v.text(label, (x + 48.0, y, r - 58.0, b), 13.0, true, WHITE)?;
+    paint_switch(v, r - 13.0, mid, enabled, acc(0.8))
+}
+
+fn paint_switch(v: &Preview<'_>, right: f32, y: f32, enabled: bool, tone: D2D1_COLOR_F) -> Result<()> {
+    let fill = if enabled { tone } else { rgba(1.0, 1.0, 1.0, 0.17) };
+    v.round((right - 42.0, y - 10.0, right, y + 10.0), 10.0, fill)?;
+    let dot = right - if enabled { 11.0 } else { 31.0 };
+    v.round((dot - 7.0, y - 7.0, dot + 7.0, y + 7.0), 7.0, WHITE)
+}
+
+fn paint_access_panel(v: &Preview<'_>) -> Result<()> {
+    let rect = v.layout.rect((442.0, 151.0, 892.0, 560.0));
+    let scale = v.layout.scale;
+    v.p.fill_round_gradient(rect, 23.0 * scale, rgba(0.085, 0.094, 0.15, 1.0), rgba(0.039, 0.045, 0.065, 1.0))?;
+    v.p.stroke_round_rect(rect, 23.0 * scale, scale, acc(0.31))?;
+    v.text("Assistant access", (460.0, 160.0, 874.0, 197.0), 18.0, true, WHITE)?;
+    v.text(
+        "You can adjust individual permissions in Settings.",
+        (460.0, 532.0, 874.0, 554.0),
+        11.0,
+        false,
+        rgba(1.0, 1.0, 1.0, 0.68),
+    )
+}
+
+fn paint_access_choice(v: &Preview<'_>, guide: &GuideUi, access: Access, rect: Rect, hover: bool) -> Result<()> {
+    let (x, y, r, b) = rect;
+    let selected = access == guide.access;
+    let tone = if access == Access::Full { rgba(1.0, 0.74, 0.39, 0.95) } else { acc(0.95) };
+    v.round(
+        rect,
+        11.0,
+        if selected {
+            rgba(tone.r, tone.g, tone.b, 0.15)
+        } else {
+            rgba(1.0, 1.0, 1.0, if hover { 0.10 } else { 0.045 })
+        },
+    )?;
+    if selected {
+        v.p.stroke_round_rect(
+            v.layout.rect(rect),
+            11.0 * v.layout.scale,
+            v.layout.scale,
+            rgba(tone.r, tone.g, tone.b, 0.58),
+        )?;
+    }
+    let full = access == Access::Full;
+    let glyph = if full {
+        '\u{E7BA}'
+    } else if selected {
+        '\u{E73E}'
+    } else {
+        '\u{E739}'
+    };
+    v.p.glyph(glyph, v.layout.rect((x + 9.0, y + 8.0, x + 33.0, y + 32.0)), 13.0 * v.layout.scale, tone)?;
+    if full {
+        paint_switch(v, r - 13.0, y + 19.0, selected, tone)?;
+    }
+    v.text(access.label(), (x + 41.0, y + 7.0, r - if full { 58.0 } else { 10.0 }, y + 32.0), 13.0, true, WHITE)?;
+    v.p.text_wrapped(
+        access.detail(),
+        v.layout.rect((x + 41.0, y + 32.0, r - 10.0, b - 6.0)),
+        11.5 * v.layout.scale,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        rgba(1.0, 1.0, 1.0, 0.73),
+    )
+}
+
 fn paint_models(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     for model in [VoiceModel::Wake, VoiceModel::Local] {
         let (x, y, r, b) = model.row();
@@ -754,11 +1060,21 @@ fn paint_models(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
 fn paint_ready_summary(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     for (i, (icon, title, body)) in [
         ('\u{E7F4}', "Workspace", guide.preset.label()),
-        ('\u{EA8F}', "Windows notifications", "Grant access from the Notifications tab."),
+        (
+            '\u{EA8F}',
+            "Windows notifications",
+            if guide.quick_value(QuickSetting::Notifications) {
+                "Windows may ask for notification access."
+            } else {
+                "Grant access from the Notifications tab."
+            },
+        ),
         (
             '\u{E99A}',
             "Voice assistant",
-            if guide.enabled(VoiceModel::Wake) {
+            if guide.access != Access::Keep && guide.assistant_enabled() {
+                guide.access.label()
+            } else if guide.enabled(VoiceModel::Wake) {
                 "Wake-word listening is selected."
             } else if guide.connect_model && guide.connect_speech {
                 "Voice services are connected."
@@ -788,25 +1104,36 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
     v.icon('\u{E7F4}', (48.0, 61.0, 80.0, 93.0), 16.0)?;
     v.text("Night Island", (91.0, 61.0, 300.0, 93.0), 17.0, true, WHITE)?;
     for (i, label) in STEPS.iter().enumerate() {
-        let x = 438.0 + i as f32 * 151.0;
+        let x = 408.0 + i as f32 * 121.0;
         let color = if i == guide.page { WHITE } else { muted };
         v.round(
-            (x, 61.0, x + 144.0, 94.0),
+            (x, 61.0, x + 114.0, 94.0),
             10.0,
             if i == guide.page { acc(0.20) } else { rgba(1.0, 1.0, 1.0, 0.055) },
         )?;
         v.text(&format!("{:02}", i + 1), (x + 12.0, 61.0, x + 35.0, 94.0), 11.0, true, acc(1.0))?;
-        v.text(label, (x + 34.0, 61.0, x + 137.0, 94.0), 12.0, i == guide.page, color)?;
+        v.text(label, (x + 34.0, 61.0, x + 109.0, 94.0), 12.0, i == guide.page, color)?;
     }
     v.round((48.0, 116.0, 892.0, 117.0), 0.5, rgba(1.0, 1.0, 1.0, 0.12))?;
     let (title, summary) = match guide.page {
         0 => ("Choose your layout", "Pick a preset to see how it looks. It applies when you finish."),
-        1 => ("Make it respond to you", "Give the assistant a name and download the voice models you want."),
+        1 => ("Essentials", "Pick the features you want to use."),
+        2 => ("Make it respond to you", "Give the assistant a name and download the voice models you want."),
         _ => ("Ready to use Island", "Check your choices and apply them. You can change them later in Settings."),
     };
     v.text(title, (48.0, 147.0, 414.0, 193.0), 28.0, true, WHITE)?;
-    p.text_wrapped(summary, l.rect((48.0, 201.0, 404.0, 252.0)), 14.0 * l.scale, DWRITE_FONT_WEIGHT_NORMAL, muted)?;
-    paint_stage(&v, guide)?;
+    p.text_wrapped(
+        summary,
+        l.rect((48.0, 196.0, 404.0, if guide.essentials_page() { 217.0 } else { 252.0 })),
+        14.0 * l.scale,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        muted,
+    )?;
+    if guide.essentials_page() {
+        paint_access_panel(&v)?;
+    } else {
+        paint_stage(&v, guide)?;
+    }
     if let Some((field, inner)) = guide_wake_rects(size, dpi, guide) {
         v.text("Assistant wake words", (48.0, 248.0, 255.0, 274.0), 13.0, true, WHITE)?;
         paint_line_edit(
@@ -844,12 +1171,21 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
     v.round((48.0, 578.0, 892.0, 579.0), 0.5, rgba(1.0, 1.0, 1.0, 0.12))?;
     for (action, label, rect) in controls(guide) {
         let hover = ui.sw.hover == Some(SwHit::Guide(action));
-        if let GuideAction::Select(preset) = action {
-            paint_preset(&v, guide, preset, rect, hover)?;
-        } else {
-            let primary = matches!(action, GuideAction::Next | GuideAction::Download(VoiceModel::Wake))
-                || matches!(action, GuideAction::ToggleModel(model) if guide.enabled(model));
-            guide_button(p, l.rect(rect), l.scale, label, primary, hover)?;
+        match action {
+            GuideAction::Select(preset) => paint_preset(&v, guide, preset, rect, hover)?,
+            GuideAction::ToggleQuick(feature) => {
+                let (glyph, _) = feature.visual();
+                paint_quick_toggle(&v, rect, glyph, label, guide.quick_value(feature), hover)?;
+            }
+            GuideAction::ToggleAssistant => {
+                paint_quick_toggle(&v, rect, '\u{E720}', label, guide.assistant_enabled(), hover)?;
+            }
+            GuideAction::SelectAccess(access) => paint_access_choice(&v, guide, access, rect, hover)?,
+            _ => {
+                let primary = matches!(action, GuideAction::Next | GuideAction::Download(VoiceModel::Wake))
+                    || matches!(action, GuideAction::ToggleModel(model) if guide.enabled(model));
+                guide_button(p, l.rect(rect), l.scale, label, primary, hover)?;
+            }
         }
     }
     Ok(())
@@ -898,9 +1234,37 @@ mod tests {
     }
 
     #[test]
+    fn essentials_override_presets_and_full_access_requires_an_explicit_choice() {
+        let mut settings = Settings::default();
+        settings.assistant.perms.set(perms::ALL[0], Level::Off);
+        let mut guide = GuideUi::new(&settings, false);
+        guide.select(Preset::Desktop, false);
+        guide.toggle_quick(QuickSetting::Top);
+        guide.apply_choices(&mut settings);
+        assert!(settings.desktop_dock.enabled);
+        assert!(!settings.top_panel.enabled);
+        assert!(!settings.assistant.perms.enabled);
+        assert_eq!(settings.assistant.perms.configured(perms::ALL[0]), Level::Off);
+        guide.select_access(Access::Confirm);
+        guide.apply_choices(&mut settings);
+        assert!(settings.assistant.perms.enabled);
+        assert!(perms::ALL.into_iter().all(|cap| settings.assistant.perms.level(cap) == Level::Ask));
+        guide.select_access(Access::Full);
+        guide.apply_choices(&mut settings);
+        assert!(perms::ALL.into_iter().all(|cap| settings.assistant.perms.level(cap) == Level::Auto));
+        assert_eq!(settings.assistant.perms.decide(crate::services::assistant::Cap::Shell, true), Level::Ask);
+        guide.select_access(Access::Full);
+        guide.apply_choices(&mut settings);
+        assert!(perms::ALL.into_iter().all(|cap| settings.assistant.perms.level(cap) == Level::Ask));
+        guide.toggle_assistant();
+        guide.apply_choices(&mut settings);
+        assert!(!settings.assistant.perms.enabled);
+    }
+
+    #[test]
     fn voice_setup_autoplays_and_installed_models_are_opt_in() {
         let mut guide = GuideUi::new(&Settings::default(), false);
-        guide.move_by(1, true);
+        guide.move_by(2, true);
         assert!(guide.animating());
         guide.models = [ModelStatus::Installed, ModelStatus::Downloading(50)];
         assert!(!guide.can_download(VoiceModel::Local));

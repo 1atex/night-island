@@ -74,6 +74,9 @@ impl App {
         match action {
             Back => guide.move_by(-1, animate),
             Select(preset) => guide.select(preset, animate),
+            ToggleQuick(feature) => guide.toggle_quick(feature),
+            ToggleAssistant => guide.toggle_assistant(),
+            SelectAccess(access) => guide.select_access(access),
             SuggestWake => {
                 guide.wake.set_text("Луна, Табуретка");
                 guide.invalid_wake = false;
@@ -91,7 +94,11 @@ impl App {
             }
             ToggleModel(model) => guide.toggle_model(model),
             Next if !guide.last_page() => {
-                if guide.voice_page() && guide.wake_changed() && guide.validated_wake().is_none() {
+                if guide.voice_page()
+                    && guide.wake_changed()
+                    && !guide.wake.text().trim().is_empty()
+                    && guide.validated_wake().is_none()
+                {
                     guide.invalid_wake = true;
                     return self.render_settings_win();
                 }
@@ -128,40 +135,51 @@ impl App {
 
     fn apply_guide(&mut self) {
         let Some(guide) = self.ui.sw.guide.as_ref() else { return };
-        let old_dock = self.settings.desktop_dock.clone();
-        let old_top = self.settings.top_panel.clone();
-        let wake_changed = guide.wake_changed();
-        if wake_changed && let Some(wake) = guide.validated_wake() {
+        let previous = self.settings.clone();
+        guide.apply_choices(&mut self.settings);
+        if guide.wake_changed()
+            && let Some(wake) = guide.validated_wake()
+        {
             self.settings.ai.voice_wake = wake;
             self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
             ai::configure(&self.settings.ai);
         }
-        if let Some(enabled) = guide.wake_enabled {
-            self.settings.assistant.wake = enabled;
-            if enabled {
-                self.settings.assistant.perms.enabled = true;
-            }
-        }
-        if let Some(enabled) = guide.local_enabled {
-            self.settings.assistant.local_voice = enabled;
-            if enabled {
-                self.settings.assistant.speak = true;
-            }
-        }
-        guide.preset.apply(&mut self.settings);
-        if old_dock != self.settings.desktop_dock {
-            self.configure_desktop_dock();
-        }
-        if old_top != self.settings.top_panel {
-            self.configure_top_panel();
-        }
         self.settings.dismiss_tour();
         self.settings.assistant.apply();
         self.ui.cfg = self.settings.clone();
-        if wake_changed {
+        if previous.desktop_dock != self.settings.desktop_dock {
+            self.configure_desktop_dock();
+        }
+        if previous.top_panel != self.settings.top_panel {
+            self.configure_top_panel();
+        }
+        if previous.weather != self.settings.weather {
+            weather::set_enabled(self.settings.weather);
+        }
+        if previous.character != self.settings.character {
+            self.apply_character();
+            self.sync_pet_studio();
+        }
+        if previous.game_mode != self.settings.game_mode {
+            self.start_game_watch();
+        }
+        if previous.system_notifications != self.settings.system_notifications {
+            self.configure_system_notifications();
+            if self.settings.system_notifications {
+                let _ = crate::platform::notifications::request_access(self.hwnd);
+            }
+        }
+        if previous.assistant.perms.enabled && !self.settings.assistant.perms.enabled {
+            self.cancel_voice_input();
+        }
+        if previous.ai.voice_wake != self.settings.ai.voice_wake {
             self.restart_wake();
         }
         self.sync_wake();
+        self.update_eq();
+        self.repaint_collapsed();
+        self.repaint_expanded();
+        self.ui.cfg = self.settings.clone();
         self.settings.save();
     }
 

@@ -387,6 +387,27 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Quick tour" => "Быстрый старт",
         "Open quick tour" => "Открыть быстрый старт",
         "Workspace" => "Рабочий стол",
+        "Preset" => "Пресет",
+        "Essentials" => "Основное",
+        "Pick the features you want to use." => "Включи то, что нужно каждый день.",
+        "Assistant access" => "Доступ ассистента",
+        "Track lyrics" => "Текст песен",
+        "Keep current permissions" => "Оставить текущий доступ",
+        "Basic access" => "Базовый доступ",
+        "Ask before actions" => "С подтверждением",
+        "Full access" => "Полный доступ",
+        "Keep the access already configured for each tool." => "Сохранить разрешения для каждого инструмента.",
+        "Music, reminders and apps. Files and terminal stay locked." => {
+            "Музыка, напоминания и приложения. Файлы и терминал закрыты."
+        }
+        "Allow all tools and confirm actions before they run." => {
+            "Разрешить инструменты и подтверждать действия перед запуском."
+        }
+        "Allow files, terminal, browser and screen without routine prompts." => {
+            "Файлы, терминал, браузер и экран без обычных запросов."
+        }
+        "You can adjust individual permissions in Settings." => "Разрешения по отдельности доступны в настройках.",
+        "Windows may ask for notification access." => "Windows может запросить доступ при применении.",
         "Ready" => "Готово",
         "Workspace preview" => "Так будет выглядеть Island",
         "On your desktop" => "На рабочем столе",
