@@ -296,7 +296,43 @@ pub fn eleven_url(base: &str, voice: &str) -> String {
     format!("{base}/v1/text-to-speech/{voice}?output_format=wav_24000")
 }
 
+fn fish_sentence_text(text: &str) -> String {
+    let text = text.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, ',' | ':' | ';'));
+    let mut spoken = String::with_capacity(text.len());
+    for (i, ch) in text.char_indices() {
+        spoken.push(ch);
+        if !matches!(ch, '.' | '?' | '!' | '\u{2026}') {
+            continue;
+        }
+        let tail = &text[i + ch.len_utf8()..];
+        let next = tail.trim_start();
+        if next.is_empty()
+            || next.len() == tail.len()
+            || next.starts_with("[break]")
+            || next.starts_with("[long-break]")
+        {
+            continue;
+        }
+        let word = text[..i].split_whitespace().next_back().unwrap_or_default();
+        if ch == '.'
+            && ((word.chars().count() == 1 && word.starts_with(char::is_uppercase))
+                || matches!(
+                    word.to_lowercase().as_str(),
+                    "гг" | "ул" | "им" | "рис" | "др" | "см" | "mr" | "mrs" | "dr" | "etc"
+                ))
+        {
+            continue;
+        }
+        spoken.push_str(" [break]");
+    }
+    if spoken.chars().last().is_some_and(char::is_alphanumeric) {
+        spoken.push('.');
+    }
+    spoken
+}
+
 fn fish_request(text: &str, natural: &Natural, format: &str) -> String {
+    let text = if natural.model.starts_with("s2") { fish_sentence_text(text) } else { text.to_owned() };
     let mut body = serde_json::json!({
         "text": text,
         "format": format,
@@ -691,7 +727,7 @@ mod tests {
             voice: "default".into(),
         };
         let body: serde_json::Value = serde_json::from_str(&fish_request("Привет", &natural, "wav")).unwrap();
-        assert_eq!(body["text"], "Привет");
+        assert_eq!(body["text"], "Привет.");
         assert_eq!(body["format"], "wav");
         assert_eq!(body["sample_rate"], 24000);
         assert!(body.get("reference_id").is_none(), "the default voice sends no reference");
@@ -699,9 +735,17 @@ mod tests {
         let marked = "[excited] Hi! [whispering] A secret. [break] Done.";
         let body: serde_json::Value = serde_json::from_str(&fish_request(marked, &natural, "pcm")).unwrap();
         assert_eq!(body["reference_id"], "0123456789abcdef0123456789abcdef");
-        assert_eq!(body["text"], marked);
+        assert_eq!(body["text"], "[excited] Hi! [break] [whispering] A secret. [break] Done.");
         assert_eq!(body["format"], "pcm");
         assert_eq!(plain_text(marked), "Hi! A secret. Done.");
+        assert_eq!(
+            fish_sentence_text("Температура 3.5 градуса. Завтра снег? Да,"),
+            "Температура 3.5 градуса. [break] Завтра снег? [break] Да."
+        );
+        assert_eq!(
+            fish_sentence_text("Офис на ул. Ленина. [long-break] Едем?"),
+            "Офис на ул. Ленина. [long-break] Едем?"
+        );
         assert_eq!(fish_url("https://api.fish.audio"), "https://api.fish.audio/v1/tts");
         assert_eq!(fish_url("https://api.fish.audio/v1/"), "https://api.fish.audio/v1/tts");
     }
