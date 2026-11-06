@@ -309,11 +309,13 @@ impl App {
                 self.notice_link = None;
                 self.update_eq();
                 self.repaint_collapsed();
+                self.maybe_show_notification();
             }
             Timer::Volume => {
                 self.ui.volume = None;
                 self.update_eq();
                 self.repaint_collapsed();
+                self.maybe_show_notification();
             }
             Timer::NoteSave => self.save_note(),
             Timer::Clip => self.on_clipboard(),

@@ -176,6 +176,15 @@ pub fn pet_card_target(source: Rect, work: Rect, scale: f32, expanded: bool) -> 
     target
 }
 
+pub fn expanded_card_layout(island: Rect, pill: Rect, work: Rect, scale: f32) -> (Rect, Rect) {
+    let target = pet_card_target(island, work, scale, false);
+    let (x, y, width, height) = island;
+    let w = pill.2.min(width);
+    let h = pill.3.min(height);
+    let anchor_y = if target.1 < y { y } else { y + height - h };
+    ((x + (width - w) / 2.0, anchor_y, w, h), target)
+}
+
 pub struct NotificationCard {
     hwnd: HWND,
     state: Box<State>,

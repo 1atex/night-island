@@ -16,6 +16,7 @@ pub(in crate::island) struct SystemNotices {
     pub origin: Option<view::Rect>,
     window: Option<NotificationCard>,
     queue: VecDeque<Record>,
+    shown: VecDeque<(u32, i64, String)>,
     active: Option<Record>,
     pub phase: Option<CardPhase>,
     hovered: bool,
@@ -23,6 +24,7 @@ pub(in crate::island) struct SystemNotices {
     main_hidden: bool,
     replaces_island: bool,
     pet_source: Option<view::Rect>,
+    expanded_source: Option<view::Rect>,
     expires: Option<Instant>,
     remaining: Duration,
     failed: bool,
@@ -133,6 +135,12 @@ impl App {
                 && state.status == Status::Ready
                 && !self.system_notices.active.as_ref().is_some_and(|active| same(active, &record))
                 && !self.system_notices.queue.iter().any(|pending| same(pending, &record))
+                && !self.ui.notifications.preview.as_ref().is_some_and(|preview| same(preview, &record))
+                && !self
+                    .system_notices
+                    .shown
+                    .iter()
+                    .any(|(id, created, app)| *id == record.id && *created == record.created && *app == record.app_id)
             {
                 self.system_notices.queue.push_back(record);
             }
@@ -237,40 +245,19 @@ impl App {
             .as_ref()
             .filter(|pet| self.settings.pet_notifications && unsafe { IsWindowVisible(pet.hwnd()).as_bool() });
         let local_pending = self.system_notices.queue.front().is_some_and(local);
-        if pet.is_none()
-            && !local_pending
-            && self.state == State::Expanded
-            && self.ui.tab == view::Tab::Home
-            && self.ui.notifications.preview.is_none()
-            && !self.ui.home.edit
-            && self.ui.home.tile_press.is_none()
-            && self.ui.home.tile_reorder.is_none()
-            && self.ui.home.dev_menu.is_none()
-            && !self.ui.home.dock_open
-            && !self.pointer.vol_drag
-            && !self.pointer.seek_drag
-            && !self.system_notices.locked
-            && self.settings.system_notifications
-            && self.ui.notifications.state.status == Status::Ready
-        {
-            self.ui.notifications.preview = self.system_notices.queue.pop_front();
-            if self.ui.notifications.preview.is_some() {
-                self.repaint_expanded();
-            }
-            return;
-        }
+        let expanded = self.state == State::Expanded;
         if self.system_notices.phase.is_some()
             || self.system_notices.queue.is_empty()
             || self.system_notices.locked
             || self.system_notices.failed
             || self.gaming
-            || (pet.is_none() && ((!local_pending && self.state != State::Collapsed) || self.pill_hidden))
+            || (pet.is_none() && (!matches!(self.state, State::Collapsed | State::Expanded) || self.pill_hidden))
             || self.character_interacting()
             || self.pill_motion_busy()
             || self.pointer.moving.is_some()
             || self.pointer.press.is_some()
             || (pet.is_none() && !unsafe { IsWindowVisible(self.hwnd).as_bool() })
-            || (pet.is_none() && !local_pending && (self.ui.notice.is_some() || self.ui.volume.is_some()))
+            || (pet.is_none() && !local_pending && !expanded && (self.ui.notice.is_some() || self.ui.volume.is_some()))
         {
             return;
         }
@@ -295,13 +282,24 @@ impl App {
                 }
             }
         }
-        let source = pet_anchor.map_or_else(|| self.pill_screen(false), |(source, _)| source);
-        let work = pet_anchor.map_or_else(|| self.island_work_area(), |(_, work)| work);
-        let edge = (pet_anchor.is_none() && self.docked()).then_some(self.edge());
-        let target = if pet_anchor.is_some() {
-            notification_card::pet_card_target(source, work, self.scale, false)
+        let (source, target) = if let Some((source, work)) = pet_anchor {
+            (source, notification_card::pet_card_target(source, work, self.scale, false))
+        } else if expanded {
+            notification_card::expanded_card_layout(
+                self.pill_screen(true),
+                self.pill_screen(false),
+                self.island_work_area(),
+                self.scale,
+            )
         } else {
-            notification_card::card_target(source, work, edge, self.scale)
+            let source = self.pill_screen(false);
+            let target = notification_card::card_target(
+                source,
+                self.island_work_area(),
+                self.docked().then_some(self.edge()),
+                self.scale,
+            );
+            (source, target)
         };
         let window = self.system_notices.window.as_mut().unwrap();
         window.set_capture_hidden(self.settings.capture_hidden);
@@ -314,7 +312,14 @@ impl App {
             return;
         }
         self.system_notices.pet_source = pet_anchor.map(|(source, _)| source);
-        self.system_notices.replaces_island = pet_anchor.is_none() && self.state == State::Collapsed;
+        self.system_notices.expanded_source = (pet_anchor.is_none() && expanded).then_some(source);
+        self.system_notices.replaces_island = pet_anchor.is_none() && !expanded;
+        if !local(&record) && !example(&record) {
+            if self.system_notices.shown.len() >= 64 {
+                self.system_notices.shown.pop_front();
+            }
+            self.system_notices.shown.push_back((record.id, record.created, record.app_id.clone()));
+        }
         self.system_notices.active = Some(record);
         self.system_notices.phase = Some(CardPhase::Opening);
         self.system_notices.hovered = false;
@@ -397,14 +402,18 @@ impl App {
                     let _ = window.expand(source, work, record, self.system_notices.queue.len());
                     return;
                 }
-                self.ui.notifications.preview = self.system_notices.active.clone();
                 if self.system_notices.active.as_ref().is_some_and(local) {
+                    self.ui.notifications.preview = self.system_notices.active.clone();
                     self.hide_notification_card();
                     self.restore_pill();
                     self.expand_notification_text();
                 } else if self.settings.notification_open_app {
+                    let record = self.system_notices.active.clone();
                     self.hide_notification_card();
-                    self.activate_notification();
+                    if let Some(record) = record {
+                        notifications::open_sender(record, self.hwnd);
+                    }
+                    self.maybe_show_notification();
                 } else {
                     self.open_notification_preview();
                 }
@@ -444,7 +453,11 @@ impl App {
         }
         self.kill_timer(Timer::NotificationExpire);
         self.system_notices.expires = None;
-        let source = self.system_notices.pet_source.unwrap_or_else(|| self.pill_screen(false));
+        let source = self
+            .system_notices
+            .pet_source
+            .or(self.system_notices.expanded_source)
+            .unwrap_or_else(|| self.pill_screen(false));
         if let (Some(window), Some(record)) = (&mut self.system_notices.window, &self.system_notices.active) {
             let _ = window.close(source, record, self.system_notices.queue.len());
         }
@@ -466,6 +479,7 @@ impl App {
         self.system_notices.expires = None;
         self.system_notices.hovered = false;
         self.system_notices.pet_source = None;
+        self.system_notices.expanded_source = None;
         if !std::mem::take(&mut self.system_notices.replaces_island) {
             return;
         }
@@ -751,6 +765,28 @@ mod tests {
             preview(&mut app, std::path::Path::new(&path))?;
         }
         app.hide_notification_card();
+        app.cancel_pill_motion();
+        app.ui.tab = view::Tab::Home;
+        app.ui.notifications.preview = None;
+        let c = record(3);
+        let incoming = notifications::Snapshot {
+            status: Status::Ready,
+            records: vec![c.clone()],
+            added: vec![c.clone(), c.clone()],
+        };
+        app.accept_system_notifications(incoming.clone());
+        assert!(app.state == State::Expanded && app.ui.notifications.preview.is_none());
+        assert!(app.system_notices.phase == Some(CardPhase::Opening));
+        assert!(app.system_notices.expanded_source.is_some() && !app.system_notices.replaces_island);
+        assert!(app.system_notices.active.as_ref().is_some_and(|active| same(active, &c)));
+        assert!(app.system_notices.queue.is_empty());
+        app.notification_stage();
+        assert!(!app.system_notices.main_hidden);
+        app.dismiss_notification_card();
+        app.notification_stage();
+        app.accept_system_notifications(incoming);
+        assert!(app.system_notices.active.is_none() && app.system_notices.queue.is_empty());
+        assert!(app.ui.notifications.preview.is_none());
         app.settings.character = Character::Spark;
         app.settings.character_detached = true;
         app.apply_character();
