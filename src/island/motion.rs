@@ -129,7 +129,7 @@ impl App {
                 self.settings.pill_opacity + (self.settings.tint_open - self.settings.pill_opacity) * p
             })?,
         )?;
-        for layer in [&self.collapsed, &self.pet.char_layer] {
+        for layer in [&self.collapsed, &self.progress_fill, &self.pet.char_layer] {
             layer.sprite.StartAnimation(h!("Opacity"), &self.open_scalar(|p| 1.0 - smooth_range(p, 0.0, 0.25))?)?;
         }
         self.expanded.sprite.StartAnimation(h!("Opacity"), &self.open_scalar(|p| smooth_range(p, 0.72, 0.97))?)?;
@@ -151,13 +151,9 @@ impl App {
             h!("Offset"),
             &self.open_vector3(|p| Vector3 { X: dx * (1.0 - p), Y: dy * (1.0 - p), Z: 0.0 })?,
         )?;
-        let (left, right, opacity) = self.ear_targets(self.win, false, false);
-        let (open_left, open_right, _) = self.ear_targets(self.win, true, false);
-        for (ear, from, to) in [(&self.ears[0], left, open_left), (&self.ears[1], right, open_right)] {
-            ear.sprite.StartAnimation(
-                h!("Offset"),
-                &self.open_vector3(|p| Vector3 { X: from + (to - from) * p, Y: 0.0, Z: 0.0 })?,
-            )?;
+        let (_, _, opacity) = self.ear_targets(self.win, false, false);
+        self.bind_ears()?;
+        for ear in &self.ears {
             ear.sprite.StartAnimation(
                 h!("Opacity"),
                 &self.open_scalar(|p| opacity * self.settings.pill_opacity * (1.0 - smooth_range(p, 0.0, 0.3)))?,
@@ -183,6 +179,7 @@ impl App {
         self.restore_liquid_body();
         let ms = if expanded { self.open_ms() } else { self.close_ms() };
         let _ = self.collapsed.sprite.SetIsVisible(true);
+        let _ = self.progress_fill.sprite.SetIsVisible(true);
         let _ = self.expanded.sprite.SetIsVisible(true);
         if self.attached_character_on() {
             let _ = self.pet.char_layer.sprite.SetIsVisible(true);
@@ -200,9 +197,12 @@ impl App {
         fade.SetDuration(Duration::from_millis(ms * 7 / 10).into())?;
         self.tint.StartAnimation(h!("Opacity"), &fade)?;
 
-        for (layer, shown) in
-            [(&self.collapsed, !expanded), (&self.expanded, expanded), (&self.pet.char_layer, !expanded)]
-        {
+        for (layer, shown) in [
+            (&self.collapsed, !expanded),
+            (&self.progress_fill, !expanded),
+            (&self.expanded, expanded),
+            (&self.pet.char_layer, !expanded),
+        ] {
             let a = self.compositor.CreateScalarKeyFrameAnimation()?;
             a.InsertKeyFrame(1.0, if shown { 1.0 } else { 0.0 })?;
             let fade_ms = if shown { ms * 6 / 10 } else { ms / 3 };
@@ -210,12 +210,9 @@ impl App {
             layer.sprite.StartAnimation(h!("Opacity"), &a)?;
         }
 
-        let (left, right, ear_opacity) = self.ear_targets(self.win, expanded, hidden);
-        for (ear, x) in self.ears.iter().zip([left, right]) {
-            let slide = self.compositor.CreateVector3KeyFrameAnimation()?;
-            slide.InsertKeyFrameWithEasingFunction(1.0, Vector3 { X: x, Y: 0.0, Z: 0.0 }, &self.ease()?)?;
-            slide.SetDuration(Duration::from_millis(ms).into())?;
-            ear.sprite.StartAnimation(h!("Offset"), &slide.cast::<CompositionAnimation>()?)?;
+        let (_, _, ear_opacity) = self.ear_targets(self.win, expanded, hidden);
+        self.bind_ears()?;
+        for ear in &self.ears {
             let a = self.compositor.CreateScalarKeyFrameAnimation()?;
             a.InsertKeyFrame(1.0, ear_opacity)?;
             a.SetDuration(Duration::from_millis(ms / 2).into())?;
@@ -283,6 +280,7 @@ impl App {
         self.kill_timer(Timer::Collapse);
         self.kill_timer(Timer::Settle);
         self.state = State::Collapsing;
+        self.update_eq();
         if !self.open_motion.as_ref().is_some_and(|motion| motion.progress.active(Instant::now())) {
             self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         }
@@ -293,7 +291,6 @@ impl App {
         self.finish_mixer();
         self.sync_mixer();
         self.update_weather_timer();
-        self.update_eq();
         let _ = self.animate_to(false, false);
         self.update_top_panel(false);
         self.start_cover_motion(false);
@@ -340,6 +337,7 @@ impl App {
             _ => return,
         };
         let _ = self.collapsed.sprite.SetIsVisible(!expanded);
+        let _ = self.progress_fill.sprite.SetIsVisible(!expanded);
         let _ = self.expanded.sprite.SetIsVisible(expanded);
         if expanded {
             let _ = self.pet.char_layer.sprite.SetIsVisible(false);
@@ -353,6 +351,7 @@ impl App {
         let tint_want = if expanded { self.settings.tint_open } else { self.settings.pill_opacity };
         let layers = [
             ("collapsed", &self.collapsed.sprite, if expanded { 0.0 } else { 1.0 }),
+            ("progress", &self.progress_fill.sprite, if expanded { 0.0 } else { 1.0 }),
             ("expanded", &self.expanded.sprite, if expanded { 1.0 } else { 0.0 }),
             ("character", &self.pet.char_layer.sprite, if expanded { 0.0 } else { 1.0 }),
         ];

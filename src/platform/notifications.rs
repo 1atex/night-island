@@ -176,9 +176,17 @@ pub(super) fn text(value: &str, limit: usize) -> String {
 }
 
 fn app_icon(info: &windows::ApplicationModel::AppInfo) -> Option<Arc<super::apps::Icon>> {
-    let stream =
-        info.DisplayInfo().ok()?.GetLogo(Size { Width: 40.0, Height: 40.0 }).ok()?.OpenReadAsync().ok()?.join().ok()?;
-    super::notification_images::decode(&stream, 40)
+    let stream = info
+        .DisplayInfo()
+        .ok()?
+        .GetLogo(Size { Width: 128.0, Height: 128.0 })
+        .ok()?
+        .OpenReadAsync()
+        .ok()?
+        .join()
+        .ok()?;
+    let icon = super::notification_images::decode(&stream, 128)?;
+    Some(Arc::new(super::apps::normalize_dock_icon(super::apps::Icon { side: icon.side, bgra: icon.bgra.clone() })))
 }
 
 fn read_record(

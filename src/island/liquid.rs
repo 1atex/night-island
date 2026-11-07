@@ -52,6 +52,8 @@ pub(in crate::island) struct MusicBars {
     pub(in crate::island) spectrum_brushes: Vec<CompositionColorBrush>,
     pub(in crate::island) spectrum_running: bool,
     pub(in crate::island) spectrum_scale: [f32; audio::BANDS],
+    pub(in crate::island) edge_values: Cell<[f32; audio::BANDS]>,
+    pub(in crate::island) edge_time: Cell<Instant>,
 }
 
 impl App {
@@ -110,14 +112,13 @@ impl App {
 
     pub(in crate::island) fn place_spectrum(&self) {
         let s = self.scale;
-        let (win_w, _) = self.window_size(self.win);
         if self.settings.vertical() {
-            return self.place_spectrum_upright(win_w as f32);
+            return self.place_spectrum_upright();
         }
         let pill_left = self.pill_rect(false).0;
         let Some(bars) = view::music_slots(&self.ui, s, self.cw * s).bars else { return };
         let x0 = pill_left + bars.0;
-        let y = self.win_pad().1 * s + (COLLAPSED.1 - SPEC_H) * s / 2.0;
+        let y = self.pill_rect(false).1 + (COLLAPSED.1 - SPEC_H) * s / 2.0;
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetSize(Vector2 { X: SPEC_W * s, Y: SPEC_H * s });
             let _ = bar.SetCenterPoint(Vector3 { X: 0.0, Y: SPEC_H * s / 2.0, Z: 0.0 });
@@ -126,11 +127,12 @@ impl App {
         }
     }
 
-    fn place_spectrum_upright(&self, win_w: f32) {
+    fn place_spectrum_upright(&self) {
         let s = self.scale;
         let Some(bars) = view::vertical_slots(&self.ui, s, self.cw * s).bars else { return };
-        let cx = win_w / 2.0;
-        let top = self.pill_rect(false).1 + bars.0;
+        let pill = self.pill_rect(false);
+        let cx = pill.0 + pill.2 / 2.0;
+        let top = pill.1 + bars.0;
         for (i, bar) in self.music.spectrum.iter().enumerate() {
             let _ = bar.SetSize(Vector2 { X: SPEC_W * s, Y: SPEC_H * s });
             let _ = bar.SetCenterPoint(Vector3 { X: 0.0, Y: SPEC_H * s / 2.0, Z: 0.0 });
@@ -191,22 +193,74 @@ impl App {
 
     pub(in crate::island) fn paint_spikes(&self) {
         self.set_bump_visible(false);
-        let s = self.scale;
-        let (w, _) = self.liquid.bump.size();
-        let count = (((w as f32 / s / 20.0) as usize) | 1).clamp(9, 31);
+        let now = Instant::now();
+        let dt = now.duration_since(self.music.edge_time.replace(now)).as_secs_f32().min(0.1);
+        let mut values = self.music.edge_values.get();
+        for (i, value) in values.iter_mut().enumerate() {
+            let target = audio::level(i).clamp(0.0, 1.0);
+            let seconds = if target > *value { 0.065 } else { 0.22 };
+            *value = if self.settings.eq_smooth {
+                *value + (target - *value) * (1.0 - (-dt / seconds).exp())
+            } else {
+                target
+            };
+        }
+        self.music.edge_values.set(values);
+        let count = ((self.collapsed().0.max(self.collapsed().1) / 30.0) as usize | 1).clamp(7, 19);
         let mid = count / 2;
-        let levels: Vec<f32> = (0..count)
+        let levels: Vec<_> = (0..count)
             .map(|i| {
                 let t = i.abs_diff(mid) as f32 / mid.max(1) as f32 * (audio::BANDS - 1) as f32;
                 let lo = (t as usize).min(audio::BANDS - 2);
-                let f = t - lo as f32;
-                audio::level(lo) * (1.0 - f) + audio::level(lo + 1) * f
+                values[lo] + (values[lo + 1] - values[lo]) * (t - lo as f32)
             })
             .collect();
         self.paint_edge_levels(&levels);
     }
 
     pub(in crate::island) fn paint_edge_levels(&self, levels: &[f32]) {
+        if !self.settings.eq_smooth {
+            return self.paint_legacy_edge_levels(levels);
+        }
+        self.set_bump_visible(false);
+        let s = self.scale;
+        let depth = (self.settings.liquid_strength * s * 0.5 * self.settings.eq_strength).min(24.0 * s);
+        let palette = self.flipped(self.eq_palette());
+        let shape = match self.settings.eq_style {
+            crate::data::settings::EqStyle::Wave => crate::ui::gfx::EdgeShape::Wave,
+            crate::data::settings::EqStyle::Bars => crate::ui::gfx::EdgeShape::Bars,
+            _ => crate::ui::gfx::EdgeShape::Spikes,
+        };
+        let body = self.elastic_body_spec(if self.liquid_on() { self.liquid.bump_amp } else { 0.0 });
+        if let Ok(outline) = self.gpu.audio_body(&body, self.settings.hang(), levels, depth, shape)
+            && let Ok(path) = crate::ui::gfx::composition_path(&outline)
+        {
+            let _ = self.liquid.body_shape.SetPath(&path);
+            let _ = self._visual.SetClip(&self.liquid.body_clip);
+            self.liquid.body_active.set(true);
+        }
+        let colored = self.settings.spike_color || palette.tone != crate::ui::gfx::Tone::Single;
+        if colored {
+            let (at, size, radius) = self.pill(self.win, false, false);
+            let body = crate::ui::gfx::LiquidBody {
+                rect: (at.X, at.Y, size.X, size.Y),
+                radius: radius.X,
+                edge: self.settings.hang(),
+                center: 0.0,
+                half: 0.0,
+                depth: depth.max(self.liquid.bump_amp).max(1.0),
+            }
+            .elastic();
+            let _ = self.liquid.highlight.paint(&self.gpu, |p| {
+                p.push_clip(self.unfilled_progress_rect(self.liquid.highlight.size()));
+                let _ = p.edge_highlight(self.liquid.highlight.size(), &body.pull, palette, self.eq_tip());
+                p.pop_clip();
+            });
+        }
+        let _ = self.liquid.highlight.sprite.SetIsVisible(colored);
+    }
+
+    fn paint_legacy_edge_levels(&self, levels: &[f32]) {
         self.set_bump_visible(false);
         let s = self.scale;
         let (w, _) = self.liquid.bump.size();
@@ -277,7 +331,9 @@ impl App {
             }
             .elastic();
             let _ = self.liquid.highlight.paint(&self.gpu, |p| {
+                p.push_clip(self.unfilled_progress_rect(self.liquid.highlight.size()));
                 let _ = p.edge_highlight(self.liquid.highlight.size(), &body.pull, palette, self.eq_tip());
+                p.pop_clip();
             });
         }
         let _ = self.liquid.highlight.sprite.SetIsVisible(colored);
@@ -333,9 +389,7 @@ impl App {
 
     fn paint_open_under(&self) {
         let s = self.scale;
-        let (px, py, _) = self.big_pad();
-        let (l, t) = (px * s, py * s);
-        let (w, h) = (EXPANDED.0 * s, EXPANDED.1 * s);
+        let (l, t, w, h) = self.pill_full();
         let r = EXPANDED_RADIUS * s;
         let width = (w - 2.0 * r).max(40.0 * s);
         let count = (((width / s / 20.0) as usize) | 1).clamp(9, 41);
@@ -361,12 +415,10 @@ impl App {
         use crate::ui::gfx::RingPt;
         let s = self.scale;
         let (frame, radius) = if self.state == State::Expanded {
-            let (px, py, _) = self.big_pad();
-            ((px * s, py * s, EXPANDED.0 * s, EXPANDED.1 * s), EXPANDED_RADIUS * s)
+            (self.pill_full(), EXPANDED_RADIUS * s)
         } else {
-            let (px, py) = self.small_pad();
-            let (pw, ph) = self.collapsed();
-            ((px * s, py * s, pw * s, ph * s), pw.min(ph) * s / 2.0)
+            let frame = self.pill_rect(false);
+            (frame, frame.2.min(frame.3) / 2.0)
         };
         let hang = if self.state == State::Expanded { Hang::Down } else { self.settings.hang() };
         let (l0, t0, w0, h0) = frame;
@@ -574,7 +626,7 @@ impl App {
     }
 
     pub(in crate::island) fn fit_bump(&mut self) {
-        let _ = self.liquid.highlight.resize(self.collapsed.size());
+        let _ = self.liquid.highlight.resize(self.window_size(self.win));
         let size = bump_size(self.scale, self.collapsed());
         if size == self.liquid.bump.size() {
             return;
@@ -674,7 +726,9 @@ impl App {
                 tip
             };
             let _ = self.liquid.highlight.paint(&self.gpu, |p| {
+                p.push_clip(self.unfilled_progress_rect(self.liquid.highlight.size()));
                 let _ = p.liquid_highlight(self.liquid.highlight.size(), &body.pull, color);
+                p.pop_clip();
             });
             let _ = self.liquid.highlight.sprite.SetIsVisible(true);
         } else {
@@ -775,12 +829,22 @@ impl App {
 
     pub(in crate::island) fn liquid_tick(&mut self) {
         self.update_decoration_input();
+        if !self.liquid_on() && self.spikes_active() {
+            self.set_timer(Timer::Liquid, 60);
+            return;
+        }
         if !self.liquid_on() || self.state != State::Collapsed || self.notification_card_visible() {
             self.liquid.bump_amp = 0.0;
             self.liquid.bump_vel = 0.0;
             self.stop_idle();
             self.restore_liquid_body();
             self.set_bump_visible(false);
+            if self.state == State::Collapsed {
+                if self.spikes_active() {
+                    self.paint_spikes();
+                }
+                self.set_timer(Timer::Liquid, 60);
+            }
             return;
         }
         if self.character_interacting() || self.pill_motion_busy() {
@@ -799,8 +863,8 @@ impl App {
             self.liquid.bump_vel = 0.0;
             if !self.spikes_active() && !self.ring_active() {
                 self.start_idle();
-            } else {
-                self.restore_liquid_body();
+            } else if !self.spikes_active() {
+                self.paint_liquid_body(0.0);
             }
             self.set_timer(Timer::Liquid, 90);
             return;

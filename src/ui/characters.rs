@@ -166,6 +166,42 @@ pub fn draw(p: &Painter, character: Character, w: f32, pose: &Pose) -> Result<()
     draw_with_design(p, character, w, pose, None)
 }
 
+pub fn draw_attached(
+    p: &Painter,
+    character: Character,
+    w: f32,
+    pose: &Pose,
+    design: Option<&super::pet_design::PetDesign>,
+) -> Result<()> {
+    let mut rest = *pose;
+    rest.t = 0.0;
+    rest.beat = 0.0;
+    rest.look = (0.0, 0.0);
+    rest.reaction = Reaction::Idle;
+    rest.motion = Default::default();
+    let (left, top, right, bottom) = match character {
+        Character::Spark => (10.8, 5.8, 29.2, 24.2),
+        Character::Blob => (9.0, 7.8, 31.0, 26.2),
+        Character::Eyes => (9.0, 7.0, 31.0, 23.0),
+        _ => drawing_bounds(character, &rest, design),
+    };
+    let k = (22.0 / (bottom - top)).min(28.0 / (right - left));
+    let scale = w / BOX_W;
+    let old = p.push_offset(0.0, 0.0);
+    p.set_transform(
+        &(windows_numerics::Matrix3x2 {
+            M11: k,
+            M22: k,
+            M31: (20.0 - (left + right) * 0.5 * k) * scale,
+            M32: (15.0 - (top + bottom) * 0.5 * k) * scale,
+            ..Default::default()
+        } * old),
+    );
+    let result = draw_with_design(p, character, w, pose, design);
+    p.set_transform(&old);
+    result
+}
+
 pub fn draw_with_design(
     p: &Painter,
     character: Character,

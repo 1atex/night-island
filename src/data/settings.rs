@@ -367,13 +367,15 @@ pub enum InterfaceFont {
     Segoe,
     Montserrat,
     SanFrancisco,
+    Custom,
 }
 
 impl InterfaceFont {
-    pub const ALL: [Self; 3] = [Self::Segoe, Self::Montserrat, Self::SanFrancisco];
+    pub const ALL: [Self; 4] = [Self::Segoe, Self::Montserrat, Self::SanFrancisco, Self::Custom];
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::Custom => "Custom font",
             Self::Segoe => "Segoe UI",
             Self::Montserrat => "Montserrat",
             Self::SanFrancisco if crate::ui::fonts::sf_available() => "SF Pro",
@@ -391,6 +393,7 @@ impl InterfaceFont {
 #[serde(default)]
 pub struct Settings {
     pub interface_font: InterfaceFont,
+    pub interface_font_file: String,
     pub tour_revision: u8,
     pub top_panel: crate::data::top_panel::TopPanelSettings,
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
@@ -441,6 +444,8 @@ pub struct Settings {
     pub voice_paste: bool,
     pub music_lyrics: bool,
     pub music_progress: bool,
+    pub pill_unified_layout: bool,
+    pub eq_smooth: bool,
     pub cover_mode: CoverMode,
     pub frame_rate: FrameRate,
     pub eq_style: EqStyle,
@@ -519,6 +524,7 @@ impl Default for Settings {
             language: Language::Ru,
             legacy_icons: false,
             interface_font: InterfaceFont::Segoe,
+            interface_font_file: String::new(),
             weather: true,
             weather_city: String::new(),
             weather_lat: None,
@@ -566,6 +572,8 @@ impl Default for Settings {
             memory_excluded: Vec::new(),
             music_lyrics: true,
             music_progress: true,
+            pill_unified_layout: true,
+            eq_smooth: true,
             cover_mode: CoverMode::Fit,
             frame_rate: FrameRate::Adaptive,
             eq_style: EqStyle::Bars,

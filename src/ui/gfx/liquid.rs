@@ -10,6 +10,29 @@ pub struct LiquidBody {
     pub depth: f32,
 }
 
+fn audio_edge_depth(t: f32, levels: &[f32], style: EdgeShape) -> f32 {
+    if levels.is_empty() || !(0.0..=1.0).contains(&t) {
+        return 0.0;
+    }
+    let smooth = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        v * v * v * (v * (v * 6.0 - 15.0) + 10.0)
+    };
+    let edge = smooth(t.min(1.0 - t) * 8.0);
+    let position = t * (levels.len() - 1) as f32;
+    let i = position.floor() as usize;
+    let a = levels[i].clamp(0.0, 1.0);
+    let b = levels[(i + 1).min(levels.len() - 1)].clamp(0.0, 1.0);
+    let level = a + (b - a) * smooth(position.fract());
+    let phase = (t * levels.len() as f32).fract();
+    let lobe = match style {
+        EdgeShape::Wave => 1.0,
+        EdgeShape::Spikes => 0.18 + 0.82 * (std::f32::consts::PI * phase).sin().powi(2),
+        EdgeShape::Bars => 0.14 + 0.86 * smooth(phase.min(1.0 - phase) * 4.0),
+    };
+    level * edge * lobe
+}
+
 impl Gpu {
     pub fn liquid_body(&self, body: &LiquidBody) -> Result<ID2D1PathGeometry> {
         liquid_body_geometry(&self.factory, body)
@@ -196,10 +219,21 @@ fn liquid_body_geometry(factory: &ID2D1Factory, body: &LiquidBody) -> Result<ID2
 }
 
 fn elastic_geometry(factory: &ID2D1Factory, body: &ElasticBody) -> Result<ID2D1PathGeometry> {
+    contour_geometry(factory, body, |point, _| point)
+}
+
+fn contour_geometry(
+    factory: &ID2D1Factory,
+    body: &ElasticBody,
+    deform: impl Fn((f32, f32), (f32, f32)) -> (f32, f32),
+) -> Result<ID2D1PathGeometry> {
     let outline = Outline::new(body.rect, body.radius);
+    let steps = (outline.perimeter / 3.0).ceil().clamp(128.0, 512.0) as usize;
     let at = |t: f32| {
         let (point, outward) = outline.at(t);
-        body.deform(point, outward)
+        let audio = deform(point, outward);
+        let pulled = body.deform(point, outward);
+        (audio.0 + pulled.0 - point.0, audio.1 + pulled.1 - point.1)
     };
     let tangent = |t: f32| {
         let a = at(t - 0.0001);
@@ -211,16 +245,16 @@ fn elastic_geometry(factory: &ID2D1Factory, body: &ElasticBody) -> Result<ID2D1P
         let geometry = factory.CreatePathGeometry()?;
         let sink = geometry.Open()?;
         sink.BeginFigure(vector(at(0.0)), D2D1_FIGURE_BEGIN_FILLED);
-        for i in 0..128 {
-            let t0 = i as f32 / 128.0;
-            let t1 = (i + 1) as f32 / 128.0;
+        for i in 0..steps {
+            let t0 = i as f32 / steps as f32;
+            let t1 = (i + 1) as f32 / steps as f32;
             let a = at(t0);
             let b = at(t1);
             let da = tangent(t0);
             let db = tangent(t1);
             sink.AddBezier(&D2D1_BEZIER_SEGMENT {
-                point1: vector((a.0 + da.0 / 384.0, a.1 + da.1 / 384.0)),
-                point2: vector((b.0 - db.0 / 384.0, b.1 - db.1 / 384.0)),
+                point1: vector((a.0 + da.0 / (steps * 3) as f32, a.1 + da.1 / (steps * 3) as f32)),
+                point2: vector((b.0 - db.0 / (steps * 3) as f32, b.1 - db.1 / (steps * 3) as f32)),
                 point3: vector(b),
             });
         }
@@ -231,6 +265,34 @@ fn elastic_geometry(factory: &ID2D1Factory, body: &ElasticBody) -> Result<ID2D1P
 }
 
 impl Gpu {
+    pub fn audio_body(
+        &self,
+        body: &ElasticBody,
+        edge: Hang,
+        levels: &[f32],
+        depth: f32,
+        style: EdgeShape,
+    ) -> Result<ID2D1PathGeometry> {
+        let (x, y, w, h) = body.rect;
+        let r = body.radius.min(w.min(h) / 2.0);
+        contour_geometry(&self.factory, body, |point, normal| {
+            let (along, length, facing) = match edge {
+                Hang::Down => (point.0 - x - r, w - 2.0 * r, normal.1),
+                Hang::Up => (x + w - r - point.0, w - 2.0 * r, -normal.1),
+                Hang::Right => (y + h - r - point.1, h - 2.0 * r, normal.0),
+                Hang::Left => (point.1 - y - r, h - 2.0 * r, -normal.0),
+            };
+            let pulled = body.deform(point, normal);
+            let pull_depth = (pulled.0 - point.0).hypot(pulled.1 - point.1);
+            let reach = 40.0 * (r / 16.0).max(1.0);
+            let amplitude = audio_edge_depth(along / length.max(1.0), levels, style)
+                * depth.min(reach)
+                * (1.0 - pull_depth / reach).max(0.0)
+                * facing.max(0.0).powi(4);
+            (point.0 + normal.0 * amplitude, point.1 + normal.1 * amplitude)
+        })
+    }
+
     pub fn elastic_body(&self, body: &ElasticBody) -> Result<ID2D1PathGeometry> {
         elastic_geometry(&self.factory, body)
     }
@@ -739,5 +801,26 @@ mod tests {
             encoder.write_header().unwrap().write_image_data(&data).unwrap();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod audio_tests {
+    use super::*;
+
+    #[test]
+    fn audio_contour_is_continuous_and_rejoins_both_corners() {
+        let levels = [0.1, 0.7, 0.3, 0.9, 0.4, 0.8, 0.1];
+        for style in [EdgeShape::Spikes, EdgeShape::Wave, EdgeShape::Bars] {
+            assert_eq!(audio_edge_depth(0.0, &levels, style), 0.0);
+            assert_eq!(audio_edge_depth(1.0, &levels, style), 0.0);
+            let mut previous = 0.0;
+            for i in 0..=2000 {
+                let depth = audio_edge_depth(i as f32 / 2000.0, &levels, style);
+                assert!((0.0..=1.0).contains(&depth));
+                assert!((depth - previous).abs() < 0.02);
+                previous = depth;
+            }
+        }
     }
 }

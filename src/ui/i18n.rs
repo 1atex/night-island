@@ -28,6 +28,32 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Turn off balanced layout or smooth equalizer to use their classic appearance." => {
+            "Выключите новые размеры или плавный эквалайзер, чтобы вернуть прежний вид."
+        }
+        "Balanced pill layout" => "Единые размеры и отступы в пилюле",
+        "Smooth liquid equalizer" => "Плавная жидкая форма эквалайзера",
+        "Load a font file to replace Segoe UI in the preview." => {
+            "Загрузите файл шрифта. Пока в предпросмотре — Segoe UI."
+        }
+        "Custom font" => "Свой шрифт",
+        "Load your font…" => "Загрузить свой шрифт…",
+        "Loading font…" => "Загрузка шрифта…",
+        "Download font" => "Скачать шрифт",
+        "Download opens the official font website." => "Скачать шрифт — открыть официальный сайт.",
+        "TTF, OTF or TTC, up to 16 MB. The font is saved in Island." => {
+            "TTF, OTF или TTC, до 16 МБ. Шрифт сохранится в Island."
+        }
+        "SF Pro is not installed. The preview currently uses Segoe UI." => {
+            "SF Pro не установлен. Сейчас в предпросмотре — Segoe UI."
+        }
+        "Font loaded and saved" => "Шрифт загружен и сохранён",
+        "Choose a TTF, OTF or TTC font file" => "Выберите файл шрифта TTF, OTF или TTC",
+        "Could not read the font file" => "Не удалось прочитать файл шрифта",
+        "Font files must be between 1 byte and 16 MB" => "Нужен непустой файл шрифта размером до 16 МБ",
+        "Could not load the font" => "Не удалось загрузить шрифт",
+        "This file is not a supported font" => "Файл повреждён или формат шрифта не поддерживается",
+        "Could not save the font" => "Не удалось сохранить шрифт",
         "Interface font" => "Шрифт интерфейса",
         "SF Pro (not installed)" => "SF Pro (не установлен)",
         "Montserrat is included. SF Pro requires an installed font; otherwise Segoe UI is used." => {

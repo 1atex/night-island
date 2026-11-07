@@ -81,6 +81,7 @@ pub fn run() -> Result<()> {
         let (weather_lat, weather_lon) = (settings.weather_lat, settings.weather_lon);
         crate::ui::i18n::set_ru(settings.language == crate::data::settings::Language::Ru);
         crate::ui::icons::set_legacy(settings.legacy_icons);
+        crate::ui::fonts::load_custom(&settings.interface_font_file);
         crate::ui::fonts::set(settings.interface_font);
         let dpi_scale = GetDpiForWindow(hwnd) as f32 / 96.0;
         ai::configure(&settings.ai);
@@ -202,6 +203,7 @@ impl App {
         let docked = settings.placement == Placement::Docked;
         let collapsed =
             gpu.layer(&compositor, window_size(scale, Win::Small, docked, COLLAPSED.0, &window_room(&settings)))?;
+        let progress_fill = gpu.layer(&compositor, collapsed.size())?;
         let expanded =
             gpu.layer(&compositor, window_size(scale, Win::Big, docked, COLLAPSED.0, &window_room(&settings)))?;
         let ear_px = ((EAR * scale).round() as i32, (EAR * scale).round() as i32);
@@ -252,6 +254,7 @@ impl App {
         let children = visual.Children()?;
         children.InsertAtTop(&backdrop)?;
         children.InsertAtTop(&tint)?;
+        children.InsertAtTop(&progress_fill.sprite)?;
         children.InsertAtTop(&highlight.sprite)?;
         children.InsertAtTop(&expanded.sprite)?;
         children.InsertAtTop(&collapsed.sprite)?;
@@ -317,7 +320,11 @@ impl App {
             _visual: visual,
             backdrop,
             tint,
-            ui: view::UiState::new(),
+            ui: {
+                let mut ui = view::UiState::new();
+                ui.composited_progress = true;
+                ui
+            },
             store: None,
             popup_open: false,
             overlay: None,
@@ -359,6 +366,7 @@ impl App {
             gpu,
             ears,
             collapsed,
+            progress_fill,
             expanded,
             cover_layer,
             cover_flight_until: None,
@@ -384,6 +392,8 @@ impl App {
                 spectrum_brushes,
                 spectrum_running: false,
                 spectrum_scale: [0.0; audio::BANDS],
+                edge_values: std::cell::Cell::new([0.0; audio::BANDS]),
+                edge_time: std::cell::Cell::new(Instant::now()),
             },
             pet: Pet {
                 behavior: crate::ui::pet_behavior::PetBehavior::new(

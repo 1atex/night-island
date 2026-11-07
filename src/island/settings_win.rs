@@ -768,8 +768,34 @@ impl App {
         self.keys_changed();
     }
 
+    pub(in crate::island) fn finish_font_import(&mut self) {
+        let Some(result) = crate::ui::fonts::take_import() else { return };
+        self.ui.sw.font_busy = false;
+        match result {
+            Ok(font) => {
+                crate::ui::fonts::use_custom(font.data);
+                self.settings.interface_font_file = font.path;
+                self.settings.interface_font = crate::data::settings::InterfaceFont::Custom;
+                self.ui.sw.font_status = crate::ui::i18n::tr("Font loaded and saved").into_owned();
+                self.setting_changed(view::Sid::InterfaceFont, true);
+            }
+            Err(error) => self.ui.sw.font_status = crate::ui::i18n::tr(&error).into_owned(),
+        }
+        self.render_settings_win();
+    }
+
     fn sw_act(&mut self, act: view::Act) {
         match act {
+            view::Act::FontDownload => {
+                cmd::shell_open(crate::ui::fonts::download_url(self.settings.interface_font), None)
+            }
+            view::Act::FontImport => {
+                if !self.ui.sw.font_busy {
+                    unsafe {
+                        let _ = PostMessageW(Some(self.hwnd), crate::ui::fonts::WM_FONT_PICK, WPARAM(0), LPARAM(0));
+                    }
+                }
+            }
             view::Act::OpenGuide => self.open_guide(),
             view::Act::Rebind(hotkey) => self.begin_rebind(hotkey),
             view::Act::KeysReset => {

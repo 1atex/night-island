@@ -189,14 +189,21 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
         p.text(
             &format!("{}°", wx.temp.round() as i32),
             (r.0, r.1 + 26.0 * scale, r.2, r.3),
-            12.5 * scale,
+            row_text_size(ui) * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_CENTER,
             rgba(1.0, 1.0, 1.0, 0.85),
         )?;
     }
     if let Some(s) = slots.title {
-        along(&ui.media.title, slot(s), 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING, WHITE)?;
+        along(
+            &ui.media.title,
+            slot(s),
+            row_text_size(ui),
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
     }
     if let (Some(s), Some(secs)) = (slots.rec, ui.recording_secs) {
         let r = slot(s);
@@ -246,7 +253,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
         p.text(
             text,
             (r.0, top, r.2, top + half),
-            15.0 * scale,
+            clock_text_size(ui) * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_CENTER,
             WHITE,

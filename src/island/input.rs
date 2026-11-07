@@ -138,7 +138,8 @@ impl App {
         } else {
             (self.collapsed().0 * s, self.collapsed().1 * s)
         };
-        let (px, py) = (rc.left as f32 + self.win_pad().0 * s, rc.top as f32 + self.win_pad().1 * s);
+        let pill = if self.state == State::Expanded { self.pill_full() } else { self.pill_rect(false) };
+        let (px, py) = (rc.left as f32 + pill.0, rc.top as f32 + pill.1);
         let (mid_x, mid_y) = (px + cw / 2.0, py + ch / 2.0);
         if self.docked() {
             let near = [

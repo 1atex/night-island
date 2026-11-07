@@ -57,6 +57,7 @@ impl App {
         let _ = self.collapsed.paint(&self.gpu, |p| {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
+        self.paint_progress_fill();
         self.update_weather_timer();
         self.maybe_show_notification();
     }
@@ -106,6 +107,50 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn unfilled_progress_rect(&self, size: (i32, i32)) -> (f32, f32, f32, f32) {
+        let full = (0.0, 0.0, size.0 as f32, size.1 as f32);
+        let Some((pos, len)) = media::progress().filter(|_| view::pill_progress_fill_on(&self.ui)) else { return full };
+        let fraction = (pos / len).clamp(0.0, 1.0);
+        if fraction <= 0.0 {
+            return full;
+        }
+        if fraction >= 1.0 {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+        let pill = self.pill_rect(false);
+        if self.settings.vertical() {
+            if self.edge() == Edge::Left {
+                (0.0, 0.0, full.2, pill.1 + pill.3 * (1.0 - fraction))
+            } else {
+                (0.0, pill.1 + pill.3 * fraction, full.2, full.3)
+            }
+        } else {
+            let ear = if self.docked() && self.edge() == Edge::Top { EAR * self.scale } else { 0.0 };
+            (pill.0 - ear + (pill.2 + ear * 2.0) * fraction, 0.0, full.2, full.3)
+        }
+    }
+
+    pub(in crate::island) fn paint_progress_fill(&self) {
+        let progress = media::progress().filter(|_| view::pill_progress_fill_on(&self.ui));
+        let _ = self.progress_fill.paint(&self.gpu, |p| {
+            if let Some((pos, len)) = progress {
+                let pill = self.pill_rect(false);
+                let ear = if self.docked() && self.edge() == Edge::Top { EAR * self.scale } else { 0.0 };
+                let range = (pill.0 - ear, pill.1, pill.0 + pill.2 + ear, pill.1 + pill.3);
+                let size = self.progress_fill.size();
+                let _ = p.fill_progress_surface(
+                    range,
+                    (size.0 as f32, size.1 as f32),
+                    pos / len,
+                    self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8),
+                    self.settings.vertical(),
+                    self.edge() == Edge::Left,
+                );
+            }
+        });
+        self.paint_ears();
+    }
+
     pub(in crate::island) fn paint_ears(&self) {
         let r = EAR * self.scale;
         for (i, ear) in self.ears.iter().enumerate() {
@@ -114,6 +159,17 @@ impl App {
                     let (r, g, b) = crate::ui::theme::panel();
                     crate::ui::gfx::rgba(r, g, b, 1.0)
                 });
+                if let Some((pos, len)) = media::progress().filter(|_| view::pill_progress_fill_on(&self.ui)) {
+                    let width = self.cw * self.scale;
+                    let left = if i == 0 { 0.0 } else { -width - r };
+                    let _ = p.fill_ear_progress(
+                        r,
+                        i == 0,
+                        (left, left + width + r * 2.0),
+                        pos / len,
+                        self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8),
+                    );
+                }
             });
         }
     }
@@ -123,6 +179,7 @@ impl App {
         let _ = self.collapsed.paint(&self.gpu, |p| {
             let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
         });
+        self.paint_progress_fill();
         self.repaint_expanded();
     }
 

@@ -65,13 +65,7 @@ impl App {
                 return false;
             }
         }
-        let (width, _) = self.window_size(self.win);
-        let pill = if self.state == State::Expanded {
-            self.pill_full()
-        } else {
-            let (w, h) = self.collapsed();
-            ((width as f32 - w * self.scale) / 2.0, self.win_pad().1 * self.scale, w * self.scale, h * self.scale)
-        };
+        let pill = if self.state == State::Expanded { self.pill_full() } else { self.pill_rect(false) };
         let (cx, cy) = desktop.center();
         crate::ui::companion::dock_hit(
             (rect.left as f32 + pill.0, rect.top as f32 + pill.1, pill.2, pill.3),
@@ -476,7 +470,12 @@ impl App {
                 desktop.render_designed(&self.gpu, character, &pose, self.scale, Some(&self.settings.custom_pet))
             } else {
                 self.pet.char_layer.paint(&self.gpu, |p| {
-                    let _ = characters::draw_with_design(p, character, cw, &pose, Some(&self.settings.custom_pet));
+                    let draw = if self.settings.pill_unified_layout {
+                        characters::draw_attached
+                    } else {
+                        characters::draw_with_design
+                    };
+                    let _ = draw(p, character, cw, &pose, Some(&self.settings.custom_pet));
                 })
             };
             match drawn {

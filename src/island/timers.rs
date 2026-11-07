@@ -306,6 +306,7 @@ impl App {
                     let _ = self.collapsed.paint(&self.gpu, |p| {
                         let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
                     });
+                    self.paint_progress_fill();
                     self.start_progress_timer();
                 }
             }

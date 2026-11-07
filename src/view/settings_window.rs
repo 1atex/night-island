@@ -60,7 +60,8 @@ const APPEARANCE: [(Sid, &str, Kind); 6] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 20] = [
+const PILL: [(Sid, &str, Kind); 22] = [
+    (Sid::PillUnifiedLayout, "Balanced pill layout", Kind::Toggle),
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
@@ -76,6 +77,7 @@ const PILL: [(Sid, &str, Kind); 20] = [
     (Sid::ProgressStyle, "Progress style", Kind::Cycle),
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
     (Sid::EqStyle, "Equalizer shape", Kind::Cycle),
+    (Sid::EqSmooth, "Smooth liquid equalizer", Kind::Toggle),
     (Sid::EqStrength, "Equalizer strength", Kind::Slider),
     (Sid::EqGradient, "Equalizer colours", Kind::Cycle),
     (Sid::EqWhenOpen, "Equalizer while the island is open", Kind::Toggle),
@@ -172,7 +174,7 @@ pub const GROUPS: [Group; 17] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (4, "Music"), (13, "Edges")],
+        sections: &[(0, "Pill"), (5, "Music"), (14, "Edges")],
     },
     Group {
         glyph: '\u{EA8F}',
@@ -253,6 +255,8 @@ pub enum Field {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
+    FontImport,
+    FontDownload,
     YandexMain,
     YandexWave,
     YandexBrowser,
@@ -290,6 +294,8 @@ pub enum Act {
 #[derive(Default)]
 pub struct SwUi {
     pub dock_status: String,
+    pub font_status: String,
+    pub font_busy: bool,
     pub memory: MemoryUi,
     pub guide: Option<GuideUi>,
     pub group: usize,
@@ -344,6 +350,7 @@ pub(in crate::view) enum Item {
     Heading(&'static str),
     Section(&'static str),
     ThemeBlock,
+    FontPreview,
     Row(Sid, &'static str, Kind),
     Service { name: &'static str, glyph: char, status: String, live: bool },
     Field(Field, &'static str, &'static str),
@@ -359,6 +366,7 @@ impl Item {
             Item::Heading(_) => HEADING_H,
             Item::Section(_) => SECTION_H,
             Item::ThemeBlock => THEME_H,
+            Item::FontPreview => 136.0,
             Item::Row(..) | Item::Field(..) | Item::Button(..) | Item::Pair(..) => ROW_H,
             Item::Service { .. } => SERVICE_H,
             Item::Note(_) | Item::Text(_) => NOTE_H,
@@ -703,6 +711,7 @@ fn pill_items(ui: &UiState) -> Vec<Item> {
     if let Some(group) = GROUPS.iter().find(|g| g.name == "Pill and music") {
         out.extend(rows_with_sections(group));
     }
+    out.push(Item::Note("Turn off balanced layout or smooth equalizer to use their classic appearance."));
     out.push(Item::Note("Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls."));
     out.push(Item::Section("Players for lyrics"));
     let apps = &ui.cfg.lyrics_apps;
@@ -1197,10 +1206,31 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
         out.extend(rows_with_sections(group));
         if group.name == "Appearance" {
             let at = out.iter().position(|item| matches!(item, Item::Row(Sid::InterfaceFont, _, _))).unwrap_or(0);
-            out.insert(
-                at + 1,
-                Item::Note("Montserrat is included. SF Pro requires an installed font; otherwise Segoe UI is used."),
-            );
+            let mut font_items = vec![
+                Item::FontPreview,
+                Item::Button(
+                    Act::FontImport,
+                    crate::ui::i18n::tr(if ui.sw.font_busy { "Loading font…" } else { "Load your font…" }).into_owned(),
+                    !ui.sw.font_busy,
+                ),
+                Item::Button(Act::FontDownload, crate::ui::i18n::tr("Download font").into_owned(), true),
+                Item::Note("TTF, OTF or TTC, up to 16 MB. The font is saved in Island."),
+                Item::Note("Download opens the official font website."),
+            ];
+            if ui.cfg.interface_font == crate::data::settings::InterfaceFont::SanFrancisco
+                && !crate::ui::fonts::sf_available()
+            {
+                font_items.push(Item::Note("SF Pro is not installed. The preview currently uses Segoe UI."));
+            }
+            if ui.cfg.interface_font == crate::data::settings::InterfaceFont::Custom
+                && crate::ui::fonts::custom_name().is_empty()
+            {
+                font_items.push(Item::Note("Load a font file to replace Segoe UI in the preview."));
+            }
+            if !ui.sw.font_status.is_empty() {
+                font_items.push(Item::Text(ui.sw.font_status.clone()));
+            }
+            out.splice(at + 1..at + 1, font_items);
         }
         return out;
     }
@@ -1796,6 +1826,49 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                         &button,
                         ctl,
                         13.5 * scale,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                        DWRITE_TEXT_ALIGNMENT_CENTER,
+                        WHITE,
+                    )?;
+                }
+                Item::FontPreview => {
+                    let card = (l.content.0, top + 4.0 * scale, l.content.2, top + 128.0 * scale);
+                    p.fill_round_rect(card, 18.0 * scale, rgba(1.0, 1.0, 1.0, 0.055))?;
+                    let custom = crate::ui::fonts::custom_name();
+                    let label = if ui.cfg.interface_font == crate::data::settings::InterfaceFont::Custom
+                        && !custom.is_empty()
+                    {
+                        custom.as_str()
+                    } else {
+                        ui.cfg.interface_font.name()
+                    };
+                    p.text(
+                        label,
+                        (card.0 + 16.0 * scale, card.1 + 8.0 * scale, card.2 - 16.0 * scale, card.1 + 30.0 * scale),
+                        12.0 * scale,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, 0.5),
+                    )?;
+                    p.text(
+                        "Night Island · Привет, мир!",
+                        (card.0 + 16.0 * scale, card.1 + 34.0 * scale, card.2 - 16.0 * scale, card.1 + 67.0 * scale),
+                        22.0 * scale,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        WHITE,
+                    )?;
+                    let pill = (
+                        card.0 + 16.0 * scale,
+                        card.1 + 78.0 * scale,
+                        (card.0 + 286.0 * scale).min(card.2 - 16.0 * scale),
+                        card.1 + 110.0 * scale,
+                    );
+                    p.fill_round_rect(pill, 16.0 * scale, rgba(0.0, 0.0, 0.0, 1.0))?;
+                    p.text(
+                        "Night Drive     21:51     6°",
+                        pill,
+                        13.0 * scale,
                         DWRITE_FONT_WEIGHT_SEMI_BOLD,
                         DWRITE_TEXT_ALIGNMENT_CENTER,
                         WHITE,

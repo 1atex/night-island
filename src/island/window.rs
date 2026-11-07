@@ -163,6 +163,28 @@ pub(in crate::island) fn point_from(lparam: LPARAM) -> (i32, i32) {
 
 pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        crate::ui::fonts::WM_FONT_PICK => {
+            let mut owner = hwnd;
+            with_app(|a| {
+                owner = a.settings_win.unwrap_or(hwnd);
+                a.popup_open = true;
+            });
+            let file = pick_font(owner);
+            with_app(|a| {
+                a.popup_open = false;
+                if let Some(file) = file {
+                    a.ui.sw.font_busy = true;
+                    a.ui.sw.font_status.clear();
+                    crate::ui::fonts::import_async(file, hwnd);
+                }
+                a.render_settings_win();
+            });
+            LRESULT(0)
+        }
+        crate::ui::fonts::WM_FONT_READY => {
+            with_app(|a| a.finish_font_import());
+            LRESULT(0)
+        }
         crate::platform::notifications::WM_NOTIFICATION_OPENED => {
             with_app(|a| {
                 if wparam.0 != 0 {
@@ -752,6 +774,14 @@ pub(in crate::island) fn dock_popup(_hwnd: HWND, exists: bool) -> Option<usize> 
 }
 
 pub(in crate::island) fn pick_file(owner: HWND) -> Option<String> {
+    pick_file_filtered(owner, false)
+}
+
+fn pick_font(owner: HWND) -> Option<String> {
+    pick_file_filtered(owner, true)
+}
+
+fn pick_file_filtered(owner: HWND, font: bool) -> Option<String> {
     use windows::Win32::Foundation::{ERROR_CANCELLED, RPC_E_CHANGED_MODE};
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
@@ -769,6 +799,14 @@ pub(in crate::island) fn pick_file(owner: HWND) -> Option<String> {
         let helper = focus_owner();
         let result = (|| {
             let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            if font {
+                dialog
+                    .SetFileTypes(&[windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC {
+                        pszName: w!("Fonts (*.ttf, *.otf, *.ttc)"),
+                        pszSpec: w!("*.ttf;*.otf;*.ttc"),
+                    }])
+                    .ok()?;
+            }
             let options = dialog.GetOptions().ok()?;
             dialog
                 .SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR)

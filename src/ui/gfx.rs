@@ -702,7 +702,7 @@ impl Painter<'_> {
         Ok(())
     }
 
-    pub fn fill_ear(&self, size: f32, left: bool, color: D2D1_COLOR_F) -> Result<()> {
+    fn ear_geometry(&self, size: f32, left: bool) -> Result<ID2D1PathGeometry> {
         unsafe {
             let factory: ID2D1Factory = self.dc.GetFactory()?;
             let geometry = factory.CreatePathGeometry()?;
@@ -717,9 +717,37 @@ impl Painter<'_> {
             sink.AddBezier(&D2D1_BEZIER_SEGMENT { point1: pt(r, r - k), point2: pt(k, 0.0), point3: pt(0.0, 0.0) });
             sink.EndFigure(D2D1_FIGURE_END_CLOSED);
             sink.Close()?;
+            Ok(geometry)
+        }
+    }
+
+    pub fn fill_ear(&self, size: f32, left: bool, color: D2D1_COLOR_F) -> Result<()> {
+        unsafe {
             let brush = self.dc.CreateSolidColorBrush(&color, None)?;
+            self.dc.FillGeometry(&self.ear_geometry(size, left)?, &brush, None);
+        }
+        Ok(())
+    }
+
+    pub fn fill_ear_progress(
+        &self,
+        size: f32,
+        left: bool,
+        range: (f32, f32),
+        fraction: f32,
+        base: (u8, u8, u8),
+    ) -> Result<()> {
+        let end = range.0 + (range.1 - range.0) * fraction.clamp(0.0, 1.0);
+        if end <= 0.0 {
+            return Ok(());
+        }
+        let brush = self.progress_brush((range.0, 0.0, range.1, size), base, false)?;
+        let geometry = self.ear_geometry(size, left)?;
+        self.push_clip((0.0, 0.0, end.min(size), size));
+        unsafe {
             self.dc.FillGeometry(&geometry, &brush, None);
         }
+        self.pop_clip();
         Ok(())
     }
 
@@ -1186,6 +1214,69 @@ impl Painter<'_> {
 
     pub fn fill_capsule_progress(&self, rect: (f32, f32, f32, f32), fraction: f32, base: (u8, u8, u8)) -> Result<()> {
         self.fill_body_progress(rect, rect, (rect.3 - rect.1).min(rect.2 - rect.0) / 2.0, fraction, base)
+    }
+
+    fn progress_brush(
+        &self,
+        range: (f32, f32, f32, f32),
+        base: (u8, u8, u8),
+        vertical: bool,
+    ) -> Result<windows::Win32::Graphics::Direct2D::ID2D1LinearGradientBrush> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+        };
+        let stops: [D2D1_GRADIENT_STOP; 5] = std::array::from_fn(|i| {
+            let position = i as f32 / 4.0;
+            let (r, g, b) = crate::platform::media::gradient(base, position);
+            D2D1_GRADIENT_STOP { position, color: rgba(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.24) }
+        });
+        unsafe {
+            let collection = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+            self.dc.CreateLinearGradientBrush(
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: windows_numerics::Vector2 { X: range.0, Y: range.1 },
+                    endPoint: windows_numerics::Vector2 {
+                        X: if vertical { range.0 } else { range.2 },
+                        Y: if vertical { range.3 } else { range.1 },
+                    },
+                },
+                None,
+                &collection,
+            )
+        }
+    }
+
+    pub fn fill_progress_surface(
+        &self,
+        range: (f32, f32, f32, f32),
+        size: (f32, f32),
+        fraction: f32,
+        base: (u8, u8, u8),
+        vertical: bool,
+        reverse: bool,
+    ) -> Result<()> {
+        if fraction <= 0.0 {
+            return Ok(());
+        }
+        let range = if vertical && reverse { (range.0, range.3, range.2, range.1) } else { range };
+        let brush = self.progress_brush(range, base, vertical)?;
+        let extent = if fraction >= 1.0 {
+            if vertical { if reverse { 0.0 } else { size.1 } } else { size.0 }
+        } else if vertical {
+            range.1 + (range.3 - range.1) * fraction.min(1.0)
+        } else {
+            range.0 + (range.2 - range.0) * fraction.min(1.0)
+        };
+        let rect = if vertical {
+            if reverse { (0.0, extent, size.0, size.1) } else { (0.0, 0.0, size.0, extent) }
+        } else {
+            (0.0, 0.0, extent, size.1)
+        };
+        unsafe {
+            self.dc.FillRectangle(&D2D_RECT_F { left: rect.0, top: rect.1, right: rect.2, bottom: rect.3 }, &brush);
+        }
+        Ok(())
     }
 
     pub fn fill_body_progress(

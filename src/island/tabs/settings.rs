@@ -217,7 +217,7 @@ impl App {
                         lockkeys::stop();
                     }
                 }
-                EqStyle | Spikes => {
+                EqStyle | Spikes | EqSmooth => {
                     self.apply_layout();
                     self.refresh_eq_shape();
                 }
@@ -234,6 +234,12 @@ impl App {
                 PreferPlayingMedia => {
                     media::configure_priority(self.settings.prefer_playing_media);
                     self.on_media();
+                }
+                PillUnifiedLayout => {
+                    self.pet.char_key = None;
+                    self.update_eq();
+                    self.repaint_collapsed();
+                    self.char_tick();
                 }
                 MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | ProgressStyle
                 | PillWeather | PillWeatherSide | PillBattery | SpikeColor => {

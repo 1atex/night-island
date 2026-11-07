@@ -267,10 +267,7 @@ impl App {
     }
 
     pub(in crate::island) fn stop_pill_attachment_motion(&self) {
-        for sprite in std::iter::once(&self.pet.char_layer.sprite)
-            .chain(self.music.spectrum.iter())
-            .chain(self.ears.iter().map(|ear| &ear.sprite))
-        {
+        for sprite in std::iter::once(&self.pet.char_layer.sprite).chain(self.music.spectrum.iter()) {
             let _ = sprite.StopAnimation(h!("Offset"));
         }
     }
@@ -544,10 +541,8 @@ mod tests {
                 app.cancel_pill_motion();
                 assert!(!app.pill_motion_busy());
                 assert!(!app.pill_motion.previous.sprite.IsVisible()?);
-                assert_eq!(
-                    app.window_size(Win::Small),
-                    window_size(app.scale, Win::Small, app.docked(), app.cw, &window_room(&app.settings))
-                );
+                assert_eq!(app.window_size(Win::Small), app.window_size(Win::Big));
+                assert_eq!(app.window_origin(Win::Small), app.window_origin(Win::Big));
                 app.pill_motion.gate = Default::default();
                 app.maybe_start_music_intro();
                 app.ui.tab = view::Tab::Note;

@@ -183,6 +183,7 @@ struct App {
     liquid: Liquid,
     ears: [Layer; 2],
     collapsed: Layer,
+    progress_fill: Layer,
     expanded: Layer,
     cover_layer: Layer,
     cover_flight_until: Option<Instant>,

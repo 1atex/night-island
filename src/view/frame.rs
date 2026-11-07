@@ -40,14 +40,16 @@ pub fn header_has_labels(ui: &UiState) -> bool {
 
 fn header_label_widths() -> [f32; TABS.len()] {
     use windows::Win32::Graphics::DirectWrite::*;
+    type LabelWidths = (bool, crate::data::settings::InterfaceFont, u64, [f32; TABS.len()]);
     thread_local! {
-        static WIDTHS: std::cell::RefCell<Option<(bool, crate::data::settings::InterfaceFont, [f32; TABS.len()])>> = const { std::cell::RefCell::new(None) };
+        static WIDTHS: std::cell::RefCell<Option<LabelWidths>> = const { std::cell::RefCell::new(None) };
     }
     let russian = crate::ui::i18n::is_ru();
     WIDTHS.with_borrow_mut(|cached| {
-        if let Some((language, font, widths)) = cached.as_ref()
+        if let Some((language, font, revision, widths)) = cached.as_ref()
             && *language == russian
             && *font == crate::ui::fonts::selected()
+            && *revision == crate::ui::fonts::revision()
         {
             return *widths;
         }
@@ -69,7 +71,7 @@ fn header_label_widths() -> [f32; TABS.len()] {
         })();
         let widths = measured
             .unwrap_or_else(|_| TABS.map(|(_, _, name)| crate::ui::i18n::tr(name).chars().count() as f32 * 8.0));
-        *cached = Some((russian, crate::ui::fonts::selected(), widths));
+        *cached = Some((russian, crate::ui::fonts::selected(), crate::ui::fonts::revision(), widths));
         widths
     })
 }

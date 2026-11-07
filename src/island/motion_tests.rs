@@ -44,6 +44,12 @@ fn seek(app: &App, progress: f32) -> Result<()> {
         controller.Pause()?;
         controller.SetProgress(progress)?;
     }
+    for sprite in std::iter::once(&app.progress_fill.sprite).chain(app.ears.iter().map(|ear| &ear.sprite)) {
+        if let Ok(controller) = sprite.TryGetAnimationController(h!("Opacity")) {
+            controller.Pause()?;
+            controller.SetProgress(progress)?;
+        }
+    }
     for property in [h!("Scale"), h!("Offset")] {
         let controller = app.expanded.sprite.TryGetAnimationController(property)?;
         controller.Pause()?;
@@ -71,6 +77,7 @@ fn seek(app: &App, progress: f32) -> Result<()> {
 
 fn capture(app: &App, frame: usize) -> Result<()> {
     let Some(folder) = std::env::var_os("NI_OPEN_MOTION_PREVIEW") else { return Ok(()) };
+    let folder = std::path::PathBuf::from(folder).join(if app.docked() { "docked" } else { "floating" });
     let size = app.window_size(Win::Big);
     let (x, y) = app.window_origin(Win::Big);
     unsafe {
@@ -107,7 +114,6 @@ fn capture(app: &App, frame: usize) -> Result<()> {
             pixels.chunks_exact(4).any(|pixel| pixel[0] < 20 && pixel[1] < 20 && pixel[2] < 20),
             "The native island must be visible in captured frame {frame}"
         );
-        let folder = std::path::PathBuf::from(folder);
         std::fs::create_dir_all(&folder).unwrap();
         let mut png = png::Encoder::new(
             std::fs::File::create(folder.join(format!("island-{frame:03}.png"))).unwrap(),
@@ -190,134 +196,191 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             app.open_motion = None;
         }
     }
-    let background = window(WS_EX_LAYERED | WS_EX_TOPMOST)?;
-    let owner = window(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST)?;
-    let (screen_w, screen_h) = App::screen_size();
-    let settings = Settings {
-        placement: Placement::Floating,
-        float_pos: Some([(screen_w * 0.5) as i32, (screen_h * 0.25) as i32]),
-        style: Style::Flat,
-        character: Character::None,
-        music_cover: true,
-        music_eq: false,
-        edge_spikes: false,
-        auto_hide: false,
-        ..Default::default()
-    };
-    let mut app = App::new_visuals(owner.0, 1.0, settings)?;
-    app.ui.cfg = app.settings.clone();
-    app.ui.media = media::Media {
-        title: "Midnight City".into(),
-        artist: "M83".into(),
-        playing: true,
-        source: "Motion preview".into(),
-        cover: media::debug_cover(16, &[72, 140, 230, 255].repeat(256)),
-        ..Default::default()
-    };
-    app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
-    app.collapsed.resize(app.window_size(Win::Small))?;
-    app.place(Win::Big);
-    app.set_geometry_now(Win::Big, false, false)?;
-    app.state = State::Expanded;
-    app.repaint();
-    let size = app.window_size(Win::Big);
-    let (x, y) = app.window_origin(Win::Big);
-    let surface = crate::ui::popup::PopupSurface::new(size)?;
-    surface.paint(&app.gpu, |p| {
-        p.fill_rect((0.0, 0.0, size.0 as f32, size.1 as f32), crate::ui::gfx::rgba(0.14, 0.21, 0.29, 1.0))
-    })?;
-    surface.present(background.0, Some(POINT { x: x.round() as i32, y: y.round() as i32 }), 255)?;
-    unsafe {
-        let _ = ShowWindow(background.0, SW_SHOWNOACTIVATE);
-        SetWindowPos(
-            owner.0,
-            Some(HWND_TOPMOST),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )?;
-    }
-    app.animate_to(true, false)?;
-    app.start_cover_motion(true);
-    for frame in 0..=30 {
-        seek(&app, frame as f32 / 30.0)?;
-        capture(&app, frame)?;
-    }
-    app.finish_cover_motion();
-    app.collapse();
-    for frame in 0..=24 {
-        seek(&app, frame as f32 / 24.0)?;
-        capture(&app, 31 + frame)?;
-    }
-    let before = app.pill_screen(false);
-    app.shrink_window();
-    assert_eq!(before, app.pill_screen(false));
-    for property in [h!("Offset"), h!("Size"), h!("CornerRadius")] {
-        assert!(app.geometry.TryGetAnimationController(property).is_err());
-    }
-    for frame in 0..10 {
+    for placement in [Placement::Docked, Placement::Floating] {
+        let background = window(WS_EX_LAYERED | WS_EX_TOPMOST)?;
+        let owner = window(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST)?;
+        let (screen_w, screen_h) = App::screen_size();
+        let settings = Settings {
+            placement,
+            float_pos: Some([(screen_w * 0.5) as i32, (screen_h * 0.25) as i32]),
+            style: Style::Flat,
+            character: Character::None,
+            music_cover: true,
+            music_eq: false,
+            music_lyrics: false,
+            edge_spikes: false,
+            auto_hide: false,
+            ..Default::default()
+        };
+        let mut app = App::new_visuals(owner.0, 1.0, settings)?;
+        app.ui.cfg = app.settings.clone();
+        app.ui.media = media::Media {
+            title: "Midnight City".into(),
+            artist: "M83".into(),
+            playing: true,
+            source: "Motion preview".into(),
+            cover: media::debug_cover(16, &[72, 140, 230, 255].repeat(256)),
+            ..Default::default()
+        };
+        media::debug_progress(65.0, 100.0);
+        app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
+        app.collapsed.resize(window_size(app.scale, Win::Small, app.docked(), app.cw, &window_room(&app.settings)))?;
+        assert_eq!(app.window_origin(Win::Small), app.window_origin(Win::Big));
+        assert_eq!(app.window_size(Win::Small), app.window_size(Win::Big));
+        app.place(Win::Big);
+        app.set_geometry_now(Win::Big, false, false)?;
+        app.state = State::Expanded;
+        app.repaint();
+        let size = app.window_size(Win::Big);
+        let (x, y) = app.window_origin(Win::Big);
+        let surface = crate::ui::popup::PopupSurface::new(size)?;
+        surface.paint(&app.gpu, |p| {
+            p.fill_rect((0.0, 0.0, size.0 as f32, size.1 as f32), crate::ui::gfx::rgba(0.14, 0.21, 0.29, 1.0))
+        })?;
+        surface.present(background.0, Some(POINT { x: x.round() as i32, y: y.round() as i32 }), 255)?;
         unsafe {
-            let mut message = MSG::default();
-            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
-                let _ = TranslateMessage(&message);
-                DispatchMessageW(&message);
+            let _ = ShowWindow(background.0, SW_SHOWNOACTIVATE);
+            SetWindowPos(
+                owner.0,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )?;
+        }
+        app.animate_to(true, false)?;
+        app.start_cover_motion(true);
+        for frame in 0..=30 {
+            seek(&app, frame as f32 / 30.0)?;
+            capture(&app, frame)?;
+        }
+        app.finish_cover_motion();
+        app.collapse();
+        for frame in 0..=24 {
+            seek(&app, frame as f32 / 24.0)?;
+            capture(&app, 31 + frame)?;
+        }
+        let before = app.pill_screen(false);
+        app.shrink_window();
+        assert_eq!(before, app.pill_screen(false));
+        for property in [h!("Offset"), h!("Size"), h!("CornerRadius")] {
+            assert!(app.geometry.TryGetAnimationController(property).is_err());
+        }
+        for frame in 0..10 {
+            unsafe {
+                let mut message = MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+                DwmFlush()?;
+                std::thread::sleep(Duration::from_millis(25));
+                DwmFlush()?;
             }
-            DwmFlush()?;
-            std::thread::sleep(Duration::from_millis(25));
-            DwmFlush()?;
+            capture(&app, 56 + frame)?;
+            let dc = unsafe { GetDC(None) };
+            for dx in [4.0, 12.0, 35.0] {
+                let color = unsafe {
+                    GetPixel(dc, (before.0 + before.2 + dx).round() as i32, (before.1 + before.3 * 0.5).round() as i32)
+                };
+                assert!((color.0 & 255) > 25, "The island stretched right after collapse, frame {frame}: {color:?}");
+            }
+            unsafe {
+                ReleaseDC(None, dc);
+            }
         }
-        capture(&app, 56 + frame)?;
-        let dc = unsafe { GetDC(None) };
-        for dx in [4.0, 12.0, 35.0] {
-            let color = unsafe {
-                GetPixel(dc, (before.0 + before.2 + dx).round() as i32, (before.1 + before.3 * 0.5).round() as i32)
-            };
-            assert!((color.0 & 255) > 25, "The island stretched right after collapse, frame {frame}: {color:?}");
+        let outside = POINT { x: (before.0 + before.2 * 0.5) as i32, y: (before.1 + before.3 + 120.0) as i32 };
+        assert_ne!(unsafe { WindowFromPoint(outside) }, owner.0, "The empty canvas must not intercept other windows");
+        app.settings.character = Character::Spark;
+        app.ui.char_inset = CHAR_INSET;
+        app.ui.weather = Some(crate::services::weather::Weather {
+            place: "Preview".into(),
+            temp: 4.0,
+            wind: 2.0,
+            humidity: 50.0,
+            sky: crate::services::weather::Sky::Overcast,
+            night: false,
+            hourly: Vec::new(),
+            daily: Vec::new(),
+            city_missing: false,
+        });
+        app.settings.style = Style::Liquid;
+        app.settings.edge_spikes = true;
+        app.settings.spike_color = true;
+        app.settings.pill_blur = false;
+        app.apply_layout();
+        let size = app.window_size(Win::Big);
+        let origin = app.window_origin(Win::Big);
+        let backdrop = crate::ui::popup::PopupSurface::new(size)?;
+        backdrop.paint(&app.gpu, |p| {
+            p.fill_rect((0.0, 0.0, size.0 as f32, size.1 as f32), crate::ui::gfx::rgba(0.14, 0.21, 0.29, 1.0))
+        })?;
+        backdrop.present(background.0, Some(POINT { x: origin.0.round() as i32, y: origin.1.round() as i32 }), 255)?;
+        app.paint_progress_fill();
+        app.pet.char_layer.paint(&app.gpu, |p| {
+            let _ = characters::draw_attached(
+                p,
+                Character::Spark,
+                characters::BOX_W * app.scale,
+                &characters::Pose {
+                    t: 0.0,
+                    reaction: characters::Reaction::Idle,
+                    look: (0.0, 0.0),
+                    blink: false,
+                    accent: (0.6, 0.7, 0.9),
+                    beat: 0.0,
+                    motion: Default::default(),
+                },
+                None,
+            );
+        })?;
+        app.pet.char_layer.sprite.SetIsVisible(true)?;
+        let body = app.pill_rect(false);
+        app.liquid.pull_ready = true;
+        app.liquid.bump_amp = 24.0;
+        app.liquid.pull = crate::ui::gfx::ElasticPull {
+            point: (body.0 + body.2 * 0.6, body.1 + body.3),
+            normal: (0.0, 1.0),
+            spread: 44.0,
+            depth: 24.0,
+        };
+        for (index, style) in [
+            crate::data::settings::EqStyle::Spikes,
+            crate::data::settings::EqStyle::Wave,
+            crate::data::settings::EqStyle::Bars,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.settings.eq_style = style;
+            app.paint_edge_levels(&[0.25, 0.6, 0.4, 0.75, 0.65, 0.5, 0.75, 0.5, 0.2]);
+            assert!(app.liquid.body_active.get());
+            assert!(!app.liquid.bump.sprite.IsVisible()?);
+            let _ = app.compositor.RequestCommitAsync();
+            unsafe {
+                let mut message = MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+                DwmFlush()?;
+                std::thread::sleep(Duration::from_millis(25));
+                DwmFlush()?;
+            }
+            capture(&app, 70 + index)?;
         }
-        unsafe {
-            ReleaseDC(None, dc);
-        }
-    }
-    app.settings.style = Style::Liquid;
-    app.settings.edge_spikes = true;
-    app.settings.spike_color = true;
-    app.settings.pill_blur = false;
-    app.apply_layout();
-    let body = app.pill_rect(false);
-    app.liquid.pull_ready = true;
-    app.liquid.bump_amp = 24.0;
-    app.liquid.pull = crate::ui::gfx::ElasticPull {
-        point: (body.0 + body.2 * 0.6, body.1 + body.3),
-        normal: (0.0, 1.0),
-        spread: 44.0,
-        depth: 24.0,
-    };
-    for (index, style) in [
-        crate::data::settings::EqStyle::Spikes,
-        crate::data::settings::EqStyle::Wave,
-        crate::data::settings::EqStyle::Bars,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        app.settings.eq_style = style;
-        app.paint_edge_levels(&[0.25, 0.6, 0.4, 0.75, 0.65, 0.5, 0.75, 0.5, 0.2]);
+        app.music.spectrum_running = true;
+        app.liquid.bump_amp = 0.0;
+        app.liquid.bump_vel = 0.0;
+        app.paint_spikes();
         assert!(app.liquid.body_active.get());
-        assert!(!app.liquid.bump.sprite.IsVisible()?);
-        let _ = app.compositor.RequestCommitAsync();
-        unsafe {
-            let mut message = MSG::default();
-            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
-                let _ = TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-            DwmFlush()?;
-            std::thread::sleep(Duration::from_millis(25));
-            DwmFlush()?;
-        }
-        capture(&app, 70 + index)?;
+        app.liquid_tick();
+        assert!(app.liquid.body_active.get(), "The liquid timer must preserve the audio silhouette");
+        app.set_decoration_through(false);
+        app._target.SetRoot(None::<&windows::UI::Composition::Visual>)?;
+        app.compositor.Close()?;
     }
     Ok(())
 }
