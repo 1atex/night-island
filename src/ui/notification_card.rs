@@ -73,12 +73,7 @@ fn notify(hwnd: HWND, state: &State, action: Action) {
 }
 
 fn inside(rect: Rect, scale: f32, point: (f32, f32)) -> bool {
-    let radius = (26.0 * scale).min(rect.2.min(rect.3) / 2.0);
-    let q = (
-        point.0.clamp(rect.0 + radius, rect.0 + rect.2 - radius),
-        point.1.clamp(rect.1 + radius, rect.1 + rect.3 - radius),
-    );
-    (point.0 - q.0).powi(2) + (point.1 - q.1).powi(2) <= radius * radius
+    view::rounded_body_contains(rect, 26.0 * scale, point)
 }
 
 extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -438,6 +433,33 @@ impl Drop for NotificationCard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shrinking_pet_card_keeps_hit_bounds_ordered_at_any_monitor_origin() {
+        let frame = (2196.0686, 386.0, 51.86258, 53.1);
+        assert!(inside(frame, 1.0, (2222.0, 412.0)));
+
+        for (left, top, width, height) in [
+            (0.0, 0.0, 1920.0, 1080.0),
+            (0.0, 0.0, 2560.0, 1440.0),
+            (1920.0, 0.0, 3840.0, 2160.0),
+            (-5120.0, -1440.0, 5120.0, 1440.0),
+            (3840.0, -2160.0, 7680.0, 4320.0),
+        ] {
+            for scale in [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5] {
+                for (w, h) in [(frame.2, frame.3), (frame.3, frame.2), (frame.2, frame.2)] {
+                    let center = (left + width * 0.85, top + height * 0.37);
+                    let (w, h) = (w * scale, h * scale);
+                    let (x, y) = (center.0 - w / 2.0, center.1 - h / 2.0);
+                    let frame = (x, y, w, h);
+                    assert!(inside(frame, scale, center));
+                    assert!(!inside(frame, scale, (x, y)));
+                    assert!(!inside(frame, scale, (x + w + scale, center.1)));
+                    assert!(!inside(frame, scale, (center.0, y + h + scale)));
+                }
+            }
+        }
+    }
 
     #[test]
     fn notification_cards_fit_every_edge_and_negative_monitor_coordinates() {

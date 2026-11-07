@@ -273,6 +273,18 @@ fn inside(r: Rect, px: f32, py: f32) -> bool {
     px >= r.0 && px < r.2 && py >= r.1 && py < r.3
 }
 
+pub(crate) fn rounded_body_contains((left, top, width, height): Rect, radius: f32, point: (f32, f32)) -> bool {
+    let x = point.0 - left;
+    let y = point.1 - top;
+    if !inside((0.0, 0.0, width, height), x, y) {
+        return false;
+    }
+    let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
+    let dx = x - x.clamp(radius, width - radius);
+    let dy = y - y.clamp(radius, height - radius);
+    dx * dx + dy * dy <= radius * radius
+}
+
 const DIM: f32 = 0.6;
 
 fn acc(alpha: f32) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {

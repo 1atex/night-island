@@ -675,7 +675,7 @@ impl App {
             return true;
         }
         let (at, size, radius) = self.pill(self.win, false, false);
-        rounded_body_contains((at.X, at.Y, size.X, size.Y), radius.X, (x as f32, y as f32))
+        view::rounded_body_contains((at.X, at.Y, size.X, size.Y), radius.X, (x as f32, y as f32))
     }
 
     pub(in crate::island) fn set_decoration_through(&mut self, through: bool) {
@@ -819,16 +819,6 @@ impl App {
     }
 }
 
-fn rounded_body_contains((left, top, width, height): view::Rect, radius: f32, (x, y): (f32, f32)) -> bool {
-    if x < left || x >= left + width || y < top || y >= top + height {
-        return false;
-    }
-    let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
-    let cx = x.clamp(left + radius, left + width - radius);
-    let cy = y.clamp(top + radius, top + height - radius);
-    (x - cx).powi(2) + (y - cy).powi(2) <= radius.powi(2)
-}
-
 #[cfg(test)]
 mod input_tests {
     use super::*;
@@ -838,10 +828,10 @@ mod input_tests {
         for scale in [0.75, 1.0, 1.5, 2.0] {
             let frame = (50.0 * scale, 40.0 * scale, 220.0 * scale, 36.0 * scale);
             for point in [(160.0, 50.0), (60.0, 58.0), (260.0, 58.0)] {
-                assert!(rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
+                assert!(view::rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
             }
             for point in [(160.0, 85.0), (35.0, 58.0), (285.0, 58.0), (51.0, 41.0), (160.0, 30.0)] {
-                assert!(!rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
+                assert!(!view::rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
             }
         }
     }

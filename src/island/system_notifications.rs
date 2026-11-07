@@ -808,7 +808,10 @@ mod tests {
         app.agent = Some(crate::services::assistant::agent::Run::new(String::new(), "test", &[]));
         assert!(app.cancel_voice_input());
         assert!(app.agent.is_none() && !app.pet.voice_phase.cue().engaged());
-        app.hide_notification_card();
+        app.dismiss_notification_card();
+        assert!(app.system_notices.phase == Some(CardPhase::Closing));
+        app.notification_stage();
+        assert!(app.pill_hidden && !app.notification_card_visible());
         drop(app);
         unsafe {
             DestroyWindow(hwnd)?;
