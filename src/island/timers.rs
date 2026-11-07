@@ -151,12 +151,18 @@ impl Timer {
 
 impl App {
     pub(in crate::island) fn kill_timer(&self, timer: Timer) {
+        if matches!(timer, Timer::Expand) {
+            self.pointer.expand_pending.set(false);
+        }
         unsafe {
             let _ = KillTimer(Some(self.hwnd), timer as usize);
         }
     }
 
     pub(in crate::island) fn set_timer(&self, timer: Timer, ms: u32) {
+        if matches!(timer, Timer::Expand) && self.pointer.expand_pending.replace(true) {
+            return;
+        }
         unsafe {
             SetTimer(Some(self.hwnd), timer as usize, ms, None);
         }
@@ -264,7 +270,12 @@ impl App {
             Timer::PillBack => self.pill_back_tick(),
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),
-            Timer::Settle => self.settle_layers(),
+            Timer::Settle => {
+                if self.cover_flight_until.is_some_and(|until| Instant::now() >= until) {
+                    self.finish_cover_motion();
+                }
+                self.settle_layers();
+            }
             Timer::UiAnim => self.ui_anim_tick(),
             Timer::VpnWait => self.vpn_wait_over(),
             Timer::SteamPoll => self.on_steam_poll(),

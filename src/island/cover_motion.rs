@@ -14,7 +14,8 @@ impl App {
     }
 
     pub(in crate::island) fn start_cover_motion(&mut self, expanded: bool) {
-        if self.ui.tab != view::Tab::Home || !crate::ui::feedback::motion_allowed() {
+        if self.ui.tab != view::Tab::Home || !self.settings.island_animations || !crate::ui::feedback::motion_allowed()
+        {
             self.finish_cover_motion();
             return;
         }
@@ -40,14 +41,32 @@ impl App {
                 self.cover_layer.sprite.SetOffset(Vector3 { X: from.0, Y: from.1, Z: 0.0 })?;
                 self.cover_layer.sprite.SetSize(Vector2 { X: from.2 - from.0, Y: from.3 - from.1 })?;
             }
-            let ms = if expanded { self.open_ms() } else { self.close_ms() };
-            let offset = self.compositor.CreateVector3KeyFrameAnimation()?;
-            offset.InsertKeyFrameWithEasingFunction(1.0, Vector3 { X: to.0, Y: to.1, Z: 0.0 }, &self.ease()?)?;
-            offset.SetDuration(Duration::from_millis(ms).into())?;
-            self.cover_layer.sprite.StartAnimation(h!("Offset"), &offset)?;
-            self.cover_layer
-                .sprite
-                .StartAnimation(h!("Size"), &self.spring(Vector2 { X: to.2 - to.0, Y: to.3 - to.1 }, ms)?)?;
+            let ms = self.transition_ms(expanded);
+            if self.open_motion.is_some() {
+                self.cover_layer.sprite.StartAnimation(
+                    h!("Offset"),
+                    &self.open_vector3(|p| Vector3 {
+                        X: small.0 + (large.0 - small.0) * p,
+                        Y: small.1 + (large.1 - small.1) * p,
+                        Z: 0.0,
+                    })?,
+                )?;
+                self.cover_layer.sprite.StartAnimation(
+                    h!("Size"),
+                    &self.open_vector(
+                        Vector2 { X: small.2 - small.0, Y: small.3 - small.1 },
+                        Vector2 { X: large.2 - large.0, Y: large.3 - large.1 },
+                    )?,
+                )?;
+            } else {
+                let offset = self.compositor.CreateVector3KeyFrameAnimation()?;
+                offset.InsertKeyFrameWithEasingFunction(1.0, Vector3 { X: to.0, Y: to.1, Z: 0.0 }, &self.ease()?)?;
+                offset.SetDuration(Duration::from_millis(ms).into())?;
+                self.cover_layer.sprite.StartAnimation(h!("Offset"), &offset)?;
+                self.cover_layer
+                    .sprite
+                    .StartAnimation(h!("Size"), &self.spring(Vector2 { X: to.2 - to.0, Y: to.3 - to.1 }, ms)?)?;
+            }
             self.cover_layer.sprite.SetIsVisible(true)?;
             self.cover_flight_until = Some(Instant::now() + Duration::from_millis(ms));
             self.ui.cover_in_flight = true;
@@ -60,7 +79,9 @@ impl App {
         }
         self.repaint_collapsed();
         self.repaint_expanded();
-        self.set_timer(Timer::UiAnim, self.frame_ms());
+        if expanded {
+            self.set_timer(Timer::Settle, self.transition_ms(true) as u32 + 30);
+        }
     }
 }
 

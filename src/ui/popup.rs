@@ -256,6 +256,10 @@ impl PopupBackdrop {
             .and_then(|brush| self.sprite.SetBrush(&brush));
     }
 
+    pub fn set_opacity(&self, opacity: f32) {
+        let _ = self.sprite.SetOpacity(opacity.clamp(0.0, 1.0));
+    }
+
     pub fn hide(&self) {
         unsafe {
             let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(

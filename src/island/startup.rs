@@ -312,6 +312,7 @@ impl App {
             win: Win::Small,
             compositor,
             geometry,
+            open_motion: None,
             state: State::Collapsed,
             _target: target,
             _visual: visual,
@@ -416,6 +417,7 @@ impl App {
                 frame: 0,
             },
             pointer: Pointer {
+                expand_pending: Default::default(),
                 decoration_through: false,
                 tracking: false,
                 press: None,

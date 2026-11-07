@@ -885,6 +885,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Open delay" => "Задержка откр.",
         "Close delay" => "Задержка закр.",
         "Open speed" => "Скорость откр.",
+        "Animate island opening and closing" => "Анимация открытия и закрытия острова",
         "Close speed" => "Скорость закр.",
         "Auto-hide" => "Автоскрытие",
         "Lock dragging" => "Заблокировать перетаскивание",

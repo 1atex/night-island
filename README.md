@@ -62,7 +62,7 @@ This integration uses the unofficial Yandex Music API and native Windows audio p
 
 An optional bottom dock shares Island's process and graphics device. Enable it in **Settings → Desktop dock** after closing another dock. It includes pinned apps and files, running-window indicators, click to launch/restore/minimize, a window list on right-click, pinned-icon reordering and file drops. Scroll when the app list exceeds the screen width.
 
-Settings control icon size, hover magnification, native backdrop blur, tint hue/saturation/brightness, opacity, bottom margin, monitor, auto-hide and 30/60 fps motion. Blur and plain materials remember separate opacity values; unsupported systems keep the configured tint without the blur effect. Icons load asynchronously at the physical size needed for DPI and zoom, preserve their aspect ratio and alpha, and reuse cached GPU bitmaps. Open Island settings appear in the running-app list while helper windows remain excluded.
+Settings control icon size, hover magnification, native backdrop blur, tint hue/saturation/brightness, opacity, bottom margin, monitor, auto-hide and economy or smooth motion. Blur and plain materials remember separate opacity values; unsupported systems keep the configured tint without the blur effect. Icons load asynchronously at the physical size needed for DPI and zoom, preserve their aspect ratio and alpha, and reuse cached GPU bitmaps. Open Island settings appear in the running-app list while helper windows remain excluded.
 
 Hover cards prepare controls as soon as the pointer reaches an app, reuse a short app-specific cache and receive updates immediately. Media metadata loads without blocking application volume or Discord voice state. The card inherits the dock's blur, tint and opacity; live window thumbnails stay sharp. The blur surface hides with the card and follows capture privacy.
 
@@ -87,6 +87,10 @@ Hover briefly over a running app to open its live Windows thumbnail, switch betw
 Dock contours preserve their antialiased edge pixels at fractional DPI, and switching/minimizing windows triggers a single delayed backdrop refresh rather than a continuous capture loop.
 
 ### Interface motion
+
+Opening uses one compositor timeline for the silhouette, artwork and content. The body stays within its final bounds, content appears once there is room, and a return to the closing island continues from its current position and velocity. Hover delay starts once on entry, rather than restarting with every mouse movement. During the transition, transparent areas pass clicks through. Opening and closing speed and the motion curve remain adjustable under Animations; Windows reduced motion is respected.
+
+Dock magnification follows the pointer with damped motion, without a second delayed layout pass. Reordering has its own movement, tooltips fade, and mouse events share a scheduled frame instead of repainting for every input event. Hover previews fade their content, live thumbnail and blur together, retain the previous preview while moving between apps, and reopen smoothly if the pointer returns during dismissal. Dock animations and economy mode remain independently configurable. Animation timers stop at rest.
 
 Home action tiles, playback buttons, header selection and control tiles use short hover transitions. Pressed Home buttons compress slightly; settings switches slide their thumb and segmented controls move their selection. Repeated input retargets from the currently visible value. The feedback timer stops when transitions finish.
 

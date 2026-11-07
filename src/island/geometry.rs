@@ -224,11 +224,19 @@ impl App {
     }
 
     pub(in crate::island) fn open_ms(&self) -> u64 {
-        if crate::ui::feedback::motion_allowed() { (OPEN_BASE_MS / self.settings.open_speed) as u64 } else { 1 }
+        if self.settings.island_animations && crate::ui::feedback::motion_allowed() {
+            (OPEN_BASE_MS / self.settings.open_speed) as u64
+        } else {
+            1
+        }
     }
 
     pub(in crate::island) fn close_ms(&self) -> u64 {
-        if crate::ui::feedback::motion_allowed() { (CLOSE_BASE_MS / self.settings.close_speed) as u64 } else { 1 }
+        if self.settings.island_animations && crate::ui::feedback::motion_allowed() {
+            (CLOSE_BASE_MS / self.settings.close_speed) as u64
+        } else {
+            1
+        }
     }
 
     pub(in crate::island) fn window_size(&self, win: Win) -> (i32, i32) {
@@ -506,6 +514,10 @@ impl App {
     }
 
     pub(in crate::island) fn apply_layout(&mut self) {
+        self.open_motion = None;
+        let _ = self.expanded.sprite.StopAnimation(h!("Scale"));
+        let _ = self.expanded.sprite.StopAnimation(h!("Offset"));
+        let _ = self.expanded.sprite.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
         self.finish_cover_motion();
         self.hide_notification_card();
         self.cancel_pill_motion();

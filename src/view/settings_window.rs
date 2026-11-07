@@ -41,7 +41,8 @@ const ISLAND: [(Sid, &str, Kind); 15] = [
     (Sid::CloseDelay, "Close delay", Kind::Slider),
 ];
 
-const ANIMATIONS: [(Sid, &str, Kind); 6] = [
+const ANIMATIONS: [(Sid, &str, Kind); 7] = [
+    (Sid::IslandAnimations, "Animate island opening and closing", Kind::Toggle),
     (Sid::AnimCurve, "Animation curve", Kind::Cycle),
     (Sid::TabAnimKind, "Tab change", Kind::Cycle),
     (Sid::TabAnimSpeed, "Tab change speed", Kind::Slider),

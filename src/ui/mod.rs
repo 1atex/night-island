@@ -16,6 +16,7 @@ pub mod pet_design;
 pub mod pet_motion;
 pub mod pet_speech;
 pub mod popup;
+pub(crate) mod reveal;
 pub mod theme;
 pub mod tip;
 pub mod tray;

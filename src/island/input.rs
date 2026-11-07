@@ -2,6 +2,7 @@ use crate::island::*;
 
 #[derive(Default)]
 pub(in crate::island) struct Pointer {
+    pub(in crate::island) expand_pending: std::cell::Cell<bool>,
     pub(in crate::island) decoration_through: bool,
     pub(in crate::island) tracking: bool,
     pub(in crate::island) press: Option<((i32, i32), (i32, i32))>,
@@ -187,6 +188,7 @@ impl App {
         if self.state != State::Expanded {
             return;
         }
+        let Some((x, y)) = self.open_content_point(x, y) else { return };
         let pill = self.pill_rect(true);
         let (fx, fy) = (x as f32, y as f32);
         if self.ui.remind.alert.is_some() {
@@ -464,6 +466,7 @@ impl App {
         if self.state != State::Expanded {
             return;
         }
+        let Some((x, y)) = self.open_content_point(x, y) else { return };
         if self.ui.remind.alert.is_some() {
             return self.click_alert(x, y);
         }
@@ -748,6 +751,9 @@ impl App {
         }
         self.kill_timer(Timer::Collapse);
         self.kill_timer(Timer::Autohide);
+        if self.state == State::Collapsing && self.transition_hit(x, y) == Some(true) {
+            self.expand();
+        }
         if self.state != State::Expanded {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed

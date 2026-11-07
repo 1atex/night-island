@@ -177,6 +177,15 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             let (x, y) = point_from(lparam);
             let mut through = false;
             with_app(|a| {
+                if a.open_motion.is_some() {
+                    let mut rect = windows::Win32::Foundation::RECT::default();
+                    if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() }
+                        && let Some(hit) = a.transition_hit(x - rect.left, y - rect.top)
+                    {
+                        through = !hit;
+                        return;
+                    }
+                }
                 if a.state == State::Collapsed && a.liquid_on() && !a.character_interacting() && !a.pill_motion_busy() {
                     let mut rect = windows::Win32::Foundation::RECT::default();
                     if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() } {

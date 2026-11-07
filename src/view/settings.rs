@@ -152,6 +152,7 @@ pub enum Sid {
     OpenDelay,
     CloseDelay,
     OpenSpeed,
+    IslandAnimations,
     TabAnimKind,
     TextLayout,
     TabAnimSpeed,
@@ -474,6 +475,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
     }
     match id {
         Sid::LegacyIcons => c.legacy_icons,
+        Sid::IslandAnimations => c.island_animations,
         Sid::TopAutoHide => c.top_panel.auto_hide,
         Sid::TopTray => c.top_panel.tray,
         Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture,
@@ -586,6 +588,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
     }
     match id {
         Sid::LegacyIcons => c.legacy_icons = on,
+        Sid::IslandAnimations => c.island_animations = on,
         Sid::TopAutoHide => c.top_panel.auto_hide = on,
         Sid::TopTray => c.top_panel.tray = on,
         Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture = on,

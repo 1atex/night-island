@@ -128,6 +128,7 @@ struct App {
     scale: f32,
     compositor: Compositor,
     geometry: CompositionRoundedRectangleGeometry,
+    open_motion: Option<motion::OpenMotion>,
     state: State,
     win: Win,
     pointer: Pointer,

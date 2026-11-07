@@ -71,6 +71,9 @@ struct State {
     panel: Rect,
     region_shapes: Vec<[i32; 6]>,
     feedback: Feedback,
+    frame_pending: bool,
+    hint_label: Option<(usize, String)>,
+    hint_alpha: f32,
     pointer: Option<(f32, f32)>,
     hover: Option<usize>,
     pressed: Option<(usize, f32)>,
@@ -322,6 +325,7 @@ impl State {
             self.hover = None;
             self.pressed = None;
             self.dragging = false;
+            self.frame_pending = false;
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
                 if suppressed {
@@ -378,11 +382,34 @@ impl State {
     }
 
     fn hit(&self, point: (f32, f32)) -> Option<usize> {
-        self.rects.iter().find(|(_, rect)| inside(*rect, point)).map(|(index, _)| *index)
+        self.rects
+            .iter()
+            .find(|(_, rect)| {
+                inside(
+                    (
+                        rect.0 - 4.0 * self.scale,
+                        rect.1 - 3.0 * self.scale,
+                        rect.2 + 4.0 * self.scale,
+                        rect.3 + 6.0 * self.scale,
+                    ),
+                    point,
+                )
+            })
+            .map(|(index, _)| *index)
+    }
+
+    fn request_frame(&mut self) {
+        if !self.frame_pending && !self.suppressed {
+            self.frame_pending = true;
+            unsafe {
+                SetTimer(Some(self.hwnd), FRAME, if self.config.economy { 33 } else { 10 }, None);
+            }
+        }
     }
 
     fn render(&mut self) {
         if self.suppressed {
+            self.frame_pending = false;
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
             }
@@ -400,28 +427,33 @@ impl State {
         )
         .saturating_sub(usize::from(self.config.show_add));
         let count = self.entries.len().saturating_sub(self.offset).min(slots);
-        let pitch = icon + 12.0 * s;
+        let pitch = icon + 10.0 * s;
         let shown = count + usize::from(self.config.show_add || self.entries.is_empty());
-        let base_left = (width - shown as f32 * pitch) / 2.0;
-        let hide = self.feedback.sample(10_000, if self.hidden { 1.0 } else { 0.0 }, 0.0, 220);
+        let boundary = (0..count).find(|n| {
+            let i = self.offset + n;
+            i > 0 && self.entries[i - 1].pinned && !self.entries[i].pinned
+        });
+        let gap = if self.config.separator && boundary.is_some() { 20.0 * s } else { 0.0 };
+        let base_left = (width - shown as f32 * pitch - gap) / 2.0;
+        let hide = self.feedback.follow(10_000, if self.hidden { 1.0 } else { 0.0 }, 0.0, 280).clamp(0.0, 1.0);
         let bottom = height - (self.config.margin as f32 + 12.0) * s;
         let shift = hide * (icon * self.config.zoom + (self.config.margin as f32 + 24.0) * s);
         let mut sizes = Vec::new();
         for n in 0..shown {
             let i = if n == count { self.entries.len() } else { self.offset + n };
             let strength = self.pointer.filter(|_| self.config.zoom > 1.0).map_or(0.0, |p| {
-                let d = ((p.0 - (base_left + (n as f32 + 0.5) * pitch)) / (pitch * 1.8)).abs();
-                if p.1 < bottom - icon * self.config.zoom - 10.0 * s { 0.0 } else { (1.0 - d).max(0.0).powi(2) }
+                let center =
+                    base_left + (n as f32 + 0.5) * pitch + if boundary.is_some_and(|b| n >= b) { gap } else { 0.0 };
+                let distance = ((p.0 - center) / (pitch * 1.8)).abs().min(1.0);
+                let horizontal = 0.5 + 0.5 * (std::f32::consts::PI * distance).cos();
+                let vertical =
+                    crate::ui::reveal::smooth_range(p.1, bottom - icon * self.config.zoom - 28.0 * s, bottom - icon);
+                horizontal * vertical
             });
             let id = self.entries.get(i).map_or(i as u64, |entry| motion_key(&entry.pin.target, 1));
-            let zoom = self.feedback.sample(id, strength, 0.0, 150);
+            let zoom = self.feedback.follow(id, strength, 0.0, 180).clamp(0.0, 1.0);
             sizes.push(icon * (1.0 + (self.config.zoom - 1.0) * zoom));
         }
-        let boundary = (0..count).find(|n| {
-            let i = self.offset + n;
-            i > 0 && self.entries[i - 1].pinned && !self.entries[i].pinned
-        });
-        let gap = if self.config.separator && boundary.is_some() { 20.0 * s } else { 0.0 };
         let total = sizes.iter().sum::<f32>() + (shown as f32 + 1.0) * 10.0 * s + gap;
         let left = (width - total) / 2.0;
         self.panel =
@@ -435,10 +467,10 @@ impl State {
                 x += gap;
             }
             self.drop_slots.push((i, x + side * 0.5));
-            let animated_x = self
-                .entries
-                .get(i)
-                .map_or(x, |entry| self.feedback.sample(motion_key(&entry.pin.target, 2), x, x, 180));
+            let animated_x = self.entries.get(i).map_or(x, |entry| {
+                let rank = self.feedback.follow(motion_key(&entry.pin.target, 2), n as f32, n as f32, 220);
+                x + (rank - n as f32) * pitch
+            });
             let rect = if self.dragging && self.pressed.is_some_and(|(index, _)| index == i) {
                 let point = self.pointer.unwrap_or((animated_x + side * 0.5, bottom - side * 0.5));
                 let drag_x = (point.0 - side * 0.5).clamp(2.0 * s, width - side - 2.0 * s);
@@ -455,6 +487,12 @@ impl State {
                 |entry| entry.pin.name.clone(),
             )
         });
+        if let Some(text) = hint.as_ref() {
+            self.hint_label = self.hover.map(|index| (index, text.clone()));
+        }
+        let show_hint =
+            hint.is_some() && !self.dragging && hide < 0.01 && !self.preview.as_ref().is_some_and(|p| p.is_open());
+        self.hint_alpha = self.feedback.follow(10_001, f32::from(show_hint), 0.0, 160).clamp(0.0, 1.0);
         let label = self.label_rect();
         if let Some((backdrop, geometry)) = &self.backdrop {
             let _ = backdrop.SetIsVisible(self.config.blur && hide < 0.99);
@@ -475,7 +513,7 @@ impl State {
             for (_, rect) in &self.rects {
                 shapes.push(region_shape(*rect, 6.0 * s, 3.0 * s));
             }
-            if hint.is_some() {
+            if self.hint_alpha > 0.001 {
                 shapes.push(region_shape(label, 6.0 * s, padding));
             }
         }
@@ -495,10 +533,11 @@ impl State {
                 }
             }
         }
-        unsafe {
-            if self.feedback.active() {
-                SetTimer(Some(self.hwnd), FRAME, if self.config.economy { 33 } else { 16 }, None);
-            } else {
+        if self.feedback.active() {
+            self.request_frame();
+        } else {
+            self.frame_pending = false;
+            unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
             }
         }
@@ -507,10 +546,10 @@ impl State {
     fn label_rect(&self) -> Rect {
         let s = self.scale;
         let width = self.size.0 as f32;
-        let len = self.hover.and_then(|i| self.entries.get(i)).map_or(0, |e| e.pin.name.chars().count());
+        let len = self.hint_label.as_ref().map_or(0, |(_, label)| label.chars().count());
+        let index = self.hint_label.as_ref().map(|(index, _)| *index);
         let label_width = ((len as f32 * 7.0 + 24.0).clamp(64.0, 280.0) * s).min(width - 8.0 * s);
-        let center =
-            self.rects.iter().find(|(i, _)| Some(*i) == self.hover).map_or(width / 2.0, |(_, r)| (r.0 + r.2) / 2.0);
+        let center = self.rects.iter().find(|(i, _)| Some(*i) == index).map_or(width / 2.0, |(_, r)| (r.0 + r.2) / 2.0);
         let left = (center - label_width / 2.0).clamp(4.0 * s, (width - label_width - 4.0 * s).max(4.0 * s));
         (left, 8.0 * s, left + label_width, 34.0 * s)
     }
@@ -529,12 +568,6 @@ impl State {
             self.config.zoom,
         )
         .saturating_sub(usize::from(self.config.show_add));
-        let hint = self.hover.map(|i| {
-            self.entries.get(i).map_or_else(
-                || crate::ui::i18n::tr("Drop an app here or right-click to add").into_owned(),
-                |entry| entry.pin.name.clone(),
-            )
-        });
         let label = self.label_rect();
 
         if hide > 0.99 {
@@ -632,18 +665,19 @@ impl State {
                 );
             }
         }
-        if let Some(text) = &hint
-            && hide < 0.01
-            && !self.preview.as_ref().is_some_and(|p| p.is_open())
+        if let Some((_, text)) = &self.hint_label
+            && self.hint_alpha > 0.001
+            && hide < 0.99
         {
-            let _ = p.fill_round_rect(label, 9.0 * s, rgba(0.06, 0.06, 0.07, 0.97));
+            let alpha = self.hint_alpha * (1.0 - hide);
+            let _ = p.fill_round_rect(label, 9.0 * s, rgba(0.06, 0.06, 0.07, 0.97 * alpha));
             let _ = p.text(
                 text,
                 label,
                 12.0 * s,
                 DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_TEXT_ALIGNMENT_CENTER,
-                rgba(0.95, 0.95, 0.97, 1.0),
+                rgba(0.95, 0.95, 0.97, alpha),
             );
         }
         if self.entries.len() > slots && hide < 0.01 {
@@ -733,18 +767,19 @@ impl State {
         }
         if self.preview_candidate.as_ref().is_none_or(|(target, _)| *target != entry.pin.target) {
             self.preview_candidate = Some((entry.pin.target.clone(), Instant::now()));
+            let switching = self.preview.as_ref().is_some_and(|p| p.is_open());
             if let Some(preview) = &mut self.preview {
-                preview.hide();
                 preview.allow_reopen();
             }
-            if let Some(window) = entry.windows.first() {
+            if !switching && let Some(window) = entry.windows.first() {
                 self.actions.request(&window.path, &entry.windows.iter().map(|w| w.handle).collect::<Vec<_>>());
             }
             unsafe {
-                SetTimer(Some(self.hwnd), PREVIEW_HOVER, 220, None);
+                SetTimer(Some(self.hwnd), PREVIEW_HOVER, if switching { 80 } else { 200 }, None);
             }
         }
-        if self.preview_candidate.as_ref().is_some_and(|(_, at)| at.elapsed() >= Duration::from_millis(200))
+        let delay = if self.preview.as_ref().is_some_and(|p| p.is_open()) { 70 } else { 180 };
+        if self.preview_candidate.as_ref().is_some_and(|(_, at)| at.elapsed() >= Duration::from_millis(delay))
             && !self.preview.as_ref().is_some_and(|p| p.target() == entry.pin.target && (p.is_open() || p.dismissed()))
         {
             self.show_preview(&entry);
@@ -819,6 +854,8 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             WM_TIMER => {
                 let state = &mut *ptr;
                 if wparam.0 == FRAME {
+                    let _ = KillTimer(Some(hwnd), FRAME);
+                    state.frame_pending = false;
                     state.render();
                 } else if wparam.0 == PULSE {
                     state.pulse();
@@ -882,7 +919,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                         y: state.origin.1 + point.1 as i32,
                     });
                 }
-                state.render();
+                state.request_frame();
                 LRESULT(0)
             }
             WM_MOUSELEAVE => {
@@ -890,7 +927,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 state.pointer = None;
                 state.hover = None;
                 state.leave_at = Instant::now();
-                state.render();
+                state.request_frame();
                 LRESULT(0)
             }
             WM_LBUTTONDOWN => {
@@ -1095,6 +1132,9 @@ impl Dock {
             panel: (0.0, 0.0, 1.0, 1.0),
             region_shapes: Vec::new(),
             feedback: Feedback::with_capacity(512),
+            frame_pending: false,
+            hint_label: None,
+            hint_alpha: 0.0,
             pointer: None,
             hover: None,
             pressed: None,
@@ -1697,6 +1737,31 @@ mod tests {
         }
         assert_eq!(dock.config().pins, stable);
         assert!(dock.take_request().is_none());
+        dock.state.scale = 1.0;
+        dock.state.layout();
+        dock.state.feedback.set_enabled(true);
+        dock.state.pointer = None;
+        dock.state.render();
+        let left = dock.state.rects.first().unwrap().1.0;
+        let right = dock.state.rects.last().unwrap().1.2;
+        for frame in 0..90 {
+            let x = left + (right - left) * frame as f32 / 89.0;
+            dock.state.pointer = Some((x, dock.state.panel.3 - 20.0));
+            dock.state.render();
+            for pair in dock.state.rects.windows(2) {
+                assert!(pair[1].1.0 - pair[0].1.2 >= 9.0, "Magnification must not overlap neighboring icons");
+            }
+            std::thread::sleep(Duration::from_millis(8));
+        }
+        dock.state.pointer = None;
+        dock.state.hover = None;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while dock.state.feedback.active() && Instant::now() < deadline {
+            dock.state.render();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!dock.state.feedback.active());
+        assert!(!dock.state.frame_pending);
         let mut config = dock.config();
         config.pins.clear();
         config.monitor = "disconnected-monitor".into();
