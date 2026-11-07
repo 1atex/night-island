@@ -34,8 +34,16 @@ impl App {
     }
 
     pub(in crate::island) fn show_notice_for(&mut self, glyph: char, text: &str, ms: u32) {
+        self.set_notice_for(glyph, text, ms, false);
+    }
+
+    pub(in crate::island) fn show_compact_reply(&mut self, text: &str) {
+        self.set_notice_for('\u{E8F2}', text, 7000, true);
+    }
+
+    fn set_notice_for(&mut self, glyph: char, text: &str, ms: u32, compact: bool) {
         self.react(if glyph == '\u{E783}' { Reaction::Attention } else { Reaction::Done }, 2300);
-        self.system_notices.compact_reply = false;
+        self.system_notices.compact_reply = compact;
         self.notice_link = None;
         self.ui.notice = Some((glyph, text.to_string()));
         self.update_eq();

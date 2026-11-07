@@ -320,8 +320,8 @@ impl App {
                 self.ui.notice = None;
                 self.notice_link = None;
                 self.update_eq();
-                self.repaint_collapsed();
                 self.maybe_show_notification();
+                self.repaint_collapsed();
             }
             Timer::Volume => {
                 self.ui.volume = None;

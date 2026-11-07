@@ -282,8 +282,7 @@ impl App {
             let work = self.island_work_area();
             let available = if self.settings.vertical() { work.3 - work.1 } else { work.2 - work.0 };
             if view::compact_reply_fits(&self.ui, &record.body, available / self.scale - 32.0) {
-                self.show_notice_for('\u{E8F2}', record.body.trim(), 7000);
-                self.system_notices.compact_reply = true;
+                self.show_compact_reply(record.body.trim());
                 return;
             }
         }
@@ -820,6 +819,16 @@ mod tests {
         assert_eq!(app.ui.notice.as_ref().unwrap().1, "Музыка на паузе.");
         app.cancel_pill_motion();
         app.on_timer(Timer::Notice as usize);
+        assert_eq!(app.ui.notice.as_ref().unwrap().1, "Готово.");
+        app.notify_for(Notice::Ai, '\u{E8F2}', "Готово.", 7000);
+        app.notify_for(Notice::Ai, '\u{E8F2}', "Готово.", 7000);
+        app.cancel_pill_motion();
+        app.on_timer(Timer::Notice as usize);
+        assert_eq!(app.system_notices.queue.len(), 1);
+        assert_eq!(app.ui.notice.as_ref().unwrap().1, "Готово.");
+        app.cancel_pill_motion();
+        app.on_timer(Timer::Notice as usize);
+        assert!(app.system_notices.queue.is_empty());
         assert_eq!(app.ui.notice.as_ref().unwrap().1, "Готово.");
         app.cancel_pill_motion();
         app.on_timer(Timer::Notice as usize);
