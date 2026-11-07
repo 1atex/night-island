@@ -26,12 +26,7 @@ impl App {
                 self.settings.pet_notifications && self.pet.desktop.is_some()
             };
             if card {
-                let title = match kind {
-                    Notice::Ai => "Assistant",
-                    Notice::Error => "Error",
-                    _ => "Notification",
-                };
-                self.post_local_notification(title, text);
+                self.post_local_notification(kind, text);
             } else {
                 self.show_notice_for(glyph, text, ms);
             }
@@ -40,6 +35,7 @@ impl App {
 
     pub(in crate::island) fn show_notice_for(&mut self, glyph: char, text: &str, ms: u32) {
         self.react(if glyph == '\u{E783}' { Reaction::Attention } else { Reaction::Done }, 2300);
+        self.system_notices.compact_reply = false;
         self.notice_link = None;
         self.ui.notice = Some((glyph, text.to_string()));
         self.update_eq();

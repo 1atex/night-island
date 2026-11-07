@@ -322,6 +322,20 @@ pub fn sf_available() -> bool {
     with_fonts(|fonts| Ok(fonts.sf.is_some())).unwrap_or(false)
 }
 
+pub fn wrapped_height(text: &str, width: f32, size: f32, weight: DWRITE_FONT_WEIGHT) -> f32 {
+    with_fonts(|fonts| {
+        let format = fonts.format(selected(), size, weight)?;
+        let wide: Vec<_> = text.encode_utf16().collect();
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        unsafe {
+            format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+            fonts.factory.CreateTextLayout(&wide, &format, width.max(1.0), 100_000.0)?.GetMetrics(&mut metrics)?;
+        }
+        Ok(metrics.height.ceil())
+    })
+    .unwrap_or(size * 1.5)
+}
+
 pub fn native_family() -> PCWSTR {
     with_fonts(|fonts| {
         if selected() == InterfaceFont::Montserrat && !fonts.native_montserrat {

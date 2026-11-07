@@ -424,6 +424,11 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Notification" => "Уведомление",
         "Talk to the detached pet" => "Разговор с вынесенным питомцем",
         "Show AI answers as cards" => "Показывать ответы ИИ карточками",
+        "Short AI replies inside the island" => "Короткие ответы ИИ внутри острова",
+        "Long replies use cards. Detached pet replies stay beside the pet." => {
+            "Длинные ответы — в карточках. У вынесенного питомца ответы остаются рядом с ним."
+        }
+        "Size cards to fit their content" => "Размер карточек по содержимому",
         "Show cards by the detached pet" => "Показывать карточки у вынесенного питомца",
         "Voice commands for My Wave" => "Голосовые команды для Моей волны",
         "Quick tour" => "Быстрый старт",

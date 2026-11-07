@@ -86,10 +86,11 @@ const PILL: [(Sid, &str, Kind); 23] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 19] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 20] = [
     (Sid::SystemNotifications, "Windows notifications from the island", Kind::Toggle),
     (Sid::NotificationTiles, "Notification preview size", Kind::Cycle),
     (Sid::NotificationOpenApp, "Click a notification to open its app", Kind::Toggle),
+    (Sid::NotificationAdaptiveSize, "Size cards to fit their content", Kind::Toggle),
     (Sid::WindowsNotificationsSettings, "Windows notification settings", Kind::Button),
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
@@ -864,6 +865,8 @@ fn assistant_page_items(ui: &UiState, page: AssistantPage) -> Vec<Item> {
             Item::Section("Assistant replies"),
             Item::Row(Sid::NotifyAi, "AI answers", Toggle),
             Item::Row(Sid::AiNotificationCards, "Show AI answers as cards", Toggle),
+            Item::Row(Sid::AiCompactReplies, "Short AI replies inside the island", Toggle),
+            Item::Note("Long replies use cards. Detached pet replies stay beside the pet."),
             Item::Section("Desktop pet"),
             Item::Row(Sid::PetVoice, "Pet reacts to voice assistant", Toggle),
             Item::Row(Sid::PetVoiceInput, "Talk to the detached pet", Toggle),
@@ -2059,6 +2062,14 @@ mod tests {
         settings.notification_tiles = 255;
         settings.sanitize();
         assert_eq!(settings.notification_tiles, 4);
+        let migrated: Settings = serde_json::from_str("{\"ai_notification_cards\":false}").unwrap();
+        assert!(!migrated.ai_notification_cards);
+        assert!(migrated.ai_compact_replies && migrated.notification_adaptive_size);
+        for sid in [Sid::AiCompactReplies, Sid::NotificationAdaptiveSize] {
+            toggle_set(sid, &mut settings, false);
+            let saved: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert!(!toggle_get(sid, &saved));
+        }
     }
 
     #[test]

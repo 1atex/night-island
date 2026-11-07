@@ -142,10 +142,14 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
     }
 }
 
-pub fn card_target(source: Rect, work: Rect, edge: Option<Edge>, scale: f32) -> Rect {
+pub fn card_target(source: Rect, work: Rect, edge: Option<Edge>, scale: f32, record: Option<&Record>) -> Rect {
     let (left, top, right, bottom) = work;
-    let width = (view::NOTIFICATION_SIZE.0 * scale).min((right - left - 16.0 * scale).max(1.0));
-    let height = (view::NOTIFICATION_SIZE.1 * scale).min((bottom - top - 16.0 * scale).max(1.0));
+    let width = (record.map(view::notification_card_width).unwrap_or(view::NOTIFICATION_SIZE.0) * scale)
+        .min((right - left - 16.0 * scale).max(1.0));
+    let height = record
+        .map(|record| view::notification_card_height(record, width, scale))
+        .unwrap_or(view::NOTIFICATION_SIZE.1 * scale)
+        .min((bottom - top - 16.0 * scale).max(1.0));
     let x = match edge {
         Some(Edge::Left) => source.0,
         Some(Edge::Right) => source.0 + source.2 - width,
@@ -159,8 +163,8 @@ pub fn card_target(source: Rect, work: Rect, edge: Option<Edge>, scale: f32) -> 
     (x.clamp(left, (right - width).max(left)), y.clamp(top, (bottom - height).max(top)), width, height)
 }
 
-pub fn pet_card_target(source: Rect, work: Rect, scale: f32, expanded: bool) -> Rect {
-    let mut target = card_target(source, work, None, scale);
+pub fn pet_card_target(source: Rect, work: Rect, scale: f32, expanded: bool, record: Option<&Record>) -> Rect {
+    let mut target = card_target(source, work, None, scale, record);
     let gap = 8.0 * scale;
     if expanded {
         let space = (source.1 - work.1).max(work.3 - source.1 - source.3) - gap;
@@ -171,8 +175,8 @@ pub fn pet_card_target(source: Rect, work: Rect, scale: f32, expanded: bool) -> 
     target
 }
 
-pub fn expanded_card_layout(island: Rect, pill: Rect, work: Rect, scale: f32) -> (Rect, Rect) {
-    let target = pet_card_target(island, work, scale, false);
+pub fn expanded_card_layout(island: Rect, pill: Rect, work: Rect, scale: f32, record: Option<&Record>) -> (Rect, Rect) {
+    let target = pet_card_target(island, work, scale, false, record);
     let (x, y, width, height) = island;
     let w = pill.2.min(width);
     let h = pill.3.min(height);
@@ -280,6 +284,10 @@ impl NotificationCard {
         self.hwnd
     }
 
+    pub fn target_rect(&self) -> Rect {
+        self.card
+    }
+
     pub fn screen_rect(&self) -> Rect {
         self.state.rect()
     }
@@ -366,7 +374,7 @@ impl NotificationCard {
             return Ok(());
         }
         let from = self.state.rect();
-        self.card = pet_card_target(source, work, self.state.scale, true);
+        self.card = pet_card_target(source, work, self.state.scale, true, Some(record));
         self.state.scroll = Some(0.0);
         self.transition(from, self.card, OPEN_MS)?;
         self.update(record, pending)
@@ -472,7 +480,7 @@ mod tests {
                         Some(Edge::Right) => (work.2 - 42.0, work.1 + 500.0, 42.0, 200.0),
                         _ => (work.0 + 800.0, work.1, 200.0, 34.0),
                     };
-                    let target = card_target(source, work, edge, scale);
+                    let target = card_target(source, work, edge, scale, None);
                     assert!(target.0 >= work.0 && target.1 >= work.1);
                     assert!(target.0 + target.2 <= work.2 + 0.01 && target.1 + target.3 <= work.3 + 0.01);
                     assert!(inside(target, scale, (target.0 + target.2 / 2.0, target.1 + target.3 / 2.0)));

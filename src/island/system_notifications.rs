@@ -4,6 +4,8 @@ use crate::island::*;
 use crate::platform::notifications::{self, Record, Status};
 use crate::ui::notification_card::{self, NotificationCard};
 
+const ASSISTANT_REPLY_ID: u32 = 1;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::island) enum CardPhase {
     Opening,
@@ -14,6 +16,7 @@ pub(in crate::island) enum CardPhase {
 #[derive(Default)]
 pub(in crate::island) struct SystemNotices {
     pub origin: Option<view::Rect>,
+    pub compact_reply: bool,
     window: Option<NotificationCard>,
     queue: VecDeque<Record>,
     shown: VecDeque<(u32, i64, String)>,
@@ -46,7 +49,12 @@ impl App {
         self.system_notices.phase.is_some() && self.system_notices.pet_source.is_some()
     }
 
-    pub(in crate::island) fn post_local_notification(&mut self, title: &str, body: &str) {
+    pub(in crate::island) fn post_local_notification(&mut self, kind: Notice, body: &str) {
+        let title = match kind {
+            Notice::Ai => "Assistant",
+            Notice::Error => "Error",
+            _ => "Notification",
+        };
         let name = if self.settings.pet_notifications && self.pet.desktop.is_some() {
             if self.settings.character == Character::Custom {
                 self.settings.custom_pet.name.clone()
@@ -60,7 +68,7 @@ impl App {
             self.system_notices.queue.pop_front();
         }
         self.system_notices.queue.push_back(Record {
-            id: 0,
+            id: if kind == Notice::Ai { ASSISTANT_REPLY_ID } else { 0 },
             created: notifications::now_ticks(),
             app_id: notifications::LOCAL_APP_ID.into(),
             app: name,
@@ -73,14 +81,9 @@ impl App {
     }
 
     pub(in crate::island) fn notification_occupied_rect(&self) -> Option<view::Rect> {
-        self.notification_card_visible().then(|| {
-            notification_card::card_target(
-                self.pill_screen(false),
-                self.island_work_area(),
-                self.docked().then_some(self.edge()),
-                self.scale,
-            )
-        })
+        self.notification_card_visible()
+            .then(|| self.system_notices.window.as_ref().map(NotificationCard::target_rect))
+            .flatten()
     }
 
     pub(in crate::island) fn notification_card_visible(&self) -> bool {
@@ -248,6 +251,7 @@ impl App {
         let expanded = self.state == State::Expanded;
         if self.system_notices.phase.is_some()
             || self.system_notices.queue.is_empty()
+            || (self.system_notices.compact_reply && self.ui.notice.is_some())
             || self.system_notices.locked
             || self.system_notices.failed
             || self.gaming
@@ -269,6 +273,20 @@ impl App {
             return;
         }
         let pet_anchor = pet.map(|pet| pet.notification_anchor());
+        if pet_anchor.is_none()
+            && !expanded
+            && self.settings.ai_compact_replies
+            && local(&record)
+            && record.id == ASSISTANT_REPLY_ID
+        {
+            let work = self.island_work_area();
+            let available = if self.settings.vertical() { work.3 - work.1 } else { work.2 - work.0 };
+            if view::compact_reply_fits(&self.ui, &record.body, available / self.scale - 32.0) {
+                self.show_notice_for('\u{E8F2}', record.body.trim(), 7000);
+                self.system_notices.compact_reply = true;
+                return;
+            }
+        }
         self.reset_liquid_pull();
         if self.system_notices.window.is_none() {
             match NotificationCard::new(self.hwnd, &self.compositor, &self.gpu, self.scale) {
@@ -282,14 +300,16 @@ impl App {
                 }
             }
         }
+        let content = self.settings.notification_adaptive_size.then_some(&record);
         let (source, target) = if let Some((source, work)) = pet_anchor {
-            (source, notification_card::pet_card_target(source, work, self.scale, false))
+            (source, notification_card::pet_card_target(source, work, self.scale, false, content))
         } else if expanded {
             notification_card::expanded_card_layout(
                 self.pill_screen(true),
                 self.pill_screen(false),
                 self.island_work_area(),
                 self.scale,
+                content,
             )
         } else {
             let source = self.pill_screen(false);
@@ -298,6 +318,7 @@ impl App {
                 self.island_work_area(),
                 self.docked().then_some(self.edge()),
                 self.scale,
+                content,
             );
             (source, target)
         };
@@ -707,7 +728,8 @@ mod tests {
         for scale in [0.75, 1.0, 2.0] {
             for edge in Edge::ALL.into_iter().map(Some).chain([None]) {
                 let source = (-6000.0, -6000.0, 200.0 * scale, 34.0 * scale);
-                let target = notification_card::card_target(source, (-8000.0, -8000.0, -4000.0, -4000.0), edge, scale);
+                let target =
+                    notification_card::card_target(source, (-8000.0, -8000.0, -4000.0, -4000.0), edge, scale, Some(&a));
                 card.show(&a, 1, source, target, scale)?;
                 card.update(&b, 0)?;
                 card.close(source, &b, 0)?;
@@ -787,13 +809,58 @@ mod tests {
         app.accept_system_notifications(incoming);
         assert!(app.system_notices.active.is_none() && app.system_notices.queue.is_empty());
         assert!(app.ui.notifications.preview.is_none());
+        app.state = State::Collapsed;
+        app.cancel_pill_motion();
+        app.notify_for(Notice::Ai, '\u{E8F2}', "Музыка на паузе.", 7000);
+        assert!(app.system_notices.compact_reply);
+        assert_eq!(app.ui.notice.as_ref().unwrap().1, "Музыка на паузе.");
+        assert!(app.system_notices.active.is_none() && app.system_notices.phase.is_none());
+        app.notify_for(Notice::Ai, '\u{E8F2}', "Готово.", 7000);
+        assert_eq!(app.system_notices.queue.len(), 1);
+        assert_eq!(app.ui.notice.as_ref().unwrap().1, "Музыка на паузе.");
+        app.cancel_pill_motion();
+        app.on_timer(Timer::Notice as usize);
+        assert_eq!(app.ui.notice.as_ref().unwrap().1, "Готово.");
+        app.cancel_pill_motion();
+        app.on_timer(Timer::Notice as usize);
+        app.cancel_pill_motion();
+        app.maybe_show_notification();
+        assert!(app.ui.notice.is_none() && app.system_notices.queue.is_empty());
+        assert!(app.system_notices.phase.is_none());
+        app.settings.ai_compact_replies = false;
+        app.notify_for(Notice::Ai, '\u{E8F2}', "Музыка на паузе.", 7000);
+        assert!(app.system_notices.phase == Some(CardPhase::Opening));
+        let target = app.system_notices.window.as_ref().unwrap().target_rect();
+        assert!(target.2 < view::NOTIFICATION_SIZE.0 && target.3 < view::NOTIFICATION_SIZE.1);
+        app.hide_notification_card();
+        app.cancel_pill_motion();
+        app.settings.ai_compact_replies = true;
+        app.pill_hidden = true;
+        app.notify_for(Notice::Ai, '\u{E8F2}', "Музыка на паузе.", 7000);
+        assert!(app.ui.notice.is_none() && app.system_notices.queue.len() == 1);
+        app.pill_hidden = false;
+        app.maybe_show_notification();
+        assert!(app.system_notices.compact_reply && app.system_notices.queue.is_empty());
+        app.agent = Some(crate::services::assistant::agent::Run::new(String::new(), "test", &[]));
+        assert!(app.cancel_voice_input());
+        assert!(app.ui.notice.is_none());
+        app.cancel_pill_motion();
+        app.state = State::Expanded;
+        app.notify_for(Notice::Ai, '\u{E8F2}', "Готово.", 7000);
+        assert!(app.system_notices.expanded_source.is_some());
+        assert!(app.ui.notice.is_none());
+        app.hide_notification_card();
+        app.cancel_pill_motion();
+        if let Some(path) = std::env::var_os("NI_COMPACT_REPLIES_PREVIEW") {
+            preview_compact_replies(&mut app, std::path::Path::new(&path))?;
+        }
         app.settings.character = Character::Spark;
         app.settings.character_detached = true;
         app.apply_character();
         app.char_tick();
         app.toggle_island_from_character();
         assert!(app.pill_hidden);
-        app.post_local_notification("Assistant", "The reply belongs to the detached pet.");
+        app.post_local_notification(Notice::Ai, "Музыка на паузе.");
         app.maybe_show_notification();
         assert!(app.pet_notification_visible());
         app.notification_stage();
@@ -816,6 +883,35 @@ mod tests {
         unsafe {
             DestroyWindow(hwnd)?;
         }
+        Ok(())
+    }
+
+    fn preview_compact_replies(app: &mut App, path: &std::path::Path) -> Result<()> {
+        use crate::ui::gfx::rgba;
+        let surface = crate::ui::popup::PopupSurface::new((1000, 430))?;
+        surface.paint(&app.gpu, |p| {
+            p.fill_rect((0.0, 0.0, 1000.0, 430.0), rgba(0.025, 0.035, 0.065, 1.0))?;
+            let mut ui = view::UiState::new();
+            ui.notice = Some(('\u{E8F2}', "Музыка на паузе.".into()));
+            let width = view::collapsed_width(&ui, 180.0);
+            let pill = (500.0 - width / 2.0, 28.0, width, 34.0);
+            p.fill_round_rect((pill.0, pill.1, pill.0 + pill.2, pill.1 + pill.3), 17.0, rgba(0.0, 0.0, 0.0, 1.0))?;
+            view::paint_collapsed(p, pill, 1.0, &ui)?;
+            for (x, body) in [(40.0, "Музыка на паузе.".to_string()), (520.0, "Я приостановил музыку. Чтобы продолжить прослушивание, попроси меня включить её или нажми кнопку воспроизведения.\n\nГромкость «Моей волны» сохранена.".into())] {
+                let record = Record { app: "Night Island".into(), title: "Ассистент".into(), body, ..record(1) };
+                let width = view::notification_card_width(&record);
+                let height = view::notification_card_height(&record, width, 1.0);
+                let rect = (x, 130.0, width, height);
+                p.fill_round_rect((x, 130.0, x + width, 130.0 + height), 26.0, rgba(0.0, 0.0, 0.0, 1.0))?;
+                view::paint_notification_card(p, rect, 1.0, &record, 0, false, None)?;
+            }
+            Ok(())
+        })?;
+        let pixels: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1000, 430);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
         Ok(())
     }
 

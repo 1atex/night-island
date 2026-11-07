@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(app.island_work_area().1, top);
         assert_eq!(app.pill_screen(false).1, top + 8.0);
         let notification =
-            crate::ui::notification_card::card_target(app.pill_screen(false), app.island_work_area(), None, 1.0);
+            crate::ui::notification_card::card_target(app.pill_screen(false), app.island_work_area(), None, 1.0, None);
         assert_eq!(notification.1, top + 8.0);
         app.settings.placement = Placement::Docked;
         app.settings.dock_edge = Edge::Top;

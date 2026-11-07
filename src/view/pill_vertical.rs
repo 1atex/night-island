@@ -113,7 +113,7 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
 pub fn vertical_length(ui: &UiState) -> f32 {
     let chars = |s: &str| crate::ui::i18n::tr(s).chars().count() as f32;
     if let Some((_, text)) = &ui.notice {
-        return (46.0 + chars(text) * 7.6 + 16.0).clamp(V_MIN, 460.0);
+        return (46.0 + notice_text_width(ui, text) + 16.0).clamp(V_MIN, 460.0);
     }
     if ui.volume.is_some() {
         return V_MIN + 20.0;

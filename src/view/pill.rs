@@ -373,7 +373,7 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     }
     let chars = |s: &str| crate::ui::i18n::tr(s).chars().count() as f32;
     if let Some((_, text)) = &ui.notice {
-        return (ui.char_inset + 40.0 + chars(text) * 7.6 + 20.0).clamp(base.min(460.0), 460.0);
+        return (ui.char_inset + notice_text_width(ui, text) + 60.0).clamp(base.min(460.0), 460.0);
     }
     if ui.volume.is_some() {
         return base;
@@ -386,6 +386,18 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
         return music_slots(ui, 1.0, 0.0).width.max(base);
     }
     idle_width(ui).max(base)
+}
+
+pub(in crate::view) fn notice_text_width(ui: &UiState, text: &str) -> f32 {
+    crate::ui::fonts::width(ui.cfg.interface_font, &crate::ui::i18n::tr(text), 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)
+        .ceil()
+}
+
+pub fn compact_reply_fits(ui: &UiState, text: &str, available: f32) -> bool {
+    let text = crate::ui::i18n::tr(text);
+    !text.trim().is_empty()
+        && !text.chars().any(|ch| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
+        && ui.char_inset + notice_text_width(ui, &text) + 60.0 <= available.min(420.0)
 }
 
 pub(in crate::view) fn idle_width(ui: &UiState) -> f32 {
@@ -774,6 +786,32 @@ mod tests {
     use super::*;
     use crate::data::settings::Edge;
     use crate::services::weather::Weather;
+
+    #[test]
+    fn compact_replies_fit_the_selected_font_without_truncation() {
+        let mut ui = UiState::new();
+        ui.char_inset = 28.0;
+        for font in crate::data::settings::InterfaceFont::ALL {
+            ui.cfg.interface_font = font;
+            let reply = "Музыка на паузе.";
+            assert!(compact_reply_fits(&ui, reply, 420.0));
+            assert!(!compact_reply_fits(&ui, reply, 90.0));
+            for long in [
+                "",
+                "   ",
+                "Первая строка\nВторая строка",
+                "Ответ\u{2028}Продолжение",
+                &"Очень длинный ответ. ".repeat(12),
+            ] {
+                assert!(!compact_reply_fits(&ui, long, 420.0));
+            }
+            ui.notice = Some(('!', reply.into()));
+            let text = notice_text_width(&ui, reply);
+            let width = collapsed_width(&ui, 150.0);
+            assert!(width >= ui.char_inset + 50.0 + text);
+            assert!(width < 420.0);
+        }
+    }
 
     fn weather_ui() -> UiState {
         let mut ui = UiState::new();
