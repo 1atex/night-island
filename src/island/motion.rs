@@ -5,7 +5,7 @@ pub(in crate::island) const CLOSE_BASE_MS: f32 = 320.0;
 pub(in crate::island) const AUTOHIDE_DELAY_MS: u32 = 1500;
 
 pub(in crate::island) struct OpenMotion {
-    progress: crate::ui::reveal::Reveal,
+    pub(in crate::island) progress: crate::ui::reveal::Reveal,
     closed: (Vector2, Vector2, Vector2),
 }
 
@@ -248,7 +248,6 @@ impl App {
             let _ = self.set_geometry_now(Win::Big, false, hidden);
         }
         self.state = State::Expanded;
-        self.update_top_panel(false);
         if self.ui.tab == view::Tab::Chat && self.ui.chat.pet.enabled {
             self.sync_pet_studio();
         }
@@ -263,6 +262,7 @@ impl App {
         self.update_eq();
         self.sync_metrics();
         let _ = self.animate_to(true, false);
+        self.update_top_panel(false);
         self.set_timer(Timer::Settle, self.transition_ms(true) as u32 + 30);
         self.start_cover_motion(true);
         self.update_weather_timer();
@@ -283,11 +283,19 @@ impl App {
         self.kill_timer(Timer::Collapse);
         self.kill_timer(Timer::Settle);
         self.state = State::Collapsing;
+        if !self.open_motion.as_ref().is_some_and(|motion| motion.progress.active(Instant::now())) {
+            self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
+        }
+        let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings));
+        let _ = self.collapsed.resize(small);
+        self.update_offsets();
+        self.repaint_collapsed();
         self.finish_mixer();
         self.sync_mixer();
         self.update_weather_timer();
         self.update_eq();
         let _ = self.animate_to(false, false);
+        self.update_top_panel(false);
         self.start_cover_motion(false);
         self.set_timer(Timer::Shrink, self.transition_ms(false) as u32 + 30);
     }
@@ -300,20 +308,22 @@ impl App {
         self.open_motion = None;
         self.ui.home.track_transition.finish();
         self.state = State::Collapsed;
-        self.update_top_panel(false);
         self.set_blur(false);
-        self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
-        self.place(Win::Small);
+        self.win = Win::Small;
         let small = window_size(self.scale, Win::Small, self.docked(), self.cw, &window_room(&self.settings));
         let _ = self.collapsed.resize(small);
         self.resize_ring();
         self.fit_bump();
         let _ = self.set_geometry_now(Win::Small, false, false);
+        self.update_offsets();
         self.schedule_autohide();
         self.start_liquid();
         self.update_eq();
         self.repaint_collapsed();
         self.settle_layers();
+        let _ = self.compositor.RequestCommitAsync();
+        self.place(Win::Small);
+        self.update_top_panel(false);
         self.sync_metrics();
         self.maybe_show_notification();
     }

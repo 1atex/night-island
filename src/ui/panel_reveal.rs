@@ -2,7 +2,7 @@ use std::sync::Once;
 use std::time::Instant;
 
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
-use windows::UI::Composition::{Compositor, ContainerVisual, LayerVisual, SpriteVisual};
+use windows::UI::Composition::{Compositor, ContainerVisual, InsetClip, LayerVisual, SpriteVisual};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
@@ -21,6 +21,7 @@ pub(super) struct Reveal {
     content: LayerVisual,
     plate: Layer,
     bridge: SpriteVisual,
+    clip: InsetClip,
 }
 
 extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -34,6 +35,8 @@ impl Reveal {
         let fill = Vector2 { X: 1.0, Y: 1.0 };
         root.SetRelativeSizeAdjustment(fill)?;
         let content = compositor.CreateLayerVisual()?;
+        let clip = compositor.CreateInsetClip()?;
+        content.SetClip(&clip)?;
         content.SetRelativeSizeAdjustment(fill)?;
         root.Children()?.InsertAtTop(&content)?;
         let plate = gpu.layer(&compositor, (1, 1))?;
@@ -81,7 +84,7 @@ impl Reveal {
                 })
         };
         match target {
-            Ok(target) => Ok(Self { hwnd, compositor, target, root, content, plate, bridge }),
+            Ok(target) => Ok(Self { hwnd, compositor, target, root, content, plate, bridge, clip }),
             Err(error) => {
                 unsafe {
                     let _ = DestroyWindow(hwnd);
@@ -107,41 +110,72 @@ impl Reveal {
         self.opacity(state.ghost_alpha);
         let now = Instant::now();
         let travel = state.travel.remaining(now);
-        let duration = travel.max(state.relocation.remaining(now));
-        let frames: Vec<_> = (0..=24)
+        let duration = state.remaining(now);
+        let frames: Vec<_> = (0..=60)
             .map(|step| {
-                let t = step as f32 / 24.0;
+                let t = step as f32 / 60.0;
                 let at = now + duration.mul_f32(t);
                 let (x, y) = state.position_at(at);
-                (t, x, y, state.travel.value(at))
+                (
+                    t,
+                    x,
+                    y,
+                    state.travel.value(at),
+                    state.boundary_at(at).map_or(edge, |b| b.0),
+                    state.island_motion.as_ref().map_or(0.0, |m| m.progress.value(at)),
+                )
             })
             .collect();
         let (w, height) = (state.size.0 as f32, state.size.1 as f32);
         let top = frames.iter().map(|f| f.2).fold(f32::INFINITY, f32::min).floor();
         let bottom = frames.iter().map(|f| f.2 + height).fold(f32::NEG_INFINITY, f32::max).ceil();
         let (start, end) = if left {
-            (frames.iter().map(|f| f.1).fold(edge, f32::min).floor(), edge.floor())
+            (
+                frames.iter().map(|f| f.1.min(f.4)).fold(edge, f32::min).floor(),
+                frames.iter().map(|f| f.4).fold(edge, f32::max).ceil(),
+            )
         } else {
-            (edge.ceil(), frames.iter().map(|f| f.1 + w).fold(edge, f32::max).ceil())
+            (
+                frames.iter().map(|f| f.4).fold(edge, f32::min).floor(),
+                frames.iter().map(|f| (f.1 + w).max(f.4)).fold(edge, f32::max).ceil(),
+            )
         };
         let offset = self.compositor.CreateVector3KeyFrameAnimation()?;
+        let scale = self.compositor.CreateVector3KeyFrameAnimation()?;
+        self.plate.sprite.SetCenterPoint(Vector3 {
+            X: if left { w - 27.0 * state.scale } else { 27.0 * state.scale },
+            Y: height * 0.5,
+            Z: 0.0,
+        })?;
         let fade = self.compositor.CreateScalarKeyFrameAnimation()?;
         let neck_offset = self.compositor.CreateVector3KeyFrameAnimation()?;
         let neck_scale = self.compositor.CreateVector3KeyFrameAnimation()?;
+        let clip_left = self.compositor.CreateScalarKeyFrameAnimation()?;
+        let clip_right = self.compositor.CreateScalarKeyFrameAnimation()?;
         let linear = self.compositor.CreateCubicBezierEasingFunction(
             Vector2 { X: 1.0 / 3.0, Y: 1.0 / 3.0 },
             Vector2 { X: 2.0 / 3.0, Y: 2.0 / 3.0 },
         )?;
-        for (t, x, y, progress) in frames {
+        for (t, x, y, progress, edge, parent_progress) in frames {
             let reach = 27.0 * state.scale;
             let inner = if left { (x + w - reach).min(edge) } else { (x + reach).max(edge) };
             let width = (inner - edge).abs();
-            let neck = if travel.is_zero() {
+            let reveal_neck = if travel.is_zero() {
                 0.0
             } else {
                 neck_height(progress, width, state.settings.island_gap as f32, state.scale)
             };
+            let parent_neck = 20.0 * state.scale * (std::f32::consts::PI * parent_progress).sin().max(0.0);
+            let neck = reveal_neck.max(parent_neck);
+            clip_left.InsertKeyFrameWithEasingFunction(t, if left { 0.0 } else { edge - start }, &linear)?;
+            clip_right.InsertKeyFrameWithEasingFunction(t, if left { end - edge } else { 0.0 }, &linear)?;
             fade.InsertKeyFrameWithEasingFunction(t, reveal_opacity(progress), &linear)?;
+            let stretch = crate::ui::reveal::smooth_range(progress, 0.0, 1.0);
+            scale.InsertKeyFrameWithEasingFunction(
+                t,
+                Vector3 { X: 0.86 + 0.14 * stretch, Y: 0.86 + 0.14 * stretch, Z: 1.0 },
+                &linear,
+            )?;
             offset.InsertKeyFrameWithEasingFunction(t, Vector3 { X: x - start, Y: y - top, Z: 0.0 }, &linear)?;
             neck_offset.InsertKeyFrameWithEasingFunction(
                 t,
@@ -151,12 +185,17 @@ impl Reveal {
             neck_scale.InsertKeyFrameWithEasingFunction(t, Vector3 { X: width, Y: neck, Z: 1.0 }, &linear)?;
         }
         let duration = duration.max(std::time::Duration::from_millis(1));
-        for animation in [&offset, &neck_offset, &neck_scale] {
+        for animation in [&offset, &neck_offset, &neck_scale, &scale] {
             animation.SetDuration(duration.into())?;
         }
         fade.SetDuration(duration.into())?;
+        clip_left.SetDuration(duration.into())?;
+        clip_right.SetDuration(duration.into())?;
+        self.clip.StartAnimation(h!("LeftInset"), &clip_left)?;
+        self.clip.StartAnimation(h!("RightInset"), &clip_right)?;
         self.content.StartAnimation(h!("Opacity"), &fade)?;
         self.plate.sprite.StartAnimation(h!("Offset"), &offset)?;
+        self.plate.sprite.StartAnimation(h!("Scale"), &scale)?;
         self.bridge.StartAnimation(h!("Offset"), &neck_offset)?;
         self.bridge.StartAnimation(h!("Scale"), &neck_scale)?;
         unsafe {
@@ -180,9 +219,12 @@ impl Reveal {
     pub fn seek(&self, progress: f32) -> Result<()> {
         for controller in [
             self.plate.sprite.TryGetAnimationController(h!("Offset"))?,
+            self.plate.sprite.TryGetAnimationController(h!("Scale"))?,
             self.bridge.TryGetAnimationController(h!("Offset"))?,
             self.bridge.TryGetAnimationController(h!("Scale"))?,
             self.content.TryGetAnimationController(h!("Opacity"))?,
+            self.clip.TryGetAnimationController(h!("LeftInset"))?,
+            self.clip.TryGetAnimationController(h!("RightInset"))?,
         ] {
             controller.Pause()?;
             controller.SetProgress(progress)?;

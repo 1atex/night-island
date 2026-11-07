@@ -349,15 +349,7 @@ impl Painter<'_> {
         use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
         let text = crate::ui::i18n::tr(text);
         unsafe {
-            let format = self.dwrite.CreateTextFormat(
-                w!("Segoe UI"),
-                None,
-                weight,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!("en-us"),
-            )?;
+            let format = crate::ui::fonts::format(self.dwrite, size, weight)?;
             format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
             let wide: Vec<u16> = text.encode_utf16().collect();
             let layout =
@@ -378,15 +370,7 @@ impl Painter<'_> {
         color: D2D1_COLOR_F,
     ) -> Result<()> {
         unsafe {
-            let format = self.dwrite.CreateTextFormat(
-                w!("Segoe UI"),
-                None,
-                weight,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!("en-us"),
-            )?;
+            let format = crate::ui::fonts::format(self.dwrite, size, weight)?;
             format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
             let sign = self.dwrite.CreateEllipsisTrimmingSign(&format)?;
             format.SetTrimming(
@@ -417,15 +401,7 @@ impl Painter<'_> {
     ) -> Result<f32> {
         use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
         unsafe {
-            let format = self.dwrite.CreateTextFormat(
-                w!("Segoe UI"),
-                None,
-                DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!("en-us"),
-            )?;
+            let format = crate::ui::fonts::format(self.dwrite, size, DWRITE_FONT_WEIGHT_NORMAL)?;
             format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
             let wide: Vec<u16> = text.encode_utf16().collect();
             let layout = self.dwrite.CreateTextLayout(&wide, &format, (rect.2 - rect.0).max(1.0), 100_000.0)?;
@@ -1209,6 +1185,17 @@ impl Painter<'_> {
     }
 
     pub fn fill_capsule_progress(&self, rect: (f32, f32, f32, f32), fraction: f32, base: (u8, u8, u8)) -> Result<()> {
+        self.fill_body_progress(rect, rect, (rect.3 - rect.1).min(rect.2 - rect.0) / 2.0, fraction, base)
+    }
+
+    pub fn fill_body_progress(
+        &self,
+        rect: (f32, f32, f32, f32),
+        body: (f32, f32, f32, f32),
+        radius: f32,
+        fraction: f32,
+        base: (u8, u8, u8),
+    ) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
         use windows::Win32::Graphics::Direct2D::{
             D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
@@ -1236,8 +1223,8 @@ impl Painter<'_> {
                 None,
                 &collection,
             )?;
-            self.push_clip((left, top, left + (right - left) * fraction, bottom));
-            self.dc.FillRoundedRectangle(&rounded(rect, (bottom - top).min(right - left) / 2.0), &brush);
+            self.push_clip((left, body.1, left + (right - left) * fraction, body.3));
+            self.dc.FillRoundedRectangle(&rounded(body, radius), &brush);
             self.pop_clip();
         }
         Ok(())
@@ -1437,15 +1424,19 @@ impl Painter<'_> {
         color: D2D1_COLOR_F,
     ) -> Result<()> {
         unsafe {
-            let format = self.dwrite.CreateTextFormat(
-                family,
-                None,
-                weight,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                size,
-                w!("en-us"),
-            )?;
+            let format = if family == self.icons {
+                self.dwrite.CreateTextFormat(
+                    family,
+                    None,
+                    weight,
+                    DWRITE_FONT_STYLE_NORMAL,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    size,
+                    w!("en-us"),
+                )?
+            } else {
+                super::fonts::format(self.dwrite, size, weight)?
+            };
             format.SetTextAlignment(align)?;
             format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
             format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
@@ -1499,15 +1490,7 @@ fn pick_icon_font(dwrite: &IDWriteFactory) -> PCWSTR {
 
 pub fn make_layout(dwrite: &IDWriteFactory, text: &str, width: f32, size: f32) -> Result<IDWriteTextLayout> {
     unsafe {
-        let format = dwrite.CreateTextFormat(
-            w!("Segoe UI"),
-            None,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            size,
-            w!("en-us"),
-        )?;
+        let format = crate::ui::fonts::format(dwrite, size, DWRITE_FONT_WEIGHT_NORMAL)?;
         format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
         let wide: Vec<u16> = text.encode_utf16().collect();
         dwrite.CreateTextLayout(&wide, &format, width.max(1.0), 1_000_000.0)

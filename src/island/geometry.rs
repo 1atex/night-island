@@ -472,6 +472,9 @@ impl App {
     }
 
     pub(in crate::island) fn set_geometry_now(&self, win: Win, expanded: bool, hidden: bool) -> Result<()> {
+        for property in [h!("Offset"), h!("Size"), h!("CornerRadius")] {
+            self.geometry.StopAnimation(property)?;
+        }
         if expanded || hidden || !self.liquid_on() {
             self.restore_liquid_body();
         }
@@ -481,6 +484,8 @@ impl App {
         self.geometry.SetCornerRadius(radius)?;
         let (left, right, opacity) = self.ear_targets(win, expanded, hidden);
         for (ear, x) in self.ears.iter().zip([left, right]) {
+            ear.sprite.StopAnimation(h!("Offset"))?;
+            ear.sprite.StopAnimation(h!("Opacity"))?;
             ear.sprite.SetOffset(Vector3 { X: x, Y: 0.0, Z: 0.0 })?;
             ear.sprite.SetOpacity(opacity * self.settings.pill_opacity)?;
         }
@@ -544,7 +549,6 @@ impl App {
         let _ = self.liquid.bump.resize(bump_size(self.scale, self.collapsed()));
         let _ = self.liquid.highlight.resize(small);
         self.liquid.pull_ready = false;
-        self.liquid.eq_key.set(None);
         let _ = self
             .pet
             .char_layer

@@ -360,9 +360,37 @@ impl ProgressStyle {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InterfaceFont {
+    #[default]
+    Segoe,
+    Montserrat,
+    SanFrancisco,
+}
+
+impl InterfaceFont {
+    pub const ALL: [Self; 3] = [Self::Segoe, Self::Montserrat, Self::SanFrancisco];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Segoe => "Segoe UI",
+            Self::Montserrat => "Montserrat",
+            Self::SanFrancisco if crate::ui::fonts::sf_available() => "SF Pro",
+            Self::SanFrancisco => "SF Pro (not installed)",
+        }
+    }
+
+    pub fn step(self, forward: bool) -> Self {
+        let index = Self::ALL.iter().position(|font| *font == self).unwrap_or(0);
+        Self::ALL[(index + if forward { 1 } else { Self::ALL.len() - 1 }) % Self::ALL.len()]
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    pub interface_font: InterfaceFont,
     pub tour_revision: u8,
     pub top_panel: crate::data::top_panel::TopPanelSettings,
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
@@ -490,6 +518,7 @@ impl Default for Settings {
             desktop_dock: Default::default(),
             language: Language::Ru,
             legacy_icons: false,
+            interface_font: InterfaceFont::Segoe,
             weather: true,
             weather_city: String::new(),
             weather_lat: None,

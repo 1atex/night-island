@@ -51,7 +51,8 @@ const ANIMATIONS: [(Sid, &str, Kind); 7] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 5] = [
+const APPEARANCE: [(Sid, &str, Kind); 6] = [
+    (Sid::InterfaceFont, "Interface font", Kind::Cycle),
     (Sid::LegacyIcons, "Classic interface icons", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
@@ -156,7 +157,7 @@ pub const GROUPS: [Group; 17] = [
         name: "Appearance",
         rows: &APPEARANCE,
         custom: None,
-        sections: &[(0, "Interface"), (1, "Liquid shape"), (4, "Text tab")],
+        sections: &[(0, "Interface"), (2, "Liquid shape"), (5, "Text tab")],
     },
     Group { glyph: '\u{EB52}', name: "Theme", rows: &THEME_ROWS, custom: Some(theme_items), sections: &[] },
     Group {
@@ -1194,6 +1195,13 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
         }
         out.push(Item::Heading(group.name));
         out.extend(rows_with_sections(group));
+        if group.name == "Appearance" {
+            let at = out.iter().position(|item| matches!(item, Item::Row(Sid::InterfaceFont, _, _))).unwrap_or(0);
+            out.insert(
+                at + 1,
+                Item::Note("Montserrat is included. SF Pro requires an installed font; otherwise Segoe UI is used."),
+            );
+        }
         return out;
     }
     for group in &GROUPS {

@@ -28,6 +28,11 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Interface font" => "Шрифт интерфейса",
+        "SF Pro (not installed)" => "SF Pro (не установлен)",
+        "Montserrat is included. SF Pro requires an installed font; otherwise Segoe UI is used." => {
+            "Montserrat встроен. SF Pro — если установлен, иначе используется Segoe UI."
+        }
         "Close" => "Закрыть",
         "Mixer" => "Микшер",
         "Minimize" => "Свернуть",

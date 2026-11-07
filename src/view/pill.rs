@@ -221,13 +221,16 @@ pub(in crate::view) fn rec_time(secs: u32) -> String {
     }
 }
 
-pub(in crate::view) const COVER_SLOT: f32 = 26.0;
+pub(in crate::view) const COVER_SLOT: f32 = 24.0;
 
 pub(in crate::view) const PILL_WEATHER_ICON: f32 = 26.0;
 pub(in crate::view) const WEATHER_CLOCK_GAP: f32 = 3.0;
 pub(in crate::view) fn weather_slot_width(ui: &UiState) -> f32 {
-    let count = ui.weather.as_ref().map_or(2, |weather| format!("{}°", weather.temp.round() as i32).chars().count());
-    PILL_WEATHER_ICON + 3.0 + count as f32 * 7.0
+    let label =
+        ui.weather.as_ref().map_or_else(|| "0°".to_owned(), |weather| format!("{}°", weather.temp.round() as i32));
+    PILL_WEATHER_ICON
+        + 3.0
+        + crate::ui::fonts::width(ui.cfg.interface_font, &label, 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD).ceil()
 }
 
 pub(in crate::view) const BARS_SLOT: f32 = 63.0;
@@ -261,8 +264,6 @@ pub(in crate::view) const AGENT_SLOT: f32 = 78.0;
 
 pub(in crate::view) const METRICS_CHAR_W: f32 = 6.6;
 
-pub(in crate::view) const CLOCK_SLOT: f32 = 48.0;
-
 pub(in crate::view) const SLOT_GAP: f32 = 8.0;
 
 pub(in crate::view) fn battery_slot(ui: &UiState) -> Option<f32> {
@@ -294,13 +295,18 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let music = music_pill(ui);
     let cover = (music && cover_visible(ui)).then_some(COVER_SLOT * cover_aspect(ui));
     let bars = (music && ui.cfg.music_eq).then_some(BARS_SLOT);
-    let title = (music && ui.cfg.music_title).then_some(TITLE_SLOT);
+    let title = (music && ui.cfg.music_title).then(|| {
+        (crate::ui::fonts::width(ui.cfg.interface_font, &ui.media.title, 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 2.0)
+            .clamp(16.0, TITLE_SLOT)
+    });
     let lyric = (music && lyric_visible(ui)).then_some(ui.lyric.width.max(LYRIC_SLOT));
     let rec = ui.recording_secs.map(rec_slot);
     let agent = agents_active(ui).then_some(AGENT_SLOT);
     let metrics = pill_metrics_on(&ui.cfg).then(|| pill_chars(&ui.cfg.metrics_pill) as f32 * METRICS_CHAR_W + 4.0);
     let battery = battery_slot(ui);
-    let widths = [cover, weather, bars, title, lyric, rec, agent, metrics, Some(CLOCK_SLOT), battery];
+    let clock_width =
+        crate::ui::fonts::width(ui.cfg.interface_font, "88:88", 15.0, DWRITE_FONT_WEIGHT_SEMI_BOLD).ceil() + 2.0;
+    let widths = [cover, weather, bars, title, lyric, rec, agent, metrics, Some(clock_width), battery];
     let weather_before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
     let count = widths.iter().flatten().count() as f32;
     let content: f32 = widths.iter().flatten().sum::<f32>() + SLOT_GAP * (count - 1.0).max(0.0)
@@ -324,7 +330,7 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let metrics = place(metrics, SLOT_GAP);
     let weather_left = if weather_before { place(weather, WEATHER_CLOCK_GAP) } else { None };
     let clock_gap = if !weather_before && weather.is_some() { WEATHER_CLOCK_GAP } else { SLOT_GAP };
-    let clock = place(Some(CLOCK_SLOT), clock_gap).unwrap_or((0.0, 0.0));
+    let clock = place(Some(clock_width), clock_gap).unwrap_or((0.0, 0.0));
     let weather = weather_left.or_else(|| if weather_before { None } else { place(weather, SLOT_GAP) });
     let battery = place(battery, SLOT_GAP);
     MusicSlots { cover, weather, bars, title, lyric, rec, agent, metrics, clock, battery, width }
@@ -356,20 +362,8 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     idle_width(ui).max(base)
 }
 
-pub(in crate::view) const IDLE_CLOCK_HALF: f32 = 24.0;
-
 pub(in crate::view) fn idle_width(ui: &UiState) -> f32 {
-    let shift = ui.char_inset + indicators_width(ui, 1.0);
-    let weather =
-        if ui.cfg.pill_weather && ui.weather.is_some() { weather_slot_width(ui) + WEATHER_CLOCK_GAP } else { 0.0 };
-    let before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
-    let left = 14.0 + shift + if before { weather } else { 0.0 };
-    let right = match battery().map(|_| ui.cfg.pill_battery) {
-        Some(BatteryStyle::Percent) => 75.0,
-        Some(BatteryStyle::Icon) => 46.0,
-        _ => 14.0,
-    } + if before { 0.0 } else { weather };
-    2.0 * (left.max(right) + IDLE_CLOCK_HALF)
+    music_slots(ui, 1.0, 0.0).width
 }
 
 fn paint_lyrics(p: &Painter, slot: Rect, scale: f32, lyric: &LyricUi) -> Result<()> {
@@ -411,12 +405,23 @@ pub fn pill_progress_fill_on(ui: &UiState) -> bool {
     ui.cfg.progress_style == crate::data::settings::ProgressStyle::Fill && progress_strip_on(ui)
 }
 
-fn paint_progress_fill(p: &Painter, pill: Rect, ui: &UiState) -> Result<()> {
+fn paint_progress_fill(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let Some((pos, len)) = crate::platform::media::progress().filter(|_| pill_progress_fill_on(ui)) else {
         return Ok(());
     };
     let base = ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8);
-    p.fill_capsule_progress((pill.0, pill.1, pill.0 + pill.2, pill.1 + pill.3), pos / len, base)
+    let rect = (pill.0, pill.1, pill.0 + pill.2, pill.1 + pill.3);
+    if ui.cfg.placement != crate::data::settings::Placement::Docked {
+        return p.fill_capsule_progress(rect, pos / len, base);
+    }
+    let radius = (16.0 * scale).min(pill.3.min(pill.2) / 2.0);
+    let mut body = rect;
+    if ui.cfg.dock_edge == crate::data::settings::Edge::Bottom {
+        body.3 += radius;
+    } else {
+        body.1 -= radius;
+    }
+    p.fill_body_progress(rect, body, radius, pos / len, base)
 }
 
 pub(in crate::view) fn paint_progress_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
@@ -530,13 +535,7 @@ pub fn pill_weather_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
         let (off, _) = vertical_slots(ui, scale, h).weather?;
         (x + w / 2.0, y + off + 13.0 * scale, 13.0 * scale)
     } else {
-        let left = if row_pill(ui) {
-            x + music_slots(ui, scale, w).weather?.0
-        } else if ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left {
-            x + w / 2.0 - (IDLE_CLOCK_HALF + WEATHER_CLOCK_GAP + weather_slot_width(ui)) * scale
-        } else {
-            x + w / 2.0 + (IDLE_CLOCK_HALF + WEATHER_CLOCK_GAP) * scale
-        };
+        let left = x + music_slots(ui, scale, w).weather?.0;
         (left + 13.0 * scale, y + h / 2.0, 13.0 * scale)
     };
     Some((cx - r, cy - r, cx + r, cy + r))
@@ -553,11 +552,11 @@ pub fn paint_collapsed(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Res
     if ui.cfg.vertical() {
         let (x, y, w, h) = pill;
         p.rotated((x, y, x + w, y + h), ui.cfg.dock_edge == crate::data::settings::Edge::Left, |p, local| {
-            paint_progress_fill(p, local, ui)
+            paint_progress_fill(p, local, scale, ui)
         })?;
         return paint_collapsed_vertical(p, pill, scale, ui);
     }
-    paint_progress_fill(p, pill, ui)?;
+    paint_progress_fill(p, pill, scale, ui)?;
     paint_collapsed_body(p, pill, scale, ui)?;
     paint_progress_strip(p, pill, scale, ui)
 }
@@ -646,98 +645,81 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         }
         Ok(())
     };
-    if row_pill(ui) {
-        let slots = music_slots(ui, scale, w);
-        if let (Some((off, width)), Some(cover)) = (slots.cover, &ui.media.cover) {
-            let side = (COVER_SLOT * scale).min(h - 10.0 * scale);
-            let top = y + (h - side) / 2.0;
-            let wide = width.min(side * cover_aspect(ui));
-            if !ui.cover_in_flight {
-                p.cover((x + off, top, x + off + wide, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
-            }
+    let slots = music_slots(ui, scale, w);
+    if let (Some((off, width)), Some(cover)) = (slots.cover, &ui.media.cover) {
+        let side = (COVER_SLOT * scale).min(h - 10.0 * scale);
+        let top = y + (h - side) / 2.0;
+        let wide = width.min(side * cover_aspect(ui));
+        if !ui.cover_in_flight {
+            p.cover((x + off, top, x + off + wide, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
         }
-        if slots.weather.is_some() {
-            weather_at()?;
-        }
-        if let Some((off, width)) = slots.title {
-            p.text(
-                &ui.media.title,
-                (x + off, y, x + off + width, y + h),
-                12.5 * scale,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                WHITE,
-            )?;
-        }
-        if let Some((off, width)) = slots.lyric {
-            paint_lyrics(p, (x + off, y, x + off + width, y + h), scale, &ui.lyric)?;
-        }
-        if let (Some((off, width)), Some(secs)) = (slots.rec, ui.recording_secs) {
-            let cy = y + h / 2.0;
-            let alpha = if secs % 2 == 0 { 1.0 } else { 0.45 };
-            let r = 4.5 * scale;
-            let dot_cx = x + off + r + 1.0 * scale;
-            p.fill_ellipse(dot_cx, cy, r * 1.8, r * 1.8, rgba(1.0, 0.27, 0.27, 0.18 * alpha))?;
-            p.fill_ellipse(dot_cx, cy, r, r, rgba(1.0, 0.27, 0.27, alpha))?;
-            p.text(
-                &rec_time(secs),
-                (dot_cx + r + 6.0 * scale, y, x + off + width, y + h),
-                13.0 * scale,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                rgba(1.0, 0.55, 0.55, 1.0),
-            )?;
-        }
-        if let Some((off, width)) = slots.agent {
-            let (label, color) = agent_label(ui);
-            let cy = y + h / 2.0;
-            p.fill_ellipse(x + off + 5.0 * scale, cy, 8.0 * scale, 8.0 * scale, rgba(color.r, color.g, color.b, 0.2))?;
-            p.fill_ellipse(x + off + 5.0 * scale, cy, 4.0 * scale, 4.0 * scale, color)?;
-            p.text(
-                &label,
-                (x + off + 15.0 * scale, y, x + off + width, y + h),
-                12.0 * scale,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                color,
-            )?;
-        }
-        if let Some((off, width)) = slots.metrics {
-            p.text(
-                &ui.metrics.pill,
-                (x + off, y, x + off + width, y + h),
-                11.5 * scale,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                DWRITE_TEXT_ALIGNMENT_LEADING,
-                rgba(1.0, 1.0, 1.0, 0.85),
-            )?;
-        }
+    }
+    if slots.weather.is_some() {
+        weather_at()?;
+    }
+    if let Some((off, width)) = slots.title {
         p.text(
-            &clock().hh_mm,
-            (x + slots.clock.0, y, x + slots.clock.0 + slots.clock.1, y + h),
-            15.0 * scale,
+            &ui.media.title,
+            (x + off, y, x + off + width, y + h),
+            12.5 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
-            DWRITE_TEXT_ALIGNMENT_CENTER,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
             WHITE,
         )?;
-        if let Some((off, width)) = slots.battery {
-            paint_pill_battery(x + off, x + off + width)?;
-        }
-        return Ok(());
+    }
+    if let Some((off, width)) = slots.lyric {
+        paint_lyrics(p, (x + off, y, x + off + width, y + h), scale, &ui.lyric)?;
+    }
+    if let (Some((off, width)), Some(secs)) = (slots.rec, ui.recording_secs) {
+        let cy = y + h / 2.0;
+        let alpha = if secs % 2 == 0 { 1.0 } else { 0.45 };
+        let r = 4.5 * scale;
+        let dot_cx = x + off + r + 1.0 * scale;
+        p.fill_ellipse(dot_cx, cy, r * 1.8, r * 1.8, rgba(1.0, 0.27, 0.27, 0.18 * alpha))?;
+        p.fill_ellipse(dot_cx, cy, r, r, rgba(1.0, 0.27, 0.27, alpha))?;
+        p.text(
+            &rec_time(secs),
+            (dot_cx + r + 6.0 * scale, y, x + off + width, y + h),
+            13.0 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            rgba(1.0, 0.55, 0.55, 1.0),
+        )?;
+    }
+    if let Some((off, width)) = slots.agent {
+        let (label, color) = agent_label(ui);
+        let cy = y + h / 2.0;
+        p.fill_ellipse(x + off + 5.0 * scale, cy, 8.0 * scale, 8.0 * scale, rgba(color.r, color.g, color.b, 0.2))?;
+        p.fill_ellipse(x + off + 5.0 * scale, cy, 4.0 * scale, 4.0 * scale, color)?;
+        p.text(
+            &label,
+            (x + off + 15.0 * scale, y, x + off + width, y + h),
+            12.0 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            color,
+        )?;
+    }
+    if let Some((off, width)) = slots.metrics {
+        p.text(
+            &ui.metrics.pill,
+            (x + off, y, x + off + width, y + h),
+            11.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            rgba(1.0, 1.0, 1.0, 0.85),
+        )?;
     }
     p.text(
         &clock().hh_mm,
-        (x, y, x + w, y + h),
+        (x + slots.clock.0, y, x + slots.clock.0 + slots.clock.1, y + h),
         15.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_CENTER,
         WHITE,
     )?;
-    weather_at()?;
-    match ui.cfg.pill_battery {
-        BatteryStyle::Hidden => {}
-        BatteryStyle::Icon => paint_pill_battery(x + w - 46.0 * scale, x + w - 16.0 * scale)?,
-        BatteryStyle::Percent => paint_pill_battery(x + w - 16.0 * scale - 62.0 * scale, x + w - 16.0 * scale)?,
+    if let Some((off, width)) = slots.battery {
+        paint_pill_battery(x + off, x + off + width)?;
     }
     Ok(())
 }
@@ -795,12 +777,8 @@ mod tests {
                     let width = collapsed_width(&ui, 200.0) * scale;
                     let pill = (12.0, 12.0, width, 34.0 * scale);
                     let icon = pill_weather_rect(pill, scale, &ui).unwrap();
-                    let (left, right) = if row_pill(&ui) {
-                        let clock = music_slots(&ui, scale, width).clock;
-                        (pill.0 + clock.0, pill.0 + clock.0 + clock.1)
-                    } else {
-                        (pill.0 + width / 2.0 - IDLE_CLOCK_HALF * scale, pill.0 + width / 2.0 + IDLE_CLOCK_HALF * scale)
-                    };
+                    let clock = music_slots(&ui, scale, width).clock;
+                    let (left, right) = (pill.0 + clock.0, pill.0 + clock.0 + clock.1);
                     if side == WeatherSide::Left {
                         assert!((left - icon.0 - (weather_slot_width(&ui) + WEATHER_CLOCK_GAP) * scale).abs() < 0.01);
                     } else {
@@ -810,6 +788,36 @@ mod tests {
                     assert!(icon.1 >= pill.1 && icon.3 <= pill.1 + pill.3);
                     assert!((icon.2 - icon.0 - 26.0 * scale).abs() < 0.01);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn music_rows_measure_the_selected_font_without_empty_title_space_or_overlaps() {
+        let mut ui = weather_ui();
+        ui.char_inset = 28.0;
+        ui.media.playing = true;
+        ui.cfg.music_eq = true;
+        ui.cfg.music_title = true;
+        for font in crate::data::settings::InterfaceFont::ALL {
+            ui.cfg.interface_font = font;
+            ui.media.title = "Hi".into();
+            let short = music_slots(&ui, 1.0, 0.0).title.unwrap().1;
+            ui.media.title = "Очень длинное название трека для проверки".into();
+            let long = music_slots(&ui, 1.0, 0.0).title.unwrap().1;
+            assert!(short < long && long == TITLE_SLOT);
+            for scale in [0.75, 1.0, 1.25, 1.5, 2.0] {
+                let width = collapsed_width(&ui, 200.0) * scale;
+                let row = music_slots(&ui, scale, width);
+                let mut slots: Vec<_> = [row.cover, row.bars, row.title, row.weather, Some(row.clock), row.battery]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                slots.sort_by(|a, b| a.0.total_cmp(&b.0));
+                for pair in slots.windows(2) {
+                    assert!(pair[0].0 + pair[0].1 <= pair[1].0);
+                }
+                assert!(slots.last().is_some_and(|slot| slot.0 + slot.1 <= width - 15.0 * scale));
             }
         }
     }

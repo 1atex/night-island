@@ -115,6 +115,26 @@ struct Button {
     enabled: bool,
 }
 
+#[derive(Clone)]
+pub(crate) struct IslandMotion {
+    pub progress: crate::ui::reveal::Reveal,
+    pub closed: Rect,
+    pub opened: Rect,
+}
+
+impl IslandMotion {
+    fn bounds(&self, now: Instant) -> Rect {
+        let p = self.progress.value(now);
+        let mix = |a: f32, b: f32| a + (b - a) * p;
+        (
+            mix(self.closed.0, self.opened.0),
+            mix(self.closed.1, self.opened.1),
+            mix(self.closed.2, self.opened.2),
+            mix(self.closed.3, self.opened.3),
+        )
+    }
+}
+
 struct State {
     hwnd: HWND,
     parent: HWND,
@@ -143,6 +163,8 @@ struct State {
     destination: (i32, i32),
     departure: (i32, i32),
     boundary: Option<(f32, bool)>,
+    island_motion: Option<IslandMotion>,
+    motion_changed: bool,
     alpha: u8,
     ghost_alpha: u8,
     click_through: bool,
@@ -288,6 +310,16 @@ impl State {
 
     fn position_at(&self, now: Instant) -> (f32, f32) {
         let progress = self.travel.value(now);
+        if let Some(motion) = &self.island_motion
+            && let Some((_, left)) = self.boundary
+        {
+            let bounds = motion.bounds(now);
+            let width = self.size.0 as f32;
+            let gap = self.settings.island_gap as f32 * self.scale;
+            let x =
+                if left { bounds.0 - (width + gap) * progress } else { bounds.2 - width + (width + gap) * progress };
+            return (x, bounds.1 - 10.0 * self.scale);
+        }
         let remaining = 1.0 - self.relocation.value(now);
         let coordinate = |from: i32, to: i32, displacement: f32| {
             from as f32 + (to - from) as f32 * progress + displacement * remaining
@@ -296,6 +328,25 @@ impl State {
             coordinate(self.departure.0, self.destination.0, self.displacement.0),
             coordinate(self.departure.1, self.destination.1, self.displacement.1),
         )
+    }
+
+    fn boundary_at(&self, now: Instant) -> Option<(f32, bool)> {
+        self.boundary.map(|(edge, left)| {
+            (
+                self.island_motion.as_ref().map_or(edge, |motion| {
+                    let rect = motion.bounds(now);
+                    if left { rect.0 } else { rect.2 }
+                }),
+                left,
+            )
+        })
+    }
+
+    fn remaining(&self, now: Instant) -> std::time::Duration {
+        self.travel
+            .remaining(now)
+            .max(self.relocation.remaining(now))
+            .max(self.island_motion.as_ref().map_or(std::time::Duration::ZERO, |m| m.progress.remaining(now)))
     }
 
     fn animate_reveal(&self) {
@@ -330,7 +381,7 @@ impl State {
             self.origin = (x.round() as i32, y.round() as i32);
         }
         self.alpha = (progress * 255.0).round() as u8;
-        self.opening = self.travel.active(now) || self.relocation.active(now);
+        self.opening = !self.remaining(now).is_zero();
     }
 
     fn fit_tray(&mut self, available: f32) {
@@ -927,7 +978,7 @@ impl State {
         if let Some(surface) = &*surface
             && surface
                 .paint_size(&self.gpu, self.size, |p| {
-                    if let Some((edge, left)) = self.boundary {
+                    if let Some((edge, left)) = self.boundary_at(Instant::now()) {
                         let edge = edge - self.origin.0 as f32;
                         p.push_clip(if left {
                             (0.0, 0.0, edge.max(0.0), self.size.1 as f32)
@@ -970,6 +1021,7 @@ impl State {
         self.revealing.set(false);
         self.reveal.borrow_mut().take();
         self.opening = false;
+        self.island_motion = None;
         self.relocation.show(true, 0, Instant::now());
         self.travel.show(false, 0, Instant::now());
         self.pressed = None;
@@ -1318,6 +1370,8 @@ impl Wing {
             destination: (0, 0),
             departure: (0, 0),
             boundary: None,
+            island_motion: None,
+            motion_changed: false,
             alpha: 255,
             ghost_alpha: 255,
             click_through: false,
@@ -1377,7 +1431,7 @@ impl Wing {
             self.state.displacement = (0.0, 0.0);
             self.state.relocation.show(true, 0, now);
             self.state.motion_frame();
-            if !fresh && ms > 0 {
+            if !fresh && ms > 0 && self.state.island_motion.is_none() {
                 self.state.displacement =
                     ((old_origin.0 - self.state.origin.0) as f32, (old_origin.1 - self.state.origin.1) as f32);
                 self.state.relocation.show(false, 0, now);
@@ -1387,9 +1441,10 @@ impl Wing {
         self.state.motion_frame();
         self.state.visible = true;
         self.state.layout();
-        if self.state.opening && (fresh || moved || reversed) {
+        if self.state.opening && (fresh || moved || reversed || self.state.motion_changed) {
             self.state.animate_reveal();
         }
+        self.state.motion_changed = false;
         unsafe {
             if fresh && matches!(self.state.role, Role::Card(_)) {
                 SetTimer(Some(self.state.hwnd), DISMISS, 50, None);
@@ -1422,11 +1477,22 @@ impl Drop for Wing {
 }
 
 impl TopPanel {
+    pub(crate) fn sync_island_motion(&mut self, motion: Option<IslandMotion>) {
+        let linked = self.settings.entrance == PanelEntrance::Island
+            && self.settings.animations
+            && crate::ui::feedback::motion_allowed();
+        for wing in [&mut self.left, &mut self.right] {
+            let next = motion.clone().filter(|_| linked);
+            wing.state.motion_changed |= wing.state.island_motion.as_ref().map(|m| m.progress.started())
+                != next.as_ref().map(|m| m.progress.started());
+            wing.state.island_motion = next;
+        }
+    }
     pub fn animating(&self) -> bool {
         let now = Instant::now();
         [&self.left, &self.right, &self.card]
             .iter()
-            .any(|wing| wing.state.visible && (wing.state.travel.active(now) || wing.state.relocation.active(now)))
+            .any(|wing| wing.state.visible && !wing.state.remaining(now).is_zero())
             || (self.right.state.tray_width - self.right.state.tray_target()).abs() > 0.1
     }
 

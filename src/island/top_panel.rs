@@ -48,7 +48,8 @@ impl App {
             return;
         }
         let suppressed = self.top_panel.as_ref().is_some_and(|panel| panel.suppressed());
-        let animating = self.top_panel.as_ref().is_some_and(|panel| panel.animating());
+        let animating = self.top_panel.as_ref().is_some_and(|panel| panel.animating())
+            || self.open_motion.as_ref().is_some_and(|motion| motion.progress.active(Instant::now()));
         let mut snapshot = self.top_panel_data.clone();
         if !suppressed && !animating && (force || self.top_panel_poll.elapsed() >= Duration::from_secs(1)) {
             self.top_panel_poll = Instant::now();
@@ -77,12 +78,25 @@ impl App {
         }
         snapshot.radios = self.ui.radios;
         self.top_panel_data = snapshot.clone();
-        let (x, y, w, h) = self.pill_screen(matches!(self.state, State::Expanded | State::Collapsing));
+        let (x, y, w, h) = self.pill_screen(self.state == State::Expanded);
         let mut occupied = (x, y, x + w, y + h);
+        let mut motion = self.open_motion.as_ref().map(|motion| {
+            let bounds = |expanded| {
+                let (x, y, w, h) = self.pill_screen(expanded);
+                (x, y, x + w, y + h)
+            };
+            crate::ui::top_panel::IslandMotion {
+                progress: motion.progress.clone(),
+                closed: bounds(false),
+                opened: bounds(true),
+            }
+        });
         if let Some((nx, ny, nw, nh)) = self.notification_occupied_rect() {
             occupied = (occupied.0.min(nx), occupied.1.min(ny), occupied.2.max(nx + nw), occupied.3.max(ny + nh));
+            motion = None;
         }
         if let Some(panel) = &mut self.top_panel {
+            panel.sync_island_motion(motion);
             panel.set_ghost(
                 if self.ghosted { self.settings.ghost_opacity } else { 1.0 },
                 self.ghosted && self.settings.ghost_click_through,

@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::data::settings::AnimCurve;
 
+#[derive(Clone)]
 pub(crate) struct Reveal {
     from: f32,
     target: f32,
@@ -54,6 +55,14 @@ impl Reveal {
 
     pub fn duration(&self) -> Duration {
         self.duration
+    }
+
+    pub fn started(&self) -> Instant {
+        self.start
+    }
+
+    pub fn remaining(&self, now: Instant) -> Duration {
+        self.duration.saturating_sub(now.saturating_duration_since(self.start))
     }
 
     pub fn active(&self, now: Instant) -> bool {

@@ -172,27 +172,34 @@ pub fn cursor_pull(
     ElasticPull { point, normal, spread: 44.0, depth }
 }
 
+impl ElasticBody {
+    pub fn deform(&self, point: (f32, f32), outward: (f32, f32)) -> (f32, f32) {
+        let (px, py) = point;
+        let (_, _, w, h) = self.rect;
+        let delta = (px - self.pull.point.0, py - self.pull.point.1);
+        let tangent = delta.0 * -self.pull.normal.1 + delta.1 * self.pull.normal.0;
+        let normal = delta.0 * self.pull.normal.0 + delta.1 * self.pull.normal.1;
+        let fade = (1.0 + normal / w.min(h).clamp(1.0, 80.0)).clamp(0.0, 1.0);
+        let alignment = (outward.0 * self.pull.normal.0 + outward.1 * self.pull.normal.1).max(0.0);
+        let weight = (-3.0 * (tangent / self.pull.spread.max(1.0)).powi(2)).exp()
+            * fade
+            * fade
+            * (3.0 - 2.0 * fade)
+            * alignment
+            * alignment;
+        (px + outward.0 * self.pull.depth * weight, py + outward.1 * self.pull.depth * weight)
+    }
+}
+
 fn liquid_body_geometry(factory: &ID2D1Factory, body: &LiquidBody) -> Result<ID2D1PathGeometry> {
     elastic_geometry(factory, &body.elastic())
 }
 
 fn elastic_geometry(factory: &ID2D1Factory, body: &ElasticBody) -> Result<ID2D1PathGeometry> {
     let outline = Outline::new(body.rect, body.radius);
-    let (_, _, w, h) = body.rect;
     let at = |t: f32| {
-        let ((px, py), outward) = outline.at(t);
-        let delta = (px - body.pull.point.0, py - body.pull.point.1);
-        let tangent = delta.0 * -body.pull.normal.1 + delta.1 * body.pull.normal.0;
-        let normal = delta.0 * body.pull.normal.0 + delta.1 * body.pull.normal.1;
-        let fade = (1.0 + normal / w.min(h).clamp(1.0, 80.0)).clamp(0.0, 1.0);
-        let alignment = (outward.0 * body.pull.normal.0 + outward.1 * body.pull.normal.1).max(0.0);
-        let weight = (-3.0 * (tangent / body.pull.spread.max(1.0)).powi(2)).exp()
-            * fade
-            * fade
-            * (3.0 - 2.0 * fade)
-            * alignment
-            * alignment;
-        (px + outward.0 * body.pull.depth * weight, py + outward.1 * body.pull.depth * weight)
+        let (point, outward) = outline.at(t);
+        body.deform(point, outward)
     };
     let tangent = |t: f32| {
         let a = at(t - 0.0001);
@@ -228,6 +235,37 @@ impl Gpu {
         elastic_geometry(&self.factory, body)
     }
 
+    pub fn elastic_with_edge(
+        &self,
+        body: &ElasticBody,
+        edge: &ID2D1PathGeometry,
+        transform: &windows_numerics::Matrix3x2,
+    ) -> Result<ID2D1PathGeometry> {
+        unsafe {
+            let local_edge = self.factory.CreatePathGeometry()?;
+            let copy = local_edge.Open()?;
+            edge.Simplify(
+                windows::Win32::Graphics::Direct2D::D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
+                None,
+                0.1,
+                &copy,
+            )?;
+            copy.Close()?;
+            let geometry = self.factory.CreatePathGeometry()?;
+            let sink = geometry.Open()?;
+            self.elastic_body(body)?.CombineWithGeometry(
+                &local_edge,
+                windows::Win32::Graphics::Direct2D::D2D1_COMBINE_MODE_UNION,
+                Some(transform),
+                0.1,
+                &sink,
+            )?;
+            sink.Close()?;
+            Ok(geometry)
+        }
+    }
+
+    #[cfg(test)]
     pub fn outside_body(
         &self,
         size: (i32, i32),
@@ -253,6 +291,81 @@ impl Gpu {
 }
 
 impl Painter<'_> {
+    pub fn edge_highlight(
+        &self,
+        size: (i32, i32),
+        pull: &ElasticPull,
+        palette: Palette,
+        tip: D2D1_COLOR_F,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+        use windows::Win32::Graphics::Direct2D::{
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LAYER_PARAMETERS,
+            D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+        };
+        let pt = |x, y| windows_numerics::Vector2 { X: x, Y: y };
+        let horizontal = palette.tone == Tone::Horizontal;
+        let stops = [(0.0, 0.0), (0.55, 0.6), (1.0, 0.85)].map(|(position, alpha)| D2D1_GRADIENT_STOP {
+            position,
+            color: match palette.tone {
+                Tone::Vertical => palette.at(position, alpha),
+                Tone::Horizontal => rgba(1.0, 1.0, 1.0, alpha),
+                Tone::Single => D2D1_COLOR_F { a: alpha, ..tip },
+            },
+        });
+        unsafe {
+            let stops = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+            let fade = self.dc.CreateLinearGradientBrush(
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: pt(pull.point.0, pull.point.1),
+                    endPoint: pt(
+                        pull.point.0 + pull.normal.0 * pull.depth.max(1.0),
+                        pull.point.1 + pull.normal.1 * pull.depth.max(1.0),
+                    ),
+                },
+                None,
+                &stops,
+            )?;
+            let bounds = D2D_RECT_F { left: 0.0, top: 0.0, right: size.0 as f32, bottom: size.1 as f32 };
+            if horizontal {
+                let colors: Vec<_> = (0..=6)
+                    .map(|i| {
+                        let position = i as f32 / 6.0;
+                        D2D1_GRADIENT_STOP { position, color: palette.at(position, 1.0) }
+                    })
+                    .collect();
+                let colors = self.dc.CreateGradientStopCollection(&colors, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                let brush = self.dc.CreateLinearGradientBrush(
+                    &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                        startPoint: pt(0.0, 0.0),
+                        endPoint: if pull.normal.0.abs() > 0.5 {
+                            pt(0.0, bounds.bottom)
+                        } else {
+                            pt(bounds.right, 0.0)
+                        },
+                    },
+                    None,
+                    &colors,
+                )?;
+                let mut params = D2D1_LAYER_PARAMETERS {
+                    contentBounds: bounds,
+                    maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                    maskTransform: windows_numerics::Matrix3x2::identity(),
+                    opacity: 1.0,
+                    opacityBrush: std::mem::ManuallyDrop::new(Some(fade.cast()?)),
+                    ..Default::default()
+                };
+                self.dc.PushLayer(&params, None);
+                self.dc.FillRectangle(&bounds, &brush);
+                self.dc.PopLayer();
+                std::mem::ManuallyDrop::drop(&mut params.opacityBrush);
+            } else {
+                self.dc.FillRectangle(&bounds, &fade);
+            }
+        }
+        Ok(())
+    }
+
     pub fn liquid_highlight(&self, size: (i32, i32), pull: &ElasticPull, color: D2D1_COLOR_F) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
         use windows::Win32::Graphics::Direct2D::{

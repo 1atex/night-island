@@ -81,6 +81,7 @@ pub fn run() -> Result<()> {
         let (weather_lat, weather_lon) = (settings.weather_lat, settings.weather_lon);
         crate::ui::i18n::set_ru(settings.language == crate::data::settings::Language::Ru);
         crate::ui::icons::set_legacy(settings.legacy_icons);
+        crate::ui::fonts::set(settings.interface_font);
         let dpi_scale = GetDpiForWindow(hwnd) as f32 / 96.0;
         ai::configure(&settings.ai);
         update::configure(settings.update_check, settings.update_beta);
@@ -230,8 +231,6 @@ impl App {
         ring.sprite.SetIsVisible(false)?;
         let highlight = gpu.layer(&compositor, collapsed.size())?;
         highlight.sprite.SetIsVisible(false)?;
-        let eq_shape = compositor.CreatePathGeometry()?;
-        let eq_clip = compositor.CreateGeometricClipWithGeometry(&eq_shape)?;
         let bump = gpu.layer(&compositor, bump_size(scale, (COLLAPSED.0, COLLAPSED.1)))?;
         bump.sprite.SetIsVisible(false)?;
         bump.sprite.SetCenterPoint(Vector3 { X: bump.size().0 as f32 / 2.0, Y: 0.0, Z: 0.0 })?;
@@ -366,15 +365,11 @@ impl App {
             liquid: Liquid {
                 ring,
                 highlight,
-                eq_shape,
-                eq_clip,
-                eq_key: std::cell::Cell::new(None),
                 pull: Default::default(),
                 pull_ready: false,
                 bump,
                 bump_fill,
                 bump_blur,
-                bump_shape,
                 round_clip,
                 body_clip,
                 body_shape,

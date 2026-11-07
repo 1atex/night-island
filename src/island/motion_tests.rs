@@ -199,6 +199,9 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
         style: Style::Flat,
         character: Character::None,
         music_cover: true,
+        music_eq: false,
+        edge_spikes: false,
+        auto_hide: false,
         ..Default::default()
     };
     let mut app = App::new_visuals(owner.0, 1.0, settings)?;
@@ -211,6 +214,8 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
         cover: media::debug_cover(16, &[72, 140, 230, 255].repeat(256)),
         ..Default::default()
     };
+    app.cw = view::collapsed_width(&app.ui, COLLAPSED.0);
+    app.collapsed.resize(app.window_size(Win::Small))?;
     app.place(Win::Big);
     app.set_geometry_now(Win::Big, false, false)?;
     app.state = State::Expanded;
@@ -241,12 +246,78 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
         capture(&app, frame)?;
     }
     app.finish_cover_motion();
-    app.state = State::Collapsing;
-    app.animate_to(false, false)?;
-    app.start_cover_motion(false);
+    app.collapse();
     for frame in 0..=24 {
         seek(&app, frame as f32 / 24.0)?;
         capture(&app, 31 + frame)?;
+    }
+    let before = app.pill_screen(false);
+    app.shrink_window();
+    assert_eq!(before, app.pill_screen(false));
+    for property in [h!("Offset"), h!("Size"), h!("CornerRadius")] {
+        assert!(app.geometry.TryGetAnimationController(property).is_err());
+    }
+    for frame in 0..10 {
+        unsafe {
+            let mut message = MSG::default();
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            DwmFlush()?;
+            std::thread::sleep(Duration::from_millis(25));
+            DwmFlush()?;
+        }
+        capture(&app, 56 + frame)?;
+        let dc = unsafe { GetDC(None) };
+        for dx in [4.0, 12.0, 35.0] {
+            let color = unsafe {
+                GetPixel(dc, (before.0 + before.2 + dx).round() as i32, (before.1 + before.3 * 0.5).round() as i32)
+            };
+            assert!((color.0 & 255) > 25, "The island stretched right after collapse, frame {frame}: {color:?}");
+        }
+        unsafe {
+            ReleaseDC(None, dc);
+        }
+    }
+    app.settings.style = Style::Liquid;
+    app.settings.edge_spikes = true;
+    app.settings.spike_color = true;
+    app.settings.pill_blur = false;
+    app.apply_layout();
+    let body = app.pill_rect(false);
+    app.liquid.pull_ready = true;
+    app.liquid.bump_amp = 24.0;
+    app.liquid.pull = crate::ui::gfx::ElasticPull {
+        point: (body.0 + body.2 * 0.6, body.1 + body.3),
+        normal: (0.0, 1.0),
+        spread: 44.0,
+        depth: 24.0,
+    };
+    for (index, style) in [
+        crate::data::settings::EqStyle::Spikes,
+        crate::data::settings::EqStyle::Wave,
+        crate::data::settings::EqStyle::Bars,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        app.settings.eq_style = style;
+        app.paint_edge_levels(&[0.25, 0.6, 0.4, 0.75, 0.65, 0.5, 0.75, 0.5, 0.2]);
+        assert!(app.liquid.body_active.get());
+        assert!(!app.liquid.bump.sprite.IsVisible()?);
+        let _ = app.compositor.RequestCommitAsync();
+        unsafe {
+            let mut message = MSG::default();
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            DwmFlush()?;
+            std::thread::sleep(Duration::from_millis(25));
+            DwmFlush()?;
+        }
+        capture(&app, 70 + index)?;
     }
     Ok(())
 }

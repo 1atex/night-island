@@ -135,6 +135,93 @@ fn pump() {
     }
 }
 
+#[test]
+#[ignore = "Uses synthetic windows to verify the shared island and panel motion"]
+fn native_linked_panels_follow_the_same_boundary_through_reversals() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    let _runtime = Runtime(unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) });
+    let _queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    let compositor = Compositor::new()?;
+    let gpu = Gpu::new(&compositor)?;
+    let mut panel = TopPanel::new(HWND::default(), &gpu, &TopPanelSettings::default())?;
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for width in [1920.0, 2560.0, 3840.0] {
+            let settings = TopPanelSettings {
+                enabled: true,
+                auto_hide: false,
+                reserve_space: false,
+                hide_fullscreen: false,
+                clear_window_controls: false,
+                ..Default::default()
+            };
+            panel.configure(&settings, scale);
+            panel.monitor.work.right = width as i32;
+            panel.monitor.bounds.right = width as i32;
+            let center = width * 0.5;
+            let closed = (center - 120.0 * scale, 8.0 * scale, center + 120.0 * scale, 42.0 * scale);
+            let opened = (center - 320.0 * scale, 8.0 * scale, center + 320.0 * scale, 392.0 * scale);
+            let now = Instant::now();
+            let mut progress = crate::ui::reveal::Reveal::new(0.0);
+            progress.retarget(true, 420, crate::data::settings::AnimCurve::Spring, now);
+            for (step, showing) in [true, false, true].into_iter().enumerate() {
+                if step > 0 {
+                    progress.retarget(
+                        showing,
+                        320,
+                        crate::data::settings::AnimCurve::Spring,
+                        now + std::time::Duration::from_millis(180 * step as u64),
+                    );
+                }
+                panel.sync_island_motion(Some(IslandMotion { progress: progress.clone(), closed, opened }));
+                panel.update(Snapshot::default(), if showing { opened } else { closed }, false);
+                if !crate::ui::feedback::motion_allowed() {
+                    assert!(panel.left.state.island_motion.is_none());
+                    continue;
+                }
+                for wing in [&mut panel.left, &mut panel.right] {
+                    wing.state.travel.show(true, 0, now);
+                }
+                for ms in (0..600).step_by(7) {
+                    let time = now + std::time::Duration::from_millis(ms);
+                    let bounds = IslandMotion { progress: progress.clone(), closed, opened }.bounds(time);
+                    let left = panel.left.state.position_at(time);
+                    let right = panel.right.state.position_at(time);
+                    let left_gap = bounds.0 - left.0 - panel.left.state.size.0 as f32;
+                    let right_gap = right.0 - bounds.2;
+                    if panel.left.state.visible {
+                        assert!(
+                            (left_gap - 20.0 * scale).abs() < 0.02,
+                            "left: {width}, {scale}, {step}, {ms}, {left_gap}"
+                        );
+                        assert_eq!(panel.left.state.boundary_at(time).unwrap().0, bounds.0);
+                    }
+                    if panel.right.state.visible {
+                        assert!(
+                            (right_gap - 20.0 * scale).abs() < 0.02,
+                            "right: {width}, {scale}, {step}, {ms}, {right_gap}"
+                        );
+                        assert_eq!(panel.right.state.boundary_at(time).unwrap().0, bounds.2);
+                    }
+                    if panel.left.state.visible && panel.right.state.visible {
+                        assert!((left.1 - right.1).abs() < 0.01);
+                    }
+                }
+            }
+            panel.left.state.hide();
+            panel.right.state.hide();
+        }
+    }
+    Ok(())
+}
+
 fn expect_right_panel_fades_before_hide(panel: &mut TopPanel) -> Result<()> {
     use windows::Win32::Foundation::COLORREF;
     use windows::Win32::Graphics::Dwm::DwmFlush;
@@ -332,6 +419,19 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
         surface.paint(&gpu, |p| paint_settings(p, &ui))?;
         let modern = surface.pixels();
         save_surface(&surface, size, "icons-modern")?;
+        for font in crate::data::settings::InterfaceFont::ALL {
+            crate::ui::fonts::set(font);
+            ui.cfg.interface_font = font;
+            surface.paint(&gpu, |p| paint_settings(p, &ui))?;
+            save_surface(&surface, size, &format!("font-settings-{font:?}"))?;
+            island.paint(&gpu, |p| {
+                p.fill_round_rect((16.0, 16.0, 656.0, 400.0), 28.0, rgba(0.028, 0.032, 0.043, 1.0))?;
+                crate::view::paint_expanded(p, (16.0, 16.0, 640.0, 384.0), 1.0, &ui, &[])
+            })?;
+            save_surface(&island, island_size, &format!("font-island-{font:?}"))?;
+        }
+        crate::ui::fonts::set(crate::data::settings::InterfaceFont::Segoe);
+        ui.cfg.interface_font = crate::data::settings::InterfaceFont::Segoe;
         crate::ui::icons::set_legacy(true);
         crate::view::toggle_set(crate::view::Sid::LegacyIcons, &mut ui.cfg, true);
         let painted = surface.paint(&gpu, |p| paint_settings(p, &ui));

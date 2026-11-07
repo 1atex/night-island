@@ -40,29 +40,21 @@ pub fn header_has_labels(ui: &UiState) -> bool {
 
 fn header_label_widths() -> [f32; TABS.len()] {
     use windows::Win32::Graphics::DirectWrite::*;
-    use windows::core::w;
     thread_local! {
-        static WIDTHS: std::cell::RefCell<Option<(bool, [f32; TABS.len()])>> = const { std::cell::RefCell::new(None) };
+        static WIDTHS: std::cell::RefCell<Option<(bool, crate::data::settings::InterfaceFont, [f32; TABS.len()])>> = const { std::cell::RefCell::new(None) };
     }
     let russian = crate::ui::i18n::is_ru();
     WIDTHS.with_borrow_mut(|cached| {
-        if let Some((language, widths)) = cached.as_ref()
+        if let Some((language, font, widths)) = cached.as_ref()
             && *language == russian
+            && *font == crate::ui::fonts::selected()
         {
             return *widths;
         }
         let measured = (|| -> windows::core::Result<[f32; TABS.len()]> {
             unsafe {
                 let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-                let format = factory.CreateTextFormat(
-                    w!("Segoe UI"),
-                    None,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    DWRITE_FONT_STYLE_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    13.0,
-                    w!("en-us"),
-                )?;
+                let format = crate::ui::fonts::format(&factory, 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)?;
                 format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
                 let mut widths = [0.0; TABS.len()];
                 for (index, (_, _, name)) in TABS.iter().enumerate() {
@@ -77,7 +69,7 @@ fn header_label_widths() -> [f32; TABS.len()] {
         })();
         let widths = measured
             .unwrap_or_else(|_| TABS.map(|(_, _, name)| crate::ui::i18n::tr(name).chars().count() as f32 * 8.0));
-        *cached = Some((russian, widths));
+        *cached = Some((russian, crate::ui::fonts::selected(), widths));
         widths
     })
 }

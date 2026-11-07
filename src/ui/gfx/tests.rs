@@ -165,6 +165,25 @@ fn capsule_progress_fills_the_width_without_painting_outside_its_corners() -> Re
                 encoder.write_header().unwrap().write_image_data(&rgba).unwrap();
             }
         }
+        for attached_top in [false, true] {
+            let body = if attached_top { (0.0, -16.0, 400.0, 48.0) } else { (0.0, 0.0, 400.0, 64.0) };
+            for fraction in [0.0, 0.25, 0.5, 1.0] {
+                dc.BeginDraw();
+                dc.Clear(Some(&rgba(0.0, 0.0, 0.0, 1.0)));
+                painter.fill_body_progress((0.0, 0.0, 400.0, 48.0), body, 16.0, fraction, (107, 151, 215))?;
+                dc.EndDraw(None, None)?;
+                staging.CopyFromBitmap(None, &target, None)?;
+                let mapped = staging.Map(D2D1_MAP_OPTIONS_READ)?;
+                let y = if attached_top { 0 } else { 47 };
+                let row = std::slice::from_raw_parts(mapped.bits.add(y * mapped.pitch as usize), 400 * 4);
+                let colored = row.chunks_exact(4).filter(|pixel| pixel[0] > 0 || pixel[1] > 0 || pixel[2] > 0).count();
+                assert!(
+                    (colored as f32 - 400.0 * fraction).abs() <= 2.0,
+                    "Docked edge lost fill: {attached_top}, {fraction}, {colored}"
+                );
+                staging.Unmap()?;
+            }
+        }
         Ok(())
     }
 }

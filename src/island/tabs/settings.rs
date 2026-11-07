@@ -89,6 +89,15 @@ impl App {
                         crate::platform::memory_tools::Command::Watch(false),
                     );
                 }
+                InterfaceFont => {
+                    crate::ui::fonts::set(self.settings.interface_font);
+                    self.apply_layout();
+                    self.repaint_themed_surfaces();
+                    if let Some(dock) = &mut self.desktop_dock {
+                        dock.repaint_icons();
+                    }
+                    self.render_settings_win();
+                }
                 Placement | Size | Edge => self.apply_layout(),
                 Style => self.apply_style(),
                 Tint => {
