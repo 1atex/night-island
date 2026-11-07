@@ -156,6 +156,7 @@ impl App {
         if self.settings.music_track_intro && (!self.ui.media.playing || self.pill_motion.track != track) {
             self.pill_motion.gate = Default::default();
         }
+        self.pill_motion.track = track;
         if !self.settings.island_animations || !crate::ui::feedback::motion_allowed() {
             return;
         }
@@ -171,7 +172,6 @@ impl App {
             return;
         }
         let replacing = self.pill_motion.intro.is_some();
-        self.pill_motion.track = track;
         self.pill_motion.intro = Some(IntroPhase::Present);
         let normal = view::collapsed_width(&self.ui, COLLAPSED.0);
         let work = self.island_work_area();
@@ -577,6 +577,13 @@ mod tests {
                 app.maybe_start_music_intro();
                 assert!(app.pill_motion.intro.is_none());
                 app.settings.music_track_intro = true;
+                app.ui.notice = Some(('!', "Busy".into()));
+                app.ui.media.title = "Started while a message was visible".into();
+                app.maybe_start_music_intro();
+                assert!(app.pill_motion.intro.is_none());
+                app.ui.notice = None;
+                app.maybe_start_music_intro();
+                assert!(app.pill_motion.intro.is_none());
                 app.ui.notice = Some(('\u{E722}', "A longer notification that expands the island".into()));
                 app.repaint_collapsed();
                 assert!(app.pill_motion.width.is_some());
