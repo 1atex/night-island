@@ -922,22 +922,29 @@ fn assistant_model_items(ui: &UiState) -> Vec<Item> {
 }
 
 fn assistant_recognition_items(ui: &UiState) -> Vec<Item> {
-    let mut out = vec![
-        Item::Heading("Speech recognition"),
-        Item::Row(Sid::AsstWake, "Listen for the call word", Kind::Toggle),
-        Item::Field(Field::WakeWord, "Voice command name", "Island, Айленд"),
-        Item::Button(Act::WakeSave, "Save command name".into(), true),
-        Item::Row(Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
-        Item::Section("Dictation"),
-        hotkey_item(ui, Hotkey::Dictate),
-        Item::Row(Sid::VoicePaste, "Paste dictated text", Kind::Toggle),
-        Item::Section("Speech service"),
-        Item::Row(Sid::VoiceSeparate, "Separate speech service", Kind::Toggle),
-    ];
-    if !ui.cfg.ai.voice_separate {
+    let from_guide = ui.sw.guide.as_ref().is_some_and(|guide| !guide.visible && guide.separate_speech());
+    let mut out = vec![Item::Heading("Speech recognition")];
+    if !from_guide {
+        out.extend([
+            Item::Row(Sid::AsstWake, "Listen for the call word", Kind::Toggle),
+            Item::Field(Field::WakeWord, "Voice command name", "Island, Айленд"),
+            Item::Button(Act::WakeSave, "Save command name".into(), true),
+            Item::Row(Sid::AsstInstall, "Download the wake-word model (46 MB)", Kind::Button),
+            Item::Section("Dictation"),
+            hotkey_item(ui, Hotkey::Dictate),
+            Item::Row(Sid::VoicePaste, "Paste dictated text", Kind::Toggle),
+        ]);
+    }
+    out.push(Item::Section("Speech service"));
+    if !from_guide {
+        out.push(Item::Row(Sid::VoiceSeparate, "Separate speech service", Kind::Toggle));
+    } else if !ui.cfg.ai.voice_separate {
+        out.push(Item::Note("Finish setup to activate the separate speech service."));
+    }
+    if !from_guide && !ui.cfg.ai.voice_separate {
         out.push(Item::Note("Uses the model service. Enable a separate speech service if it cannot transcribe."));
     }
-    if ui.cfg.ai.voice_separate {
+    if from_guide || ui.cfg.ai.voice_separate {
         let saved = ui.int.voice_key_saved;
         let shared = ui.int.voice_key_shared;
         out.push(Item::Field(
@@ -1986,6 +1993,17 @@ mod tests {
         ui.sw.assistant_page = AssistantPage::Recognition;
         assert!(items(&ui).iter().any(|item| matches!(item, Item::Field(Field::VoiceKey, ..))));
         assert!(items(&ui).iter().any(|item| matches!(item, Item::Pair(Act::Rebind(Hotkey::Dictate), ..))));
+        ui.cfg.ai.voice_separate = false;
+        assert!(!items(&ui).iter().any(|item| matches!(item, Item::Field(Field::VoiceKey, ..))));
+        let mut guide = GuideUi::new(&ui.cfg, false);
+        guide.toggle_speech_service();
+        guide.visible = false;
+        ui.sw.guide = Some(guide);
+        let rows = items(&ui);
+        assert!(rows.iter().any(|item| matches!(item, Item::Field(Field::VoiceKey, ..))));
+        assert!(rows.iter().any(|item| matches!(item, Item::Button(Act::VoiceSave, ..))));
+        assert!(!ui.cfg.ai.voice_separate);
+        ui.sw.guide = None;
         ui.sw.assistant_page = AssistantPage::Voice;
         assert!(items(&ui).iter().any(|item| matches!(item, Item::Row(Sid::AsstVolume, ..))));
         ui.sw.search = "Voice API key".into();

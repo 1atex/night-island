@@ -58,7 +58,9 @@ impl App {
         guide.refresh_settings(&self.settings);
         guide.refresh_models();
         guide.connect_model = ai::has_key(self.settings.ai.provider);
-        guide.connect_speech = ai::can_transcribe(&self.settings.ai) && ai::voice_ready(&self.settings.ai);
+        let mut speech = self.settings.ai.clone();
+        guide.apply_speech_choice(&mut speech);
+        guide.connect_speech = ai::can_transcribe(&speech) && ai::voice_ready(&speech);
         guide.visible
     }
 
@@ -86,6 +88,10 @@ impl App {
             Select(preset) => guide.select(preset, animate),
             ToggleQuick(feature) => guide.toggle_quick(feature),
             ToggleAssistant => guide.toggle_assistant(),
+            ToggleSpeechService => {
+                guide.toggle_speech_service();
+                self.refresh_guide_voice();
+            }
             SelectAccess(access) => guide.select_access(access),
             SuggestWake => {
                 guide.wake.set_text("Луна, Табуретка");
@@ -126,10 +132,11 @@ impl App {
                 }
                 return;
             }
-            OpenAssistant => {
+            OpenAssistant | OpenRecognition => {
                 guide.visible = false;
                 self.sw_focus(None);
-                self.ui.sw.assistant_page = if self.ui.sw.guide.as_ref().is_some_and(|guide| guide.connect_model) {
+                self.ui.sw.assistant_page = if action == OpenRecognition {
+                    self.sync_ai_fields();
                     view::AssistantPage::Recognition
                 } else {
                     view::AssistantPage::Model
@@ -152,8 +159,8 @@ impl App {
         {
             self.settings.ai.voice_wake = wake;
             self.ui.int.wake.set_text(&self.settings.ai.voice_wake);
-            ai::configure(&self.settings.ai);
         }
+        ai::configure(&self.settings.ai);
         self.settings.dismiss_tour();
         self.settings.assistant.apply();
         self.ui.cfg = self.settings.clone();
@@ -558,8 +565,12 @@ impl App {
         self.ui.int.ai_base.set_text(&self.settings.ai.openai_base);
         self.ui.int.ai_key.set_text("");
         self.ui.int.ai_key_saved = ai::has_key(provider);
+        let mut speech = self.settings.ai.clone();
+        if let Some(guide) = &self.ui.sw.guide {
+            guide.apply_speech_choice(&mut speech);
+        }
         self.ui.int.voice_key_shared =
-            ai::voice_shares_chat_key(&self.settings.ai) && ai::has_key(crate::data::settings::AiProvider::OpenAi);
+            ai::voice_shares_chat_key(&speech) && ai::has_key(crate::data::settings::AiProvider::OpenAi);
     }
 
     pub(in crate::island) fn sync_voice_fields(&mut self) {
@@ -606,9 +617,6 @@ impl App {
 
     fn save_voice(&mut self) {
         let key = self.ui.int.voice_key.text();
-        if !key.trim().is_empty() && !ai::save_voice_key(&key) {
-            return self.notify(Notice::Error, '\u{E783}', "That does not look like an API key");
-        }
         let model = self.ui.int.voice_model.text().trim().to_string();
         let model = if model.is_empty() { "whisper-1".to_string() } else { model };
         if !ai::valid_model(&model, crate::data::settings::AiProvider::OpenAi) {
@@ -617,6 +625,9 @@ impl App {
         let Some(base) = ai::clean_base(&self.ui.int.voice_base.text()) else {
             return self.notify(Notice::Error, '\u{E783}', "The server address must be https:// (or local http://)");
         };
+        if !key.trim().is_empty() && !ai::save_voice_key(&key) {
+            return self.notify(Notice::Error, '\u{E783}', "That does not look like an API key");
+        }
         self.settings.ai.voice_model = model;
         self.settings.ai.voice_base = base;
         self.settings.save();

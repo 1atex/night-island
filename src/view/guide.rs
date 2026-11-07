@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
-use crate::data::settings::Settings;
+use crate::data::settings::{AiSettings, Settings};
 use crate::platform::{localvoice, wake, wake_install};
 use crate::services::assistant::{Level, Permissions, perms};
 use crate::ui::characters::Character;
@@ -200,8 +200,8 @@ impl Access {
     }
 
     fn rect(self) -> Rect {
-        let y = 251.0 + self as u8 as f32 * 71.0;
-        (460.0, y, 874.0, y + 64.0)
+        let y = 249.0 + self as u8 as f32 * 59.0;
+        (460.0, y, 874.0, y + 54.0)
     }
 
     fn apply(self, perms: &mut Permissions) {
@@ -223,6 +223,8 @@ impl Access {
 }
 
 const ASSISTANT_ROW: Rect = (460.0, 201.0, 874.0, 242.0);
+const SPEECH_ESSENTIALS: Rect = (460.0, 489.0, 874.0, 525.0);
+const SPEECH_VOICE: Rect = (453.0, 448.0, 865.0, 487.0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoiceModel {
@@ -295,11 +297,13 @@ pub enum GuideAction {
     Select(Preset),
     ToggleQuick(QuickSetting),
     ToggleAssistant,
+    ToggleSpeechService,
     SelectAccess(Access),
     SuggestWake,
     Download(VoiceModel),
     ToggleModel(VoiceModel),
     OpenAssistant,
+    OpenRecognition,
 }
 
 pub struct GuideUi {
@@ -320,6 +324,8 @@ pub struct GuideUi {
     pub invalid_wake: bool,
     pub connect_speech: bool,
     pub connect_model: bool,
+    speech_separate_before: bool,
+    speech_separate: Option<bool>,
     wake_enabled: Option<bool>,
     local_enabled: Option<bool>,
     wake_before: bool,
@@ -347,6 +353,8 @@ impl GuideUi {
             invalid_wake: false,
             connect_speech: false,
             connect_model: false,
+            speech_separate_before: settings.ai.voice_separate,
+            speech_separate: None,
             wake_enabled: None,
             local_enabled: None,
             wake_before: settings.assistant.wake,
@@ -364,6 +372,7 @@ impl GuideUi {
         self.wake_before_text.clone_from(&settings.ai.voice_wake);
         self.quick_before = QUICK_ROWS.map(|feature| feature.read(settings));
         self.assistant_before = settings.assistant.perms.enabled;
+        self.speech_separate_before = settings.ai.voice_separate;
         self.wake_before = settings.assistant.wake;
         self.local_before = settings.assistant.local_voice && settings.assistant.speak;
     }
@@ -525,6 +534,21 @@ impl GuideUi {
         self.assistant = Some(!self.assistant_enabled());
     }
 
+    pub fn separate_speech(&self) -> bool {
+        self.speech_separate.unwrap_or(self.speech_separate_before)
+    }
+
+    pub fn toggle_speech_service(&mut self) {
+        let enabled = !self.separate_speech();
+        self.speech_separate = (enabled != self.speech_separate_before).then_some(enabled);
+    }
+
+    pub fn apply_speech_choice(&self, settings: &mut AiSettings) {
+        if let Some(enabled) = self.speech_separate {
+            settings.voice_separate = enabled;
+        }
+    }
+
     pub fn select_access(&mut self, access: Access) {
         if access == Access::Full {
             if let Some((previous, assistant)) = self.before_full.take() {
@@ -563,6 +587,7 @@ impl GuideUi {
             }
         }
         self.access.apply(&mut settings.assistant.perms);
+        self.apply_speech_choice(&mut settings.ai);
         if let Some(enabled) = self.assistant {
             settings.assistant.perms.enabled = enabled;
         }
@@ -687,12 +712,21 @@ fn controls(guide: &GuideUi) -> Vec<(GuideAction, &'static str, Rect)> {
             .extend(QUICK_ROWS.into_iter().map(|feature| (ToggleQuick(feature), feature.visual().1, feature.rect())));
         buttons.push((ToggleAssistant, "Voice assistant", ASSISTANT_ROW));
         buttons.extend(ACCESS_ROWS.into_iter().map(|access| (SelectAccess(access), access.label(), access.rect())));
+        buttons.push((ToggleSpeechService, "Separate speech service", SPEECH_ESSENTIALS));
+        if guide.separate_speech() {
+            buttons.push((OpenRecognition, "Configure speech service", (460.0, 529.0, 874.0, 555.0)));
+        }
     }
     if guide.voice_page() {
         buttons.push((SuggestWake, "Suggest names", (264.0, 248.0, 404.0, 274.0)));
-        if !guide.connect_model || !guide.connect_speech {
-            let label = if guide.connect_model { "Connect speech recognition" } else { "Connect an AI service" };
-            buttons.push((OpenAssistant, label, (453.0, 496.0, 865.0, 535.0)));
+        buttons.push((ToggleSpeechService, "Separate speech service", SPEECH_VOICE));
+        if guide.separate_speech() {
+            let right = if guide.connect_model { 865.0 } else { 655.0 };
+            buttons.push((OpenRecognition, "Configure speech service", (453.0, 513.0, right, 546.0)));
+        }
+        if !guide.connect_model {
+            let left = if guide.separate_speech() { 663.0 } else { 453.0 };
+            buttons.push((OpenAssistant, "Connect an AI service", (left, 513.0, 865.0, 546.0)));
         }
         for model in [VoiceModel::Wake, VoiceModel::Local] {
             let label = match guide.models[model.index()] {
@@ -881,7 +915,7 @@ fn paint_voice(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     let phase = guide.voice_phase();
     let elapsed = guide.elapsed().as_secs_f32().min(3.5);
     let mouth = if phase == 3 { 0.18 + 0.69 * (elapsed * 16.0).sin().abs() } else { 0.0 };
-    v.island(474.0, 220.0, 370.0, 235.0)?;
+    v.island(474.0, 220.0, 370.0, 225.0)?;
     v.pose_pet(
         490.0,
         230.0,
@@ -1109,19 +1143,22 @@ fn paint_switch(v: &Preview<'_>, right: f32, y: f32, enabled: bool, tone: D2D1_C
     v.round((dot - 7.0, y - 7.0, dot + 7.0, y + 7.0), 7.0, WHITE)
 }
 
-fn paint_access_panel(v: &Preview<'_>) -> Result<()> {
+fn paint_access_panel(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
     let rect = v.layout.rect((442.0, 151.0, 892.0, 560.0));
     let scale = v.layout.scale;
     v.p.fill_round_gradient(rect, 23.0 * scale, rgba(0.085, 0.094, 0.15, 1.0), rgba(0.039, 0.045, 0.065, 1.0))?;
     v.p.stroke_round_rect(rect, 23.0 * scale, scale, acc(0.31))?;
     v.text("Assistant access", (460.0, 160.0, 874.0, 197.0), 18.0, true, WHITE)?;
-    v.text(
-        "You can adjust individual permissions in Settings.",
-        (460.0, 532.0, 874.0, 554.0),
-        11.0,
-        false,
-        rgba(1.0, 1.0, 1.0, 0.68),
-    )
+    if !guide.separate_speech() {
+        v.text(
+            "Use this if your AI service cannot recognize speech.",
+            (460.0, 529.0, 874.0, 555.0),
+            11.5,
+            false,
+            rgba(1.0, 1.0, 1.0, 0.68),
+        )?;
+    }
+    Ok(())
 }
 
 fn paint_access_choice(v: &Preview<'_>, guide: &GuideUi, access: Access, rect: Rect, hover: bool) -> Result<()> {
@@ -1291,7 +1328,7 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
         muted,
     )?;
     if guide.essentials_page() {
-        paint_access_panel(&v)?;
+        paint_access_panel(&v, guide)?;
     } else {
         paint_stage(&v, guide)?;
     }
@@ -1320,12 +1357,12 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
             if guide.invalid_wake { rgba(1.0, 0.65, 0.60, 1.0) } else { muted },
         )?;
         paint_models(&v, guide)?;
-        let hint = if guide.connect_model && guide.connect_speech {
-            "Voice services are connected."
+        let hint = if guide.separate_speech() {
+            if guide.connect_speech { "A speech API key is available." } else { "Set the speech server and API key." }
         } else {
-            "Voice commands also need AI and speech recognition."
+            "Use this if your AI service cannot recognize speech."
         };
-        v.center(hint, (453.0, 461.0, 865.0, 487.0), 11.5, muted)?;
+        v.center(hint, (453.0, 488.0, 865.0, 511.0), 11.5, muted)?;
     } else if guide.last_page() {
         paint_ready_summary(&v, guide)?;
     }
@@ -1345,6 +1382,9 @@ pub fn paint_guide(p: &Painter, size: (f32, f32), dpi: f32, guide: &GuideUi, ui:
             GuideAction::ToggleAssistant => {
                 paint_quick_toggle(&v, rect, '\u{E720}', label, guide.assistant_enabled(), hover)?;
             }
+            GuideAction::ToggleSpeechService => {
+                paint_quick_toggle(&v, rect, '\u{E720}', label, guide.separate_speech(), hover)?;
+            }
             GuideAction::SelectAccess(access) => paint_access_choice(&v, guide, access, rect, hover)?,
             _ => {
                 let primary = matches!(action, GuideAction::Next | GuideAction::Download(VoiceModel::Wake))
@@ -1363,6 +1403,7 @@ mod tests {
     #[test]
     fn setup_controls_fit_small_windows_and_high_dpi() {
         let mut guide = GuideUi::new(&Settings::default(), false);
+        guide.toggle_speech_service();
         guide.move_by(-1, false);
         assert_eq!(guide.page, 0);
         guide.mode = GuideMode::Detailed;
@@ -1385,11 +1426,17 @@ mod tests {
 
     #[test]
     fn switching_routes_keeps_choices_and_quick_setup_skips_voice() {
-        let mut guide = GuideUi::new(&Settings::default(), false);
+        let mut settings = Settings::default();
+        let mut guide = GuideUi::new(&settings, false);
         guide.choose_mode(GuideMode::Quick, false);
         guide.select(Preset::Desktop, false);
         guide.toggle_quick(QuickSetting::Top);
-        guide.move_by(2, false);
+        guide.move_by(1, false);
+        assert!(guide.essentials_page());
+        assert!(controls(&guide).iter().any(|(action, _, _)| *action == GuideAction::ToggleSpeechService));
+        guide.toggle_speech_service();
+        assert!(!settings.ai.voice_separate);
+        guide.move_by(1, false);
         assert!(guide.last_page());
         assert!(!guide.voice_page());
         guide.extend(false);
@@ -1403,6 +1450,13 @@ mod tests {
         guide.choose_mode(GuideMode::Detailed, false);
         assert_eq!(guide.wake.text(), "Luna, Taburetka");
         assert!(!guide.quick_value(QuickSetting::Top));
+        guide.refresh_settings(&settings);
+        guide.apply_choices(&mut settings);
+        assert!(settings.ai.voice_separate);
+        guide.refresh_settings(&settings);
+        guide.toggle_speech_service();
+        guide.apply_choices(&mut settings);
+        assert!(!settings.ai.voice_separate);
         guide.visible = false;
         assert!(!guide.preview_ticking());
     }

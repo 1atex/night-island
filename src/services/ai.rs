@@ -343,12 +343,19 @@ fn build(
             all.extend(messages.into_iter().map(|(a, parts)| {
                 json!({"role": if a { "assistant" } else { "user" }, "content": content_json(provider, parts)})
             }));
-            let mut body = json!({"model": model, "max_tokens": max_tokens, "messages": all});
+            let base = clean_base(&settings.openai_base)?;
+            let token_limit = if base == "https://api.openai.com" || base.starts_with("https://api.openai.com/") {
+                "max_completion_tokens"
+            } else {
+                "max_tokens"
+            };
+            let mut body = json!({"model": model, "messages": all});
+            body[token_limit] = json!(max_tokens);
             if quick && settings.openai_base.to_ascii_lowercase().contains("deepseek.com") {
                 body["thinking"] = json!({"type": "disabled"});
             }
             Call {
-                url: format!("{}/chat/completions", clean_base(&settings.openai_base)?),
+                url: format!("{base}/chat/completions"),
                 headers: vec![("Authorization", format!("Bearer {key}"))],
                 body: body.to_string(),
             }
@@ -482,35 +489,20 @@ fn whisper_model(base: &str) -> &'static str {
 fn openai_voice_call(base: &str, model: &str, key: &str, wav: &[u8]) -> VoiceCall {
     let mut body: Vec<u8> = Vec::with_capacity(wav.len() + 512);
     let field = |name: &str, value: &str| {
-        format!(
-            "--{MULTIPART_BOUNDARY}
-Content-Disposition: form-data; name=\"{name}\"
-
-{value}
-"
-        )
+        format!("--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
     };
     body.extend_from_slice(field("model", model).as_bytes());
     body.extend_from_slice(field("response_format", "json").as_bytes());
     body.extend_from_slice(
         format!(
-            "--{MULTIPART_BOUNDARY}
-Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"
-Content-Type: audio/wav
-
-"
+            "--{MULTIPART_BOUNDARY}\r\n\
+             Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\n\
+             Content-Type: audio/wav\r\n\r\n"
         )
         .as_bytes(),
     );
     body.extend_from_slice(wav);
-    body.extend_from_slice(
-        format!(
-            "
---{MULTIPART_BOUNDARY}--
-"
-        )
-        .as_bytes(),
-    );
+    body.extend_from_slice(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n").as_bytes());
     VoiceCall {
         url: format!("{base}/audio/transcriptions"),
         headers: vec![("Authorization", format!("Bearer {key}"))],
@@ -869,6 +861,15 @@ mod tests {
         let call = build_call(&s, "k1234567", "Hi?").unwrap();
         assert_eq!(call.url, "https://openrouter.ai/api/v1/chat/completions");
         assert!(call.headers.contains(&("Authorization", "Bearer k1234567".to_string())));
+        let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
+        assert_eq!(body["max_tokens"], MAX_OUTPUT_TOKENS);
+        assert!(body.get("max_completion_tokens").is_none());
+        s.openai_base = "https://api.openai.com/v1".into();
+        s.openai_model = "gpt-6-luna".into();
+        let call = build_call(&s, "k1234567", "Hi?").unwrap();
+        let body: serde_json::Value = serde_json::from_str(&call.body).unwrap();
+        assert_eq!(body["max_completion_tokens"], MAX_OUTPUT_TOKENS);
+        assert!(body.get("max_tokens").is_none());
         let g = build_call(&settings(AiProvider::Gemini), "k1234567", "Hi?").unwrap();
         assert!(g.url.starts_with("https://generativelanguage.googleapis.com/v1beta/models/"));
         assert!(g.url.ends_with(":generateContent") && !g.url.contains("k1234567"));
@@ -921,23 +922,27 @@ mod tests {
 
     #[test]
     fn a_voice_call_is_built_per_provider() {
-        let wav = vec![1u8, 2, 3, 4];
+        let wav = vec![0, b'\n', b'\r', b'\n'];
         assert!(build_voice_call(&settings(AiProvider::Claude), "k1234567", &wav).is_none());
         let mut s = settings(AiProvider::OpenAi);
         s.openai_base = "https://api.groq.com/openai/v1".into();
         let call = build_voice_call(&s, "k1234567", &wav).unwrap();
         assert_eq!(call.url, "https://api.groq.com/openai/v1/audio/transcriptions");
-        assert!(call.content_type.starts_with("multipart/form-data; boundary="));
-        let text = String::from_utf8_lossy(&call.body);
-        assert!(text.contains("whisper-large-v3-turbo") && text.contains("filename=\"speech.wav\""));
-        assert!(call.body.windows(4).any(|w| w == wav.as_slice()));
-        assert!(!text.contains("k1234567"), "the key goes in a header only");
+        let boundary = call.content_type.strip_prefix("multipart/form-data; boundary=").unwrap();
+        let fields = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-large-v3-turbo\r\n\
+             --{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n\
+             --{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\n\
+             Content-Type: audio/wav\r\n\r\n"
+        );
+        let ending = format!("\r\n--{boundary}--\r\n");
+        assert_eq!(call.body, [fields.as_bytes(), &wav, ending.as_bytes()].concat());
         s.openai_base = "https://api.openai.com/v1".into();
         assert!(String::from_utf8_lossy(&build_voice_call(&s, "k1234567", &wav).unwrap().body).contains("whisper-1"));
         let g = build_voice_call(&settings(AiProvider::Gemini), "k1234567", &wav).unwrap();
         let body: serde_json::Value = serde_json::from_slice(&g.body).unwrap();
         assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["mimeType"], "audio/wav");
-        assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["data"], "AQIDBA==");
+        assert_eq!(body["contents"][0]["parts"][1]["inlineData"]["data"], "AAoNCg==");
     }
 
     fn file_turn(text: &str, files: Vec<Attachment>) -> ChatTurn {

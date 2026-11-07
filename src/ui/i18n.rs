@@ -505,6 +505,13 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Grant access from the Notifications tab." => "Доступ можно выдать во вкладке «Уведомления».",
         "Wake-word listening is selected." => "Выбран запуск ассистента по кличке.",
         "Voice services are connected." => "Голосовые сервисы подключены.",
+        "Configure speech service" => "Настроить сервис речи",
+        "Use this if your AI service cannot recognize speech." => "Включи, если твой ИИ не распознаёт речь.",
+        "A speech API key is available." => "Ключ для распознавания есть.",
+        "Set the speech server and API key." => "Укажи сервер и ключ для распознавания.",
+        "Finish setup to activate the separate speech service." => {
+            "Заверши онбординг, чтобы включить отдельный сервис речи."
+        }
         "Connect voice services later under Assistant." => "Подключить голос можно позже в «Ассистенте».",
         "Choose your layout" => "Выбери пресет",
         "Pick a preset to see how it looks. It applies when you finish." => {
