@@ -107,27 +107,8 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn unfilled_progress_rect(&self, size: (i32, i32)) -> (f32, f32, f32, f32) {
-        let full = (0.0, 0.0, size.0 as f32, size.1 as f32);
-        let Some((pos, len)) = media::progress().filter(|_| view::pill_progress_fill_on(&self.ui)) else { return full };
-        let fraction = (pos / len).clamp(0.0, 1.0);
-        if fraction <= 0.0 {
-            return full;
-        }
-        if fraction >= 1.0 {
-            return (0.0, 0.0, 0.0, 0.0);
-        }
-        let pill = self.pill_rect(false);
-        if self.settings.vertical() {
-            if self.edge() == Edge::Left {
-                (0.0, 0.0, full.2, pill.1 + pill.3 * (1.0 - fraction))
-            } else {
-                (0.0, pill.1 + pill.3 * fraction, full.2, full.3)
-            }
-        } else {
-            let ear = if self.docked() && self.edge() == Edge::Top { EAR * self.scale } else { 0.0 };
-            (pill.0 - ear + (pill.2 + ear * 2.0) * fraction, 0.0, full.2, full.3)
-        }
+    pub(in crate::island) fn progress_fill_active(&self) -> bool {
+        view::pill_progress_fill_on(&self.ui) && media::progress().is_some()
     }
 
     pub(in crate::island) fn paint_progress_fill(&self) {

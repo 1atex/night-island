@@ -1213,14 +1213,26 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
                     crate::ui::i18n::tr(if ui.sw.font_busy { "Loading font…" } else { "Load your font…" }).into_owned(),
                     !ui.sw.font_busy,
                 ),
-                Item::Button(Act::FontDownload, crate::ui::i18n::tr("Download font").into_owned(), true),
+                Item::Button(
+                    Act::FontDownload,
+                    crate::ui::i18n::tr(
+                        if ui.cfg.interface_font == crate::data::settings::InterfaceFont::SanFrancisco {
+                            "SF Pro website (macOS package)"
+                        } else {
+                            "Download font"
+                        },
+                    )
+                    .into_owned(),
+                    true,
+                ),
                 Item::Note("TTF, OTF or TTC, up to 16 MB. The font is saved in Island."),
                 Item::Note("Download opens the official font website."),
             ];
-            if ui.cfg.interface_font == crate::data::settings::InterfaceFont::SanFrancisco
-                && !crate::ui::fonts::sf_available()
-            {
-                font_items.push(Item::Note("SF Pro is not installed. The preview currently uses Segoe UI."));
+            if ui.cfg.interface_font == crate::data::settings::InterfaceFont::SanFrancisco {
+                font_items.push(Item::Note("Apple provides a DMG package. Import a TTF or OTF file, not the DMG."));
+                if !crate::ui::fonts::sf_available() {
+                    font_items.push(Item::Note("SF Pro is not installed. The preview currently uses Segoe UI."));
+                }
             }
             if ui.cfg.interface_font == crate::data::settings::InterfaceFont::Custom
                 && crate::ui::fonts::custom_name().is_empty()

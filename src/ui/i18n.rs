@@ -40,6 +40,10 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Load your font…" => "Загрузить свой шрифт…",
         "Loading font…" => "Загрузка шрифта…",
         "Download font" => "Скачать шрифт",
+        "SF Pro website (macOS package)" => "Сайт SF Pro (пакет macOS)",
+        "Apple provides a DMG package. Import a TTF or OTF file, not the DMG." => {
+            "Apple выдаёт пакет DMG. Для импорта нужен файл TTF или OTF из пакета."
+        }
         "Download opens the official font website." => "Скачать шрифт — открыть официальный сайт.",
         "TTF, OTF or TTC, up to 16 MB. The font is saved in Island." => {
             "TTF, OTF или TTC, до 16 МБ. Шрифт сохранится в Island."

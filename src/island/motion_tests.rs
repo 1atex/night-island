@@ -371,6 +371,42 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             }
             capture(&app, 70 + index)?;
         }
+        app.ui.media.accent = Some((183, 140, 77));
+        media::debug_progress(20.0, 100.0);
+        app.paint_progress_fill();
+        let (at, size, radius) = app.pill(app.win, false, false);
+        let rect = (at.X, at.Y, size.X, size.Y);
+        let cursors = [
+            (at.X - 5.0, at.Y + size.Y * 0.5),
+            (at.X - 5.0, at.Y + size.Y + 5.0),
+            (at.X + 10.0, at.Y + size.Y + 10.0),
+            (at.X + size.X + 5.0, at.Y + size.Y * 0.5),
+            (at.X + size.X + 5.0, at.Y + size.Y + 5.0),
+            (at.X + size.X - 10.0, at.Y + size.Y + 10.0),
+        ];
+        for (index, cursor) in cursors.into_iter().enumerate() {
+            app.liquid.pull = crate::ui::gfx::cursor_pull(rect, radius.X, cursor, 160.0, 40.0, None);
+            app.liquid.bump_amp = 40.0;
+            app.settings.eq_style = crate::data::settings::EqStyle::Spikes;
+            app.paint_edge_levels(&[0.25, 0.6, 0.4, 0.75, 0.65, 0.5, 0.75, 0.5, 0.2]);
+            assert!(!app.liquid.highlight.sprite.IsVisible()?, "A filled body must have one continuous material");
+            let _ = app.compositor.RequestCommitAsync();
+            unsafe {
+                let mut message = MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+                DwmFlush()?;
+                std::thread::sleep(Duration::from_millis(30));
+                DwmFlush()?;
+            }
+            capture(&app, 80 + index)?;
+        }
+        app.ui.cfg.music_progress = false;
+        app.paint_edge_levels(&[0.3; 9]);
+        assert!(app.liquid.highlight.sprite.IsVisible()?, "Equalizer colour remains available without body fill");
+        app.ui.cfg.music_progress = true;
         app.music.spectrum_running = true;
         app.liquid.bump_amp = 0.0;
         app.liquid.bump_vel = 0.0;

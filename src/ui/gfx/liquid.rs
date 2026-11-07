@@ -127,6 +127,18 @@ impl Outline {
 }
 
 impl ElasticPull {
+    pub fn bounded(self, rect: (f32, f32, f32, f32), radius: f32) -> Self {
+        let (x, y, w, h) = rect;
+        let support = if w >= h {
+            (self.point.0 - x).min(x + w - self.point.0)
+        } else {
+            (self.point.1 - y).min(y + h - self.point.1)
+        }
+        .max(0.0);
+        let limit = radius.min(w.min(h) * 0.5).max(0.0) * 0.7 + support * 0.35;
+        Self { depth: self.depth.clamp(0.0, limit), ..self }
+    }
+
     pub fn follow(self, target: Self, rect: (f32, f32, f32, f32), radius: f32, blend: f32) -> Self {
         let outline = Outline::new(rect, radius);
         let from = outline.position(self);
@@ -192,7 +204,7 @@ pub fn cursor_pull(
     if magnitude > 0.001 {
         normal = (normal.0 / magnitude, normal.1 / magnitude);
     }
-    ElasticPull { point, normal, spread: 44.0, depth }
+    ElasticPull { point, normal, spread: 44.0, depth }.bounded(rect, radius)
 }
 
 impl ElasticBody {
@@ -210,7 +222,7 @@ impl ElasticBody {
             * (3.0 - 2.0 * fade)
             * alignment
             * alignment;
-        (px + outward.0 * self.pull.depth * weight, py + outward.1 * self.pull.depth * weight)
+        (px + self.pull.normal.0 * self.pull.depth * weight, py + self.pull.normal.1 * self.pull.depth * weight)
     }
 }
 
@@ -493,6 +505,41 @@ mod tests {
                             }
                         }
                     }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn side_pulls_stay_within_the_pill_height_and_corners_remain_compact() -> Result<()> {
+        let factory: ID2D1Factory = unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
+        for scale in [0.75, 1.0, 1.25, 1.5, 2.0] {
+            for vertical in [false, true] {
+                let rect = if vertical {
+                    (80.0 * scale, 80.0 * scale, 34.0 * scale, 240.0 * scale)
+                } else {
+                    (80.0 * scale, 80.0 * scale, 240.0 * scale, 34.0 * scale)
+                };
+                let radius = 17.0 * scale;
+                for cursor in [(75.0, 97.0), (325.0, 97.0), (75.0, 119.0), (325.0, 119.0)] {
+                    let cursor = if vertical {
+                        (cursor.1 * scale, cursor.0 * scale)
+                    } else {
+                        (cursor.0 * scale, cursor.1 * scale)
+                    };
+                    let pull = cursor_pull(rect, radius, cursor, 160.0 * scale, 40.0 * scale, None);
+                    assert!(pull.depth > 0.0 && pull.depth <= 15.0 * scale);
+                    let shape = elastic_geometry(&factory, &ElasticBody { rect, radius, pull })?;
+                    let bounds = unsafe { shape.GetBounds(None)? };
+                    let (low, high, start, length, straight) = if vertical {
+                        (bounds.left, bounds.right, rect.0, rect.2, pull.normal.0.abs() < 0.001)
+                    } else {
+                        (bounds.top, bounds.bottom, rect.1, rect.3, pull.normal.1.abs() < 0.001)
+                    };
+                    let allowance = if straight { 0.05 * scale } else { 12.0 * scale };
+                    assert!(low >= start - allowance && high <= start + length + allowance);
+                    assert_eq!(unsafe { shape.GetFigureCount()? }, 1);
                 }
             }
         }
