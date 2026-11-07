@@ -280,6 +280,33 @@ impl EqStyle {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum EqResponse {
+    Calm,
+    #[default]
+    Responsive,
+    Energetic,
+}
+
+impl EqResponse {
+    pub const ALL: [Self; 3] = [Self::Calm, Self::Responsive, Self::Energetic];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Calm => "Calm",
+            Self::Responsive => "Responsive",
+            Self::Energetic => "Energetic",
+        }
+    }
+
+    pub fn step(self, forward: bool) -> Self {
+        let count = Self::ALL.len();
+        let index = Self::ALL.iter().position(|value| *value == self).unwrap_or(0);
+        Self::ALL[if forward { (index + 1) % count } else { (index + count - 1) % count }]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum EqGradient {
     #[default]
     Single,
@@ -449,6 +476,7 @@ pub struct Settings {
     pub cover_mode: CoverMode,
     pub frame_rate: FrameRate,
     pub eq_style: EqStyle,
+    pub eq_response: EqResponse,
     pub eq_strength: f32,
     pub eq_gradient: EqGradient,
     pub eq_when_open: bool,
@@ -577,6 +605,7 @@ impl Default for Settings {
             cover_mode: CoverMode::Fit,
             frame_rate: FrameRate::Adaptive,
             eq_style: EqStyle::Bars,
+            eq_response: EqResponse::Responsive,
             eq_strength: 1.5,
             eq_gradient: EqGradient::Horizontal,
             eq_when_open: true,
@@ -1212,6 +1241,23 @@ mod tests {
             assert!(!restored.pet_autonomy);
             assert_eq!(restored.custom_pet, settings.custom_pet);
             assert_eq!(restored.custom_pet.ear_size, 1.25);
+        }
+    }
+
+    #[test]
+    fn equalizer_response_migrates_without_replacing_existing_preferences() {
+        let mut settings: Settings =
+            serde_json::from_str(r#"{"eq_style":"bars","eq_strength":1.0,"bump_tint":"progress","eq_smooth":true}"#)
+                .unwrap();
+        assert_eq!(settings.eq_response, EqResponse::Responsive);
+        for response in EqResponse::ALL {
+            settings.eq_response = response;
+            let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+            assert_eq!(restored.eq_response, response);
+            assert_eq!(restored.eq_style, EqStyle::Bars);
+            assert_eq!(restored.eq_strength, 1.0);
+            assert_eq!(restored.bump_tint, BumpTint::Progress);
+            assert!(restored.eq_smooth);
         }
     }
 

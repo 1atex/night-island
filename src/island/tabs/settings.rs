@@ -230,7 +230,7 @@ impl App {
                     self.stop_idle();
                     self.liquid_tick();
                 }
-                EqStrength | EqGradient => self.refresh_eq_shape(),
+                EqStrength | EqGradient | EqResponse => self.refresh_eq_shape(),
                 PreferPlayingMedia => {
                     media::configure_priority(self.settings.prefer_playing_media);
                     self.on_media();

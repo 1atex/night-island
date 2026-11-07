@@ -60,7 +60,7 @@ const APPEARANCE: [(Sid, &str, Kind); 6] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 22] = [
+const PILL: [(Sid, &str, Kind); 23] = [
     (Sid::PillUnifiedLayout, "Balanced pill layout", Kind::Toggle),
     (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
@@ -78,6 +78,7 @@ const PILL: [(Sid, &str, Kind); 22] = [
     (Sid::Spikes, "Edge spikes", Kind::Toggle),
     (Sid::EqStyle, "Equalizer shape", Kind::Cycle),
     (Sid::EqSmooth, "Smooth liquid equalizer", Kind::Toggle),
+    (Sid::EqResponse, "Liquid equalizer response", Kind::Cycle),
     (Sid::EqStrength, "Equalizer strength", Kind::Slider),
     (Sid::EqGradient, "Equalizer colours", Kind::Cycle),
     (Sid::EqWhenOpen, "Equalizer while the island is open", Kind::Toggle),
@@ -711,6 +712,9 @@ fn pill_items(ui: &UiState) -> Vec<Item> {
     if let Some(group) = GROUPS.iter().find(|g| g.name == "Pill and music") {
         out.extend(rows_with_sections(group));
     }
+    out.push(Item::Note(
+        "Calm keeps the previous liquid response. Responsive follows beats faster; Energetic adds more movement.",
+    ));
     out.push(Item::Note("Turn off balanced layout or smooth equalizer to use their classic appearance."));
     out.push(Item::Note("Player priority: pause My Wave and start a video to control the browser from Home. My Wave keeps its own controls."));
     out.push(Item::Section("Players for lyrics"));

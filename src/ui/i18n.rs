@@ -33,6 +33,13 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "Balanced pill layout" => "Единые размеры и отступы в пилюле",
         "Smooth liquid equalizer" => "Плавная жидкая форма эквалайзера",
+        "Liquid equalizer response" => "Реакция жидкого эквалайзера",
+        "Calm" => "Спокойная",
+        "Responsive" => "Отзывчивая",
+        "Energetic" => "Энергичная",
+        "Calm keeps the previous liquid response. Responsive follows beats faster; Energetic adds more movement." => {
+            "Спокойная — прежняя реакция. Отзывчивая быстрее следует ритму, энергичная усиливает движение."
+        }
         "Load a font file to replace Segoe UI in the preview." => {
             "Загрузите файл шрифта. Пока в предпросмотре — Segoe UI."
         }

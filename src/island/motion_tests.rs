@@ -411,6 +411,42 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
         app.paint_edge_levels(&[0.3; 9]);
         assert!(!app.liquid.highlight.sprite.IsVisible()?, "Disabling liquid edge colour must remove its gradient");
         app.settings.bump_tint = crate::data::settings::BumpTint::Equalizer;
+        app.liquid.pull_ready = false;
+        app.liquid.bump_amp = 0.0;
+        app.settings.eq_style = crate::data::settings::EqStyle::Bars;
+        for (profile, response) in crate::data::settings::EqResponse::ALL.into_iter().enumerate() {
+            app.settings.eq_response = response;
+            app.music.edge_values.set([0.0; audio::BANDS]);
+            let mut peak = 0.0_f32;
+            for frame in 0..24 {
+                audio::debug_levels(std::array::from_fn(|band| {
+                    if (4..8).contains(&frame) { if band < 10 { 1.0 } else { 0.65 } } else { 0.08 }
+                }));
+                app.music.edge_time.set(Instant::now() - Duration::from_millis(16));
+                app.paint_spikes();
+                peak = peak.max(app.music.edge_values.get()[4]);
+                if [0, 6, 9, 13, 23].contains(&frame) {
+                    let _ = app.compositor.RequestCommitAsync();
+                    unsafe {
+                        let mut message = MSG::default();
+                        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                            let _ = TranslateMessage(&message);
+                            DispatchMessageW(&message);
+                        }
+                        DwmFlush()?;
+                        std::thread::sleep(Duration::from_millis(20));
+                        DwmFlush()?;
+                    }
+                    capture(&app, 100 + profile * 30 + frame)?;
+                }
+            }
+            if response != crate::data::settings::EqResponse::Calm {
+                assert!(peak > 0.9, "Short beats must be visible in the responsive profiles");
+                assert!(app.music.edge_values.get()[4] < 0.2, "The edge must settle before the next beat");
+            }
+        }
+        audio::debug_levels([0.0; audio::BANDS]);
+        app.settings.eq_response = crate::data::settings::EqResponse::Responsive;
         app.music.spectrum_running = true;
         app.liquid.bump_amp = 0.0;
         app.liquid.bump_vel = 0.0;

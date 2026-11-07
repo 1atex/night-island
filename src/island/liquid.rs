@@ -56,6 +56,34 @@ pub(in crate::island) struct MusicBars {
     pub(in crate::island) edge_time: Cell<Instant>,
 }
 
+fn edge_response_parameters(response: crate::data::settings::EqResponse) -> (f32, f32, f32) {
+    use crate::data::settings::EqResponse;
+    match response {
+        EqResponse::Calm => (0.065, 0.22, 1.0),
+        EqResponse::Responsive => (0.022, 0.09, 1.35),
+        EqResponse::Energetic => (0.012, 0.065, 1.65),
+    }
+}
+
+fn edge_response_step(previous: f32, target: f32, elapsed: f32, response: crate::data::settings::EqResponse) -> f32 {
+    let (attack, release, _) = edge_response_parameters(response);
+    let seconds = if target > previous { attack } else { release };
+    previous + (target - previous) * (1.0 - (-elapsed.max(0.0) / seconds).exp())
+}
+
+fn edge_band_level(values: &[f32; audio::BANDS], position: f32, half_width: f32, pool: bool) -> f32 {
+    if !pool {
+        let lo = (position as usize).min(audio::BANDS - 2);
+        return values[lo] + (values[lo + 1] - values[lo]) * (position - lo as f32);
+    }
+    let lo = ((position - half_width).floor().max(0.0) as usize).min(audio::BANDS - 1);
+    let hi = ((position + half_width).ceil() as usize).min(audio::BANDS - 1);
+    let bands = &values[lo..=hi];
+    let peak = bands.iter().copied().fold(0.0, f32::max);
+    let average = bands.iter().sum::<f32>() / bands.len() as f32;
+    peak * 0.65 + average * 0.35
+}
+
 impl App {
     fn elastic_body_spec(&self, depth: f32) -> crate::ui::gfx::ElasticBody {
         let (at, size, radius) = self.pill(self.win, false, false);
@@ -199,9 +227,8 @@ impl App {
         let mut values = self.music.edge_values.get();
         for (i, value) in values.iter_mut().enumerate() {
             let target = audio::level(i).clamp(0.0, 1.0);
-            let seconds = if target > *value { 0.065 } else { 0.22 };
             *value = if self.settings.eq_smooth {
-                *value + (target - *value) * (1.0 - (-dt / seconds).exp())
+                edge_response_step(*value, target, dt, self.settings.eq_response)
             } else {
                 target
             };
@@ -209,14 +236,13 @@ impl App {
         self.music.edge_values.set(values);
         let count = ((self.collapsed().0.max(self.collapsed().1) / 30.0) as usize | 1).clamp(7, 19);
         let mid = count / 2;
-        let levels: Vec<_> = (0..count)
-            .map(|i| {
-                let t = i.abs_diff(mid) as f32 / mid.max(1) as f32 * (audio::BANDS - 1) as f32;
-                let lo = (t as usize).min(audio::BANDS - 2);
-                values[lo] + (values[lo + 1] - values[lo]) * (t - lo as f32)
-            })
-            .collect();
-        self.paint_edge_levels(&levels);
+        let spacing = (audio::BANDS - 1) as f32 / mid.max(1) as f32;
+        let pool = self.settings.eq_smooth && self.settings.eq_response != crate::data::settings::EqResponse::Calm;
+        let mut levels = [0.0; 19];
+        for (i, level) in levels.iter_mut().take(count).enumerate() {
+            *level = edge_band_level(&values, i.abs_diff(mid) as f32 * spacing, spacing * 0.5, pool);
+        }
+        self.paint_edge_levels(&levels[..count]);
     }
 
     pub(in crate::island) fn paint_edge_levels(&self, levels: &[f32]) {
@@ -225,7 +251,8 @@ impl App {
         }
         self.set_bump_visible(false);
         let s = self.scale;
-        let depth = (self.settings.liquid_strength * s * 0.5 * self.settings.eq_strength).min(24.0 * s);
+        let gain = edge_response_parameters(self.settings.eq_response).2;
+        let depth = (self.settings.liquid_strength * s * 0.5 * self.settings.eq_strength * gain).min(24.0 * s);
         let shape = match self.settings.eq_style {
             crate::data::settings::EqStyle::Wave => crate::ui::gfx::EdgeShape::Wave,
             crate::data::settings::EqStyle::Bars => crate::ui::gfx::EdgeShape::Bars,
@@ -584,6 +611,8 @@ impl App {
             return;
         }
         self.music.spectrum_running = show;
+        self.music.edge_values.set([0.0; audio::BANDS]);
+        self.music.edge_time.set(Instant::now());
         if !show {
             let _ = self.liquid.ring.sprite.SetIsVisible(false);
             self.paint_liquid_body(self.liquid.bump_amp);
@@ -904,6 +933,62 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn responsive_edge_catches_beats_and_releases_between_them() {
+        use crate::data::settings::EqResponse;
+        let calm = edge_response_step(0.0, 1.0, 0.033, EqResponse::Calm);
+        let responsive = edge_response_step(0.0, 1.0, 0.033, EqResponse::Responsive);
+        let energetic = edge_response_step(0.0, 1.0, 0.033, EqResponse::Energetic);
+        assert!(responsive > 0.75 && responsive > calm * 1.8);
+        assert!(energetic > responsive && energetic <= 1.0);
+        assert!(edge_response_step(1.0, 0.0, 0.12, EqResponse::Responsive) < 0.3);
+        assert!(edge_response_step(1.0, 0.0, 0.12, EqResponse::Calm) > 0.55);
+        for response in EqResponse::ALL {
+            let mut value = 0.0;
+            for frame in 0..180 {
+                let target = if frame % 30 < 3 { 1.0 } else { 0.0 };
+                value = edge_response_step(value, target, 1.0 / 60.0, response);
+                assert!(value.is_finite() && (0.0..=1.0).contains(&value));
+            }
+        }
+    }
+
+    #[test]
+    fn edge_response_is_independent_of_render_frequency() {
+        for response in crate::data::settings::EqResponse::ALL {
+            for target in [0.0, 0.4, 1.0] {
+                let expected = edge_response_step(0.8, target, 0.5, response);
+                for frames in [15, 30, 72, 120] {
+                    let actual = (0..frames)
+                        .fold(0.8, |value, _| edge_response_step(value, target, 0.5 / frames as f32, response));
+                    assert!((actual - expected).abs() < 0.00001);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compact_equalizer_keeps_transients_from_every_audio_band() {
+        for count in [7, 9, 19] {
+            let mid = count / 2;
+            let spacing = (audio::BANDS - 1) as f32 / mid as f32;
+            for band in 0..audio::BANDS {
+                let mut input = [0.0; audio::BANDS];
+                input[band] = 1.0;
+                let strongest = (0..=mid)
+                    .map(|i| edge_band_level(&input, i as f32 * spacing, spacing * 0.5, true))
+                    .fold(0.0, f32::max);
+                assert!(strongest >= 0.65, "Missing band {band} in a {count}-segment equalizer");
+            }
+            for level in [0.0, 0.25, 0.8, 1.0] {
+                let input = [level; audio::BANDS];
+                for i in 0..=mid {
+                    assert!((edge_band_level(&input, i as f32 * spacing, spacing * 0.5, true) - level).abs() < 0.00001);
+                }
+            }
+        }
+    }
 
     #[test]
     fn flat_shape_reserves_room_for_every_edge_equalizer_and_keeps_internal_bars() {
