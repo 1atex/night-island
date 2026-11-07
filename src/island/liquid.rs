@@ -84,6 +84,14 @@ fn edge_band_level(values: &[f32; audio::BANDS], position: f32, half_width: f32,
     peak * 0.65 + average * 0.35
 }
 
+fn idle_wave_sample(length: f32, radius: f32, phase: f32) -> (f32, f32) {
+    let phase = phase.rem_euclid(1.0);
+    let wave = (std::f32::consts::TAU * phase).sin();
+    let span = (length / 2.0 - radius - BUMP_HALF * 0.65).max(0.0);
+    let depth = IDLE_AMP * (0.55 + 0.45 * wave * wave) * (1.0 - 0.25 * wave.abs());
+    (depth, span * wave)
+}
+
 impl App {
     fn elastic_body_spec(&self, depth: f32) -> crate::ui::gfx::ElasticBody {
         let (at, size, radius) = self.pill(self.win, false, false);
@@ -832,14 +840,30 @@ impl App {
                 .compositor
                 .CreateCubicBezierEasingFunction(Vector2 { X: 0.45, Y: 0.0 }, Vector2 { X: 0.55, Y: 1.0 })?;
             let animation = self.compositor.CreatePathKeyFrameAnimation()?;
-            for (key, depth, center) in [(0.0, 2.0, -6.0), (0.5, IDLE_AMP, 6.0), (1.0, 2.0, -6.0)] {
-                let shape = self.liquid_body_path(depth * self.scale, center * self.scale)?;
-                if key == 0.0 {
-                    self.liquid.body_shape.SetPath(&shape)?;
+            let length = self.cw;
+            let (_, _, radius) = self.pill(self.win, false, false);
+            if self.settings.liquid_idle_travel {
+                let linear = self.compositor.CreateLinearEasingFunction()?;
+                for frame in 0..=40 {
+                    let key = frame as f32 / 40.0;
+                    let (depth, center) = idle_wave_sample(length, radius.X / self.scale, key);
+                    let shape = self.liquid_body_path(depth * self.scale, center * self.scale)?;
+                    if frame == 0 {
+                        self.liquid.body_shape.SetPath(&shape)?;
+                    }
+                    animation.InsertKeyFrameWithEasingFunction(key, &shape, &linear)?;
                 }
-                animation.InsertKeyFrameWithEasingFunction(key, &shape, &ease)?;
+                animation.SetDuration(Duration::from_millis(8400).into())?;
+            } else {
+                for (key, depth, center) in [(0.0, 2.0, -6.0), (0.5, IDLE_AMP, 6.0), (1.0, 2.0, -6.0)] {
+                    let shape = self.liquid_body_path(depth * self.scale, center * self.scale)?;
+                    if key == 0.0 {
+                        self.liquid.body_shape.SetPath(&shape)?;
+                    }
+                    animation.InsertKeyFrameWithEasingFunction(key, &shape, &ease)?;
+                }
+                animation.SetDuration(Duration::from_millis(5200).into())?;
             }
-            animation.SetDuration(Duration::from_millis(5200).into())?;
             animation.SetIterationBehavior(AnimationIterationBehavior::Forever)?;
             self.liquid.body_shape.StartAnimation(h!("Path"), &animation.cast::<CompositionAnimation>()?)?;
             self._visual.SetClip(&self.liquid.body_clip)?;
@@ -936,6 +960,24 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_wave_crosses_the_edge_and_loops_without_a_seam() {
+        for length in [80.0, 176.0, 240.0, 420.0, 640.0] {
+            assert_eq!(idle_wave_sample(length, 17.0, 0.0), idle_wave_sample(length, 17.0, 1.0));
+            let right = idle_wave_sample(length, 17.0, 0.25).1;
+            let left = idle_wave_sample(length, 17.0, 0.75).1;
+            assert!((right + left).abs() < 0.001);
+            if length >= 176.0 {
+                assert!(right - left > 60.0);
+            }
+            for frame in 0..=100 {
+                let (depth, center) = idle_wave_sample(length, 17.0, frame as f32 / 100.0);
+                assert!((0.0..=IDLE_AMP).contains(&depth));
+                assert!(center.abs() + 17.0 <= length / 2.0);
+            }
+        }
+    }
 
     #[test]
     fn responsive_edge_catches_beats_and_releases_between_them() {

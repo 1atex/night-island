@@ -75,6 +75,10 @@ impl App {
         use view::Sid::*;
         if apply {
             match id {
+                LiquidIdleTravel => {
+                    self.stop_idle();
+                    self.start_liquid();
+                }
                 LegacyIcons => {
                     crate::ui::icons::set_legacy(self.settings.legacy_icons);
                     self.repaint_themed_surfaces();

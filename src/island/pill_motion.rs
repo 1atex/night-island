@@ -1,7 +1,8 @@
 use crate::island::*;
 
 pub(in crate::island) const WIDTH_MS: u64 = 360;
-const INTRO_HOLD_MS: u32 = 1250;
+const INTRO_HOLD_MS: u32 = 1700;
+pub(in crate::island) const REVEAL_MS: u64 = 720;
 const INTRO_RETURN_MS: u64 = 440;
 
 #[derive(Clone, Copy)]
@@ -51,6 +52,7 @@ pub(in crate::island) struct PillMotion {
     pub content: Option<PillContent>,
     pub width: Option<WidthTween>,
     pub intro: Option<IntroPhase>,
+    pub intro_started: Option<Instant>,
     pub intro_width: f32,
     pub gate: MusicEntranceGate,
     pub track: (String, String, String),
@@ -173,12 +175,14 @@ impl App {
         }
         let replacing = self.pill_motion.intro.is_some();
         self.pill_motion.intro = Some(IntroPhase::Present);
-        let normal = view::collapsed_width(&self.ui, COLLAPSED.0);
         let work = self.island_work_area();
         let room = if self.settings.vertical() { work.3 - work.1 } else { work.2 - work.0 };
-        self.pill_motion.intro_width = (normal + if self.settings.music_track_intro { 64.0 } else { 0.0 })
-            .max(if self.settings.pet_music_curiosity && self.attached_character_on() { 380.0 } else { 340.0 })
-            .min((room / self.scale - 32.0).max(normal));
+        self.pill_motion.intro_width = view::music_entrance_width(&self.ui).min((room / self.scale - 32.0).max(100.0));
+        for sprite in [&self.pill_motion.cover.sprite, &self.pill_motion.title.sprite] {
+            let _ = sprite.StopAnimation(h!("Opacity"));
+            let _ = sprite.SetOpacity(0.0);
+        }
+        let _ = self.intro_alpha(&self.collapsed.sprite, if replacing { 0.0 } else { 1.0 }, 0.0, 0.0, 180);
         self.kill_timer(Timer::Autohide);
         let _ = self.pill_motion.previous.sprite.SetIsVisible(false);
         self.reset_liquid_pull();
@@ -186,24 +190,61 @@ impl App {
         self.repaint_collapsed();
         self.place_music_intro();
         self.refresh_music_intro();
-        let full = Vector3 { X: 1.0, Y: 1.0, Z: 1.0 };
-        for sprite in [&self.pill_motion.cover.sprite, &self.pill_motion.title.sprite] {
-            let _ = sprite.StopAnimation(h!("Scale"));
-            let _ = sprite.SetScale(full);
-            let _ = sprite.SetIsVisible(true);
-            let target = sprite.Offset().unwrap_or_default();
-            let _ = self.animate_pill_vector(
-                sprite,
-                h!("Offset"),
-                Vector3 { Y: target.Y + 6.0 * self.scale, ..target },
-                target,
-                WIDTH_MS,
-            );
-            let _ = self.intro_alpha(sprite, 0.0, 1.0, 0.1, WIDTH_MS);
+        self.pill_motion.intro_started = Some(Instant::now());
+        let layout = self.intro_layout();
+        let pill = self.pill_rect(false);
+        let center = view::music_entrance_cover_at(pill, self.scale, &self.ui, 0.0);
+        let delta = (center.0 - layout.cover.0, center.1 - layout.cover.1);
+        let shifted_title =
+            (layout.title.0 + delta.0, layout.title.1 + delta.1, layout.title.2 + delta.0, layout.title.3 + delta.1);
+        let easing = self.ease();
+        if let Ok(easing) = easing {
+            for (sprite, from, to) in [
+                (
+                    &self.pill_motion.cover.sprite,
+                    Vector3 { X: center.0, Y: center.1, Z: 0.0 },
+                    Vector3 { X: layout.cover.0, Y: layout.cover.1, Z: 0.0 },
+                ),
+                (
+                    &self.pill_motion.title.sprite,
+                    self.title_position(shifted_title, 1.0),
+                    self.title_position(layout.title, 1.0),
+                ),
+            ] {
+                let _ = sprite.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
+                if let Ok(animation) = self.compositor.CreateVector3KeyFrameAnimation() {
+                    let _ = animation.InsertKeyFrame(0.0, from);
+                    let _ = animation.InsertKeyFrame(0.24, from);
+                    let _ = animation.InsertKeyFrameWithEasingFunction(1.0, to, &easing);
+                    let _ = animation.SetDuration(Duration::from_millis(REVEAL_MS).into());
+                    let _ = sprite.StartAnimation(h!("Offset"), &animation);
+                }
+                let _ = sprite.SetIsVisible(true);
+            }
+            let length = if self.settings.vertical() {
+                layout.title.3 - layout.title.1
+            } else {
+                layout.title.2 - layout.title.0
+            };
+            if let Ok(clip) = self.compositor.CreateScalarKeyFrameAnimation() {
+                let _ = clip.InsertKeyFrame(0.0, 240.0 * self.scale);
+                let _ = clip.InsertKeyFrame(0.24, 240.0 * self.scale);
+                let _ = clip.InsertKeyFrameWithEasingFunction(1.0, (240.0 * self.scale - length).max(0.0), &easing);
+                let _ = clip.SetDuration(Duration::from_millis(REVEAL_MS).into());
+                let _ = self.pill_motion.title_clip.StartAnimation(h!("RightInset"), &clip);
+            }
         }
-        let _ = self.pill_motion.title_clip.StopAnimation(h!("RightInset"));
-        let _ = self.pill_motion.title_clip.SetRightInset(0.0);
-        let _ = self.intro_alpha(&self.collapsed.sprite, if replacing { 0.0 } else { 1.0 }, 0.0, 0.0, 160);
+        let cover = &self.pill_motion.cover.sprite;
+        let _ = cover.SetCenterPoint(Vector3 { X: 14.0 * self.scale, Y: 14.0 * self.scale, Z: 0.0 });
+        let _ = self.animate_pill_vector(
+            cover,
+            h!("Scale"),
+            Vector3 { X: 0.72, Y: 0.72, Z: 1.0 },
+            Vector3 { X: 1.0, Y: 1.0, Z: 1.0 },
+            260,
+        );
+        let _ = self.intro_alpha(cover, 0.0, 1.0, 0.0, 260);
+        let _ = self.intro_alpha(&self.pill_motion.title.sprite, 0.0, 1.0, 0.28, REVEAL_MS);
         if !self.settings.pet_music_curiosity {
             let _ = self.intro_alpha(&self.pet.char_layer.sprite, 1.0, 0.0, 0.0, 160);
         }
@@ -215,6 +256,7 @@ impl App {
     pub(in crate::island) fn music_intro_step(&mut self) {
         match self.pill_motion.intro {
             Some(IntroPhase::Present) => {
+                let _ = self.pill_motion.cover.sprite.SetCenterPoint(Vector3::default());
                 let origin = self.window_origin(Win::Small);
                 let cover_from = self.pill_motion.cover.sprite.Offset().unwrap_or_default();
                 let title_from = self.pill_motion.title.sprite.Offset().unwrap_or_default();
@@ -372,9 +414,6 @@ impl App {
             let _ = self.geometry.StopAnimation(name);
         }
         let _ = self.set_geometry_now(Win::Small, false, false);
-        if self.pill_motion.intro == Some(IntroPhase::Present) {
-            self.place_music_intro();
-        }
         self.start_liquid();
         self.maybe_show_notification();
     }
@@ -562,6 +601,16 @@ mod tests {
                 assert_eq!(app.collapsed.sprite.Opacity()?, 1.0);
                 app.maybe_start_music_intro();
                 assert!(app.pill_motion.intro.is_none());
+                if style == Style::Liquid {
+                    app.start_idle();
+                    assert!(app.liquid.idle_running && app.liquid.body_active.get());
+                    app.stop_idle();
+                    app.settings.liquid_idle_travel = false;
+                    app.start_idle();
+                    assert!(app.liquid.idle_running && app.liquid.body_active.get());
+                    app.stop_idle();
+                    app.settings.liquid_idle_travel = true;
+                }
                 app.ui.media.title = "A different track".into();
                 app.maybe_start_music_intro();
                 assert!(app.pill_motion.intro == Some(IntroPhase::Present));

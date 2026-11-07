@@ -428,6 +428,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Present each new track" => "Показывать обложку и название при смене трека",
         "Pet watches the new track" => "Питомец с интересом смотрит на новый трек",
         "Island welcomes the returning pet" => "Плавно втягивать питомца в остров",
+        "Idle wave travels along the edge" => "Фоновая волна движется вдоль края",
         "Expressive active tab" => "Выразительное выделение активной вкладки",
         "Show AI answers as cards" => "Показывать ответы ИИ карточками",
         "Short AI replies inside the island" => "Короткие ответы ИИ внутри острова",

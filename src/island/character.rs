@@ -497,16 +497,23 @@ impl App {
                 reaction = Reaction::Idle;
             }
         }
-        let curious =
-            self.settings.pet_music_curiosity && !detached && self.pill_motion.intro.is_some() && !speech_cue.engaged();
-        let gaze = if curious {
-            let layout = view::music_entrance_layout(self.pill_rect(false), self.scale, &self.ui);
+        let curious = self.settings.pet_music_curiosity
+            && !detached
+            && self.pill_motion.intro == Some(super::pill_motion::IntroPhase::Present)
+            && !speech_cue.engaged();
+        let interest_target = curious.then(|| {
+            let progress = self
+                .pill_motion
+                .intro_started
+                .map_or(1.0, |start| start.elapsed().as_secs_f32() / (super::pill_motion::REVEAL_MS as f32 / 1000.0));
+            let cover = view::music_entrance_cover_at(self.pill_rect(false), self.scale, &self.ui, progress);
             let origin = self.char_origin();
             (
-                ((layout.cover.0 + layout.cover.2) / 2.0 - origin.0 - cw / 2.0) / (70.0 * self.scale),
-                ((layout.cover.1 + layout.cover.3) / 2.0 - origin.1 - ch / 2.0) / (70.0 * self.scale),
+                ((cover.0 + cover.2) / 2.0 - origin.0 - cw / 2.0) / (70.0 * self.scale),
+                ((cover.1 + cover.3) / 2.0 - origin.1 - ch / 2.0) / (70.0 * self.scale),
             )
-        } else if held {
+        });
+        let gaze = if held {
             cursor.zip(self.pet.cursor).map_or((0.0, 0.0), |((x, y), (px, py))| {
                 (
                     ((x - px) as f32 / (dt.max(0.001) * 900.0)).clamp(-1.0, 1.0),
@@ -518,9 +525,10 @@ impl App {
         } else {
             self.pet.motion.look
         };
+        let (gaze, interest) = self.pet.motion.interest_gaze(gaze, interest_target, dt, still);
         let gaze_moving = (gaze.0 - self.pet.motion.look.0).abs() + (gaze.1 - self.pet.motion.look.1).abs() > 0.015;
         self.pet.cursor = cursor;
-        let mut motion = self.pet.motion.advance(gaze, dt, near || curious, held, still);
+        let mut motion = self.pet.motion.advance(gaze, dt, near, held, still);
         motion.lid = if still { 0.0 } else { lid };
         motion.behavior = behavior.as_ref().map_or(Default::default(), |frame| frame.pose);
         motion.mouth = self.pet.speech.advance(speech_cue, dt, still);
@@ -537,12 +545,9 @@ impl App {
                 motion.stretch += target.abs() * 0.12;
             }
         }
-        if curious {
-            reaction = Reaction::Idle;
-            motion.warmth = motion.warmth.max(0.35);
-            if !still {
-                motion.lean += 0.08;
-            }
+        motion.warmth = motion.warmth.max(0.35 * interest);
+        if !still {
+            motion.lean += 0.08 * interest;
         }
         let look = self.pet.motion.look;
         let target = if detached || self.music.spectrum_running {

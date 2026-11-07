@@ -348,6 +348,7 @@ impl App {
                 content: None,
                 width: None,
                 intro: None,
+                intro_started: None,
                 intro_width: COLLAPSED.0,
                 gate: Default::default(),
                 track: (String::new(), String::new(), String::new()),
