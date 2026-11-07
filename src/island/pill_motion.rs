@@ -181,6 +181,7 @@ impl App {
         for sprite in [&self.pill_motion.cover.sprite, &self.pill_motion.title.sprite] {
             let _ = sprite.StopAnimation(h!("Opacity"));
             let _ = sprite.SetOpacity(0.0);
+            let _ = sprite.StopAnimation(h!("Scale"));
         }
         let _ = self.intro_alpha(&self.collapsed.sprite, if replacing { 0.0 } else { 1.0 }, 0.0, 0.0, 180);
         self.kill_timer(Timer::Autohide);
