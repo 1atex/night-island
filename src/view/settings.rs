@@ -4,6 +4,8 @@ use crate::view::*;
 pub enum Sid {
     InterfaceFont,
     LegacyIcons,
+    HeaderIcons,
+    HeaderIconColors,
     TopEnabled,
     TopAutoHide,
     TopTray,
@@ -481,6 +483,8 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
     }
     match id {
         Sid::LegacyIcons => c.legacy_icons,
+        Sid::HeaderIcons => c.header_icons,
+        Sid::HeaderIconColors => c.header_icon_colors,
         Sid::IslandAnimations => c.island_animations,
         Sid::TopAutoHide => c.top_panel.auto_hide,
         Sid::TopTray => c.top_panel.tray,
@@ -598,6 +602,8 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
     }
     match id {
         Sid::LegacyIcons => c.legacy_icons = on,
+        Sid::HeaderIcons => c.header_icons = on,
+        Sid::HeaderIconColors => c.header_icon_colors = on,
         Sid::IslandAnimations => c.island_animations = on,
         Sid::TopAutoHide => c.top_panel.auto_hide = on,
         Sid::TopTray => c.top_panel.tray = on,

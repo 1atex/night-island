@@ -51,9 +51,11 @@ const ANIMATIONS: [(Sid, &str, Kind); 7] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 6] = [
+const APPEARANCE: [(Sid, &str, Kind); 8] = [
     (Sid::InterfaceFont, "Interface font", Kind::Cycle),
     (Sid::LegacyIcons, "Classic interface icons", Kind::Toggle),
+    (Sid::HeaderIcons, "Icons beside tab names", Kind::Toggle),
+    (Sid::HeaderIconColors, "Colored header icons", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),

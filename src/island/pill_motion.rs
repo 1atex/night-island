@@ -48,6 +48,7 @@ impl MusicEntranceGate {
 }
 
 pub(in crate::island) struct PillMotion {
+    pub content: Option<PillContent>,
     pub width: Option<WidthTween>,
     pub intro: Option<IntroPhase>,
     pub intro_width: f32,
@@ -57,6 +58,28 @@ pub(in crate::island) struct PillMotion {
     pub previous: Layer,
     pub title: Layer,
     pub title_clip: windows::UI::Composition::InsetClip,
+}
+
+#[derive(PartialEq, Eq)]
+pub(in crate::island) enum PillContent {
+    Notice(char, String),
+    Volume,
+    Download(String),
+    Normal,
+}
+
+impl PillContent {
+    pub fn current(ui: &view::UiState) -> Self {
+        if let Some((glyph, text)) = &ui.notice {
+            Self::Notice(*glyph, text.clone())
+        } else if ui.volume.is_some() {
+            Self::Volume
+        } else if let Some(name) = &ui.downloading {
+            Self::Download(name.clone())
+        } else {
+            Self::Normal
+        }
+    }
 }
 
 impl App {
@@ -267,6 +290,7 @@ impl App {
     }
 
     pub(in crate::island) fn stop_pill_attachment_motion(&self) {
+        let _ = self.collapsed.sprite.StopAnimation(h!("Offset"));
         for sprite in std::iter::once(&self.pet.char_layer.sprite).chain(self.music.spectrum.iter()) {
             let _ = sprite.StopAnimation(h!("Offset"));
         }
@@ -543,6 +567,35 @@ mod tests {
                 assert!(!app.pill_motion.previous.sprite.IsVisible()?);
                 assert_eq!(app.window_size(Win::Small), app.window_size(Win::Big));
                 assert_eq!(app.window_origin(Win::Small), app.window_origin(Win::Big));
+                app.ui.notice = Some(('!', "Copied".into()));
+                app.repaint_collapsed();
+                app.width_motion_done();
+                let width = app.cw;
+                app.ui.notice = Some(('?', "Copied".into()));
+                app.repaint_collapsed();
+                assert_eq!(app.cw, width);
+                assert!(app.pill_motion.width.is_some());
+                assert!(app.pill_motion.previous.sprite.IsVisible()?);
+                app.width_motion_done();
+                app.ui.notice = None;
+                app.ui.volume = Some(0.4);
+                app.repaint_collapsed();
+                app.width_motion_done();
+                app.ui.volume = Some(0.5);
+                app.repaint_collapsed();
+                assert!(app.pill_motion.width.is_none());
+                app.ui.volume = None;
+                app.repaint_collapsed();
+                assert!(app.pill_motion.previous.sprite.IsVisible()?);
+                app.width_motion_done();
+                app.settings.island_animations = false;
+                app.ui.notice = Some(('!', "Copied".into()));
+                app.repaint_collapsed();
+                assert!(app.pill_motion.width.is_none());
+                assert!(!app.pill_motion.previous.sprite.IsVisible()?);
+                app.ui.notice = None;
+                app.repaint_collapsed();
+                app.settings.island_animations = true;
                 app.pill_motion.gate = Default::default();
                 app.maybe_start_music_intro();
                 app.ui.tab = view::Tab::Note;

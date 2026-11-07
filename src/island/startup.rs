@@ -345,6 +345,7 @@ impl App {
             cw: COLLAPSED.0,
             system_notices: Default::default(),
             pill_motion: super::pill_motion::PillMotion {
+                content: None,
                 width: None,
                 intro: None,
                 intro_width: COLLAPSED.0,

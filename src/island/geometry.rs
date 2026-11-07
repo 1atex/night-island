@@ -278,16 +278,21 @@ impl App {
     }
 
     pub(in crate::island) fn fit_width(&mut self) {
+        let content = super::pill_motion::PillContent::current(&self.ui);
+        let content_changed = self.pill_motion.content.as_ref().is_some_and(|previous| *previous != content);
+        self.pill_motion.content = Some(content);
         if self.state != State::Collapsed {
             return;
         }
         let animate = !SNAP_FIT.load(std::sync::atomic::Ordering::Relaxed)
+            && self.settings.island_animations
+            && crate::ui::feedback::motion_allowed()
             && !self.pill_hidden
             && !self.gaming
             && !self.notification_card_visible();
         let normal = view::collapsed_width(&self.ui, COLLAPSED.0);
         let want = if self.pill_motion.intro.is_some() { self.pill_motion.intro_width } else { normal };
-        if (want - self.cw).abs() < 0.5 {
+        if (want - self.cw).abs() < 0.5 && !(animate && content_changed) {
             return;
         }
         let now = Instant::now();
@@ -339,6 +344,15 @@ impl App {
             self.set_timer(Timer::WidthMotion, super::pill_motion::WIDTH_MS as u32 + 30);
             if crossfade {
                 let origin = self.window_origin(Win::Small);
+                let target = self.collapsed.sprite.Offset().unwrap_or_default();
+                let start = Vector3 { X: target.X + from.0 - to.0, Y: target.Y + from.1 - to.1, Z: 0.0 };
+                let _ = self.animate_pill_vector(
+                    &self.collapsed.sprite,
+                    h!("Offset"),
+                    start,
+                    target,
+                    super::pill_motion::WIDTH_MS,
+                );
                 let previous = &self.pill_motion.previous.sprite;
                 let _ = previous.SetOffset(Vector3 {
                     X: old_offset.X + old_origin.0 - origin.0,

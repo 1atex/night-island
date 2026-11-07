@@ -104,7 +104,7 @@ pub const TABS: [(Tab, char, &str); 17] = [
     (Tab::Controls, '\u{E9E9}', "Controls"),
     (Tab::Mixer, '\u{E9E9}', "App mixer"),
     (Tab::Notifications, '\u{EA8F}', "Notifications"),
-    (Tab::Yandex, '\u{E189}', "My Wave"),
+    (Tab::Yandex, crate::ui::icons::YANDEX_MUSIC_GLYPH, "My Wave"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
 

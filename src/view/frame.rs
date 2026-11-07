@@ -38,6 +38,26 @@ pub fn header_has_labels(ui: &UiState) -> bool {
     movable_tabs(ui).len() <= 5
 }
 
+fn header_icon_color(tab: Tab, ui: &UiState, alpha: f32) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {
+    let rgb = if ui.cfg.header_icon_colors {
+        match tab {
+            Tab::Record => (1.0, 0.32, 0.36),
+            Tab::Weather => (1.0, 0.78, 0.32),
+            Tab::Clipboard => (0.38, 0.72, 1.0),
+            Tab::Note => (1.0, 0.8, 0.42),
+            Tab::Ai | Tab::Chat => (0.7, 0.58, 1.0),
+            Tab::Privacy => (0.36, 0.85, 0.63),
+            Tab::Notifications => (1.0, 0.62, 0.3),
+            Tab::Mixer | Tab::Controls => (0.4, 0.8, 0.86),
+            Tab::Yandex => (1.0, 0.93, 0.0),
+            _ => (1.0, 1.0, 1.0),
+        }
+    } else {
+        (1.0, 1.0, 1.0)
+    };
+    rgba(rgb.0, rgb.1, rgb.2, alpha)
+}
+
 fn header_label_widths() -> [f32; TABS.len()] {
     use windows::Win32::Graphics::DirectWrite::*;
     type LabelWidths = (bool, crate::data::settings::InterfaceFont, u64, [f32; TABS.len()]);
@@ -91,10 +111,13 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let active_index = available.iter().copied().find(|&i| TABS[i].0 == active);
     let labels = header_has_labels(ui);
     let label_widths = header_label_widths();
-    let desired: f32 = available.iter().map(|&i| 16.0 + label_widths[i]).sum();
-    let label_scale = ((room / scale - gap / scale * (available.len() - 1) as f32) / desired).min(1.0);
+    let padding = if ui.cfg.header_icons { 32.0 } else { 16.0 };
+    let desired: f32 = available.iter().map(|&i| label_widths[i]).sum();
+    let fixed = padding * available.len() as f32 + gap / scale * (available.len() - 1) as f32;
+    let label_scale =
+        ((room / scale - fixed) / desired.max(1.0)).clamp(if ui.cfg.header_icons { 0.78 } else { 0.0 }, 1.0);
     let width = |i: usize| {
-        if labels { (16.0 + label_widths[i]) * label_scale * scale } else { icon_w }
+        if labels { (padding + label_widths[i] * label_scale) * scale } else { icon_w }
     };
     let mut selected = Vec::new();
     let mut used = 0.0;
@@ -302,18 +325,31 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
             rgba(1.0, 1.0, 1.0, base + (0.16 - base) * selection + 0.09 * hover * (1.0 - selection)),
         )?;
         let alpha = 0.62 + 0.38 * selection;
+        let color = header_icon_color(tab, ui, alpha);
+        let glyph = if tab == Tab::Yandex { crate::ui::icons::YANDEX_MUSIC_GLYPH } else { glyph };
         if header_has_labels(ui) && tab != Tab::Settings {
-            let font = ((rect.2 - rect.0 - 10.0 * scale) / header_label_widths()[i].max(1.0) * 13.0).min(13.0 * scale);
+            let inset = if ui.cfg.header_icons { 28.0 } else { 4.0 } * scale;
+            if ui.cfg.header_icons {
+                p.glyph(glyph, (rect.0 + 6.0 * scale, rect.1, rect.0 + 24.0 * scale, rect.3), 14.0 * scale, color)?;
+            }
+            let available = (rect.2 - rect.0 - inset - 6.0 * scale).max(scale);
+            let mut font = (available / header_label_widths()[i].max(1.0) * 13.0).min(13.0 * scale);
+            let label = crate::ui::i18n::tr(name);
+            let measured =
+                crate::ui::fonts::width(crate::ui::fonts::selected(), &label, font, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            if measured > available {
+                font *= available / measured * 0.99;
+            }
             p.text(
                 name,
-                (rect.0 + 4.0 * scale, rect.1, rect.2 - 4.0 * scale, rect.3),
+                (rect.0 + inset, rect.1, rect.2 - 4.0 * scale, rect.3),
                 font,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_TEXT_ALIGNMENT_CENTER,
                 rgba(1.0, 1.0, 1.0, alpha),
             )?;
         } else {
-            p.glyph(glyph, *rect, 17.0 * scale, rgba(1.0, 1.0, 1.0, alpha))?;
+            p.glyph(glyph, *rect, 17.0 * scale, color)?;
         }
     }
     let pin = pin_rect(pill, scale);
@@ -556,8 +592,18 @@ mod tests {
         assert!(header_has_labels(&ui));
         ui.cfg.header_tabs =
             ["Privacy", "Activity", "Controls", "App mixer", "Notifications"].map(String::from).to_vec();
+        ui.cfg.header_icons = false;
         let rects = tab_rects((0.0, 0.0, 640.0, 384.0), 1.0, &ui);
         assert!(movable_tabs(&ui).iter().all(|&i| rects[i].2 > rects[i].0));
+        ui.cfg.header_icons = true;
+        ui.tab = Tab::Notifications;
+        let rects = tab_rects((0.0, 0.0, 640.0, 384.0), 1.0, &ui);
+        let active = TABS.iter().position(|tab| tab.0 == Tab::Notifications).unwrap();
+        assert!(rects[active].2 > rects[active].0);
+        assert!(ui.cfg.header_icons);
+        let saved: Settings = serde_json::from_str(&serde_json::to_string(&ui.cfg).unwrap()).unwrap();
+        assert!(saved.header_icons);
+        assert!(!saved.header_icon_colors);
     }
 
     #[test]

@@ -423,6 +423,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Start with Island" => "Запускать с Island",
         "Notification" => "Уведомление",
         "Talk to the detached pet" => "Разговор с вынесенным питомцем",
+        "Icons beside tab names" => "Иконки рядом с названиями вкладок",
+        "Colored header icons" => "Цветные иконки в шапке",
         "Show AI answers as cards" => "Показывать ответы ИИ карточками",
         "Short AI replies inside the island" => "Короткие ответы ИИ внутри острова",
         "Long replies use cards. Detached pet replies stay beside the pet." => {

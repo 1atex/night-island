@@ -9,6 +9,9 @@ const REPEAT: &str =
     "M 4 10 L 4 8 Q 4 6 6 6 L 20 6 M 17 3 L 20 6 L 17 9 M 20 14 L 20 16 Q 20 18 18 18 L 4 18 M 7 15 L 4 18 L 7 21";
 
 pub(super) fn paths(ch: char) -> Option<(&'static str, &'static str)> {
+    if ch == super::super::YANDEX_MUSIC_GLYPH {
+        return Some(("", super::super::YANDEX_MUSIC_PATH));
+    }
     let outline = match ch {
         '\u{E006}' => HEART,
         '\u{E189}' => "M 4 14 L 4 18 M 8 10 L 8 20 M 12 6 L 12 16 M 16 9 L 16 14 M 20 5 L 20 11",

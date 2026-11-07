@@ -19,8 +19,7 @@ impl App {
             self.finish_cover_motion();
             return;
         }
-        let (offset, size, _) = self.pill(self.win, false, false);
-        let Some(small) = view::pill_cover_rect((offset.X, offset.Y, size.X, size.Y), self.scale, &self.ui) else {
+        let Some(small) = view::pill_cover_rect(self.pill_rect(false), self.scale, &self.ui) else {
             self.finish_cover_motion();
             return;
         };
@@ -149,8 +148,15 @@ mod tests {
                 app.ui.char_inset = CHAR_INSET;
                 app.place(Win::Big);
                 app.state = State::Expanded;
+                let expected = view::pill_cover_rect(app.pill_rect(false), scale, &app.ui).unwrap();
                 app.start_cover_motion(true);
                 if crate::ui::feedback::motion_allowed() {
+                    let source = app.cover_layer.sprite.Offset()?;
+                    let size = app.cover_layer.sprite.Size()?;
+                    assert!((source.X - expected.0).abs() < 0.01, "{edge:?} at {scale}");
+                    assert!((source.Y - expected.1).abs() < 0.01, "{edge:?} at {scale}");
+                    assert!((size.X - (expected.2 - expected.0)).abs() < 0.01);
+                    assert!((size.Y - (expected.3 - expected.1)).abs() < 0.01);
                     assert!(app.ui.cover_in_flight, "{edge:?} at {scale}");
                     assert!(app.cover_layer.sprite.IsVisible()?);
                     let before = app.cover_layer.sprite.Offset()?;
@@ -174,6 +180,9 @@ mod tests {
                 {
                     let folder = std::path::PathBuf::from(folder);
                     std::fs::create_dir_all(&folder).unwrap();
+                    app.ui.cfg.header_icon_colors = true;
+                    app.ui.cfg.header_tabs =
+                        ["Clipboard", "Note", "Weather", "Record", "My Wave"].map(String::from).to_vec();
                     let old = app.ui.media.clone();
                     app.ui.media.title = "Night Drive".into();
                     app.ui.media.artist = "Chromatic".into();
