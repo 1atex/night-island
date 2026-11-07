@@ -187,10 +187,29 @@ impl App {
         let (bx, by, _) = self.big_pad();
         let small_at = (closed.0 - sx * self.scale, closed.1 - sy * self.scale);
         let big_at = (open.0 - bx * self.scale, open.1 - by * self.scale);
-        let x = small_at.0.min(big_at.0).floor();
-        let y = small_at.1.min(big_at.1).floor();
-        let right = (small_at.0 + small.0 as f32).max(big_at.0 + big.0 as f32).ceil();
-        let bottom = (small_at.1 + small.1 as f32).max(big_at.1 + big.1 as f32).ceil();
+        let mut x = small_at.0.min(big_at.0).floor();
+        let mut y = small_at.1.min(big_at.1).floor();
+        let mut right = (small_at.0 + small.0 as f32).max(big_at.0 + big.0 as f32).ceil();
+        let mut bottom = (small_at.1 + small.1 as f32).max(big_at.1 + big.1 as f32).ceil();
+        if let Some(tween) = self.pill_motion.width {
+            let (_, top, lower) = small_pads(&room, self.docked());
+            let work = self.island_work_area();
+            for rect in [tween.from, tween.to] {
+                let (mut left, mut upper, mut end, mut lower_edge) = (rect.0, rect.1, rect.0 + rect.2, rect.1 + rect.3);
+                if self.docked() {
+                    match self.edge() {
+                        Edge::Top => upper = upper.max(work.1),
+                        Edge::Bottom => lower_edge = lower_edge.min(work.3),
+                        Edge::Left => left = left.max(work.0),
+                        Edge::Right => end = end.min(work.2),
+                    }
+                }
+                x = x.min((left - sx * self.scale).floor());
+                y = y.min((upper - top * self.scale).floor());
+                right = right.max((end + sx * self.scale).ceil());
+                bottom = bottom.max((lower_edge + lower * self.scale).ceil());
+            }
+        }
         (x, y, (right - x) as i32, (bottom - y) as i32)
     }
 
@@ -318,7 +337,9 @@ impl App {
         } else {
             (from.0 + from.2).max(to.0 + to.2) - from.0.min(to.0)
         } / self.scale;
-        self.pill_motion.width = animate.then_some(super::pill_motion::WidthTween { from, to, room, start: now });
+        let duration = self.width_motion_ms();
+        self.pill_motion.width =
+            animate.then_some(super::pill_motion::WidthTween { from, to, room, start: now, duration });
         if animate {
             self.set_bump_visible(false);
             let _ = self.liquid.ring.sprite.SetIsVisible(false);
@@ -339,20 +360,15 @@ impl App {
                     Y: old.Y + old_origin.1 - origin.1 + from.1 - old_target.1,
                     Z: 0.0,
                 };
-                let _ = self.animate_pill_vector(&sprite, h!("Offset"), start, target, super::pill_motion::WIDTH_MS);
+                let _ = self.animate_pill_vector(&sprite, h!("Offset"), start, target, duration);
             }
-            self.set_timer(Timer::WidthMotion, super::pill_motion::WIDTH_MS as u32 + 30);
+            self.set_timer(Timer::WidthMotion, duration as u32 + 30);
+            self.set_timer(Timer::Liquid, 60);
             if crossfade {
                 let origin = self.window_origin(Win::Small);
                 let target = self.collapsed.sprite.Offset().unwrap_or_default();
                 let start = Vector3 { X: target.X + from.0 - to.0, Y: target.Y + from.1 - to.1, Z: 0.0 };
-                let _ = self.animate_pill_vector(
-                    &self.collapsed.sprite,
-                    h!("Offset"),
-                    start,
-                    target,
-                    super::pill_motion::WIDTH_MS,
-                );
+                let _ = self.animate_pill_vector(&self.collapsed.sprite, h!("Offset"), start, target, duration);
                 let previous = &self.pill_motion.previous.sprite;
                 let _ = previous.SetOffset(Vector3 {
                     X: old_offset.X + old_origin.0 - origin.0,
@@ -462,9 +478,25 @@ impl App {
                 let (px, py) = self.small_pad();
                 let small =
                     window_size(self.scale, Win::Small, self.docked(), self.width_room(), &window_room(&self.settings));
-                let left = (pill.0 - px * self.scale).floor() as i32;
-                let top = (pill.1 - py * self.scale).floor() as i32;
-                let region = CreateRectRgn(left, top, left + small.0 + 1, top + small.1 + 1);
+                let mut left = (pill.0 - px * self.scale).floor() as i32;
+                let mut top = (pill.1 - py * self.scale).floor() as i32;
+                let right = left + small.0 + 1;
+                let bottom = top + small.1 + 1;
+                if let Some(tween) = self.pill_motion.width {
+                    let work = self.island_work_area();
+                    for rect in [tween.from, tween.to] {
+                        let mut from = (rect.0, rect.1);
+                        if self.docked() && self.edge() == Edge::Left {
+                            from.0 = from.0.max(work.0);
+                        }
+                        if self.docked() && self.edge() == Edge::Top {
+                            from.1 = from.1.max(work.1);
+                        }
+                        left = left.min((from.0 - x - px * self.scale).floor() as i32);
+                        top = top.min((from.1 - y - py * self.scale).floor() as i32);
+                    }
+                }
+                let region = CreateRectRgn(left, top, right, bottom);
                 if SetWindowRgn(self.hwnd, Some(region), true) == 0 {
                     let _ = DeleteObject(region.into());
                 }

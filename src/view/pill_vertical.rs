@@ -179,7 +179,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
     if let (Some(s), Some(cover)) = (slots.cover, &ui.media.cover) {
         let side = (w - 14.0 * scale).min(V_COVER * scale);
         let top = y + s.0;
-        if !ui.cover_in_flight {
+        if !ui.cover_in_flight && !ui.track_in_flight {
             p.cover((cx - side / 2.0, top, cx + side / 2.0, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
         }
     }
@@ -195,7 +195,9 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
             rgba(1.0, 1.0, 1.0, 0.85),
         )?;
     }
-    if let Some(s) = slots.title {
+    if let Some(s) = slots.title
+        && !ui.track_in_flight
+    {
         along(
             &ui.media.title,
             slot(s),

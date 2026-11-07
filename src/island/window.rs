@@ -208,7 +208,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                         return;
                     }
                 }
-                if a.state == State::Collapsed && a.liquid_on() && !a.character_interacting() && !a.pill_motion_busy() {
+                if a.state == State::Collapsed
+                    && (a.liquid_on() || a.pill_motion.width.is_some())
+                    && !a.character_interacting()
+                    && (!a.pill_motion_busy() || a.pill_motion.width.is_some())
+                {
                     let mut rect = windows::Win32::Foundation::RECT::default();
                     if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() } {
                         through = !a.on_interactive_body(x - rect.left, y - rect.top);

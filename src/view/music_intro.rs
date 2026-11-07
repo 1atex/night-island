@@ -106,6 +106,22 @@ pub fn render_music_entrance_preview(gpu: &crate::ui::gfx::Gpu, ui: &UiState, pa
             )?;
             if progress > 1.0 {
                 paint_collapsed(p, pill, 1.0, ui)?;
+                if ui.track_in_flight {
+                    let layout = music_entrance_layout(pill, 1.0, ui);
+                    if let (Some(rect), Some(cover)) = (layout.final_cover, &ui.media.cover) {
+                        p.cover(rect, 6.0, cover, ui.cfg.cover_mode)?;
+                    }
+                    if let Some(rect) = layout.final_title {
+                        p.text(
+                            &ui.media.title,
+                            rect,
+                            if ui.cfg.pill_unified_layout { 13.0 } else { 12.5 },
+                            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                            DWRITE_TEXT_ALIGNMENT_LEADING,
+                            WHITE,
+                        )?;
+                    }
+                }
             } else {
                 let layout = music_entrance_layout(pill, 1.0, ui);
                 let cover = music_entrance_cover_at(pill, 1.0, ui, progress);

@@ -890,6 +890,11 @@ impl App {
             return;
         }
         self.update_decoration_input();
+        if !self.liquid_on() && !self.spikes_active() && self.pill_motion.width.is_none() {
+            self.kill_timer(Timer::Liquid);
+            self.set_decoration_through(false);
+            return;
+        }
         if !self.liquid_on() && self.spikes_active() {
             self.set_timer(Timer::Liquid, 60);
             return;
@@ -910,6 +915,7 @@ impl App {
         }
         if self.character_interacting() || self.pill_motion_busy() {
             self.reset_liquid_pull();
+            self.update_decoration_input();
             self.set_timer(Timer::Liquid, 60);
             return;
         }

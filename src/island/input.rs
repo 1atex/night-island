@@ -679,6 +679,11 @@ impl App {
             return true;
         }
         let (at, size, radius) = self.pill(self.win, false, false);
+        if let Some(tween) = self.pill_motion.width {
+            let rect = tween.at(Instant::now());
+            let origin = self.window_origin(self.win);
+            return view::rounded_body_contains(rect, radius.X, (x as f32 + origin.0, y as f32 + origin.1));
+        }
         view::rounded_body_contains((at.X, at.Y, size.X, size.Y), radius.X, (x as f32, y as f32))
     }
 
@@ -707,9 +712,9 @@ impl App {
         let valid = unsafe { GetCursorPos(&mut point).is_ok() && GetWindowRect(self.hwnd, &mut window).is_ok() };
         let through = valid
             && self.state == State::Collapsed
-            && self.liquid_on()
+            && (self.liquid_on() || self.pill_motion.width.is_some())
             && !self.character_interacting()
-            && !self.pill_motion_busy()
+            && (!self.pill_motion_busy() || self.pill_motion.width.is_some())
             && !self.on_interactive_body(point.x - window.left, point.y - window.top);
         let was_through = self.pointer.decoration_through;
         self.set_decoration_through(through);

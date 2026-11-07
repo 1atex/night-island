@@ -53,10 +53,12 @@ impl App {
         if self.music.spectrum_running {
             self.place_spectrum();
         }
-        let c = self.collapsed_surface_rect();
-        let _ = self.collapsed.paint(&self.gpu, |p| {
-            let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
-        });
+        if self.pill_motion.intro != Some(super::pill_motion::IntroPhase::Fading) {
+            let c = self.collapsed_surface_rect();
+            let _ = self.collapsed.paint(&self.gpu, |p| {
+                let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
+            });
+        }
         self.paint_progress_fill();
         self.update_weather_timer();
         self.maybe_show_notification();
@@ -156,10 +158,12 @@ impl App {
     }
 
     pub(in crate::island) fn repaint(&self) {
-        let c = self.collapsed_surface_rect();
-        let _ = self.collapsed.paint(&self.gpu, |p| {
-            let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
-        });
+        if self.pill_motion.intro != Some(super::pill_motion::IntroPhase::Fading) {
+            let c = self.collapsed_surface_rect();
+            let _ = self.collapsed.paint(&self.gpu, |p| {
+                let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
+            });
+        }
         self.paint_progress_fill();
         self.repaint_expanded();
     }

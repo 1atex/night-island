@@ -691,14 +691,16 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         let side = (cover_size(ui) * scale).min(h - 10.0 * scale);
         let top = y + (h - side) / 2.0;
         let wide = width.min(side * cover_aspect(ui));
-        if !ui.cover_in_flight {
+        if !ui.cover_in_flight && !ui.track_in_flight {
             p.cover((x + off, top, x + off + wide, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
         }
     }
     if slots.weather.is_some() {
         weather_at()?;
     }
-    if let Some((off, width)) = slots.title {
+    if let Some((off, width)) = slots.title
+        && !ui.track_in_flight
+    {
         p.text(
             &ui.media.title,
             (x + off, y, x + off + width, y + h),
