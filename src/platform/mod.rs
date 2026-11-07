@@ -25,6 +25,7 @@ pub mod recognize;
 pub mod recorder;
 pub mod sounds;
 pub mod speech;
+mod startup_task;
 pub mod steam;
 pub mod steam_art;
 pub mod system;

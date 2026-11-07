@@ -11,7 +11,7 @@ impl App {
     pub(in crate::island) fn configure_desktop_dock(&mut self) {
         if !self.settings.desktop_dock.enabled {
             self.desktop_dock.take();
-            self.windows_taskbar.take();
+            self.configure_taskbar_replacement();
             return;
         }
         if !self.settings.desktop_dock.taskbar_imported {
@@ -44,13 +44,19 @@ impl App {
         self.configure_taskbar_replacement();
     }
 
-    fn configure_taskbar_replacement(&mut self) {
+    pub(in crate::island) fn configure_taskbar_replacement(&mut self) {
         if self.desktop_dock.is_some() && self.settings.desktop_dock.replace_taskbar {
-            if self.windows_taskbar.is_none() {
-                self.windows_taskbar = crate::platform::taskbar::TaskbarGuard::start().ok();
+            if self.windows_taskbar.as_mut().is_none_or(|guard| !guard.running()) {
+                self.windows_taskbar.take();
+                match crate::platform::taskbar::TaskbarGuard::start() {
+                    Ok(guard) => self.windows_taskbar = Some(guard),
+                    Err(error) => crate::log_warn!("Could not start taskbar replacement: {error}"),
+                }
             }
+            self.set_timer(Timer::Taskbar, 2000);
         } else {
             self.windows_taskbar.take();
+            self.kill_timer(Timer::Taskbar);
         }
     }
 

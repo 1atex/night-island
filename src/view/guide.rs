@@ -103,7 +103,6 @@ impl Preset {
         settings.top_panel.enabled = self == Self::Desktop;
         if dock {
             settings.desktop_dock.auto_hide = true;
-            settings.desktop_dock.replace_taskbar = false;
         }
         if self == Self::Desktop {
             settings.top_panel.auto_hide = true;
@@ -573,7 +572,6 @@ impl GuideUi {
                 if enabled && !feature.read(settings) {
                     match feature {
                         QuickSetting::Dock => {
-                            settings.desktop_dock.replace_taskbar = false;
                             settings.desktop_dock.auto_hide = true;
                         }
                         QuickSetting::Top => {
@@ -1462,7 +1460,7 @@ mod tests {
     }
 
     #[test]
-    fn presets_do_not_replace_taskbar_or_change_pins_and_other_settings() {
+    fn presets_preserve_taskbar_choice_pins_and_other_settings() {
         let mut settings = Settings { scale_percent: 120, ..Settings::default() };
         let pins = settings.desktop_dock.pins.clone();
         let unchanged = serde_json::to_vec(&settings).unwrap();
@@ -1470,11 +1468,28 @@ mod tests {
         assert_eq!(serde_json::to_vec(&settings).unwrap(), unchanged);
         Preset::Desktop.apply(&mut settings);
         assert!(settings.desktop_dock.enabled && settings.top_panel.enabled);
-        assert!(!settings.desktop_dock.replace_taskbar && !settings.top_panel.reserve_space);
+        assert!(settings.desktop_dock.replace_taskbar && !settings.top_panel.reserve_space);
+        settings.desktop_dock.replace_taskbar = false;
+        Preset::Desktop.apply(&mut settings);
+        assert!(!settings.desktop_dock.replace_taskbar);
         Preset::Island.apply(&mut settings);
         assert!(!settings.desktop_dock.enabled && !settings.top_panel.enabled);
         assert_eq!(settings.desktop_dock.pins, pins);
         assert_eq!(settings.scale_percent, 120);
+    }
+
+    #[test]
+    fn enabling_dock_in_guide_preserves_default_and_explicit_taskbar_choices() {
+        for replace in [true, false] {
+            let mut settings = Settings::default();
+            settings.desktop_dock.enabled = false;
+            settings.desktop_dock.replace_taskbar = replace;
+            let mut guide = GuideUi::new(&settings, false);
+            guide.toggle_quick(QuickSetting::Dock);
+            guide.apply_choices(&mut settings);
+            assert!(settings.desktop_dock.enabled);
+            assert_eq!(settings.desktop_dock.replace_taskbar, replace);
+        }
     }
 
     #[test]

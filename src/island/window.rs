@@ -692,7 +692,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         m if m != 0 && m == TASKBAR_CREATED.load(Ordering::Relaxed) => {
             tray::add(hwnd);
-            with_app(|a| a.top_panel_request(4));
+            with_app(|a| {
+                a.configure_taskbar_replacement();
+                a.top_panel_request(4);
+            });
             LRESULT(0)
         }
         WM_DPICHANGED => {

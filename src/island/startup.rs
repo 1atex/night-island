@@ -23,12 +23,15 @@ pub fn run() -> Result<()> {
             waited += 1;
         }
         if windows::Win32::Foundation::GetLastError() == windows::Win32::Foundation::ERROR_ALREADY_EXISTS {
-            if let Ok(existing) = FindWindowW(w!("NightIsland.Window"), None) {
+            if !std::env::args().any(|arg| arg == "--startup")
+                && let Ok(existing) = FindWindowW(w!("NightIsland.Window"), None)
+            {
                 let _ = PostMessageW(Some(existing), WM_SHOW, WPARAM(0), LPARAM(0));
             }
             return Ok(());
         }
 
+        let started = Instant::now();
         crate::data::log::init();
         crate::log_info!("starting Night Island {}", env!("CARGO_PKG_VERSION"));
         update::clean_up_after_update();
@@ -98,11 +101,12 @@ pub fn run() -> Result<()> {
             hwnd,
             windows::Win32::System::RemoteDesktop::NOTIFY_FOR_THIS_SESSION,
         );
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        crate::log_info!("Primary window ready in {} ms", started.elapsed().as_millis());
         with_app(|app| app.configure_system_notifications());
         with_app(|app| app.configure_desktop_dock());
         with_app(|app| app.configure_top_panel());
 
-        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         let failed = with_app_value(|a| register_hotkeys(hwnd, &a.settings)).unwrap_or_default();
         if !failed.is_empty() {
             crate::log_warn!("hotkeys taken by another program: {failed:?}");
@@ -133,6 +137,10 @@ pub fn run() -> Result<()> {
             }
         });
 
+        if !cfg!(feature = "demo") {
+            crate::platform::autostart::refresh();
+        }
+        crate::log_info!("Startup services scheduled in {} ms", started.elapsed().as_millis());
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
