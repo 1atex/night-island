@@ -862,6 +862,9 @@ impl App {
     }
 
     pub(in crate::island) fn liquid_tick(&mut self) {
+        if self.pet.returning.is_some() {
+            return;
+        }
         self.update_decoration_input();
         if !self.liquid_on() && self.spikes_active() {
             self.set_timer(Timer::Liquid, 60);

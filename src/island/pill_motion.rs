@@ -53,7 +53,7 @@ pub(in crate::island) struct PillMotion {
     pub intro: Option<IntroPhase>,
     pub intro_width: f32,
     pub gate: MusicEntranceGate,
-    pub track: (String, String),
+    pub track: (String, String, String),
     pub cover: Layer,
     pub previous: Layer,
     pub title: Layer,
@@ -152,6 +152,13 @@ impl App {
     }
 
     pub(in crate::island) fn maybe_start_music_intro(&mut self) {
+        let track = (self.ui.media.title.clone(), self.ui.media.artist.clone(), self.ui.media.source.clone());
+        if self.settings.music_track_intro && (!self.ui.media.playing || self.pill_motion.track != track) {
+            self.pill_motion.gate = Default::default();
+        }
+        if !self.settings.island_animations || !crate::ui::feedback::motion_allowed() {
+            return;
+        }
         let visible = !self.notification_card_visible()
             && self.state == State::Collapsed
             && !self.pill_hidden
@@ -163,9 +170,15 @@ impl App {
         if !self.pill_motion.gate.take(self.ui.media.playing, !self.ui.media.title.trim().is_empty(), visible) {
             return;
         }
-        self.pill_motion.track = (self.ui.media.title.clone(), self.ui.media.source.clone());
+        let replacing = self.pill_motion.intro.is_some();
+        self.pill_motion.track = track;
         self.pill_motion.intro = Some(IntroPhase::Present);
-        self.pill_motion.intro_width = view::collapsed_width(&self.ui, COLLAPSED.0).max(340.0);
+        let normal = view::collapsed_width(&self.ui, COLLAPSED.0);
+        let work = self.island_work_area();
+        let room = if self.settings.vertical() { work.3 - work.1 } else { work.2 - work.0 };
+        self.pill_motion.intro_width = (normal + if self.settings.music_track_intro { 64.0 } else { 0.0 })
+            .max(if self.settings.pet_music_curiosity && self.attached_character_on() { 380.0 } else { 340.0 })
+            .min((room / self.scale - 32.0).max(normal));
         self.kill_timer(Timer::Autohide);
         let _ = self.pill_motion.previous.sprite.SetIsVisible(false);
         self.reset_liquid_pull();
@@ -190,8 +203,12 @@ impl App {
         }
         let _ = self.pill_motion.title_clip.StopAnimation(h!("RightInset"));
         let _ = self.pill_motion.title_clip.SetRightInset(0.0);
-        let _ = self.intro_alpha(&self.collapsed.sprite, 1.0, 0.0, 0.0, 160);
-        let _ = self.intro_alpha(&self.pet.char_layer.sprite, 1.0, 0.0, 0.0, 160);
+        let _ = self.intro_alpha(&self.collapsed.sprite, if replacing { 0.0 } else { 1.0 }, 0.0, 0.0, 160);
+        if !self.settings.pet_music_curiosity {
+            let _ = self.intro_alpha(&self.pet.char_layer.sprite, 1.0, 0.0, 0.0, 160);
+        }
+        self.pet.char_key = None;
+        self.set_timer(Timer::Char, 1);
         self.set_timer(Timer::MusicIntro, INTRO_HOLD_MS);
     }
 
@@ -231,7 +248,7 @@ impl App {
                     },
                     INTRO_RETURN_MS,
                 );
-                let ratio = 12.5 / 15.0;
+                let ratio = if self.settings.pill_unified_layout { 13.0 / 15.0 } else { 12.5 / 15.0 };
                 let title = layout.final_title.unwrap_or(layout.title);
                 let title_to = self.title_position(title, ratio);
                 let _ = self.animate_pill_vector(
@@ -258,7 +275,9 @@ impl App {
                     let _ = self.intro_alpha(sprite, 1.0, 0.0, 0.65, INTRO_RETURN_MS);
                 }
                 for sprite in [&self.collapsed.sprite, &self.pet.char_layer.sprite] {
-                    let _ = self.intro_alpha(sprite, 0.0, 1.0, 0.55, INTRO_RETURN_MS);
+                    if sprite != &self.pet.char_layer.sprite || !self.settings.pet_music_curiosity {
+                        let _ = self.intro_alpha(sprite, 0.0, 1.0, 0.55, INTRO_RETURN_MS);
+                    }
                 }
                 self.set_timer(Timer::MusicIntro, INTRO_RETURN_MS as u32 + 30);
             }
@@ -543,6 +562,21 @@ mod tests {
                 assert_eq!(app.collapsed.sprite.Opacity()?, 1.0);
                 app.maybe_start_music_intro();
                 assert!(app.pill_motion.intro.is_none());
+                app.ui.media.title = "A different track".into();
+                app.maybe_start_music_intro();
+                assert!(app.pill_motion.intro == Some(IntroPhase::Present));
+                let visible = app.pill_motion.width.unwrap().at(Instant::now());
+                app.ui.media.title = "Switched again immediately".into();
+                app.maybe_start_music_intro();
+                assert!((app.pill_motion.width.unwrap().from.2 - visible.2).abs() < 10.0);
+                assert!(app.pill_motion.intro == Some(IntroPhase::Present));
+                app.music_intro_step();
+                app.music_intro_step();
+                app.settings.music_track_intro = false;
+                app.ui.media.title = "Legacy behavior".into();
+                app.maybe_start_music_intro();
+                assert!(app.pill_motion.intro.is_none());
+                app.settings.music_track_intro = true;
                 app.ui.notice = Some(('\u{E722}', "A longer notification that expands the island".into()));
                 app.repaint_collapsed();
                 assert!(app.pill_motion.width.is_some());
@@ -596,6 +630,37 @@ mod tests {
                 app.ui.notice = None;
                 app.repaint_collapsed();
                 app.settings.island_animations = true;
+                if float_pos.is_none() {
+                    app.settings.character = Character::Spark;
+                    app.set_character_detached(true);
+                    let from = app.pet.desktop.as_ref().unwrap().center();
+                    app.begin_pet_return();
+                    assert!(app.pet.returning.is_some());
+                    assert!(app.pet.desktop.is_some());
+                    app.pet.returning.as_mut().unwrap().start = Instant::now() - Duration::from_millis(260);
+                    app.char_tick();
+                    let center = app.pet.desktop.as_ref().unwrap().center();
+                    assert!(center.0.is_finite() && center.1.is_finite());
+                    assert_ne!(from, center);
+                    let hwnd = app.pet.desktop.as_ref().unwrap().hwnd();
+                    assert_ne!(unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } & WS_EX_TRANSPARENT.0 as isize, 0);
+                    app.pet.returning.as_mut().unwrap().start = Instant::now() - Duration::from_millis(600);
+                    app.char_tick();
+                    assert!(app.pet.returning.is_none() && app.pet.desktop.is_none());
+                    assert!(!app.settings.character_detached);
+                    app.set_character_detached(true);
+                    app.begin_pet_return();
+                    app.char_tick();
+                    app.pill_hidden = true;
+                    app.char_tick();
+                    assert!(app.pet.returning.is_none() && app.pet.desktop.is_some());
+                    let hwnd = app.pet.desktop.as_ref().unwrap().hwnd();
+                    assert_eq!(unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } & WS_EX_TRANSPARENT.0 as isize, 0);
+                    app.pill_hidden = false;
+                    app.settings.pet_return_animation = false;
+                    app.begin_pet_return();
+                    assert!(app.pet.returning.is_none() && app.pet.desktop.is_none());
+                }
                 app.pill_motion.gate = Default::default();
                 app.maybe_start_music_intro();
                 app.ui.tab = view::Tab::Note;

@@ -41,8 +41,11 @@ const ISLAND: [(Sid, &str, Kind); 15] = [
     (Sid::CloseDelay, "Close delay", Kind::Slider),
 ];
 
-const ANIMATIONS: [(Sid, &str, Kind); 7] = [
+const ANIMATIONS: [(Sid, &str, Kind); 10] = [
     (Sid::IslandAnimations, "Animate island opening and closing", Kind::Toggle),
+    (Sid::MusicTrackIntro, "Present each new track", Kind::Toggle),
+    (Sid::PetMusicCuriosity, "Pet watches the new track", Kind::Toggle),
+    (Sid::PetReturnAnimation, "Island welcomes the returning pet", Kind::Toggle),
     (Sid::AnimCurve, "Animation curve", Kind::Cycle),
     (Sid::TabAnimKind, "Tab change", Kind::Cycle),
     (Sid::TabAnimSpeed, "Tab change speed", Kind::Slider),

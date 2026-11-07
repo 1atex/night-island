@@ -350,7 +350,7 @@ impl App {
                 intro: None,
                 intro_width: COLLAPSED.0,
                 gate: Default::default(),
-                track: (String::new(), String::new()),
+                track: (String::new(), String::new(), String::new()),
                 cover: intro_cover,
                 previous: previous_pill,
                 title: intro_title,
@@ -397,6 +397,7 @@ impl App {
                 edge_time: std::cell::Cell::new(Instant::now()),
             },
             pet: Pet {
+                returning: None,
                 behavior: crate::ui::pet_behavior::PetBehavior::new(
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)

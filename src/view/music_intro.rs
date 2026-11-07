@@ -11,11 +11,14 @@ pub struct MusicEntranceLayout {
 
 pub fn music_entrance_layout(pill: Rect, scale: f32, ui: &UiState) -> MusicEntranceLayout {
     let (x, y, w, h) = pill;
-    let text = (ui.media.title.chars().count() as f32 * 7.6).clamp(64.0, 240.0) * scale;
+    let text = crate::ui::fonts::width(ui.cfg.interface_font, &ui.media.title, 15.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)
+        .clamp(64.0, 240.0)
+        * scale;
+    let reserve = if ui.cfg.pet_music_curiosity && ui.char_inset > 0.0 { ui.char_inset + 10.0 } else { 0.0 } * scale;
     let cover = 28.0 * scale;
     let gap = 12.0 * scale;
     if ui.cfg.vertical() {
-        let top = y + (h - cover - gap - text) / 2.0;
+        let top = y + reserve + (h - reserve - cover - gap - text) / 2.0;
         let cx = x + w / 2.0;
         let slots = vertical_slots(ui, scale, h);
         let side = (w - 14.0 * scale).min(30.0 * scale);
@@ -30,17 +33,13 @@ pub fn music_entrance_layout(pill: Rect, scale: f32, ui: &UiState) -> MusicEntra
             rotation: if ui.cfg.dock_edge == Edge::Left { -90.0 } else { 90.0 },
         };
     }
-    let left = x + (w - cover - gap - text) / 2.0;
+    let left = x + reserve + (w - reserve - cover - gap - text) / 2.0;
     let slots = music_slots(ui, scale, w);
-    let side = (26.0 * scale).min(h - 10.0 * scale);
-    let top = y + (h - side) / 2.0;
+
     MusicEntranceLayout {
         cover: (left, y + (h - cover) / 2.0, left + cover, y + (h + cover) / 2.0),
         title: (left + cover + gap, y, left + cover + gap + text, y + h),
-        final_cover: slots
-            .cover
-            .filter(|_| ui.media.cover.is_some())
-            .map(|s| (x + s.0, top, x + s.0 + s.1.min(side * cover_aspect(ui)), top + side)),
+        final_cover: pill_cover_rect(pill, scale, ui),
         final_title: slots.title.map(|s| (x + s.0, y, x + s.0 + s.1, y + h)),
         rotation: 0.0,
     }

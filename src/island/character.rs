@@ -2,7 +2,14 @@ use crate::island::*;
 
 pub(in crate::island) const CHAR_INSET: f32 = 30.0;
 
+#[derive(Clone, Copy)]
+pub(in crate::island) struct PetReturn {
+    pub start: Instant,
+    pub from: (f32, f32),
+}
+
 pub(in crate::island) struct Pet {
+    pub returning: Option<PetReturn>,
     pub(in crate::island) behavior: crate::ui::pet_behavior::PetBehavior,
     pub(in crate::island) speech: crate::ui::pet_speech::PetSpeech,
     pub(in crate::island) speech_cue: crate::ui::pet_speech::SpeechCue,
@@ -79,7 +86,9 @@ impl App {
     }
 
     pub(in crate::island) fn character_interacting(&self) -> bool {
-        self.pointer.character_press.is_some() || self.pet.desktop.as_ref().is_some_and(|desktop| desktop.grabbed())
+        self.pet.returning.is_some()
+            || self.pointer.character_press.is_some()
+            || self.pet.desktop.as_ref().is_some_and(|desktop| desktop.grabbed())
     }
 
     pub(in crate::island) fn char_size(&self) -> (f32, f32) {
@@ -102,6 +111,11 @@ impl App {
     }
 
     pub(in crate::island) fn apply_character(&mut self) {
+        self.pet.returning = None;
+        let _ = self._visual.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
+        if let Some(desktop) = &mut self.pet.desktop {
+            desktop.cancel_return();
+        }
         self.pet.behavior.suspend();
         if self.settings.character == Character::None {
             self.settings.character_detached = false;
@@ -187,6 +201,104 @@ impl App {
         self.settings.save();
     }
 
+    pub(in crate::island) fn begin_pet_return(&mut self) {
+        if self.pet.returning.is_some() {
+            return;
+        }
+        let Some(desktop) = &self.pet.desktop else { return };
+        if !self.settings.pet_return_animation
+            || !self.settings.island_animations
+            || self.settings.pet_performance == crate::ui::pet_motion::PetPerformance::Still
+            || !crate::ui::feedback::motion_allowed()
+            || self.pill_hidden
+            || self.gaming
+        {
+            self.set_character_detached(false);
+            return;
+        }
+        self.pet.returning = Some(PetReturn { start: Instant::now(), from: desktop.center() });
+        self.pet.behavior.suspend();
+        self.cancel_pill_motion();
+        self.reset_liquid_pull();
+        self.kill_timer(Timer::Collapse);
+        self.kill_timer(Timer::Expand);
+        self.kill_timer(Timer::Autohide);
+        self.set_timer(Timer::Char, 1);
+    }
+
+    fn pet_return_step(&mut self) {
+        let Some(returning) = self.pet.returning else { return };
+        let p = (returning.start.elapsed().as_secs_f32() / 0.52).clamp(0.0, 1.0);
+        let _ = self._visual.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
+        if self.gaming || self.pill_hidden || !matches!(self.state, State::Collapsed | State::Expanded) {
+            self.pet.returning = None;
+            if let Some(desktop) = &mut self.pet.desktop {
+                desktop.cancel_return();
+            }
+            self.reset_liquid_pull();
+            return;
+        }
+        if p >= 1.0 || self.pet.desktop.is_none() {
+            self.pet.returning = None;
+            self.reset_liquid_pull();
+            self.set_character_detached(false);
+            let sprite = &self.pet.char_layer.sprite;
+            let _ = sprite.SetCenterPoint(Vector3 { X: self.char_size().0 / 2.0, Y: self.char_size().1 / 2.0, Z: 0.0 });
+            let _ = sprite.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
+            let _ = self.animate_pill_vector(
+                sprite,
+                h!("Scale"),
+                Vector3 { X: 0.65, Y: 0.8, Z: 1.0 },
+                Vector3 { X: 1.0, Y: 1.0, Z: 1.0 },
+                220,
+            );
+            self.react(Reaction::Done, 800);
+            return;
+        }
+        let origin = self.window_origin(self.win);
+        let character = self.char_origin();
+        let size = self.char_size();
+        let target = if self.state == State::Expanded {
+            let r = self.pill_full();
+            (origin.0 + r.0 + r.2 / 2.0, origin.1 + r.1 + 24.0 * self.scale)
+        } else {
+            (origin.0 + character.0 + size.0 / 2.0, origin.1 + character.1 + size.1 / 2.0)
+        };
+        let ease = p * p * (3.0 - 2.0 * p);
+        let center = (
+            returning.from.0 + (target.0 - returning.from.0) * ease,
+            returning.from.1 + (target.1 - returning.from.1) * ease,
+        );
+        if let Some(desktop) = &mut self.pet.desktop {
+            desktop.return_to(center, ease);
+        }
+        if self.state == State::Expanded || (self.state == State::Collapsed && !self.liquid_on()) {
+            let r = self.pill_rect(self.state == State::Expanded);
+            let pulse = (std::f32::consts::PI * p).sin() * if self.state == State::Expanded { 0.3 } else { 1.0 };
+            let _ = self._visual.SetCenterPoint(Vector3 { X: r.0 + r.2 / 2.0, Y: r.1 + r.3 / 2.0, Z: 0.0 });
+            let _ = self._visual.SetScale(Vector3 { X: 1.0 + 0.018 * pulse, Y: 1.0 + 0.045 * pulse, Z: 1.0 });
+        }
+        if self.state == State::Collapsed && self.liquid_on() {
+            let (at, size, _) = self.pill(self.win, false, false);
+            let vertical = self.settings.vertical();
+            let normal = if vertical {
+                (if self.edge() == Edge::Left { 1.0 } else { -1.0 }, 0.0)
+            } else {
+                (0.0, if self.docked() && self.edge() == Edge::Bottom { -1.0 } else { 1.0 })
+            };
+            let point = if vertical {
+                (if normal.0 > 0.0 { at.X + size.X } else { at.X }, (center.1 - origin.1).clamp(at.Y, at.Y + size.Y))
+            } else {
+                ((center.0 - origin.0).clamp(at.X, at.X + size.X), if normal.1 > 0.0 { at.Y + size.Y } else { at.Y })
+            };
+            let depth = (std::f32::consts::PI * p).sin() * 14.0 * self.scale;
+            self.liquid.pull = crate::ui::gfx::ElasticPull { point, normal, spread: 30.0 * self.scale, depth };
+            self.liquid.pull_ready = true;
+            self.liquid.bump_amp = depth;
+            self.paint_liquid_body(depth);
+        }
+    }
+
     pub(in crate::island) fn on_companion(&mut self, id: usize, source: isize) {
         if self.pet.desktop.as_ref().is_none_or(|window| window.hwnd().0 as isize != source) {
             return;
@@ -201,7 +313,7 @@ impl App {
             Some(action @ (crate::ui::companion::Action::Moved | crate::ui::companion::Action::Dropped)) => {
                 self.pet.behavior.suspend();
                 if action == crate::ui::companion::Action::Dropped && self.companion_over_island() {
-                    self.set_character_detached(false);
+                    self.begin_pet_return();
                     self.react(Reaction::Done, 650);
                     return;
                 }
@@ -219,7 +331,7 @@ impl App {
                     self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1));
                 }
             }
-            Some(crate::ui::companion::Action::Dock) => self.set_character_detached(false),
+            Some(crate::ui::companion::Action::Dock) => self.begin_pet_return(),
             Some(crate::ui::companion::Action::Previous) => {
                 media::control(media::Control::Previous);
                 self.react(Reaction::Music, 600);
@@ -258,6 +370,7 @@ impl App {
     }
 
     pub(in crate::island) fn char_tick(&mut self) {
+        self.pet_return_step();
         let character = self.settings.character;
         if self.gaming {
             self.pet.behavior.suspend();
@@ -360,7 +473,7 @@ impl App {
         let behavior = self.pet.desktop.as_ref().map(|desktop| {
             self.pet.behavior.advance(&crate::ui::pet_behavior::Environment {
                 dt,
-                enabled: self.settings.pet_autonomy,
+                enabled: self.settings.pet_autonomy && self.pet.returning.is_none(),
                 reduced_motion: still,
                 held,
                 engaged: near || desktop.controls_visible() || chat_open || speech_cue.engaged() || urgent || pet_card,
@@ -384,7 +497,16 @@ impl App {
                 reaction = Reaction::Idle;
             }
         }
-        let gaze = if held {
+        let curious =
+            self.settings.pet_music_curiosity && !detached && self.pill_motion.intro.is_some() && !speech_cue.engaged();
+        let gaze = if curious {
+            let layout = view::music_entrance_layout(self.pill_rect(false), self.scale, &self.ui);
+            let origin = self.char_origin();
+            (
+                ((layout.cover.0 + layout.cover.2) / 2.0 - origin.0 - cw / 2.0) / (70.0 * self.scale),
+                ((layout.cover.1 + layout.cover.3) / 2.0 - origin.1 - ch / 2.0) / (70.0 * self.scale),
+            )
+        } else if held {
             cursor.zip(self.pet.cursor).map_or((0.0, 0.0), |((x, y), (px, py))| {
                 (
                     ((x - px) as f32 / (dt.max(0.001) * 900.0)).clamp(-1.0, 1.0),
@@ -398,7 +520,7 @@ impl App {
         };
         let gaze_moving = (gaze.0 - self.pet.motion.look.0).abs() + (gaze.1 - self.pet.motion.look.1).abs() > 0.015;
         self.pet.cursor = cursor;
-        let mut motion = self.pet.motion.advance(gaze, dt, near, held, still);
+        let mut motion = self.pet.motion.advance(gaze, dt, near || curious, held, still);
         motion.lid = if still { 0.0 } else { lid };
         motion.behavior = behavior.as_ref().map_or(Default::default(), |frame| frame.pose);
         motion.mouth = self.pet.speech.advance(speech_cue, dt, still);
@@ -413,6 +535,13 @@ impl App {
                 };
                 motion.lean += target;
                 motion.stretch += target.abs() * 0.12;
+            }
+        }
+        if curious {
+            reaction = Reaction::Idle;
+            motion.warmth = motion.warmth.max(0.35);
+            if !still {
+                motion.lean += 0.08;
             }
         }
         let look = self.pet.motion.look;
@@ -433,6 +562,7 @@ impl App {
             [motion.behavior.sit, motion.behavior.sleep].iter().any(|value| *value > 0.005 && *value < 0.995);
         let interval = self.settings.pet_performance.interval(
             near || held
+                || self.pet.returning.is_some()
                 || gaze_moving
                 || pose.lively()
                 || motion.warmth > 0.0
@@ -450,7 +580,8 @@ impl App {
                 self.pet.char_key = None;
             }
             let available = self.ui.media.playing || !self.ui.media.title.is_empty() || self.ui.media.players > 0;
-            if (near || held || desktop.controls_visible())
+            if self.pet.returning.is_none()
+                && (near || held || desktop.controls_visible())
                 && now.duration_since(self.pet.controls_at) >= Duration::from_millis(80)
             {
                 self.pet.controls_at = now;

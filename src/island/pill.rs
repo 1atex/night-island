@@ -245,7 +245,9 @@ impl App {
         self.start_progress_timer();
         if self.pill_motion.intro.is_some()
             && (!self.ui.media.playing
-                || self.pill_motion.track != (self.ui.media.title.clone(), self.ui.media.source.clone()))
+                || (!self.settings.music_track_intro
+                    && self.pill_motion.track
+                        != (self.ui.media.title.clone(), self.ui.media.artist.clone(), self.ui.media.source.clone())))
         {
             self.cancel_pill_motion();
         }
