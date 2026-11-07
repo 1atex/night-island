@@ -425,6 +425,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Talk to the detached pet" => "Разговор с вынесенным питомцем",
         "Icons beside tab names" => "Иконки рядом с названиями вкладок",
         "Colored header icons" => "Цветные иконки в шапке",
+        "Expressive active tab" => "Выразительное выделение активной вкладки",
         "Show AI answers as cards" => "Показывать ответы ИИ карточками",
         "Short AI replies inside the island" => "Короткие ответы ИИ внутри острова",
         "Long replies use cards. Detached pet replies stay beside the pet." => {

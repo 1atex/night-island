@@ -215,6 +215,41 @@ mod tests {
                         encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
                     }
                 }
+                if scale == 1.0
+                    && edge == Edge::Top
+                    && let Some(path) = std::env::var_os("NI_HEADER_SELECTION_PREVIEW")
+                {
+                    app.ui.cfg.header_icon_colors = true;
+                    app.ui.cfg.header_tabs =
+                        ["Clipboard", "Note", "Weather", "Record", "My Wave"].map(String::from).to_vec();
+                    app.ui.feedback.set_enabled(false);
+                    let surface = crate::ui::popup::PopupSurface::new((640, 198))?;
+                    surface.paint(&app.gpu, |p| {
+                        p.fill_rect((0.0, 0.0, 640.0, 198.0), crate::ui::gfx::rgba(0.025, 0.025, 0.03, 1.0))?;
+                        for (row, (tab, modern)) in
+                            [(view::Tab::Clipboard, true), (view::Tab::Yandex, true), (view::Tab::Clipboard, false)]
+                                .into_iter()
+                                .enumerate()
+                        {
+                            let y = row as f32 * 66.0;
+                            app.ui.tab = tab;
+                            app.ui.cfg.header_active_accent = modern;
+                            app.ui.hover_tab = Some(0);
+                            p.push_clip((0.0, y, 640.0, y + 62.0));
+                            view::paint_expanded(p, (0.0, y, 640.0, 384.0), 1.0, &app.ui, &[])?;
+                            p.pop_clip();
+                        }
+                        Ok(())
+                    })?;
+                    let mut pixels = surface.pixels();
+                    for pixel in pixels.chunks_exact_mut(4) {
+                        pixel.swap(0, 2);
+                    }
+                    let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 640, 198);
+                    encoder.set_color(png::ColorType::Rgba);
+                    encoder.set_depth(png::BitDepth::Eight);
+                    encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+                }
                 drop(app);
                 unsafe {
                     DestroyWindow(hwnd)?;
