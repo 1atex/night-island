@@ -368,9 +368,10 @@ impl Painter<'_> {
     pub fn edge_highlight(
         &self,
         size: (i32, i32),
-        pull: &ElasticPull,
+        body: &ElasticBody,
         palette: Palette,
         tip: D2D1_COLOR_F,
+        opacity: f32,
     ) -> Result<()> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
         use windows::Win32::Graphics::Direct2D::{
@@ -379,19 +380,22 @@ impl Painter<'_> {
         };
         let pt = |x, y| windows_numerics::Vector2 { X: x, Y: y };
         let horizontal = palette.tone == Tone::Horizontal;
-        let stops = [(0.0, 0.0), (0.55, 0.6), (1.0, 0.85)].map(|(position, alpha)| D2D1_GRADIENT_STOP {
+        let pull = &body.pull;
+        let blend = body.radius * 0.2;
+        let opacity = opacity.clamp(0.0, 1.0);
+        let stops = [(0.0, 0.0), (0.45, 0.32), (1.0, 0.68)].map(|(position, alpha)| D2D1_GRADIENT_STOP {
             position,
             color: match palette.tone {
-                Tone::Vertical => palette.at(position, alpha),
-                Tone::Horizontal => rgba(1.0, 1.0, 1.0, alpha),
-                Tone::Single => D2D1_COLOR_F { a: alpha, ..tip },
+                Tone::Vertical => palette.at(position, alpha * opacity),
+                Tone::Horizontal => rgba(1.0, 1.0, 1.0, alpha * opacity),
+                Tone::Single => D2D1_COLOR_F { a: alpha * opacity, ..tip },
             },
         });
         unsafe {
             let stops = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
             let fade = self.dc.CreateLinearGradientBrush(
                 &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                    startPoint: pt(pull.point.0, pull.point.1),
+                    startPoint: pt(pull.point.0 - pull.normal.0 * blend, pull.point.1 - pull.normal.1 * blend),
                     endPoint: pt(
                         pull.point.0 + pull.normal.0 * pull.depth.max(1.0),
                         pull.point.1 + pull.normal.1 * pull.depth.max(1.0),
@@ -411,11 +415,11 @@ impl Painter<'_> {
                 let colors = self.dc.CreateGradientStopCollection(&colors, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
                 let brush = self.dc.CreateLinearGradientBrush(
                     &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                        startPoint: pt(0.0, 0.0),
-                        endPoint: if pull.normal.0.abs() > 0.5 {
-                            pt(0.0, bounds.bottom)
+                        startPoint: pt(body.rect.0, body.rect.1),
+                        endPoint: if body.rect.2 >= body.rect.3 {
+                            pt(body.rect.0 + body.rect.2, body.rect.1)
                         } else {
-                            pt(bounds.right, 0.0)
+                            pt(body.rect.0, body.rect.1 + body.rect.3)
                         },
                     },
                     None,
@@ -438,33 +442,6 @@ impl Painter<'_> {
             }
         }
         Ok(())
-    }
-
-    pub fn liquid_highlight(&self, size: (i32, i32), pull: &ElasticPull, color: D2D1_COLOR_F) -> Result<()> {
-        use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
-        use windows::Win32::Graphics::Direct2D::{
-            D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-        };
-        let stops = [
-            D2D1_GRADIENT_STOP { position: 0.0, color: D2D1_COLOR_F { a: 0.0, ..color } },
-            D2D1_GRADIENT_STOP { position: 1.0, color: D2D1_COLOR_F { a: 0.2, ..color } },
-        ];
-        unsafe {
-            let gradient = self.dc.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
-            let line = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                startPoint: windows_numerics::Vector2 { X: pull.point.0, Y: pull.point.1 },
-                endPoint: windows_numerics::Vector2 {
-                    X: pull.point.0 + pull.normal.0 * pull.depth.max(1.0),
-                    Y: pull.point.1 + pull.normal.1 * pull.depth.max(1.0),
-                },
-            };
-            let brush = self.dc.CreateLinearGradientBrush(&line, None, &gradient)?;
-            self.dc.FillRectangle(
-                &D2D_RECT_F { left: 0.0, top: 0.0, right: size.0 as f32, bottom: size.1 as f32 },
-                &brush,
-            );
-            Ok(())
-        }
     }
 }
 

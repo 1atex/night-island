@@ -389,7 +389,7 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             app.liquid.bump_amp = 40.0;
             app.settings.eq_style = crate::data::settings::EqStyle::Spikes;
             app.paint_edge_levels(&[0.25, 0.6, 0.4, 0.75, 0.65, 0.5, 0.75, 0.5, 0.2]);
-            assert!(!app.liquid.highlight.sprite.IsVisible()?, "A filled body must have one continuous material");
+            assert!(app.liquid.highlight.sprite.IsVisible()?, "Body fill must retain the continuous edge gradient");
             let _ = app.compositor.RequestCommitAsync();
             unsafe {
                 let mut message = MSG::default();
@@ -407,6 +407,10 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
         app.paint_edge_levels(&[0.3; 9]);
         assert!(app.liquid.highlight.sprite.IsVisible()?, "Equalizer colour remains available without body fill");
         app.ui.cfg.music_progress = true;
+        app.settings.bump_tint = crate::data::settings::BumpTint::Off;
+        app.paint_edge_levels(&[0.3; 9]);
+        assert!(!app.liquid.highlight.sprite.IsVisible()?, "Disabling liquid edge colour must remove its gradient");
+        app.settings.bump_tint = crate::data::settings::BumpTint::Equalizer;
         app.music.spectrum_running = true;
         app.liquid.bump_amp = 0.0;
         app.liquid.bump_vel = 0.0;

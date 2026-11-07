@@ -226,7 +226,6 @@ impl App {
         self.set_bump_visible(false);
         let s = self.scale;
         let depth = (self.settings.liquid_strength * s * 0.5 * self.settings.eq_strength).min(24.0 * s);
-        let palette = self.flipped(self.eq_palette());
         let shape = match self.settings.eq_style {
             crate::data::settings::EqStyle::Wave => crate::ui::gfx::EdgeShape::Wave,
             crate::data::settings::EqStyle::Bars => crate::ui::gfx::EdgeShape::Bars,
@@ -240,9 +239,10 @@ impl App {
             let _ = self._visual.SetClip(&self.liquid.body_clip);
             self.liquid.body_active.set(true);
         }
-        let colored =
-            !self.progress_fill_active() && (self.settings.spike_color || palette.tone != crate::ui::gfx::Tone::Single);
-        if colored {
+        let colors = self
+            .bump_look()
+            .filter(|(palette, _)| self.settings.spike_color || palette.tone != crate::ui::gfx::Tone::Single);
+        if let Some((palette, tip)) = colors {
             let (at, size, radius) = self.pill(self.win, false, false);
             let body = crate::ui::gfx::LiquidBody {
                 rect: (at.X, at.Y, size.X, size.Y),
@@ -250,14 +250,20 @@ impl App {
                 edge: self.settings.hang(),
                 center: 0.0,
                 half: 0.0,
-                depth: depth.max(self.liquid.bump_amp).max(1.0),
+                depth: depth.max(self.elastic_body_spec(self.liquid.bump_amp).pull.depth).max(1.0),
             }
             .elastic();
             let _ = self.liquid.highlight.paint(&self.gpu, |p| {
-                let _ = p.edge_highlight(self.liquid.highlight.size(), &body.pull, palette, self.eq_tip());
+                let _ = p.edge_highlight(
+                    self.liquid.highlight.size(),
+                    &body,
+                    palette,
+                    tip,
+                    if self.progress_fill_active() { 0.8 } else { 1.0 },
+                );
             });
         }
-        let _ = self.liquid.highlight.sprite.SetIsVisible(colored);
+        let _ = self.liquid.highlight.sprite.SetIsVisible(colors.is_some());
     }
 
     fn paint_legacy_edge_levels(&self, levels: &[f32]) {
@@ -318,9 +324,10 @@ impl App {
                 }
             }
         });
-        let colored =
-            !self.progress_fill_active() && (self.settings.spike_color || palette.tone != crate::ui::gfx::Tone::Single);
-        if colored {
+        let colors = self
+            .bump_look()
+            .filter(|(palette, _)| self.settings.spike_color || palette.tone != crate::ui::gfx::Tone::Single);
+        if let Some((palette, tip)) = colors {
             let (at, size, radius) = self.pill(self.win, false, false);
             let body = crate::ui::gfx::LiquidBody {
                 rect: (at.X, at.Y, size.X, size.Y),
@@ -328,14 +335,20 @@ impl App {
                 edge: self.settings.hang(),
                 center: 0.0,
                 half: 0.0,
-                depth: depth.max(self.liquid.bump_amp).max(1.0),
+                depth: depth.max(self.elastic_body_spec(self.liquid.bump_amp).pull.depth).max(1.0),
             }
             .elastic();
             let _ = self.liquid.highlight.paint(&self.gpu, |p| {
-                let _ = p.edge_highlight(self.liquid.highlight.size(), &body.pull, palette, self.eq_tip());
+                let _ = p.edge_highlight(
+                    self.liquid.highlight.size(),
+                    &body,
+                    palette,
+                    tip,
+                    if self.progress_fill_active() { 0.8 } else { 1.0 },
+                );
             });
         }
-        let _ = self.liquid.highlight.sprite.SetIsVisible(colored);
+        let _ = self.liquid.highlight.sprite.SetIsVisible(colors.is_some());
     }
 
     fn eq_tip(&self) -> crate::ui::gfx::D2D1Colour {
@@ -718,14 +731,9 @@ impl App {
         if !self.spikes_active() {
             self.set_bump_visible(false);
         }
-        if let Some((palette, tip)) = self.bump_look().filter(|_| depth > 0.2 && !self.progress_fill_active()) {
-            let color = if palette.tone == crate::ui::gfx::Tone::Horizontal {
-                palette.at(((body.pull.point.0 - body.rect.0) / body.rect.2.max(1.0)).clamp(0.0, 1.0), 1.0)
-            } else {
-                tip
-            };
+        if let Some((palette, tip)) = self.bump_look().filter(|_| body.pull.depth > 0.2) {
             let _ = self.liquid.highlight.paint(&self.gpu, |p| {
-                let _ = p.liquid_highlight(self.liquid.highlight.size(), &body.pull, color);
+                let _ = p.edge_highlight(self.liquid.highlight.size(), &body, palette, tip, 0.4);
             });
             let _ = self.liquid.highlight.sprite.SetIsVisible(true);
         } else {
