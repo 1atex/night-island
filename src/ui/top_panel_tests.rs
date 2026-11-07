@@ -1,6 +1,8 @@
 use super::*;
+use crate::ui::gfx::WHITE;
 use windows::UI::Composition::Compositor;
 use windows::Win32::Foundation::RECT;
+use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_ALIGNMENT_CENTER;
 use windows::Win32::System::WinRT::{
     CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
     RO_INIT_SINGLETHREADED, RoInitialize, RoUninitialize,
@@ -59,6 +61,68 @@ fn save_surface(surface: &PopupSurface, size: (i32, i32), name: &str) -> Result<
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
     Ok(())
+}
+
+fn capture_icon_catalog(gpu: &Gpu) -> Result<()> {
+    let glyphs: Vec<_> = crate::ui::icons::modern_glyphs().collect();
+    let columns = 11;
+    let rows = glyphs.len().div_ceil(columns);
+    let size = (932, 96 + rows as i32 * 62);
+    let surface = PopupSurface::new(size)?;
+    let cell = |i: usize| (25 + (i % columns) * 80, 86 + (i / columns) * 62);
+    let draw = |p: &Painter, catalog: bool| -> Result<()> {
+        if catalog {
+            p.fill_rect((0.0, 0.0, size.0 as f32, size.1 as f32), rgba(0.047, 0.051, 0.071, 1.0))?;
+            p.text(
+                "Night Island · Иконки интерфейса",
+                (25.0, 15.0, 890.0, 52.0),
+                25.0,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                WHITE,
+            )?;
+            p.text(
+                "Проверка в двух размерах · 24 и 12 px",
+                (25.0, 52.0, 890.0, 75.0),
+                13.0,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                rgba(0.72, 0.76, 0.85, 1.0),
+            )?;
+        }
+        for (i, &ch) in glyphs.iter().enumerate() {
+            let (left, top) = cell(i);
+            let (x, y) = (left as f32, top as f32);
+            if catalog {
+                p.fill_round_rect((x, y, x + 72.0, y + 55.0), 10.0, rgba(0.08, 0.09, 0.126, 1.0))?;
+                p.text(
+                    &format!("{:04X}", u32::from(ch)),
+                    (x + 1.0, y + 35.0, x + 71.0, y + 52.0),
+                    9.0,
+                    DWRITE_FONT_WEIGHT_NORMAL,
+                    DWRITE_TEXT_ALIGNMENT_CENTER,
+                    rgba(0.60, 0.64, 0.75, 1.0),
+                )?;
+            }
+            p.glyph(ch, (x + 5.0, y + 3.0, x + 36.0, y + 36.0), 24.0, WHITE)?;
+            p.glyph(ch, (x + 43.0, y + 3.0, x + 67.0, y + 36.0), 12.0, rgba(0.74, 0.8, 1.0, 1.0))?;
+        }
+        Ok(())
+    };
+    surface.paint(gpu, |p| draw(p, false))?;
+    let pixels = surface.pixels();
+    for (i, ch) in glyphs.iter().enumerate() {
+        let (x, y) = cell(i);
+        for (left, right) in [(x, x + 41), (x + 41, x + 72)] {
+            let drawn = (y..y + 38)
+                .flat_map(|row| (left..right).map(move |col| (row * size.0 as usize + col) * 4 + 3))
+                .filter(|&offset| pixels[offset] > 40)
+                .count();
+            assert!(drawn > 8, "icon U+{:04X} is missing", u32::from(*ch));
+        }
+    }
+    surface.paint(gpu, |p| draw(p, true))?;
+    save_surface(&surface, size, "icon-catalog")
 }
 
 fn pump() {
@@ -234,12 +298,53 @@ fn native_top_panel_layout_actions_privacy_and_cleanup() -> Result<()> {
     let compositor = Compositor::new()?;
     let gpu = Gpu::new(&compositor)?;
     if std::env::var_os("NI_TOP_PANEL_PREVIEW").is_some() {
+        capture_icon_catalog(&gpu)?;
         let mut ui = crate::view::UiState::new();
         ui.sw.group = crate::view::GROUPS.iter().position(|group| group.name == "Assistant").unwrap();
         let size = (940, 680);
         let surface = PopupSurface::new(size)?;
         use crate::view::AssistantPage;
         crate::ui::i18n::set_ru(true);
+        let island_size = (672, 416);
+        let island = PopupSurface::new(island_size)?;
+        ui.media = crate::platform::media::Media {
+            title: "Ночная прогулка".into(),
+            artist: "Демонстрация".into(),
+            source: "Night Island".into(),
+            accent: Some((139, 161, 236)),
+            playing: true,
+            ..Default::default()
+        };
+        ui.home.vol = 0.56;
+        ui.home.device = "Динамики".into();
+        island.paint(&gpu, |p| {
+            p.fill_round_rect((16.0, 16.0, 656.0, 400.0), 28.0, rgba(0.028, 0.032, 0.043, 1.0))?;
+            crate::view::paint_expanded(p, (16.0, 16.0, 640.0, 384.0), 1.0, &ui, &[])
+        })?;
+        save_surface(&island, island_size, "icons-island")?;
+        ui.media = Default::default();
+        let appearance = crate::view::GROUPS.iter().position(|group| group.name == "Appearance").unwrap();
+        let assistant = ui.sw.group;
+        ui.sw.group = appearance;
+        let paint_settings = |p: &Painter, ui: &crate::view::UiState| {
+            crate::view::paint_settings_window(p, (size.0 as f32, size.1 as f32), 1.0, ui)
+        };
+        surface.paint(&gpu, |p| paint_settings(p, &ui))?;
+        let modern = surface.pixels();
+        save_surface(&surface, size, "icons-modern")?;
+        crate::ui::icons::set_legacy(true);
+        crate::view::toggle_set(crate::view::Sid::LegacyIcons, &mut ui.cfg, true);
+        let painted = surface.paint(&gpu, |p| paint_settings(p, &ui));
+        crate::ui::icons::set_legacy(false);
+        painted?;
+        let classic = surface.pixels();
+        assert!((70..565).any(|row| {
+            let offset = (row * size.0 as usize + 24) * 4;
+            modern[offset..offset + 20 * 4] != classic[offset..offset + 20 * 4]
+        }));
+        save_surface(&surface, size, "icons-classic")?;
+        ui.cfg.legacy_icons = false;
+        ui.sw.group = assistant;
         ui.cfg.ai.voice_separate = true;
         ui.cfg.assistant.natural_voice = true;
         ui.cfg.assistant.tts_provider = crate::services::assistant::TtsProvider::Fish;

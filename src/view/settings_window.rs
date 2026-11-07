@@ -50,7 +50,8 @@ const ANIMATIONS: [(Sid, &str, Kind); 6] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 4] = [
+const APPEARANCE: [(Sid, &str, Kind); 5] = [
+    (Sid::LegacyIcons, "Classic interface icons", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
@@ -154,7 +155,7 @@ pub const GROUPS: [Group; 17] = [
         name: "Appearance",
         rows: &APPEARANCE,
         custom: None,
-        sections: &[(0, "Window"), (1, "Liquid shape"), (4, "Text tab")],
+        sections: &[(0, "Interface"), (1, "Liquid shape"), (4, "Text tab")],
     },
     Group { glyph: '\u{EB52}', name: "Theme", rows: &THEME_ROWS, custom: Some(theme_items), sections: &[] },
     Group {
@@ -178,8 +179,8 @@ pub const GROUPS: [Group; 17] = [
         custom: None,
         sections: &[(0, "System"), (11, "Clipboard and keys"), (14, "Apps and services")],
     },
-    Group { glyph: '\u{E9D9}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
-    Group { glyph: '\u{E9D9}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
+    Group { glyph: '\u{E950}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
+    Group { glyph: '\u{E823}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
     Group { glyph: '\u{E71B}', name: "Integrations", rows: &[], custom: Some(integration_items), sections: &[] },
     Group { glyph: '\u{E720}', name: "Assistant", rows: &[], custom: Some(assistant_items), sections: &[] },
     Group {

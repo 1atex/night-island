@@ -1,3 +1,24 @@
+mod modern;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub(super) use modern::Cache;
+
+static LEGACY: AtomicBool = AtomicBool::new(false);
+
+pub fn set_legacy(enabled: bool) {
+    LEGACY.store(enabled, Ordering::Relaxed);
+}
+
+pub(super) fn legacy() -> bool {
+    LEGACY.load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+pub(super) fn modern_glyphs() -> impl Iterator<Item = char> {
+    ('\u{E000}'..='\u{F8FF}').filter(|&ch| modern::has_glyph(ch))
+}
+
 pub fn lookup(ch: char) -> Option<(&'static str, &'static str)> {
     const NEW: &str = "0 -960 960 960";
     const OLD: &str = "0 0 24 24";

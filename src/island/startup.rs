@@ -80,6 +80,7 @@ pub fn run() -> Result<()> {
         let weather_city = settings.weather_city.clone();
         let (weather_lat, weather_lon) = (settings.weather_lat, settings.weather_lon);
         crate::ui::i18n::set_ru(settings.language == crate::data::settings::Language::Ru);
+        crate::ui::icons::set_legacy(settings.legacy_icons);
         let dpi_scale = GetDpiForWindow(hwnd) as f32 / 96.0;
         ai::configure(&settings.ai);
         update::configure(settings.update_check, settings.update_beta);

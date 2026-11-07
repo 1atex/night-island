@@ -948,6 +948,12 @@ impl Preview {
         }
     }
 
+    pub fn repaint_icons(&self) {
+        if self.state.visible {
+            self.state.invalidate();
+        }
+    }
+
     pub fn refresh_actions(&mut self) {
         if !self.state.visible {
             return;

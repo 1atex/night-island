@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use windows::Foundation::Size;
 use windows::Graphics::DirectX::{DirectXAlphaMode, DirectXPixelFormat};
 use windows::Graphics::SizeInt32;
@@ -85,6 +88,7 @@ pub struct Gpu {
     factory: ID2D1Factory,
     dwrite: IDWriteFactory,
     icons: PCWSTR,
+    vector_icons: Rc<RefCell<super::icons::Cache>>,
     weather: std::cell::RefCell<crate::ui::weather_icons::WeatherIcons>,
 }
 
@@ -99,6 +103,7 @@ impl Gpu {
             factory: self.factory.clone(),
             dwrite: self.dwrite.clone(),
             icons: self.icons,
+            vector_icons: Rc::clone(&self.vector_icons),
             weather: std::cell::RefCell::default(),
         }
     }
@@ -123,7 +128,7 @@ impl Gpu {
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let icons = pick_icon_font(&dwrite);
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
-            Ok(Self { gfx, factory, dwrite, icons, weather: std::cell::RefCell::default() })
+            Ok(Self { gfx, factory, dwrite, icons, vector_icons: Rc::default(), weather: RefCell::default() })
         }
     }
 
@@ -197,8 +202,18 @@ impl Gpu {
             dc_target.BeginDraw();
             dc_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             dc_target.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
-            f(&Painter { dc: &target, dwrite: self.dwrite(), icons: self.icons(), weather: &self.weather });
+            f(&self.painter(&target));
             dc_target.EndDraw(None, None)
+        }
+    }
+
+    fn painter<'a>(&'a self, dc: &'a ID2D1RenderTarget) -> Painter<'a> {
+        Painter {
+            dc,
+            dwrite: self.dwrite(),
+            icons: self.icons(),
+            vector_icons: &self.vector_icons,
+            weather: &self.weather,
         }
     }
 }
@@ -231,7 +246,7 @@ impl Layer {
             dc.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             dc.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             let target: ID2D1RenderTarget = dc.cast()?;
-            f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons(), weather: &gpu.weather });
+            f(&gpu.painter(&target));
             interop.EndDraw()
         }
     }
@@ -265,9 +280,7 @@ impl Layer {
             dc.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_ALIASED);
             dc.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             let target = dc.cast::<ID2D1RenderTarget>();
-            let painted = target.and_then(|target| {
-                f(&Painter { dc: &target, dwrite: gpu.dwrite(), icons: gpu.icons(), weather: &gpu.weather })
-            });
+            let painted = target.and_then(|target| f(&gpu.painter(&target)));
             dc.PopAxisAlignedClip();
             let ended = interop.EndDraw();
             painted.and(ended)
@@ -303,6 +316,7 @@ pub struct Painter<'a> {
     dc: &'a ID2D1RenderTarget,
     dwrite: &'a IDWriteFactory,
     icons: PCWSTR,
+    vector_icons: &'a RefCell<super::icons::Cache>,
     weather: &'a std::cell::RefCell<crate::ui::weather_icons::WeatherIcons>,
 }
 
@@ -562,7 +576,12 @@ impl Painter<'_> {
     }
 
     pub fn glyph(&self, ch: char, rect: (f32, f32, f32, f32), size: f32, color: D2D1_COLOR_F) -> Result<()> {
-        if let Some((view_box, path)) = crate::ui::icons::lookup(ch) {
+        if !super::icons::legacy() && self.vector_icons.borrow_mut().draw(self.dc, ch, rect, size, color)? {
+            return Ok(());
+        }
+        if let Some((view_box, path)) = super::icons::lookup(ch)
+            && self.dc.cast::<windows::Win32::Graphics::Direct2D::ID2D1DeviceContext5>().is_ok()
+        {
             return self.icon(view_box, path, rect, size, color);
         }
         let mut buf = [0u8; 4];
@@ -614,7 +633,13 @@ impl Painter<'_> {
             rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             rt.Clear(Some(&rgba(0.0, 0.0, 0.0, 0.0)));
             rt.SetTransform(&Matrix3x2::translation(-origin.0, -origin.1));
-            let painted = f(&Painter { dc: &rt, dwrite: self.dwrite, icons: self.icons, weather: self.weather });
+            let painted = f(&Painter {
+                dc: &rt,
+                dwrite: self.dwrite,
+                icons: self.icons,
+                vector_icons: self.vector_icons,
+                weather: self.weather,
+            });
             rt.EndDraw(None, None)?;
             painted?;
             target.GetBitmap()

@@ -1160,6 +1160,15 @@ impl Dock {
         }
     }
 
+    pub fn repaint_icons(&mut self) {
+        if !self.state.suppressed {
+            self.state.render();
+            if let Some(preview) = &self.state.preview {
+                preview.repaint_icons();
+            }
+        }
+    }
+
     pub fn show_preview(&mut self, entry: &Entry) {
         if !self.state.suppressed {
             self.state.show_preview(entry);

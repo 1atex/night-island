@@ -2,6 +2,7 @@ use crate::view::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sid {
+    LegacyIcons,
     TopEnabled,
     TopAutoHide,
     TopTray,
@@ -472,6 +473,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::LegacyIcons => c.legacy_icons,
         Sid::TopAutoHide => c.top_panel.auto_hide,
         Sid::TopTray => c.top_panel.tray,
         Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture,
@@ -583,6 +585,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::LegacyIcons => c.legacy_icons = on,
         Sid::TopAutoHide => c.top_panel.auto_hide = on,
         Sid::TopTray => c.top_panel.tray = on,
         Sid::DockExperimentalCapture => c.desktop_dock.experimental_capture = on,

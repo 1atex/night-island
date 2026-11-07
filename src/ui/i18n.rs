@@ -1161,6 +1161,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         "General" => "Основные",
         "Island" => "Остров",
         "Appearance" => "Внешний вид",
+        "Interface" => "Интерфейс",
+        "Classic interface icons" => "Классические иконки интерфейса",
         "About" => "О программе",
         "Logs folder" => "Папка логов",
         "Search settings" => "Поиск по настройкам",

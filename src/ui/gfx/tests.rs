@@ -90,7 +90,14 @@ fn capsule_progress_fills_the_width_without_painting_outside_its_corners() -> Re
         let rt: ID2D1RenderTarget = dc.cast()?;
         let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
         let weather = std::cell::RefCell::default();
-        let painter = Painter { dc: &rt, dwrite: &dwrite, icons: w!("Segoe UI Symbol"), weather: &weather };
+        let vector_icons = RefCell::default();
+        let painter = Painter {
+            dc: &rt,
+            dwrite: &dwrite,
+            icons: w!("Segoe UI Symbol"),
+            vector_icons: &vector_icons,
+            weather: &weather,
+        };
         let mut baseline = Vec::new();
         for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
             dc.BeginDraw();

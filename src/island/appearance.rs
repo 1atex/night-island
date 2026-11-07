@@ -83,6 +83,10 @@ impl App {
         self.paint_ears();
         self.paint_liquid_body(0.0);
         self.apply_accent();
+        self.repaint_themed_surfaces();
+    }
+
+    pub(in crate::island) fn repaint_themed_surfaces(&mut self) {
         self.repaint();
         self.update_notification_card();
         if let Some(chat) = &mut self.pet.chat {

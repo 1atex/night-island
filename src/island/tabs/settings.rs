@@ -75,6 +75,13 @@ impl App {
         use view::Sid::*;
         if apply {
             match id {
+                LegacyIcons => {
+                    crate::ui::icons::set_legacy(self.settings.legacy_icons);
+                    self.repaint_themed_surfaces();
+                    if let Some(dock) = &mut self.desktop_dock {
+                        dock.repaint_icons();
+                    }
+                }
                 MemoryTools if !self.settings.memory_tools => {
                     self.close_memory_tools();
                     crate::platform::memory_tools::send(

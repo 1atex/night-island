@@ -148,7 +148,7 @@ pub enum Info {
 
 pub const HOME_INFO: [(char, &str, Info); 15] = [
     ('\u{E9D9}', "Processor", Info::Metric(Metric::Cpu)),
-    ('\u{E950}', "Memory", Info::Metric(Metric::Ram)),
+    ('\u{E964}', "Memory", Info::Metric(Metric::Ram)),
     ('\u{E7F4}', "Graphics card", Info::Metric(Metric::Gpu)),
     ('\u{EDA2}', "System disk", Info::Metric(Metric::Disk)),
     ('\u{E896}', "Download speed", Info::Metric(Metric::NetDown)),
