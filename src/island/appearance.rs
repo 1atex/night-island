@@ -43,8 +43,12 @@ pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
 
 impl App {
     pub(in crate::island) fn repaint_collapsed(&mut self) {
+        self.sync_live_activities();
         if self.pill_motion.intro.is_some()
-            && (self.ui.notice.is_some() || self.ui.volume.is_some() || self.ui.downloading.is_some())
+            && (self.ui.notice.is_some()
+                || self.ui.volume.is_some()
+                || (self.settings.live_music_priority && !self.ui.live.is_empty())
+                || view::legacy_download(&self.ui).is_some())
         {
             self.cancel_pill_motion();
             self.update_eq();

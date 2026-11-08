@@ -42,6 +42,7 @@ pub struct VSlots {
     pub bars: Option<(f32, f32)>,
     pub title: Option<(f32, f32)>,
     pub rec: Option<(f32, f32)>,
+    pub live: Option<(f32, f32)>,
     pub agent: Option<(f32, f32)>,
     pub metrics: Option<(f32, f32)>,
     pub clock: (f32, f32),
@@ -70,6 +71,7 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
             bars: None,
             title: None,
             rec: None,
+            live: None,
             agent: None,
             metrics: None,
             clock: at(clock_y, V_CLOCK),
@@ -81,9 +83,10 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
     let bars = m.bars.map(|_| BARS_SLOT);
     let title = m.title.map(|_| V_TITLE);
     let rec = m.rec.map(|_| V_REC);
+    let live = m.live.map(|(_, w)| w);
     let agent = m.agent.map(|_| V_AGENT);
     let metrics = m.metrics.map(|(_, w)| w);
-    let heights = [cover, weather, bars, title, rec, agent, metrics, Some(V_CLOCK), battery];
+    let heights = [cover, weather, bars, title, rec, live, agent, metrics, Some(V_CLOCK), battery];
     let count = heights.iter().flatten().count() as f32;
     let content: f32 = heights.iter().flatten().sum::<f32>() + V_GAP * (count - 1.0).max(0.0);
     let length = (top + content + V_PAD).max(V_MIN);
@@ -100,6 +103,7 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
     let bars = place(bars);
     let title = place(title);
     let rec = place(rec);
+    let live = place(live);
     let agent = place(agent);
     let metrics = place(metrics);
     let before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
@@ -107,7 +111,7 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
     let clock = place(Some(V_CLOCK)).unwrap_or((0.0, 0.0));
     let weather = weather_left.or_else(|| if before { None } else { place(weather) });
     let battery = place(battery);
-    VSlots { cover, weather, bars, title, rec, agent, metrics, clock, battery, length }
+    VSlots { cover, weather, bars, title, rec, live, agent, metrics, clock, battery, length }
 }
 
 pub fn vertical_length(ui: &UiState) -> f32 {
@@ -118,7 +122,7 @@ pub fn vertical_length(ui: &UiState) -> f32 {
     if ui.volume.is_some() {
         return V_MIN + 20.0;
     }
-    if let Some(name) = &ui.downloading {
+    if let Some(name) = legacy_download(ui) {
         return (top_reserved(ui) + 40.0 + chars(&downloading_label(name)) * 6.9 + 16.0).clamp(V_MIN, 420.0);
     }
     vertical_slots(ui, 1.0, 0.0).length
@@ -162,7 +166,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
             WHITE,
         );
     }
-    if let Some(name) = &ui.downloading {
+    if let Some(name) = legacy_download(ui) {
         let start = y + top_reserved(ui) * scale;
         p.glyph('\u{E896}', (x, start, x + w, start + 28.0 * scale), 15.0 * scale, acc(1.0))?;
         return along(
@@ -206,6 +210,9 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
             DWRITE_TEXT_ALIGNMENT_LEADING,
             WHITE,
         )?;
+    }
+    if let Some(s) = slots.live {
+        p.rotated(slot(s), ccw, |p, rect| paint_live_chip(p, rect, scale, ui))?;
     }
     if let (Some(s), Some(secs)) = (slots.rec, ui.recording_secs) {
         let r = slot(s);

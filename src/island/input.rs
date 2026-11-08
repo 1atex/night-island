@@ -358,6 +358,7 @@ impl App {
                 Some(view::HomeHit::Edit) => Some(550),
                 Some(view::HomeHit::Player) => Some(560),
                 Some(view::HomeHit::Wave) => Some(561),
+                Some(view::HomeHit::Live(index)) => Some(570 + index),
                 Some(view::HomeHit::Notification) => Some(562),
                 Some(view::HomeHit::NotificationExpand) => Some(563),
                 _ => None,

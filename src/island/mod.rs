@@ -83,6 +83,7 @@ mod geometry;
 mod hotkeys;
 mod input;
 mod liquid;
+mod live;
 mod lyric;
 mod memory_tools;
 mod motion;

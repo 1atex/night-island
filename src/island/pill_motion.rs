@@ -70,6 +70,7 @@ pub(in crate::island) enum PillContent {
     Notice(char, String),
     Volume,
     Download(String),
+    Live(Vec<view::LiveKind>),
     Normal,
 }
 
@@ -79,8 +80,10 @@ impl PillContent {
             Self::Notice(*glyph, text.clone())
         } else if ui.volume.is_some() {
             Self::Volume
-        } else if let Some(name) = &ui.downloading {
-            Self::Download(name.clone())
+        } else if let Some(name) = view::legacy_download(ui) {
+            Self::Download(name.to_owned())
+        } else if !ui.live.is_empty() {
+            Self::Live(ui.live.iter().map(|v| v.kind).collect())
         } else {
             Self::Normal
         }
@@ -170,9 +173,10 @@ impl App {
             && !self.pill_hidden
             && !self.gaming
             && !self.character_interacting()
+            && (!self.settings.live_music_priority || self.ui.live.is_empty())
             && self.ui.notice.is_none()
             && self.ui.volume.is_none()
-            && self.ui.downloading.is_none();
+            && view::legacy_download(&self.ui).is_none();
         if !self.pill_motion.gate.take(self.ui.media.playing, !self.ui.media.title.trim().is_empty(), visible) {
             return;
         }
@@ -599,6 +603,7 @@ mod tests {
                     float_pos,
                     dock_edge: edge,
                     music_eq: false,
+                    live_activities: false,
                     edge_spikes: false,
                     music_cover: style == Style::Flat,
                     music_title: style == Style::Flat,

@@ -99,6 +99,24 @@ impl App {
     }
 
     pub(in crate::island) fn click_collapsed(&mut self, x: i32, y: i32) {
+        if self.ui.notice.is_none() && self.ui.volume.is_none() && !self.ui.live.is_empty() {
+            let pill = self.pill_rect(false);
+            let slot = if self.settings.vertical() {
+                view::vertical_slots(&self.ui, self.scale, self.cw * self.scale).live
+            } else {
+                view::music_slots(&self.ui, self.scale, self.cw * self.scale).live
+            };
+            if let Some((offset, length)) = slot {
+                let r = if self.settings.vertical() {
+                    (pill.0, pill.1 + offset, pill.0 + pill.2, pill.1 + offset + length)
+                } else {
+                    (pill.0 + offset, pill.1, pill.0 + offset + length, pill.1 + pill.3)
+                };
+                if x as f32 >= r.0 && x as f32 <= r.2 && y as f32 >= r.1 && y as f32 <= r.3 {
+                    return self.open_live_activity(0);
+                }
+            }
+        }
         if self.recording.is_some() {
             return self.stop_recording();
         }

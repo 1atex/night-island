@@ -786,6 +786,36 @@ impl App {
 
     fn sw_act(&mut self, act: view::Act) {
         match act {
+            view::Act::SoundImport(index) => {
+                if !self.ui.sw.sound_busy && index < crate::platform::sounds::Cue::OPTIONS.len() {
+                    unsafe {
+                        let _ = PostMessageW(
+                            Some(self.hwnd),
+                            crate::platform::sounds::WM_SOUND_PICK,
+                            WPARAM(index),
+                            LPARAM(0),
+                        );
+                    }
+                }
+            }
+            view::Act::SoundPreview(index) => {
+                if let Some(cue) = crate::platform::sounds::Cue::OPTIONS.get(index) {
+                    crate::platform::sounds::play(*cue, 100);
+                }
+            }
+            view::Act::SoundReset(index) => {
+                if let Some(cue) = crate::platform::sounds::Cue::OPTIONS.get(index) {
+                    self.settings.sounds.custom.remove(cue.key());
+                    self.setting_changed(view::Sid::SoundPreset, true);
+                    self.render_settings_win();
+                }
+            }
+            view::Act::SoundResetAll => {
+                self.settings.sounds.custom.clear();
+                self.settings.sounds.preset = crate::data::sounds::SoundPreset::Classic;
+                self.setting_changed(view::Sid::SoundPreset, true);
+                self.render_settings_win();
+            }
             view::Act::FontDownload => {
                 cmd::shell_open(crate::ui::fonts::download_url(self.settings.interface_font), None)
             }

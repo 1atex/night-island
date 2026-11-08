@@ -245,7 +245,7 @@ pub(in crate::view) const GRID_ROW_H: f32 = 46.0;
 pub(in crate::view) const GRID_GAP: f32 = 8.0;
 
 pub fn home_wide(ui: &UiState) -> bool {
-    !ui.home.edit && ui.cfg.home_actions.is_empty() && ui.notifications.preview.is_none()
+    !ui.home.edit && ui.cfg.home_actions.is_empty() && ui.notifications.preview.is_none() && ui.live.is_empty()
 }
 
 pub(in crate::view) fn slot_action(ui: &UiState, slot: usize) -> Option<usize> {
@@ -253,7 +253,7 @@ pub(in crate::view) fn slot_action(ui: &UiState, slot: usize) -> Option<usize> {
         let id = ui.home.edit_scroll * 2 + slot;
         (id < HOME_ACTION_COUNT).then_some(id)
     } else {
-        slot.checked_sub(notification_tile_count(ui))
+        slot.checked_sub(notification_tile_count(ui) + live_tile_count(ui))
             .and_then(|i| ui.cfg.home_actions.get(i))
             .map(|&id| usize::from(id))
     }
@@ -263,7 +263,7 @@ fn slot_count(ui: &UiState) -> usize {
     if ui.home.edit {
         HOME_ACTION_COUNT.saturating_sub(ui.home.edit_scroll * 2).min(MAX_HOME_TILES)
     } else {
-        (ui.cfg.home_actions.len() + notification_tile_count(ui)).min(MAX_HOME_TILES)
+        (ui.cfg.home_actions.len() + notification_tile_count(ui) + live_tile_count(ui)).min(MAX_HOME_TILES)
     }
 }
 
@@ -634,6 +634,7 @@ pub(in crate::view) fn media_btn(pill: Rect, scale: f32, i: usize, wide: bool) -
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum HomeHit {
+    Live(usize),
     Notification,
     NotificationExpand,
     Mixer(MixerHit),
@@ -703,6 +704,11 @@ pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Optio
         if px >= l - 6.0 * scale && px <= r + 6.0 * scale && (py - y).abs() < 10.0 * scale {
             return Some(HomeHit::Seek(((px - l) / (r - l).max(1.0)).clamp(0.0, 1.0)));
         }
+    }
+    if let Some(index) =
+        (0..live_tile_count(ui)).find(|&i| inside(action_tile(pill, scale, notification_tile_count(ui) + i), px, py))
+    {
+        return Some(HomeHit::Live(index));
     }
     if let Some(id) = (0..slot_count(ui))
         .find(|&slot| inside(action_tile(pill, scale, slot), px, py))
@@ -1104,6 +1110,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         p.fill_round_rect((track.0, top, track.2, top + thumb_h), 1.5 * scale, rgba(1.0, 1.0, 1.0, 0.35))?;
     }
 
+    paint_live_tiles(p, pill, scale, ui)?;
     paint_home_notification(p, pill, scale, ui)?;
     if ui.home.preview_timeline.is_none() {
         paint_dock(p, pill, scale, ui)?;

@@ -87,6 +87,7 @@ pub fn run() -> Result<()> {
         crate::ui::fonts::load_custom(&settings.interface_font_file);
         crate::ui::fonts::set(settings.interface_font);
         let dpi_scale = GetDpiForWindow(hwnd) as f32 / 96.0;
+        crate::platform::sounds::configure(&settings.sounds);
         ai::configure(&settings.ai);
         update::configure(settings.update_check, settings.update_beta);
         let mut app = App::new(hwnd, dpi_scale, settings)?;

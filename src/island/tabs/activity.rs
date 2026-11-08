@@ -214,7 +214,9 @@ impl App {
             self.ui.tab_change = None;
             return;
         }
-        let mut again = matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) && self.ui.yandex.animate_colours();
+        let live_moving = self.ui.live_changed.is_some_and(|at| at.elapsed().as_millis() < 280);
+        let mut again = live_moving
+            || matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) && self.ui.yandex.animate_colours();
         if let Some((_, start)) = self.ui.home.mixer_motion {
             if start.elapsed().as_millis() >= 220 {
                 self.ui.home.mixer_motion = None;

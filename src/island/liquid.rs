@@ -228,8 +228,7 @@ impl App {
         self.repaint_collapsed();
     }
 
-    pub(in crate::island) fn paint_spikes(&self) {
-        self.set_bump_visible(false);
+    fn update_edge_envelope(&self) -> [f32; audio::BANDS] {
         let now = Instant::now();
         let dt = now.duration_since(self.music.edge_time.replace(now)).as_secs_f32().min(0.1);
         let mut values = self.music.edge_values.get();
@@ -242,6 +241,12 @@ impl App {
             };
         }
         self.music.edge_values.set(values);
+        values
+    }
+
+    pub(in crate::island) fn paint_spikes(&self) {
+        self.set_bump_visible(false);
+        let values = self.update_edge_envelope();
         let count = ((self.collapsed().0.max(self.collapsed().1) / 30.0) as usize | 1).clamp(7, 19);
         let mid = count / 2;
         let spacing = (audio::BANDS - 1) as f32 / mid.max(1) as f32;
@@ -399,12 +404,13 @@ impl App {
 
     fn edge_levels(&self, count: usize) -> Vec<f32> {
         let mid = count / 2;
+        let values = self.update_edge_envelope();
         (0..count)
             .map(|i| {
                 let t = i.abs_diff(mid) as f32 / mid.max(1) as f32 * (audio::BANDS - 1) as f32;
                 let lo = (t as usize).min(audio::BANDS - 2);
                 let f = t - lo as f32;
-                audio::level(lo) * (1.0 - f) + audio::level(lo + 1) * f
+                values[lo] * (1.0 - f) + values[lo + 1] * f
             })
             .collect()
     }
@@ -417,16 +423,6 @@ impl App {
     }
 
     pub(in crate::island) fn paint_open_eq(&self) {
-        if TICKS.get().is_multiple_of(150) {
-            crate::log_info!(
-                "open equalizer: style {:?}, window {:?}, ring {:?}, levels {:.2}/{:.2}",
-                self.settings.eq_style,
-                self.window_size(self.win),
-                self.liquid.ring.size(),
-                audio::level(0),
-                audio::level(audio::BANDS / 2)
-            );
-        }
         if self.settings.eq_style.around() {
             self.paint_ring();
         } else {
@@ -455,7 +451,7 @@ impl App {
             let _ = p.fill_spikes(width, seam, &levels, depth, clear, tip, shape, palette);
             p.set_transform(&old);
         });
-        let _ = self.liquid.ring.sprite.SetIsVisible(levels.iter().any(|v| *v * depth > 0.8));
+        let _ = self.liquid.ring.sprite.SetIsVisible(true);
     }
 
     pub(in crate::island) fn paint_ring(&self) {
@@ -528,6 +524,7 @@ impl App {
             k -= quarter;
             (cx - hx + k, cy + h / 2.0, 0.0, 1.0)
         };
+        let values = self.update_edge_envelope();
         let levels: Vec<f32> = (0..n)
             .map(|i| {
                 let at = perimeter * (i as f32 + 0.5) / n as f32;
@@ -535,7 +532,7 @@ impl App {
                 let t = u * (audio::BANDS - 1) as f32;
                 let lo = (t as usize).min(audio::BANDS - 2);
                 let f = t - lo as f32;
-                audio::level(lo) * (1.0 - f) + audio::level(lo + 1) * f
+                values[lo] * (1.0 - f) + values[lo + 1] * f
             })
             .collect();
         let smooth: Vec<f32> =
@@ -560,7 +557,7 @@ impl App {
         let _ = self.liquid.ring.paint(&self.gpu, |p| {
             let _ = p.fill_ring(&points, aura, tip, 3.0 * s, palette);
         });
-        let _ = self.liquid.ring.sprite.SetIsVisible(points.iter().any(|p| p.d > 0.8));
+        let _ = self.liquid.ring.sprite.SetIsVisible(true);
     }
 
     pub(in crate::island) fn spectrum_tick(&mut self) {

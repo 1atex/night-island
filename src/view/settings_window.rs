@@ -23,7 +23,12 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 15] = [
+const ISLAND: [(Sid, &str, Kind); 20] = [
+    (Sid::LiveActivities, "Live activities", Kind::Toggle),
+    (Sid::LiveMusicPriority, "Activities take priority over track introductions", Kind::Toggle),
+    (Sid::LiveReminders, "Timer and reminder countdowns", Kind::Toggle),
+    (Sid::LiveRecording, "Recording activity cards", Kind::Toggle),
+    (Sid::LiveDownloads, "Download activity cards", Kind::Toggle),
     (Sid::GhostMode, "Hotkey makes the pill a ghost", Kind::Toggle),
     (Sid::GhostOpacity, "Ghost visibility", Kind::Slider),
     (Sid::GhostThrough, "Ghost ignores the mouse", Kind::Toggle),
@@ -142,9 +147,9 @@ const ROWS_TABS_ONLY: [(Sid, &str, Kind); 14] = [
 ];
 
 pub const SIDEBAR_SECTIONS: [(usize, &str); 5] =
-    [(0, "Application"), (6, "Look and feel"), (10, "Monitoring"), (13, "Services"), (16, "Program")];
+    [(0, "Application"), (6, "Look and feel"), (11, "Monitoring"), (14, "Services"), (17, "Program")];
 
-pub const GROUPS: [Group; 17] = [
+pub const GROUPS: [Group; 18] = [
     Group {
         glyph: '\u{E713}',
         name: "General",
@@ -157,7 +162,7 @@ pub const GROUPS: [Group; 17] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Ghost mode"), (5, "Placement and look"), (13, "Open and close")],
+        sections: &[(0, "Live activities"), (5, "Ghost mode"), (10, "Placement and look"), (18, "Open and close")],
     },
     Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
     Group { glyph: '\u{E8A9}', name: "Top panel", rows: &[], custom: Some(top_panel_items), sections: &[] },
@@ -185,6 +190,7 @@ pub const GROUPS: [Group; 17] = [
         custom: Some(pill_items),
         sections: &[(0, "Pill"), (5, "Music"), (14, "Edges")],
     },
+    Group { glyph: '\u{E767}', name: "Sounds", rows: &[], custom: Some(sound_items), sections: &[] },
     Group {
         glyph: '\u{EA8F}',
         name: "Notifications",
@@ -264,6 +270,10 @@ pub enum Field {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
+    SoundImport(usize),
+    SoundPreview(usize),
+    SoundReset(usize),
+    SoundResetAll,
     FontImport,
     FontDownload,
     YandexMain,
@@ -304,6 +314,8 @@ pub enum Act {
 pub struct SwUi {
     pub dock_status: String,
     pub font_status: String,
+    pub sound_status: String,
+    pub sound_busy: bool,
     pub font_busy: bool,
     pub memory: MemoryUi,
     pub guide: Option<GuideUi>,
@@ -995,11 +1007,56 @@ fn assistant_recognition_items(ui: &UiState) -> Vec<Item> {
     out
 }
 
+fn sound_items(ui: &UiState) -> Vec<Item> {
+    let mut out = vec![
+        Item::Heading("Sounds"),
+        Item::Row(Sid::SoundEnabled, "Interface sounds", Kind::Toggle),
+        Item::Row(Sid::SoundPreset, "Sound preset", Kind::Cycle),
+        Item::Row(Sid::SoundVolume, "Effects volume", Kind::Slider),
+        Item::Note("Glass is an original sound set inspired by iPhone chimes."),
+        Item::Note("Choose a PCM 16-bit WAV up to 15 seconds"),
+        Item::Button(Act::SoundResetAll, "Restore original sounds".into(), true),
+    ];
+    if !ui.sw.sound_status.is_empty() {
+        out.push(Item::Text(ui.sw.sound_status.clone()));
+    }
+    out.extend(sound_cue_items(ui, false));
+    out
+}
+
+fn sound_cue_items(ui: &UiState, assistant_only: bool) -> Vec<Item> {
+    let mut out = Vec::new();
+    for (i, cue) in crate::platform::sounds::Cue::OPTIONS.iter().enumerate().take(if assistant_only { 3 } else { 4 }) {
+        out.push(Item::Section(cue.label()));
+        out.push(Item::Pair(
+            Act::SoundImport(i),
+            crate::ui::i18n::tr("Choose sound").into_owned(),
+            crate::ui::i18n::tr(if ui.cfg.sounds.custom.contains_key(cue.key()) {
+                "Custom sound"
+            } else {
+                "Preset sound"
+            })
+            .into_owned(),
+            ui.sw.sound_busy,
+        ));
+        out.push(Item::Button(
+            Act::SoundPreview(i),
+            "Preview sound".into(),
+            !ui.sw.sound_busy && ui.cfg.sounds.enabled && ui.cfg.sounds.volume > 0,
+        ));
+        if ui.cfg.sounds.custom.contains_key(cue.key()) {
+            out.push(Item::Button(Act::SoundReset(i), "Use preset sound".into(), true));
+        }
+    }
+    out
+}
+
 fn assistant_voice_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![
         Item::Heading("Voice"),
         Item::Row(Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
         Item::Row(Sid::AsstSounds, "Sound cues", Kind::Toggle),
+        Item::Row(Sid::SoundPreset, "Sound preset", Kind::Cycle),
         Item::Row(Sid::AsstVolume, "Assistant volume", Kind::Slider),
         Item::Section("Voice source"),
         Item::Row(Sid::AsstLocal, "Local Piper voice", Kind::Toggle),
@@ -1061,6 +1118,13 @@ fn assistant_voice_items(ui: &UiState) -> Vec<Item> {
         }
         out.push(Item::Note("The key is stored encrypted for your Windows account and is never shown again."));
     }
+    out.push(Item::Section("Sound cues"));
+    out.push(Item::Row(Sid::SoundEnabled, "Interface sounds", Kind::Toggle));
+    out.push(Item::Row(Sid::SoundVolume, "Effects volume", Kind::Slider));
+    if !ui.sw.sound_status.is_empty() {
+        out.push(Item::Text(ui.sw.sound_status.clone()));
+    }
+    out.extend(sound_cue_items(ui, true));
     out
 }
 

@@ -163,6 +163,49 @@ pub(in crate::island) fn point_from(lparam: LPARAM) -> (i32, i32) {
 
 pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        crate::platform::sounds::WM_SOUND_PICK => {
+            let Some(cue) = crate::platform::sounds::Cue::OPTIONS.get(wparam.0).copied() else { return LRESULT(0) };
+            let mut owner = hwnd;
+            let mut allowed = false;
+            with_app(|a| {
+                if !a.ui.sw.sound_busy {
+                    owner = a.settings_win.unwrap_or(hwnd);
+                    a.popup_open = true;
+                    allowed = true;
+                }
+            });
+            if allowed {
+                let file = pick_file_filtered(owner, 2);
+                with_app(|a| {
+                    a.popup_open = false;
+                    if let Some(file) = file {
+                        a.ui.sw.sound_busy = true;
+                        a.ui.sw.sound_status.clear();
+                        crate::platform::sounds::import_async(cue, file, hwnd);
+                    }
+                    a.render_settings_win();
+                });
+            }
+            LRESULT(0)
+        }
+        crate::platform::sounds::WM_SOUND_READY => {
+            with_app(|a| {
+                a.ui.sw.sound_busy = false;
+                if let Some(result) = crate::platform::sounds::take_import() {
+                    match result {
+                        Ok((cue, path)) => {
+                            a.settings.sounds.custom.insert(cue.key().into(), path);
+                            a.ui.sw.sound_status = crate::ui::i18n::tr("Sound saved").into_owned();
+                            a.setting_changed(view::Sid::SoundPreset, true);
+                            crate::platform::sounds::play(cue, 100);
+                        }
+                        Err(error) => a.ui.sw.sound_status = crate::ui::i18n::tr(&error).into_owned(),
+                    }
+                }
+                a.render_settings_win();
+            });
+            LRESULT(0)
+        }
         crate::ui::fonts::WM_FONT_PICK => {
             let mut owner = hwnd;
             with_app(|a| {
@@ -781,14 +824,14 @@ pub(in crate::island) fn dock_popup(_hwnd: HWND, exists: bool) -> Option<usize> 
 }
 
 pub(in crate::island) fn pick_file(owner: HWND) -> Option<String> {
-    pick_file_filtered(owner, false)
+    pick_file_filtered(owner, 0)
 }
 
 fn pick_font(owner: HWND) -> Option<String> {
-    pick_file_filtered(owner, true)
+    pick_file_filtered(owner, 1)
 }
 
-fn pick_file_filtered(owner: HWND, font: bool) -> Option<String> {
+fn pick_file_filtered(owner: HWND, kind: u8) -> Option<String> {
     use windows::Win32::Foundation::{ERROR_CANCELLED, RPC_E_CHANGED_MODE};
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
@@ -806,11 +849,19 @@ fn pick_file_filtered(owner: HWND, font: bool) -> Option<String> {
         let helper = focus_owner();
         let result = (|| {
             let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
-            if font {
+            if kind == 1 {
                 dialog
                     .SetFileTypes(&[windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC {
                         pszName: w!("Fonts (*.ttf, *.otf, *.ttc)"),
                         pszSpec: w!("*.ttf;*.otf;*.ttc"),
+                    }])
+                    .ok()?;
+            }
+            if kind == 2 {
+                dialog
+                    .SetFileTypes(&[windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC {
+                        pszName: w!("WAV audio (*.wav)"),
+                        pszSpec: w!("*.wav"),
                     }])
                     .ok()?;
             }

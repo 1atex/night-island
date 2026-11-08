@@ -419,6 +419,7 @@ impl InterfaceFont {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    pub sounds: crate::data::sounds::SoundSettings,
     pub interface_font: InterfaceFont,
     pub interface_font_file: String,
     pub tour_revision: u8,
@@ -426,6 +427,11 @@ pub struct Settings {
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
     pub legacy_icons: bool,
+    pub live_activities: bool,
+    pub live_music_priority: bool,
+    pub live_reminders: bool,
+    pub live_recording: bool,
+    pub live_downloads: bool,
     pub header_icons: bool,
     pub header_icon_colors: bool,
     pub header_active_accent: bool,
@@ -555,11 +561,17 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            sounds: Default::default(),
             tour_revision: 0,
             top_panel: Default::default(),
             desktop_dock: Default::default(),
             language: Language::Ru,
             legacy_icons: false,
+            live_activities: true,
+            live_music_priority: true,
+            live_reminders: true,
+            live_recording: true,
+            live_downloads: true,
             header_icons: true,
             header_icon_colors: false,
             header_active_accent: true,
@@ -1081,6 +1093,7 @@ impl Settings {
     }
 
     pub fn sanitize(&mut self) {
+        self.sounds.sanitize();
         self.desktop_dock.sanitize();
         self.top_panel.sanitize();
         let d = Settings::default();

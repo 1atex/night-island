@@ -29,6 +29,7 @@ mod frame;
 mod guide;
 mod home;
 mod integrations;
+mod live;
 mod memory_tools;
 mod metrics;
 mod mixer;
@@ -61,6 +62,7 @@ pub use self::{
     widgets::*, yandex::*,
 };
 pub use guide::*;
+pub use live::*;
 pub use memory_tools::*;
 pub use pet_studio::*;
 
@@ -204,6 +206,8 @@ pub struct UiState {
     pub chat: ChatUi,
     pub privacy_log: PrivacyUi,
     pub activity: ActivityUi,
+    pub live: Vec<LiveActivity>,
+    pub live_changed: Option<std::time::Instant>,
     pub steam: SteamUi,
     pub metrics: MetricsUi,
     pub agents: Vec<crate::services::agents::Session>,
@@ -222,6 +226,8 @@ impl UiState {
             chat: ChatUi::default(),
             privacy_log: PrivacyUi::default(),
             activity: ActivityUi::default(),
+            live: Vec::new(),
+            live_changed: None,
             steam: SteamUi::default(),
             metrics: MetricsUi::default(),
             agents: Vec::new(),

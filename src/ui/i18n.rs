@@ -1051,6 +1051,37 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Camera" => "Камера",
         "Weather is off" => "Погода выключена",
         "Pill blur" => "Размытие под пилюлей",
+        "Downloading" => "Загрузка",
+        "Could not save the sound" => "Не удалось сохранить звук",
+        "Could not read the sound" => "Не удалось прочитать звуковой файл",
+        "Sound saved" => "Звук сохранён",
+        "Use preset sound" => "Вернуть звук из набора",
+        "Preview sound" => "Прослушать",
+        "Preset sound" => "Из набора",
+        "Custom sound" => "Свой файл",
+        "Choose sound" => "Загрузить свой звук",
+        "Timer and reminder" => "Таймер и напоминание",
+        "Assistant error" => "Ошибка ассистента",
+        "Assistant finished" => "Ответ завершён",
+        "Assistant is listening" => "Ассистент слушает",
+        "Restore original sounds" => "Вернуть прежние звуки",
+        "Choose a PCM 16-bit WAV up to 15 seconds" => {
+            "WAV PCM, 16 бит, до 15 секунд. Файл сохранится в профиле Island."
+        }
+        "Glass is an original sound set inspired by iPhone chimes." => {
+            "Стекло — собственные мягкие сигналы в стиле iPhone."
+        }
+        "Glass · iPhone style" => "Стекло · в стиле iPhone",
+        "Original sounds" => "Прежние звуки",
+        "Effects volume" => "Громкость эффектов",
+        "Sound preset" => "Набор звуков",
+        "Interface sounds" => "Звуки интерфейса",
+        "Download activity cards" => "Карточка загрузки",
+        "Recording activity cards" => "Карточка записи",
+        "Timer and reminder countdowns" => "Таймеры и напоминания",
+        "Live activities" => "Текущие действия",
+        "Activities take priority over track introductions" => "Действия важнее заставки трека",
+        "Sounds" => "Звуки",
         "Start with Windows" => "Запуск с Windows",
         "Pill opacity" => "Прозрачность пилюли",
         "Weather on the pill" => "Погода на пилюле",

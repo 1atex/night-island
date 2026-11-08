@@ -23,6 +23,7 @@ pub mod panel_controls;
 pub mod privacy;
 pub mod recognize;
 pub mod recorder;
+mod sound_output;
 pub mod sounds;
 pub mod speech;
 mod startup_task;

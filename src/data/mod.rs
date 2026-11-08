@@ -5,6 +5,7 @@ pub mod keys;
 pub mod log;
 pub mod notes;
 pub mod settings;
+pub mod sounds;
 pub mod usage;
 
 pub mod desktop_dock;

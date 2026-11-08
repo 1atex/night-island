@@ -460,3 +460,126 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "Checks live activity transitions and expanded equalizer using isolated native surfaces"]
+fn native_live_activities_preserve_music_and_open_equalizer_is_smoothed() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    struct Runtime;
+    impl Drop for Runtime {
+        fn drop(&mut self) {
+            unsafe {
+                RoUninitialize();
+            }
+        }
+    }
+    let _runtime = Runtime;
+    let _queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for placement in [Placement::Floating, Placement::Docked] {
+            let owner = window(WS_EX_NOREDIRECTIONBITMAP)?;
+            let settings = Settings {
+                placement,
+                character: Character::None,
+                music_eq: false,
+                eq_smooth: true,
+                eq_response: crate::data::settings::EqResponse::Calm,
+                eq_when_open: true,
+                edge_spikes: true,
+                music_track_intro: true,
+                ..Settings::default()
+            };
+            let mut app = App::new_visuals(owner.0, scale, settings)?;
+            let now = chrono::Local::now().timestamp();
+            app.reminders = vec![
+                Reminder { id: 17, due: now + 300, text: "Чай".into() },
+                Reminder { id: 19, due: now + 400, text: "Проверить духовку".into() },
+            ];
+            app.ui.media.playing = true;
+            app.ui.media.title = "New track".into();
+            app.ui.media.artist = "Preview".into();
+            app.ui.media.accent = Some((110, 150, 230));
+            app.sync_live_activities();
+            assert_eq!(app.ui.live.len(), 2);
+            let content = super::pill_motion::PillContent::current(&app.ui);
+            app.reminders[0].due -= 1;
+            app.sync_live_activities();
+            assert!(super::pill_motion::PillContent::current(&app.ui) == content);
+            app.maybe_start_music_intro();
+            assert!(app.pill_motion.intro.is_none());
+            app.settings.live_activities = false;
+            app.sync_live_activities();
+            assert!(app.ui.live.is_empty());
+            app.settings.live_activities = true;
+            app.sync_live_activities();
+            app.state = State::Expanded;
+            app.win = Win::Big;
+            app.music.spectrum_running = true;
+            app.music.edge_time.set(Instant::now() - Duration::from_millis(16));
+            audio::debug_levels([1.0; audio::BANDS]);
+            app.paint_open_eq();
+            let first = app.music.edge_values.get()[0];
+            assert!(first > 0.0 && first < 0.8, "Open equalizer jumped to {first}");
+            app.music.edge_time.set(Instant::now() - Duration::from_millis(16));
+            audio::debug_levels([0.0; audio::BANDS]);
+            app.paint_open_eq();
+            let second = app.music.edge_values.get()[0];
+            assert!(second > 0.0 && second < first);
+            assert!(app.liquid.ring.sprite.IsVisible()?);
+            if scale == 1.0
+                && placement == Placement::Floating
+                && let Some(folder) = std::env::var_os("NI_ACTIVITY_REVIEW")
+            {
+                let folder = std::path::PathBuf::from(folder);
+                std::fs::create_dir_all(&folder).unwrap();
+                app.ui.live_changed = None;
+                for (name, size, settings) in [("activities", (760, 520), false), ("sounds", (940, 760), true)] {
+                    let surface = crate::ui::popup::PopupSurface::new(size)?;
+                    if settings {
+                        app.ui.sw.group = view::GROUPS.iter().position(|g| g.name == "Sounds").unwrap();
+                    }
+                    surface.paint(&app.gpu, |p| {
+                        p.fill_rect(
+                            (0.0, 0.0, size.0 as f32, size.1 as f32),
+                            crate::ui::gfx::rgba(0.03, 0.04, 0.07, 1.0),
+                        )?;
+                        if settings {
+                            view::paint_settings_window(p, (940.0, 760.0), 1.0, &app.ui)
+                        } else {
+                            let width = view::collapsed_width(&app.ui, 200.0);
+                            let left = (760.0 - width) / 2.0;
+                            p.fill_round_rect(
+                                (left, 30.0, left + width, 64.0),
+                                17.0,
+                                crate::ui::gfx::rgba(0.0, 0.0, 0.0, 1.0),
+                            )?;
+                            view::paint_collapsed(p, (left, 30.0, width, 34.0), 1.0, &app.ui)?;
+                            view::paint_expanded(p, (60.0, 100.0, 640.0, 380.0), 1.0, &app.ui, &[])
+                        }
+                    })?;
+                    let bytes: Vec<u8> =
+                        surface.pixels().chunks_exact(4).flat_map(|v| [v[2], v[1], v[0], v[3]]).collect();
+                    let mut encoder = png::Encoder::new(
+                        std::fs::File::create(folder.join(format!("{name}.png"))).unwrap(),
+                        size.0 as u32,
+                        size.1 as u32,
+                    );
+                    encoder.set_color(png::ColorType::Rgba);
+                    encoder.set_depth(png::BitDepth::Eight);
+                    encoder.write_header().unwrap().write_image_data(&bytes).unwrap();
+                }
+            }
+            app.music.spectrum_running = false;
+            audio::debug_levels([0.0; audio::BANDS]);
+        }
+    }
+    Ok(())
+}

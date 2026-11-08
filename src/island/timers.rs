@@ -96,10 +96,11 @@ pub(in crate::island) enum Timer {
     TopPanel = 42,
     WaveSearch = 43,
     Taskbar = 44,
+    LiveActivity = 45,
 }
 
 impl Timer {
-    const ALL: [Timer; 44] = [
+    const ALL: [Timer; 45] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -144,6 +145,7 @@ impl Timer {
         Timer::TopPanel,
         Timer::WaveSearch,
         Timer::Taskbar,
+        Timer::LiveActivity,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -239,6 +241,7 @@ impl App {
         let Some(timer) = Timer::from_id(id) else { return };
         self.kill_timer(timer);
         match timer {
+            Timer::LiveActivity => self.live_activity_tick(),
             Timer::Taskbar => self.configure_taskbar_replacement(),
             Timer::TopPanel => self.update_top_panel(false),
             Timer::NotificationStage => self.notification_stage(),

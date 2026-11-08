@@ -171,6 +171,7 @@ pub fn synthesize(text: &str) -> windows::core::Result<Vec<u8>> {
 }
 
 pub fn stop() {
+    super::sounds::stop();
     GENERATION.fetch_add(1, Ordering::SeqCst);
     unsafe {
         let _ = PlaySoundW(PCWSTR::null(), None, SND_PURGE);

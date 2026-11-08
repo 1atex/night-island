@@ -31,6 +31,7 @@ impl App {
         }
         let pill = self.pill_rect(true);
         match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
+            Some(view::HomeHit::Live(index)) => self.open_live_activity(index),
             Some(view::HomeHit::Notification) => {
                 if self.settings.notification_open_app {
                     self.activate_notification();
@@ -48,7 +49,9 @@ impl App {
             Some(view::HomeHit::Player) => media::next_player(),
             Some(view::HomeHit::Wave) => self.select_tab(view::Tab::Yandex),
             Some(view::HomeHit::Action(i)) if self.ui.home.edit => self.toggle_home_action(i),
-            Some(view::HomeHit::Action(i)) if self.ui.notifications.preview.is_some() => self.home_action(i),
+            Some(view::HomeHit::Action(i)) if self.ui.notifications.preview.is_some() || !self.ui.live.is_empty() => {
+                self.home_action(i)
+            }
             Some(view::HomeHit::Action(i)) => {
                 match self.settings.home_actions.iter().position(|&a| usize::from(a) == i) {
                     Some(slot) => self.ui.home.tile_press = Some((slot, x, y)),

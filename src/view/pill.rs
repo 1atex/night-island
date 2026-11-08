@@ -198,15 +198,15 @@ pub fn music_pill(ui: &UiState) -> bool {
         && (ui.cfg.music_eq || ui.cfg.music_title || cover_visible(ui) || lyric_visible(ui))
         && ui.notice.is_none()
         && ui.volume.is_none()
-        && ui.downloading.is_none()
+        && legacy_download(ui).is_none()
 }
 
 pub fn row_pill(ui: &UiState) -> bool {
     music_pill(ui)
-        || ((ui.recording_secs.is_some() || pill_metrics_on(&ui.cfg) || agents_active(ui))
+        || ((!ui.live.is_empty() || ui.recording_secs.is_some() || pill_metrics_on(&ui.cfg) || agents_active(ui))
             && ui.notice.is_none()
             && ui.volume.is_none()
-            && ui.downloading.is_none())
+            && legacy_download(ui).is_none())
 }
 
 pub(in crate::view) fn rec_slot(secs: u32) -> f32 {
@@ -301,6 +301,7 @@ pub struct MusicSlots {
     pub title: Option<(f32, f32)>,
     pub lyric: Option<(f32, f32)>,
     pub rec: Option<(f32, f32)>,
+    pub live: Option<(f32, f32)>,
     pub metrics: Option<(f32, f32)>,
     pub agent: Option<(f32, f32)>,
     pub clock: (f32, f32),
@@ -324,7 +325,9 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
             .clamp(16.0, TITLE_SLOT)
     });
     let lyric = (music && lyric_visible(ui)).then_some(ui.lyric.width.max(LYRIC_SLOT));
-    let rec = ui.recording_secs.map(rec_slot);
+    let live = ui.live.first().map(|v| v.width() + if ui.live.len() > 1 { 22.0 } else { 0.0 });
+    let rec =
+        ui.recording_secs.filter(|_| !ui.live.first().is_some_and(|v| v.kind == LiveKind::Recording)).map(rec_slot);
     let agent = agents_active(ui).then_some(AGENT_SLOT);
     let metrics = pill_metrics_on(&ui.cfg).then(|| pill_chars(&ui.cfg.metrics_pill) as f32 * METRICS_CHAR_W + 4.0);
     let battery = battery_slot(ui);
@@ -332,7 +335,7 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
         crate::ui::fonts::width(ui.cfg.interface_font, "88:88", clock_text_size(ui), DWRITE_FONT_WEIGHT_SEMI_BOLD)
             .ceil()
             + 2.0;
-    let widths = [cover, weather, bars, title, lyric, rec, agent, metrics, Some(clock_width), battery];
+    let widths = [cover, weather, bars, title, lyric, rec, live, agent, metrics, Some(clock_width), battery];
     let weather_before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
     let count = widths.iter().flatten().count() as f32;
     let content: f32 = widths.iter().flatten().sum::<f32>() + SLOT_GAP * (count - 1.0).max(0.0)
@@ -352,6 +355,7 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let title = place(title, SLOT_GAP);
     let lyric = place(lyric, SLOT_GAP);
     let rec = place(rec, SLOT_GAP);
+    let live = place(live, SLOT_GAP);
     let agent = place(agent, SLOT_GAP);
     let metrics = place(metrics, SLOT_GAP);
     let weather_left = if weather_before { place(weather, weather_clock_gap(ui)) } else { None };
@@ -359,7 +363,7 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let clock = place(Some(clock_width), clock_gap).unwrap_or((0.0, 0.0));
     let weather = weather_left.or_else(|| if weather_before { None } else { place(weather, SLOT_GAP) });
     let battery = place(battery, SLOT_GAP);
-    MusicSlots { cover, weather, bars, title, lyric, rec, agent, metrics, clock, battery, width }
+    MusicSlots { cover, weather, bars, title, lyric, rec, live, agent, metrics, clock, battery, width }
 }
 
 pub(in crate::view) fn downloading_label(name: &str) -> String {
@@ -378,7 +382,7 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     if ui.volume.is_some() {
         return base;
     }
-    if let Some(name) = &ui.downloading {
+    if let Some(name) = legacy_download(ui) {
         let shift = ui.char_inset + indicators_width(ui, 1.0);
         return (shift + 40.0 + chars(&downloading_label(name)) * 6.9 + 18.0).clamp(base.min(420.0), 420.0);
     }
@@ -564,7 +568,7 @@ pub fn pill_weather_visible(ui: &UiState) -> bool {
         && ui.weather.is_some()
         && ui.notice.is_none()
         && ui.volume.is_none()
-        && ui.downloading.is_none()
+        && legacy_download(ui).is_none()
 }
 
 pub fn pill_weather_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
@@ -637,7 +641,7 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
             WHITE,
         );
     }
-    if let Some(name) = &ui.downloading {
+    if let Some(name) = legacy_download(ui) {
         let shift = indicators_width(ui, scale) + inset;
         p.glyph('\u{E896}', (x + 10.0 * scale + shift, y, x + 38.0 * scale + shift, y + h), 15.0 * scale, acc(1.0))?;
         let label = downloading_label(name);
@@ -728,6 +732,9 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
             DWRITE_TEXT_ALIGNMENT_LEADING,
             rgba(1.0, 0.55, 0.55, 1.0),
         )?;
+    }
+    if let Some((off, width)) = slots.live {
+        paint_live_chip(p, (x + off, y, x + off + width, y + h), scale, ui)?;
     }
     if let Some((off, width)) = slots.agent {
         let (label, color) = agent_label(ui);
