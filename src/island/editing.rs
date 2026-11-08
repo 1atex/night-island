@@ -89,6 +89,7 @@ impl App {
             && !self.ui.pinned
             && !self.popup_open
             && self.pointer.moving.is_none()
+            && self.ui.home.widgets.resize.is_none()
         {
             self.set_timer(Timer::Collapse, delay_ms);
         }
@@ -176,7 +177,27 @@ impl App {
     }
 
     pub(in crate::island) fn on_keydown(&mut self, vk: u16) {
+        if vk == VK_ESCAPE.0 && self.ui.home.widgets.resize.is_some() {
+            self.cancel_widget_resize();
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+            return;
+        }
         if vk == VK_ESCAPE.0 && self.cancel_voice_input() {
+            return;
+        }
+        if vk == VK_ESCAPE.0 && self.ui.home.widgets.editing {
+            self.toggle_widget_editor();
+            return;
+        }
+        if vk == VK_ESCAPE.0
+            && self.ui.tab == view::Tab::Yandex
+            && (self.ui.yandex.track_menu.is_some() || self.ui.yandex.open_group.is_some())
+        {
+            self.ui.yandex.track_menu = None;
+            self.ui.yandex.open_group = None;
+            self.repaint_expanded();
             return;
         }
         if vk == VK_ESCAPE.0 && self.ui.home.mixer_open {

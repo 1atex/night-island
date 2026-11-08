@@ -681,6 +681,33 @@ impl Painter<'_> {
         unsafe { self.dc.SetTransform(m) };
     }
 
+    pub fn with_opacity(
+        &self,
+        bounds: (f32, f32, f32, f32),
+        alpha: f32,
+        paint: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        if alpha >= 0.999 {
+            return paint();
+        }
+        if alpha <= 0.001 {
+            return Ok(());
+        }
+        let parameters = windows::Win32::Graphics::Direct2D::D2D1_LAYER_PARAMETERS {
+            contentBounds: D2D_RECT_F { left: bounds.0, top: bounds.1, right: bounds.2, bottom: bounds.3 },
+            opacity: alpha,
+            ..Default::default()
+        };
+        unsafe {
+            self.dc.PushLayer(&parameters, None::<&windows::Win32::Graphics::Direct2D::ID2D1Layer>);
+        }
+        let result = paint();
+        unsafe {
+            self.dc.PopLayer();
+        }
+        result
+    }
+
     pub fn push_clip(&self, r: (f32, f32, f32, f32)) {
         unsafe {
             self.dc.PushAxisAlignedClip(

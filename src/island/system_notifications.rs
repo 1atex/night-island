@@ -467,6 +467,15 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn dismiss_home_notification(&mut self) {
+        let id = self.ui.notifications.preview.take().map(|record| record.id);
+        self.ui.notifications.full = false;
+        if self.system_notices.active.as_ref().map(|record| record.id) == id {
+            self.dismiss_notification_card();
+        }
+        self.repaint_expanded();
+    }
+
     pub(in crate::island) fn dismiss_notification_card(&mut self) {
         if self.system_notices.phase.is_none() || self.system_notices.phase == Some(CardPhase::Closing) {
             return;

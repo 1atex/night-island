@@ -1,6 +1,7 @@
 pub mod chats;
 pub mod clips;
 pub mod groups;
+pub mod home_widgets;
 pub mod keys;
 pub mod log;
 pub mod notes;

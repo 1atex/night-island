@@ -456,6 +456,7 @@ pub struct Settings {
     pub float_pos: Option<[i32; 2]>,
     pub system_notifications: bool,
     pub wave_ratings: bool,
+    pub wave_legacy_layout: bool,
     pub wave_search: bool,
     pub notification_tiles: u8,
     pub notification_open_app: bool,
@@ -555,6 +556,9 @@ pub struct Settings {
     pub ghost_click_through: bool,
     pub ghost_hold: bool,
     pub home_actions: Vec<u8>,
+    pub home_widgets: bool,
+    pub home_weather_widget: bool,
+    pub home_widget_sizes: BTreeMap<u8, crate::data::home_widgets::WidgetSize>,
     pub lyrics_apps: Vec<String>,
 }
 
@@ -598,6 +602,7 @@ impl Default for Settings {
             float_pos: None,
             system_notifications: false,
             wave_ratings: true,
+            wave_legacy_layout: false,
             wave_search: true,
             notification_tiles: 4,
             notification_open_app: false,
@@ -694,6 +699,9 @@ impl Default for Settings {
             ghost_opacity: 0.3,
             ghost_click_through: true,
             ghost_hold: false,
+            home_widgets: true,
+            home_weather_widget: true,
+            home_widget_sizes: BTreeMap::new(),
             home_actions: Vec::new(),
             lyrics_apps: Vec::new(),
         }
@@ -1094,6 +1102,7 @@ impl Settings {
 
     pub fn sanitize(&mut self) {
         self.sounds.sanitize();
+        self.home_widget_sizes.retain(|id, _| usize::from(*id) < HOME_ACTION_COUNT);
         self.desktop_dock.sanitize();
         self.top_panel.sanitize();
         let d = Settings::default();
@@ -1202,6 +1211,15 @@ impl Settings {
             }
         }
         self.home_actions = seen;
+        let items = |sizes: &BTreeMap<u8, crate::data::home_widgets::WidgetSize>| {
+            self.home_actions.iter().map(|id| (*id, sizes.get(id).copied().unwrap_or_default())).collect::<Vec<_>>()
+        };
+        for id in self.home_actions.iter().rev() {
+            if crate::data::home_widgets::pack(&items(&self.home_widget_sizes), 0).is_some() {
+                break;
+            }
+            self.home_widget_sizes.remove(id);
+        }
         self.sanitize_keys();
         let mut apps: Vec<String> = Vec::new();
         for a in &self.lyrics_apps {

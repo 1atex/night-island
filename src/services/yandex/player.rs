@@ -12,6 +12,58 @@ use windows::core::HSTRING;
 
 use super::{Command, Track};
 
+struct ThumbnailJob {
+    account: u64,
+    generation: u64,
+    tracks: Vec<(String, String)>,
+    sender: SyncSender<Command>,
+}
+
+static THUMBNAILS: std::sync::Mutex<Option<ThumbnailJob>> = std::sync::Mutex::new(None);
+static THUMBNAIL_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn load_thumbnails(
+    tracks: &[Track],
+    account: u64,
+    cached: &std::collections::BTreeMap<String, Arc<crate::platform::media::Cover>>,
+    sender: SyncSender<Command>,
+) {
+    let tracks: Vec<_> = tracks
+        .iter()
+        .filter(|track| !track.cover.is_empty() && !cached.contains_key(&track.id))
+        .take(32)
+        .map(|track| (track.id.clone(), track.cover.replace("300x300", "128x128")))
+        .collect();
+    if tracks.is_empty() {
+        return;
+    }
+    let generation = THUMBNAIL_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
+    *THUMBNAILS.lock().unwrap_or_else(|e| e.into_inner()) = Some(ThumbnailJob { account, generation, tracks, sender });
+    static WORKER: OnceLock<SyncSender<()>> = OnceLock::new();
+    let worker = WORKER.get_or_init(|| {
+        let (tx, rx) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            unsafe {
+                let _ =
+                    windows::Win32::System::WinRT::RoInitialize(windows::Win32::System::WinRT::RO_INIT_MULTITHREADED);
+            }
+            while rx.recv().is_ok() {
+                let Some(job) = THUMBNAILS.lock().unwrap_or_else(|e| e.into_inner()).take() else { continue };
+                for (id, url) in job.tracks {
+                    if job.generation != THUMBNAIL_REVISION.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if let Some(image) = crate::platform::media::cover_url(&url) {
+                        let _ = job.sender.send(Command::Thumbnail { account: job.account, id, image });
+                    }
+                }
+            }
+        });
+        tx
+    });
+    let _ = worker.try_send(());
+}
+
 pub struct Player {
     inner: MediaPlayer,
     outcome: Arc<AtomicU8>,
@@ -187,6 +239,7 @@ mod tests {
         let url = format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
         let (tx, rx) = std::sync::mpsc::sync_channel(16);
         let track = Track {
+            artists: Vec::new(),
             id: "test".into(),
             title: "Night Island audio test".into(),
             artist: "Silent fixture".into(),

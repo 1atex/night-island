@@ -23,7 +23,9 @@ const GENERAL: [(Sid, &str, Kind); 10] = [
     (Sid::ActivityTrack, "Track activity (time in programs)", Kind::Toggle),
 ];
 
-const ISLAND: [(Sid, &str, Kind); 20] = [
+const ISLAND: [(Sid, &str, Kind); 22] = [
+    (Sid::HomeWidgets, "Resizable widgets on Home", Kind::Toggle),
+    (Sid::HomeWeatherWidget, "Weather widget in unused space", Kind::Toggle),
     (Sid::LiveActivities, "Live activities", Kind::Toggle),
     (Sid::LiveMusicPriority, "Activities take priority over track introductions", Kind::Toggle),
     (Sid::LiveReminders, "Timer and reminder countdowns", Kind::Toggle),
@@ -162,7 +164,13 @@ pub const GROUPS: [Group; 18] = [
         name: "Island",
         rows: &ISLAND,
         custom: None,
-        sections: &[(0, "Live activities"), (5, "Ghost mode"), (10, "Placement and look"), (18, "Open and close")],
+        sections: &[
+            (0, "Widgets"),
+            (2, "Live activities"),
+            (7, "Ghost mode"),
+            (12, "Placement and look"),
+            (20, "Open and close"),
+        ],
     },
     Group { glyph: '\u{E7F4}', name: "Desktop dock", rows: &[], custom: Some(desktop_dock_items), sections: &[] },
     Group { glyph: '\u{E8A9}', name: "Top panel", rows: &[], custom: Some(top_panel_items), sections: &[] },
@@ -460,6 +468,7 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
         ));
     }
     out.push(Item::Button(Act::YandexWave, "Open My Wave".into(), true));
+    out.push(Item::Row(Sid::WaveLegacyLayout, "Original My Wave layout", Kind::Toggle));
     out.push(Item::Row(Sid::WaveRatings, "Liked tracks and ratings in My Wave", Kind::Toggle));
     out.push(Item::Row(Sid::WaveSearch, "Track search in My Wave", Kind::Toggle));
 

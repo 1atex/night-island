@@ -343,6 +343,8 @@ impl App {
             }
         } else if self.ui.tab == view::Tab::Home {
             match view::hit_home(pill, self.scale, fx, fy, &self.ui) {
+                Some(view::HomeHit::WidgetControl(_)) => Some(2200),
+                Some(view::HomeHit::WidgetHandle(id)) => Some(2000 + usize::from(id)),
                 Some(view::HomeHit::Action(i)) => Some(i),
                 Some(view::HomeHit::Device) => Some(100),
                 Some(view::HomeHit::Media(i)) => Some(500 + i),
@@ -360,6 +362,10 @@ impl App {
                 Some(view::HomeHit::Wave) => Some(561),
                 Some(view::HomeHit::Live(index)) => Some(570 + index),
                 Some(view::HomeHit::Notification) => Some(562),
+                Some(view::HomeHit::WaveRate(rating)) => {
+                    Some(if rating == crate::services::yandex::Rating::Like { 564 } else { 565 })
+                }
+                Some(view::HomeHit::NotificationClose) => Some(566),
                 Some(view::HomeHit::NotificationExpand) => Some(563),
                 _ => None,
             }
@@ -563,6 +569,14 @@ impl App {
             let scroll = &mut self.ui.home.edit_scroll;
             *scroll = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(view::home_edit_rows()) };
             return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Yandex && self.ui.yandex.open_group.is_some() {
+            self.scroll_wave_group(if delta > 0 { -2 } else { 2 });
+            return;
+        }
+        if self.ui.tab == view::Tab::Yandex && self.ui.yandex.show_library && self.ui.yandex.track_menu.is_none() {
+            self.move_wave_library(if delta > 0 { -1 } else { 1 });
+            return;
         }
         if self.ui.tab == view::Tab::Steam {
             let most = self.ui.steam.games.len().saturating_sub(view::steam_rows(self.pill_rect(true), self.scale));

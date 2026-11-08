@@ -4,6 +4,8 @@ use crate::services::yandex::{self, Command};
 impl App {
     pub(in crate::island) fn on_yandex(&mut self) {
         let next = yandex::snapshot();
+        let feedback_changed =
+            next.rating != self.ui.yandex.state.rating || next.current_id != self.ui.yandex.state.current_id;
         if next.account.is_empty() {
             self.close_wave_search();
         }
@@ -42,7 +44,9 @@ impl App {
         }
         self.on_media();
         self.start_progress_timer();
-        if self.ui.tab == view::Tab::Yandex || (wave_volume_changed && self.ui.tab == view::Tab::Home) {
+        if self.ui.tab == view::Tab::Yandex
+            || ((wave_volume_changed || feedback_changed) && self.ui.tab == view::Tab::Home)
+        {
             self.repaint_expanded();
         }
     }
@@ -123,10 +127,119 @@ impl App {
         yandex::send(command);
     }
 
+    pub(in crate::island) fn scroll_wave_group(&mut self, delta: isize) {
+        if let Some(group) = self.ui.yandex.open_group.and_then(|i| self.ui.yandex.state.groups.get(i)) {
+            self.ui.yandex.group_scroll =
+                self.ui.yandex.group_scroll.saturating_add_signed(delta).min(group.items.len().saturating_sub(9));
+            self.repaint_expanded();
+        }
+    }
+
+    pub(in crate::island) fn move_wave_library(&mut self, step: isize) {
+        let Some(page) = self.ui.yandex.state.library.as_ref() else { return };
+        if self.ui.yandex.state.busy {
+            return;
+        }
+        let current = page.page * yandex::LIBRARY_PAGE + self.ui.yandex.library_scroll;
+        let target = current.saturating_add_signed(step).min(page.total.saturating_sub(4));
+        self.jump_wave_library(target);
+    }
+
+    fn jump_wave_library(&mut self, target: usize) {
+        let Some(page) = self.ui.yandex.state.library.as_ref() else { return };
+        let requested = target / yandex::LIBRARY_PAGE;
+        if requested == page.page {
+            self.ui.yandex.library_scroll = target % yandex::LIBRARY_PAGE;
+            self.repaint_expanded();
+        } else {
+            self.ui.yandex.library_pending_scroll = Some(target % yandex::LIBRARY_PAGE);
+            yandex::send(Command::Library(requested));
+        }
+    }
+
     pub(in crate::island) fn click_yandex(&mut self, x: i32, y: i32) {
         use view::YandexHit as Hit;
         let hit = view::hit_yandex(self.pill_rect(true), self.scale, &self.ui.yandex, x as f32, y as f32);
         let command = match hit {
+            Some(Hit::Overview) => {
+                self.close_wave_search();
+                self.ui.yandex.show_library = false;
+                self.ui.yandex.open_group = None;
+                self.ui.yandex.track_menu = None;
+                self.repaint_expanded();
+                return;
+            }
+            Some(Hit::StartWave) => Command::StartWave,
+            Some(Hit::CurrentStation(artist)) => {
+                let Some(track) = self.ui.yandex.state.current_track.clone() else { return };
+                let (seed, title) = if artist {
+                    let Some((id, name)) = track.artists.first() else { return };
+                    (format!("artist:{id}"), name.clone())
+                } else {
+                    (format!("track:{}", track.id.split(':').next().unwrap_or_default()), track.title)
+                };
+                Command::Station { seed, title }
+            }
+            Some(Hit::TrackMenu(index, liked)) => {
+                self.end_edit(false);
+                let track = if liked {
+                    self.ui.yandex.state.library.as_ref().and_then(|p| p.tracks.get(index))
+                } else {
+                    self.ui.yandex.search_rows().get(index)
+                }
+                .cloned();
+                self.ui.yandex.track_menu = track.map(|t| (t, liked));
+                self.repaint_expanded();
+                return;
+            }
+            Some(Hit::CloseMenu) => {
+                self.ui.yandex.track_menu = None;
+                self.ui.yandex.open_group = None;
+                self.repaint_expanded();
+                return;
+            }
+            Some(Hit::MenuPlay | Hit::MenuTrackStation | Hit::MenuArtistStation) => {
+                let Some((track, liked)) = self.ui.yandex.track_menu.take() else { return };
+                if hit == Some(Hit::MenuPlay) {
+                    if liked {
+                        Command::PlayLiked(track.id)
+                    } else {
+                        Command::PlaySearch { query: self.ui.yandex.search_query(), id: track.id }
+                    }
+                } else if hit == Some(Hit::MenuTrackStation) {
+                    Command::Station {
+                        seed: format!("track:{}", track.id.split(':').next().unwrap_or_default()),
+                        title: track.title,
+                    }
+                } else {
+                    let Some((id, name)) = track.artists.first() else { return };
+                    Command::Station { seed: format!("artist:{id}"), title: name.clone() }
+                }
+            }
+            Some(Hit::GroupPage(dir)) => {
+                self.scroll_wave_group(dir as isize * 8);
+                return;
+            }
+            Some(Hit::GroupMenu(index)) => {
+                self.ui.yandex.group_scroll = 0;
+                self.ui.yandex.open_group = Some(index);
+                self.repaint_expanded();
+                return;
+            }
+            Some(Hit::GroupPick(index, option)) => {
+                let Some(group) = self.ui.yandex.state.groups.get(index) else { return };
+                let key = group.key.clone();
+                let seed = option.and_then(|i| group.items.get(i).map(|v| v.1.clone()));
+                self.ui.yandex.open_group = None;
+                Command::Select(key, seed)
+            }
+            Some(Hit::LibraryJump) => {
+                let Some(page) = self.ui.yandex.state.library.as_ref() else { return };
+                let fraction =
+                    ((y as f32 - self.pill_rect(true).1 - 150.0 * self.scale) / (188.0 * self.scale)).clamp(0.0, 1.0);
+                self.jump_wave_library((fraction * page.total.saturating_sub(4) as f32).round() as usize);
+                return;
+            }
             Some(Hit::Home) => {
                 self.select_tab(view::Tab::Home);
                 return;
@@ -147,6 +260,10 @@ impl App {
                 return;
             }
             Some(Hit::Search) => {
+                if self.ui.yandex.search_open && !self.ui.yandex.legacy_layout {
+                    self.begin_edit();
+                    return;
+                }
                 if self.ui.yandex.search_open {
                     self.close_wave_search();
                 } else {
@@ -161,7 +278,7 @@ impl App {
             Some(Hit::SearchInput) => {
                 self.begin_edit();
                 if let Some(layout) = self.active_layout() {
-                    let inner = view::wave_search_field(self.pill_rect(true), self.scale).1;
+                    let inner = self.ui.yandex.search_field(self.pill_rect(true), self.scale).1;
                     let input = &mut self.ui.yandex.search_input;
                     let (caret, _, _) = edit::caret_xy(&layout, input.utf16_at(input.caret));
                     let shift = (caret - (inner.2 - inner.0) + 8.0 * self.scale).max(0.0);
@@ -180,7 +297,13 @@ impl App {
             Some(Hit::PlaySearch(index)) => return self.play_wave_result(index),
             Some(Hit::Library) => {
                 self.close_wave_search();
-                self.ui.yandex.show_library = !self.ui.yandex.show_library;
+                let was = self.ui.yandex.show_library;
+                self.ui.yandex.show_library = !was || !self.ui.yandex.legacy_layout;
+                if !self.ui.yandex.legacy_layout && was {
+                    self.repaint_expanded();
+                    return;
+                }
+                self.ui.yandex.library_scroll = 0;
                 self.ui.yandex.hover = None;
                 self.repaint_expanded();
                 if !self.ui.yandex.show_library {
@@ -189,8 +312,8 @@ impl App {
                 Command::Library(0)
             }
             Some(Hit::LibraryPage(dir)) => {
-                let Some(library) = &self.ui.yandex.state.library else { return };
-                Command::Library(library.page.saturating_add_signed(dir as isize))
+                self.move_wave_library(dir as isize * 4);
+                return;
             }
             Some(Hit::PlayLiked(index)) => {
                 let Some(track) = self.ui.yandex.state.library.as_ref().and_then(|page| page.tracks.get(index)) else {
@@ -265,7 +388,7 @@ mod tests {
         };
         let compositor = windows::UI::Composition::Compositor::new()?;
         let gpu = crate::ui::gfx::Gpu::new(&compositor)?;
-        let surface = crate::ui::popup::PopupSurface::new((1320, 820))?;
+        let surface = crate::ui::popup::PopupSurface::new((1320, 1230))?;
         let mut ui = view::UiState::new();
         ui.tab = view::Tab::Yandex;
         ui.cfg.header_tabs = vec!["My Wave".into(), "Weather".into(), "App mixer".into()];
@@ -295,9 +418,13 @@ mod tests {
             },
         ];
         surface.paint(&gpu, |p| {
-            p.fill_rect((0.0, 0.0, 1320.0, 820.0), rgba(0.025, 0.035, 0.06, 1.0))?;
-            for (i, (x, y)) in [(10.0, 10.0), (670.0, 10.0), (10.0, 420.0), (670.0, 420.0)].into_iter().enumerate() {
-                ui.tab = if i % 2 == 0 { view::Tab::Home } else { view::Tab::Yandex };
+            p.fill_rect((0.0, 0.0, 1320.0, 1230.0), rgba(0.025, 0.035, 0.06, 1.0))?;
+            for (i, (x, y)) in
+                [(10.0, 10.0), (670.0, 10.0), (10.0, 420.0), (670.0, 420.0), (10.0, 830.0), (670.0, 830.0)]
+                    .into_iter()
+                    .enumerate()
+            {
+                ui.tab = if i < 2 { view::Tab::Home } else { view::Tab::Yandex };
                 ui.yandex.state = Default::default();
                 ui.yandex.state.account = "Музыка для тебя".into();
                 ui.yandex.state.groups = groups.clone();
@@ -305,13 +432,16 @@ mod tests {
                 ui.yandex.state.current_id = Some("1".into());
                 ui.yandex.state.rating = Rating::Like;
                 ui.yandex.state.config.volume = 37;
-                ui.yandex.show_library = i == 3;
-                ui.yandex.search_open = i == 1;
-                ui.editing = i == 1;
+                ui.yandex.show_library = i == 4;
+                ui.yandex.track_menu = None;
+                ui.yandex.open_group = None;
+                ui.yandex.search_open = i == 3;
+                ui.editing = i == 3;
                 let tracks: Vec<_> = ["Ночной город", "Маяк", "Тёплый вечер", "Дорога домой"]
                     .into_iter()
                     .enumerate()
                     .map(|(i, title)| Track {
+                        artists: vec![("42".into(), "Любимый исполнитель".into())],
                         id: (i + 1).to_string(),
                         title: title.into(),
                         artist: "Любимый исполнитель".into(),
@@ -321,6 +451,10 @@ mod tests {
                         palette: Default::default(),
                     })
                     .collect();
+                ui.yandex.state.current_track = tracks.first().cloned();
+                if i == 5 {
+                    ui.yandex.track_menu = Some((tracks[0].clone(), false));
+                }
                 if ui.yandex.show_library {
                     ui.yandex.state.library = Some(LibraryPage { page: 0, total: 12, tracks });
                 } else if ui.yandex.search_open {
@@ -355,6 +489,35 @@ mod tests {
                     .collect();
                 ui.yandex.state.media.cover = crate::platform::media::debug_cover(96, &pixels);
                 ui.media = ui.yandex.state.media.clone();
+                if let Some(image) = &ui.media.cover {
+                    for id in ["1", "2", "3", "4"] {
+                        ui.yandex.state.thumbnails.insert(id.into(), image.clone());
+                    }
+                }
+                ui.cfg.island_animations = false;
+                ui.cfg.home_actions = vec![0, 1, 2, 3];
+                ui.cfg.home_widget_sizes.clear();
+                ui.home.widgets = Default::default();
+                ui.home.widgets.editing = i == 1;
+                ui.home.widgets.selected = Some(view::weather_widget_id());
+                ui.weather = Some(crate::services::weather::Weather {
+                    place: "Москва".into(),
+                    temp: 7.0,
+                    wind: 3.0,
+                    humidity: 65.0,
+                    hourly: (12..16)
+                        .map(|hour| crate::services::weather::Hour {
+                            hour,
+                            temp: 8.0,
+                            sky: crate::services::weather::Sky::Cloudy,
+                            night: false,
+                        })
+                        .collect(),
+                    sky: crate::services::weather::Sky::Cloudy,
+                    night: false,
+                    daily: Vec::new(),
+                    city_missing: false,
+                });
                 crate::platform::media::debug_timeline(83.0, 241.0);
                 crate::services::yandex::debug_timeline(83.0, 241.0);
                 p.fill_round_rect((x, y, x + 640.0, y + 384.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
@@ -364,7 +527,7 @@ mod tests {
         })?;
         if let Some(path) = std::env::var_os("NI_WAVE_PREVIEW") {
             let rgba: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
-            let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 820);
+            let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 1230);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             encoder.write_header().unwrap().write_image_data(&rgba).unwrap();

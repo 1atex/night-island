@@ -28,6 +28,26 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Search" => "Поиск",
+        "Dismiss notification" => "Закрыть уведомление",
+        "Resizable widgets on Home" => "Изменяемые виджеты на главной",
+        "Weather widget in unused space" => "Погода в свободных ячейках",
+        "Original My Wave layout" => "Прежний вид «Моей волны»",
+        "Widgets" => "Виджеты",
+        "Choose a tile on the right" => "Выберите плитку справа",
+        "Not enough room in the grid" => "Для этого размера не хватает места",
+        "Layout" => "Раскладка",
+        "Wave settings" => "Настроить волну",
+        "Start My Wave" => "Запустить волну",
+        "Wave from track" => "Волна по треку",
+        "Wave from artist" => "Волна по исполнителю",
+        "Play track" => "Включить трек",
+        "Your personal wave" => "Ваша персональная волна",
+        "Start your wave or find a track" => "Запустите волну или найдите трек",
+        "Find a track to play or start its wave" => "Найдите трек: включите его или запустите волну",
+        "Drag the corner or choose a size" => "Потяните за угол или выберите размер",
+        "m/s" => "м/с",
+
         "Turn off balanced layout or smooth equalizer to use their classic appearance." => {
             "Выключите новые размеры или плавный эквалайзер, чтобы вернуть прежний вид."
         }

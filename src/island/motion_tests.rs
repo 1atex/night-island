@@ -583,3 +583,63 @@ fn native_live_activities_preserve_music_and_open_equalizer_is_smoothed() -> Res
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "Uses native Composition surfaces and an isolated settings profile"]
+fn native_widget_resize_commits_on_release_and_cancels_without_saving() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    let queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    {
+        let owner = window(WS_EX_NOREDIRECTIONBITMAP)?;
+        let settings = Settings {
+            home_actions: vec![0, 1],
+            home_weather_widget: false,
+            island_animations: false,
+            character: Character::None,
+            ..Settings::default()
+        };
+        let mut app = App::new_visuals(owner.0, 1.0, settings)?;
+        app.state = State::Expanded;
+        app.win = Win::Big;
+        app.toggle_widget_editor();
+        app.begin_widget_resize(0, 0, 0);
+        assert!(app.drag_widget_resize(132, 54));
+        assert_eq!(app.ui.home.widgets.preview, Some((0, crate::data::home_widgets::WidgetSize::Wide4)));
+        assert!(app.settings.home_widget_sizes.is_empty());
+        assert!(app.cancel_widget_resize());
+        assert!(app.settings.home_widget_sizes.is_empty());
+        assert!(app.ui.home.widgets.preview.is_none());
+        app.begin_widget_resize(0, 0, 0);
+        app.drag_widget_resize(0, 54);
+        assert!(app.finish_widget_resize());
+        assert_eq!(app.settings.home_widget_sizes.get(&0), Some(&crate::data::home_widgets::WidgetSize::Tall2));
+        let mut restored: Settings = serde_json::from_str(&serde_json::to_string(&app.settings).unwrap()).unwrap();
+        restored.sanitize();
+        assert_eq!(restored.home_widget_sizes, app.settings.home_widget_sizes);
+        app.toggle_widget_editor();
+        assert!(!app.ui.home.widgets.editing);
+        let surface = crate::ui::popup::PopupSurface::new((32, 32))?;
+        surface.paint(&app.gpu, |p| {
+            p.fill_rect((0.0, 0.0, 32.0, 32.0), crate::ui::gfx::rgba(0.0, 0.0, 0.0, 1.0))?;
+            p.with_opacity((0.0, 0.0, 32.0, 32.0), 0.5, || {
+                p.fill_rect((0.0, 0.0, 32.0, 32.0), crate::ui::gfx::rgba(1.0, 0.0, 0.0, 1.0))
+            })
+        })?;
+        let pixels = surface.pixels();
+        let red = pixels[(16 * 32 + 16) * 4 + 2];
+        assert!((120..=136).contains(&red), "Widget opacity layer rendered {red}");
+    }
+    drop(queue);
+    unsafe {
+        RoUninitialize();
+    }
+    Ok(())
+}

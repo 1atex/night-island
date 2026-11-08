@@ -80,7 +80,7 @@ pub fn notification_card_width(record: &Record) -> f32 {
 }
 
 pub fn notification_tile_count(ui: &UiState) -> usize {
-    if ui.home.edit || ui.notifications.preview.is_none() {
+    if ui.home.edit || ui.home.widgets.editing || ui.notifications.preview.is_none() {
         return 0;
     }
     match ui.cfg.notification_tiles {
@@ -101,7 +101,11 @@ pub fn home_notification_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Re
 }
 
 pub fn home_notification_expand(rect: Rect, scale: f32) -> Rect {
-    (rect.2 - 30.0 * scale, rect.1 + 6.0 * scale, rect.2 - 4.0 * scale, rect.1 + 40.0 * scale)
+    (rect.2 - 57.0 * scale, rect.1 + 6.0 * scale, rect.2 - 31.0 * scale, rect.1 + 40.0 * scale)
+}
+
+pub fn home_notification_close(rect: Rect, scale: f32) -> Rect {
+    (rect.2 - 29.0 * scale, rect.1 + 6.0 * scale, rect.2 - 3.0 * scale, rect.1 + 40.0 * scale)
 }
 
 pub fn paint_home_notification(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
@@ -112,14 +116,37 @@ pub fn paint_home_notification(p: &Painter, pill: Rect, scale: f32, ui: &UiState
         return Ok(());
     };
     let large = notification_tile_count(ui) == 4;
-    let hover = matches!(ui.home.hover_act, Some(562 | 563));
+    let hover = matches!(ui.home.hover_act, Some(562 | 563 | 566));
     p.fill_round_rect(rect, 16.0 * scale, acc(if hover { 0.23 } else { 0.14 }))?;
+    if notification_tile_count(ui) == 1 {
+        p.text(
+            &record.title,
+            (rect.0 + 10.0 * scale, rect.1 + 3.0 * scale, rect.2 - 31.0 * scale, rect.1 + 23.0 * scale),
+            11.0 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
+        p.text(
+            &record.body,
+            (rect.0 + 10.0 * scale, rect.1 + 23.0 * scale, rect.2 - 8.0 * scale, rect.3 - 3.0 * scale),
+            11.0 * scale,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            rgba(1.0, 1.0, 1.0, 0.65),
+        )?;
+        let close = home_notification_close(rect, scale);
+        if ui.home.hover_act == Some(566) {
+            p.fill_round_rect(close, 9.0 * scale, acc(0.3))?;
+        }
+        return p.glyph('\u{E711}', close, 10.0 * scale, WHITE);
+    }
     let icon = (rect.0 + 9.0 * scale, rect.1 + 9.0 * scale, rect.0 + 37.0 * scale, rect.1 + 37.0 * scale);
     paint_notification_avatar(p, icon, scale, record)?;
     let text_left = icon.2 + 8.0 * scale;
     p.text(
         &record.title,
-        (text_left, rect.1 + 4.0 * scale, rect.2 - 30.0 * scale, rect.1 + 25.0 * scale),
+        (text_left, rect.1 + 4.0 * scale, rect.2 - 59.0 * scale, rect.1 + 25.0 * scale),
         12.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -127,7 +154,7 @@ pub fn paint_home_notification(p: &Painter, pill: Rect, scale: f32, ui: &UiState
     )?;
     p.text(
         if large { &record.app } else { &record.body },
-        (text_left, rect.1 + 24.0 * scale, rect.2 - 30.0 * scale, rect.1 + 42.0 * scale),
+        (text_left, rect.1 + 24.0 * scale, rect.2 - 59.0 * scale, rect.1 + 42.0 * scale),
         11.5 * scale,
         DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -146,7 +173,12 @@ pub fn paint_home_notification(p: &Painter, pill: Rect, scale: f32, ui: &UiState
     if ui.home.hover_act == Some(563) {
         p.fill_round_rect(button, 9.0 * scale, acc(0.3))?;
     }
-    p.glyph('\u{E76C}', button, 11.0 * scale, WHITE)
+    p.glyph('\u{E76C}', button, 11.0 * scale, WHITE)?;
+    let close = home_notification_close(rect, scale);
+    if ui.home.hover_act == Some(566) {
+        p.fill_round_rect(close, 9.0 * scale, acc(0.3))?;
+    }
+    p.glyph('\u{E711}', close, 10.0 * scale, WHITE)
 }
 
 fn notification_detail_buttons(pill: Rect, scale: f32) -> [Rect; 3] {
@@ -589,9 +621,16 @@ mod tile_tests {
                     Some(HomeHit::Notification)
                 ));
                 let button = home_notification_expand(rect, scale);
+                let hit = hit_home(pill, scale, (button.0 + button.2) / 2.0, (button.1 + button.3) / 2.0, &ui);
+                assert!(if count == 1 {
+                    matches!(hit, Some(HomeHit::Notification))
+                } else {
+                    matches!(hit, Some(HomeHit::NotificationExpand))
+                });
+                let close = home_notification_close(rect, scale);
                 assert!(matches!(
-                    hit_home(pill, scale, (button.0 + button.2) / 2.0, (button.1 + button.3) / 2.0, &ui),
-                    Some(HomeHit::NotificationExpand)
+                    hit_home(pill, scale, (close.0 + close.2) / 2.0, (close.1 + close.3) / 2.0, &ui),
+                    Some(HomeHit::NotificationClose)
                 ));
                 let next = action_tile(pill, scale, count as usize);
                 assert!(matches!(

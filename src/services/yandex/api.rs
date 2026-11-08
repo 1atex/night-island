@@ -358,6 +358,7 @@ fn parse_track(t: &Value, batch: &str) -> Option<Track> {
         .collect();
     let cover = t["coverUri"]
         .as_str()
+        .or_else(|| t["albums"][0]["coverUri"].as_str())
         .map(|c| format!("https://{}", c.replace("%%", "300x300")))
         .filter(|c| trusted_url(c))
         .unwrap_or_default();
@@ -365,6 +366,13 @@ fn parse_track(t: &Value, batch: &str) -> Option<Track> {
         id,
         title,
         artist,
+        artists: t["artists"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| Some((numeric_id(&a["id"])?, a["name"].as_str()?.chars().take(160).collect())))
+            .take(8)
+            .collect(),
         cover,
         batch: batch.into(),
         session: String::new(),
@@ -412,6 +420,15 @@ pub fn parse_groups(v: &Value) -> Vec<Group> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn library_art_uses_album_cover_and_retains_artist_station_ids() {
+        let data = serde_json::json!({"id":123,"title":"Track","artists":[{"id":77,"name":"Artist"}],"albums":[{"id":4,"coverUri":"avatars.yandex.net/get-music-content/abc/%%"}]});
+        let track = super::parse_track(&data, "").unwrap();
+        assert_eq!(track.id, "123:4");
+        assert!(track.cover.ends_with("300x300"));
+        assert_eq!(track.artists, vec![("77".into(), "Artist".into())]);
+    }
+
     use super::*;
 
     #[test]

@@ -48,7 +48,11 @@ impl LiveActivity {
 }
 
 pub fn live_tile_count(ui: &UiState) -> usize {
-    if ui.home.edit { 0 } else { ui.live.len().min(4).min(MAX_HOME_TILES.saturating_sub(notification_tile_count(ui))) }
+    if ui.home.edit || ui.home.widgets.editing {
+        0
+    } else {
+        ui.live.len().min(4).min(MAX_HOME_TILES.saturating_sub(notification_tile_count(ui)))
+    }
 }
 
 pub fn legacy_download(ui: &UiState) -> Option<&str> {

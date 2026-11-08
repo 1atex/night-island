@@ -1,10 +1,17 @@
 use crate::services::yandex::{LIBRARY_PAGE, Rating, Snapshot};
 use crate::view::*;
+mod panel;
 
 #[derive(Default)]
 pub struct YandexUi {
     pub state: Snapshot,
     pub hover: Option<YandexHit>,
+    pub legacy_layout: bool,
+    pub library_scroll: usize,
+    pub library_pending_scroll: Option<usize>,
+    pub open_group: Option<usize>,
+    pub group_scroll: usize,
+    pub track_menu: Option<(crate::services::yandex::Track, bool)>,
     pub copied: bool,
     pub show_library: bool,
     pub search_open: bool,
@@ -19,6 +26,14 @@ pub struct YandexUi {
 }
 
 impl YandexUi {
+    pub fn search_field(&self, pill: Rect, s: f32) -> (Rect, Rect) {
+        if !self.legacy_layout {
+            return wave_search_field(pill, s);
+        }
+        let frame = (pill.0 + 244.0 * s, pill.1 + 105.0 * s, pill.0 + pill.2 - 24.0 * s, pill.1 + 141.0 * s);
+        (frame, (frame.0 + 12.0 * s, frame.1, frame.2 - 12.0 * s, frame.3))
+    }
+
     pub fn search_query(&self) -> String {
         self.search_input.text().trim().to_owned()
     }
@@ -49,6 +64,12 @@ impl YandexUi {
 
     pub fn accept(&mut self, next: Snapshot, animate: bool) {
         let from = self.colours();
+        if next.account != self.state.account {
+            self.track_menu = None;
+            self.open_group = None;
+            self.library_scroll = 0;
+            self.library_pending_scroll = None;
+        }
         if next.code != self.state.code {
             self.copied = false;
         }
@@ -60,6 +81,13 @@ impl YandexUi {
         if self.volume_preview == Some(next.config.volume) || (!next.error.is_empty() && next.error != self.state.error)
         {
             self.volume_preview = None;
+        }
+        if next.library.as_ref().map(|p| p.page) != self.state.library.as_ref().map(|p| p.page) {
+            self.library_scroll = self
+                .library_pending_scroll
+                .take()
+                .unwrap_or(0)
+                .min(next.library.as_ref().map_or(0, |p| p.tracks.len().saturating_sub(4)));
         }
         self.state = next;
         self.colour_transition = None;
@@ -81,6 +109,18 @@ impl YandexUi {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum YandexHit {
     Connect,
+    Overview,
+    StartWave,
+    CurrentStation(bool),
+    TrackMenu(usize, bool),
+    CloseMenu,
+    MenuPlay,
+    MenuTrackStation,
+    MenuArtistStation,
+    GroupMenu(usize),
+    GroupPage(i32),
+    GroupPick(usize, Option<usize>),
+    LibraryJump,
     Browser,
     Copy,
     Cancel,
@@ -114,6 +154,14 @@ pub fn wave_fraction(pill: Rect, s: f32, x: f32) -> f32 {
     ((x - r.0) / (r.2 - r.0).max(1.0)).clamp(0.0, 1.0)
 }
 
+pub fn wave_volume_level_for(pill: Rect, s: f32, x: f32, legacy: bool) -> u8 {
+    if legacy {
+        return wave_volume_level(pill, s, x);
+    }
+    let left = pill.0 + pill.2 - 144.0 * s;
+    (((x - left) / (88.0 * s)).clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
 pub fn wave_volume_level(pill: Rect, s: f32, x: f32) -> u8 {
     let left = pill.0 + 30.0 * s;
     (((x - left) / (150.0 * s)).clamp(0.0, 1.0) * 100.0).round() as u8
@@ -123,11 +171,14 @@ pub const SEARCH_ROWS: usize = 3;
 pub const SEARCH_MAX_CHARS: usize = 180;
 
 pub fn wave_search_field((x, y, w, _): Rect, s: f32) -> (Rect, Rect) {
-    let frame = (x + 244.0 * s, y + 105.0 * s, x + w - 24.0 * s, y + 141.0 * s);
+    let frame = (x + 24.0 * s, y + 148.0 * s, x + w - 24.0 * s, y + 184.0 * s);
     (frame, (frame.0 + 12.0 * s, frame.1, frame.2 - 12.0 * s, frame.3))
 }
 
 pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHit)> {
+    if !ui.legacy_layout && !ui.state.account.is_empty() {
+        return panel::controls(pill, s, ui);
+    }
     let (x, y, w, _) = pill;
     let r = |a: f32, b: f32, c: f32, d: f32| (x + a * s, y + b * s, x + c * s, y + d * s);
     let width = w / s;
@@ -171,7 +222,7 @@ pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHi
             controls.push((r(width - 116.0, 350.0, width - 24.0, 376.0), YandexHit::Retry));
         }
         if ui.search_open {
-            controls.push((wave_search_field(pill, s).0, YandexHit::SearchInput));
+            controls.push((ui.search_field(pill, s).0, YandexHit::SearchInput));
             for (i, _) in ui.search_rows().iter().enumerate() {
                 let top = 149.0 + i as f32 * 50.0;
                 controls.push((r(244.0, top, width - 24.0, top + 42.0), YandexHit::PlaySearch(i)));
@@ -186,14 +237,14 @@ pub fn yandex_controls(pill: Rect, s: f32, ui: &YandexUi) -> Vec<(Rect, YandexHi
             }
         } else if ui.show_library && !ui.ratings_hidden {
             if let Some(library) = &ui.state.library {
-                for (i, _) in library.tracks.iter().enumerate() {
-                    let top = 105.0 + i as f32 * 47.0;
+                for (i, _) in library.tracks.iter().enumerate().skip(ui.library_scroll).take(4) {
+                    let top = 105.0 + (i - ui.library_scroll) as f32 * 47.0;
                     controls.push((r(244.0, top, width - 24.0, top + 42.0), YandexHit::PlayLiked(i)));
                 }
-                if library.page > 0 {
+                if library.page > 0 || ui.library_scroll > 0 {
                     controls.push((r(244.0, 310.0, 278.0, 344.0), YandexHit::LibraryPage(-1)));
                 }
-                if (library.page + 1) * LIBRARY_PAGE < library.total {
+                if library.page * LIBRARY_PAGE + ui.library_scroll + 4 < library.total {
                     controls.push((r(369.0, 310.0, 403.0, 344.0), YandexHit::LibraryPage(1)));
                 }
             }
@@ -238,6 +289,9 @@ pub fn paint_yandex(
     seek: Option<f32>,
     progress: Option<(f32, f32)>,
 ) -> Result<()> {
+    if !ui.legacy_layout && !ui.state.account.is_empty() {
+        return panel::paint(p, pill, s, ui, editing, caret);
+    }
     let (x, y, w, _) = pill;
     let width = w / s;
     let r = |a: f32, b: f32, c: f32, d: f32| (x + a * s, y + b * s, x + c * s, y + d * s);
@@ -330,7 +384,7 @@ pub fn paint_yandex(
             0.65,
         )?;
         if ui.search_open {
-            let (frame, inner) = wave_search_field(pill, s);
+            let (frame, inner) = ui.search_field(pill, s);
             paint_line_edit(p, frame, inner, &ui.search_input, false, "Track title or artist", editing, caret, s)?;
             if let Some(result) = ui.search_result() {
                 if let Some(error) = result.error {
@@ -367,7 +421,11 @@ pub fn paint_yandex(
                 }
                 if library.total > 0 {
                     p.text(
-                        &format!("{} / {}", library.page + 1, library.total.div_ceil(LIBRARY_PAGE)),
+                        &format!(
+                            "{} / {}",
+                            (library.page * LIBRARY_PAGE + ui.library_scroll) / 4 + 1,
+                            library.total.div_ceil(4)
+                        ),
                         r(278.0, 310.0, 369.0, 344.0),
                         12.0 * s,
                         DWRITE_FONT_WEIGHT_NORMAL,
@@ -582,6 +640,7 @@ pub fn paint_yandex(
                 }
                 continue;
             }
+            _ => continue,
         };
         p.text(label, rect, 12.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
     }
@@ -639,6 +698,7 @@ mod tests {
             query: "Небо".into(),
             error: None,
             tracks: vec![crate::services::yandex::Track {
+                artists: Vec::new(),
                 id: "1".into(),
                 title: "Небо".into(),
                 artist: "Группа".into(),

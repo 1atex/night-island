@@ -14,7 +14,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
-pub const LIBRARY_PAGE: usize = 4;
+pub const LIBRARY_PAGE: usize = 24;
 
 pub const SOURCE: &str = "Night Island · Yandex Music";
 pub const WM_YANDEX: u32 = WM_APP + 58;
@@ -44,6 +44,9 @@ pub struct Snapshot {
     pub media: Media,
     pub palette: palette::Palette,
     pub current_id: Option<String>,
+    pub current_track: Option<Track>,
+    pub station_name: String,
+    pub thumbnails: BTreeMap<String, Arc<media::Cover>>,
     pub rating: Rating,
     pub library: Option<LibraryPage>,
     pub search: Option<SearchResult>,
@@ -119,6 +122,12 @@ struct LibraryPlayback {
     next: usize,
 }
 
+fn valid_station_seed(seed: &str) -> bool {
+    seed.split_once(':').is_some_and(|(kind, id)| {
+        matches!(kind, "track" | "artist") && !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_digit())
+    })
+}
+
 fn track_key(id: &str) -> &str {
     id.split_once(':').map_or(id, |(track, _)| track)
 }
@@ -151,6 +160,7 @@ pub struct Track {
     pub id: String,
     pub title: String,
     pub artist: String,
+    pub artists: Vec<(String, String)>,
     pub cover: String,
     pub batch: String,
     pub session: String,
@@ -193,6 +203,9 @@ pub enum Command {
     Disconnect,
     Retry,
     Toggle,
+    StartWave,
+    Station { seed: String, title: String },
+    Thumbnail { account: u64, id: String, image: Arc<media::Cover> },
     Resume,
     Pause,
     Next,
@@ -527,6 +540,49 @@ impl Worker {
                 self.remember_sign_in();
                 self.state.busy = false;
             }
+            Command::StartWave => {
+                self.voice(VoiceAction::Start)?;
+                self.state.station_name.clear();
+            }
+            Command::Station { seed, title } => {
+                if !valid_station_seed(&seed) {
+                    return Err("Unknown station");
+                }
+                let old = self.station.replace(seed);
+                if let Err(error) = self.new_wave(false) {
+                    self.station = old;
+                    return Err(error);
+                }
+                self.state.station_name = title;
+            }
+            Command::Thumbnail { account, id, image } => {
+                if self.account_id == Some(account) {
+                    if self.state.thumbnails.len() >= 64 {
+                        let old = self
+                            .state
+                            .thumbnails
+                            .keys()
+                            .find(|id| {
+                                !self
+                                    .state
+                                    .library
+                                    .as_ref()
+                                    .is_some_and(|page| page.tracks.iter().any(|t| &t.id == *id))
+                                    && !self
+                                        .state
+                                        .search
+                                        .as_ref()
+                                        .is_some_and(|page| page.tracks.iter().any(|t| &t.id == *id))
+                            })
+                            .cloned()
+                            .or_else(|| self.state.thumbnails.keys().next().cloned());
+                        if let Some(old) = old {
+                            self.state.thumbnails.remove(&old);
+                        }
+                    }
+                    self.state.thumbnails.insert(id, image);
+                }
+            }
             Command::Toggle => {
                 self.state.error.clear();
                 if let Some(p) = &self.player {
@@ -594,6 +650,7 @@ impl Worker {
             }
             Command::SearchDone { account, result } => {
                 if self.account_id == Some(account) && result.request == SEARCH_REQUEST.load(Ordering::Acquire) {
+                    player::load_thumbnails(&result.tracks, account, &self.state.thumbnails, self.tx.clone());
                     self.state.search = Some(result);
                 }
             }
@@ -668,6 +725,8 @@ impl Worker {
                 }
                 self.save_config();
                 if self.state.active && self.library_playback.is_none() {
+                    self.station = None;
+                    self.state.station_name.clear();
                     self.replace_pending = true;
                     self.queue.clear();
                 }
@@ -717,6 +776,7 @@ impl Worker {
                 } else {
                     self.command(Command::Resume)?;
                 }
+                self.state.station_name.clear();
                 return Ok(crate::ui::i18n::tr("Starting your My Wave").into_owned());
             }
             VoiceAction::Station { query, artist } => {
@@ -726,6 +786,7 @@ impl Worker {
                     self.station = old;
                     return Err(error);
                 }
+                self.state.station_name = name.clone();
                 return Ok(format!("Started a Yandex Music station based on {name}"));
             }
             VoiceAction::Track { title, artist } => {
@@ -854,8 +915,9 @@ impl Worker {
         let total = ids.len();
         let page = page.min(total.saturating_sub(1) / LIBRARY_PAGE);
         let start = page * LIBRARY_PAGE;
-        let end = (start + LIBRARY_PAGE).min(total);
+        let end = (start + LIBRARY_PAGE + 3).min(total);
         let tracks = self.api.library_tracks(&ids[start..end])?;
+        player::load_thumbnails(&tracks, self.account_id.unwrap_or_default(), &self.state.thumbnails, self.tx.clone());
         self.state.library = Some(LibraryPage { page, total, tracks });
         Ok(())
     }
@@ -881,12 +943,13 @@ impl Worker {
         let ids = self.likes.clone().ok_or("Could not load liked tracks")?;
         let track = page.tracks[index].clone();
         let queue = page.tracks[index + 1..].iter().cloned().collect();
-        let next = ((page.page + 1) * LIBRARY_PAGE).min(ids.len());
+        let next = (page.page * LIBRARY_PAGE + page.tracks.len()).min(ids.len());
         self.finish(false);
         self.play_track(track)?;
         self.history.clear();
         self.queue = queue;
         self.station = None;
+        self.state.station_name = crate::ui::i18n::tr("Liked tracks").into_owned();
         self.session.clear();
         self.library_playback = Some(LibraryPlayback { ids, next });
         Ok(())
@@ -1084,6 +1147,7 @@ impl Worker {
             players: 1,
             ..Default::default()
         };
+        self.state.current_track = Some(track.clone());
         self.current = Some(track.clone());
         if self.likes.is_none() || !self.dislikes_loaded {
             let _ = self.tx.try_send(Command::Ratings);
@@ -1194,6 +1258,17 @@ impl Worker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn station_selection_uses_catalog_identifiers() {
+        for value in ["artist:123", "track:987654321"] {
+            assert!(super::valid_station_seed(value));
+        }
+        for value in ["track:", "album:123", "track:123:4", "artist:1?track=2", "track:abc", "https://music.yandex.ru"]
+        {
+            assert!(!super::valid_station_seed(value));
+        }
+    }
+
     use super::*;
     #[test]
     fn default_wave_is_personal_and_autoplay_is_opt_in() {
@@ -1215,6 +1290,7 @@ mod tests {
     fn exact_track_request_matches_title_and_performer() {
         let tracks = [("1", "Небо", "Первый"), ("2", "Небо", "Второй, Третий"), ("3", "Огонёк!", "Группа")].map(
             |(id, title, artist)| Track {
+                artists: Vec::new(),
                 id: id.into(),
                 title: title.into(),
                 artist: artist.into(),

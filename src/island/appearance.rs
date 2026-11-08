@@ -178,7 +178,12 @@ impl App {
         let _ = self.expanded.paint(&self.gpu, |p| {
             let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
-        if self.state == State::Expanded && (self.ui.feedback.active() || self.ui.home.track_transition.active()) {
+        if self.state == State::Expanded
+            && (self.ui.feedback.active()
+                || self.ui.home.track_transition.active()
+                || self.ui.home.widgets.motion.borrow().active()
+                || self.ui.home.widgets.editor_active())
+        {
             self.set_timer(Timer::UiAnim, self.frame_ms());
         }
         self.update_weather_timer();

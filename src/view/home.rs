@@ -91,6 +91,7 @@ pub struct HomeUi {
     pub app_vol: f32,
     pub hover_act: Option<usize>,
     pub edit: bool,
+    pub widgets: HomeWidgets,
     pub edit_scroll: usize,
     pub screen_secs: Option<i64>,
 }
@@ -116,6 +117,7 @@ impl Default for HomeUi {
             app_vol: 1.0,
             hover_act: Default::default(),
             edit: false,
+            widgets: Default::default(),
             edit_scroll: 0,
             screen_secs: None,
         }
@@ -245,7 +247,12 @@ pub(in crate::view) const GRID_ROW_H: f32 = 46.0;
 pub(in crate::view) const GRID_GAP: f32 = 8.0;
 
 pub fn home_wide(ui: &UiState) -> bool {
-    !ui.home.edit && ui.cfg.home_actions.is_empty() && ui.notifications.preview.is_none() && ui.live.is_empty()
+    !ui.home.edit
+        && !ui.home.widgets.editing
+        && ui.cfg.home_actions.is_empty()
+        && ui.notifications.preview.is_none()
+        && ui.live.is_empty()
+        && (!ui.cfg.home_widgets || !has_home_widgets(ui))
 }
 
 pub(in crate::view) fn slot_action(ui: &UiState, slot: usize) -> Option<usize> {
@@ -634,9 +641,13 @@ pub(in crate::view) fn media_btn(pill: Rect, scale: f32, i: usize, wide: bool) -
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum HomeHit {
+    WidgetControl(WidgetControl),
+    WidgetHandle(u8),
     Live(usize),
     Notification,
     NotificationExpand,
+    NotificationClose,
+    WaveRate(crate::services::yandex::Rating),
     Mixer(MixerHit),
     Media(usize),
     Action(usize),
@@ -658,12 +669,30 @@ pub enum HomeHit {
 }
 
 pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Option<HomeHit> {
+    if !ui.home.widgets.editing
+        && ui.home.widgets.editor_active()
+        && (inside(media_card(pill, scale, false), px, py) || inside(volume_row(pill, scale, false), px, py))
+    {
+        return None;
+    }
+    if ui.home.widgets.editing {
+        if let Some((_, control)) =
+            widget_editor_controls(pill, scale, ui).into_iter().find(|(r, _)| inside(*r, px, py))
+        {
+            return Some(HomeHit::WidgetControl(control));
+        }
+        if inside(media_card(pill, scale, false), px, py) || inside(volume_row(pill, scale, false), px, py) {
+            return None;
+        }
+    }
     if let Some(rect) = home_notification_rect(pill, scale, ui)
         && inside(rect, px, py)
         && !ui.home.dock_open
         && ui.home.dev_menu.is_none()
     {
-        return Some(if inside(home_notification_expand(rect, scale), px, py) {
+        return Some(if inside(home_notification_close(rect, scale), px, py) {
+            HomeHit::NotificationClose
+        } else if notification_tile_count(ui) > 1 && inside(home_notification_expand(rect, scale), px, py) {
             HomeHit::NotificationExpand
         } else {
             HomeHit::Notification
@@ -687,6 +716,15 @@ pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Optio
             }
         }
     }
+    if wave_active(ui) && ui.cfg.wave_ratings && !ui.yandex.state.busy {
+        for (like, rating) in
+            [(true, crate::services::yandex::Rating::Like), (false, crate::services::yandex::Rating::Dislike)]
+        {
+            if inside(wave_rating_button(pill, scale, ui, like), px, py) {
+                return Some(HomeHit::WaveRate(rating));
+            }
+        }
+    }
     if wave_active(ui) && inside(wave_link(pill, scale, ui), px, py) {
         return Some(HomeHit::Wave);
     }
@@ -705,14 +743,21 @@ pub fn hit_home(pill: Rect, scale: f32, px: f32, py: f32, ui: &UiState) -> Optio
             return Some(HomeHit::Seek(((px - l) / (r - l).max(1.0)).clamp(0.0, 1.0)));
         }
     }
+    if ui.cfg.home_widgets
+        && !ui.home.edit
+        && let Some(hit) = hit_home_widget(pill, scale, ui, px, py)
+    {
+        return Some(hit);
+    }
     if let Some(index) =
         (0..live_tile_count(ui)).find(|&i| inside(action_tile(pill, scale, notification_tile_count(ui) + i), px, py))
     {
         return Some(HomeHit::Live(index));
     }
-    if let Some(id) = (0..slot_count(ui))
-        .find(|&slot| inside(action_tile(pill, scale, slot), px, py))
-        .and_then(|slot| slot_action(ui, slot))
+    if (!ui.cfg.home_widgets || ui.home.edit)
+        && let Some(id) = (0..slot_count(ui))
+            .find(|&slot| inside(action_tile(pill, scale, slot), px, py))
+            .and_then(|slot| slot_action(ui, slot))
     {
         return Some(HomeHit::Action(id));
     }
@@ -764,6 +809,12 @@ pub(in crate::view) fn player_btn(pill: Rect, scale: f32, wide: bool) -> Rect {
 
 pub fn wave_active(ui: &UiState) -> bool {
     ui.yandex.state.active && ui.media.source == "Night Island · Yandex Music"
+}
+
+pub fn wave_rating_button(pill: Rect, s: f32, ui: &UiState, like: bool) -> Rect {
+    let card = media_card(pill, s, home_wide(ui));
+    let left = if like { card.0 + 10.0 * s } else { card.2 - 40.0 * s };
+    (left, card.3 - 40.0 * s, left + 30.0 * s, card.3 - 10.0 * s)
 }
 
 pub fn wave_link(pill: Rect, s: f32, ui: &UiState) -> Rect {
@@ -914,6 +965,26 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
                 accent,
             )?;
         }
+        if wave_active(ui) && ui.cfg.wave_ratings {
+            use crate::services::yandex::Rating;
+            for (like, rating, glyph) in [
+                (true, Rating::Like, if ui.yandex.state.rating == Rating::Like { '\u{EB51}' } else { '\u{E006}' }),
+                (false, Rating::Dislike, '\u{E19E}'),
+            ] {
+                let r = wave_rating_button(pill, scale, ui, like);
+                let active = ui.yandex.state.rating == rating;
+                p.fill_round_rect(
+                    r,
+                    11.0 * scale,
+                    if active {
+                        acc(0.25)
+                    } else {
+                        rgba(1.0, 1.0, 1.0, 0.08 + 0.12 * ui.action_hover(if like { 564 } else { 565 }))
+                    },
+                )?;
+                p.glyph(glyph, r, 15.0 * scale, if active { acc(1.0) } else { WHITE })?;
+            }
+        }
         if spotify_active(ui) {
             let accent_on = accent;
             let off = rgba(1.0, 1.0, 1.0, 0.55);
@@ -1030,73 +1101,77 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     let slots = slot_count(ui);
     let order: Vec<usize> =
         (0..slots).filter(|s| Some(*s) != carried.map(|r| r.from)).chain(carried.map(|r| r.from)).collect();
-    for slot in order {
-        let Some(id) = slot_action(ui, slot) else { continue };
-        let Some(kind) = tile_kind(id) else { continue };
-        let mut r = action_tile(pill, scale, slot);
-        if let Some(c) = carried.filter(|c| c.pos.len() == slots) {
-            let (w, h) = (r.2 - r.0, r.3 - r.1);
-            r = if slot == c.from {
-                c.dragged_rect((w, h))
-            } else {
-                (c.pos[slot].0, c.pos[slot].1, c.pos[slot].0 + w, c.pos[slot].1 + h)
-            };
-        }
-        let chosen = ui.cfg.home_actions.contains(&(id as u8));
-        let recording = id == 6 && ui.recording_secs.is_some() && !ui.home.edit;
-        let hovered = ui.action_hover(id);
-        let r = ui.action_rect(id, r);
-        let bg = if recording {
-            rgba(1.0, 0.3, 0.3, 0.3)
-        } else if ui.home.edit && chosen {
-            acc(0.32 + hovered * 0.13)
-        } else {
-            rgba(1.0, 1.0, 1.0, if ui.home.edit { 0.05 + hovered * 0.1 } else { 0.08 + hovered * 0.07 })
-        };
-        p.fill_round_rect(r, 16.0 * scale, bg)?;
-        if ui.home.edit && chosen {
-            p.stroke_round_rect(r, 16.0 * scale, 1.2 * scale, acc(0.8))?;
-        }
-        let dim = if ui.home.edit && !chosen { 0.5 } else { 1.0 };
-        match kind {
-            Tile::Action(glyph, label) => {
-                p.glyph(
-                    glyph,
-                    (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
-                    17.0 * scale,
-                    rgba(1.0, 1.0, 1.0, 0.9 * dim),
-                )?;
-                p.text_wrapped(
-                    if recording { "Stop recording" } else { label },
-                    (r.0 + 40.0 * scale, r.1 + 2.0 * scale, r.2 - 6.0 * scale, r.3 - 2.0 * scale),
-                    12.5 * scale,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    rgba(1.0, 1.0, 1.0, dim),
-                )?;
+    if ui.cfg.home_widgets && !ui.home.edit {
+        paint_home_widgets(p, pill, scale, ui)?;
+    } else {
+        for slot in order {
+            let Some(id) = slot_action(ui, slot) else { continue };
+            let Some(kind) = tile_kind(id) else { continue };
+            let mut r = action_tile(pill, scale, slot);
+            if let Some(c) = carried.filter(|c| c.pos.len() == slots) {
+                let (w, h) = (r.2 - r.0, r.3 - r.1);
+                r = if slot == c.from {
+                    c.dragged_rect((w, h))
+                } else {
+                    (c.pos[slot].0, c.pos[slot].1, c.pos[slot].0 + w, c.pos[slot].1 + h)
+                };
             }
-            Tile::Info(glyph, label, info) => {
-                p.glyph(
-                    glyph,
-                    (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
-                    17.0 * scale,
-                    rgba(1.0, 1.0, 1.0, 0.9 * dim),
-                )?;
-                p.text(
-                    label,
-                    (r.0 + 40.0 * scale, r.1 + 4.0 * scale, r.2 - 6.0 * scale, r.1 + 21.0 * scale),
-                    10.5 * scale,
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_TEXT_ALIGNMENT_LEADING,
-                    rgba(1.0, 1.0, 1.0, 0.55 * dim),
-                )?;
-                p.text(
-                    &fit(info_value(ui, info), 14),
-                    (r.0 + 40.0 * scale, r.1 + 19.0 * scale, r.2 - 6.0 * scale, r.3 - 3.0 * scale),
-                    13.5 * scale,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    DWRITE_TEXT_ALIGNMENT_LEADING,
-                    rgba(1.0, 1.0, 1.0, dim),
-                )?;
+            let chosen = ui.cfg.home_actions.contains(&(id as u8));
+            let recording = id == 6 && ui.recording_secs.is_some() && !ui.home.edit;
+            let hovered = ui.action_hover(id);
+            let r = ui.action_rect(id, r);
+            let bg = if recording {
+                rgba(1.0, 0.3, 0.3, 0.3)
+            } else if ui.home.edit && chosen {
+                acc(0.32 + hovered * 0.13)
+            } else {
+                rgba(1.0, 1.0, 1.0, if ui.home.edit { 0.05 + hovered * 0.1 } else { 0.08 + hovered * 0.07 })
+            };
+            p.fill_round_rect(r, 16.0 * scale, bg)?;
+            if ui.home.edit && chosen {
+                p.stroke_round_rect(r, 16.0 * scale, 1.2 * scale, acc(0.8))?;
+            }
+            let dim = if ui.home.edit && !chosen { 0.5 } else { 1.0 };
+            match kind {
+                Tile::Action(glyph, label) => {
+                    p.glyph(
+                        glyph,
+                        (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
+                        17.0 * scale,
+                        rgba(1.0, 1.0, 1.0, 0.9 * dim),
+                    )?;
+                    p.text_wrapped(
+                        if recording { "Stop recording" } else { label },
+                        (r.0 + 40.0 * scale, r.1 + 2.0 * scale, r.2 - 6.0 * scale, r.3 - 2.0 * scale),
+                        12.5 * scale,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                        rgba(1.0, 1.0, 1.0, dim),
+                    )?;
+                }
+                Tile::Info(glyph, label, info) => {
+                    p.glyph(
+                        glyph,
+                        (r.0 + 6.0 * scale, r.1, r.0 + 38.0 * scale, r.3),
+                        17.0 * scale,
+                        rgba(1.0, 1.0, 1.0, 0.9 * dim),
+                    )?;
+                    p.text(
+                        label,
+                        (r.0 + 40.0 * scale, r.1 + 4.0 * scale, r.2 - 6.0 * scale, r.1 + 21.0 * scale),
+                        10.5 * scale,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, 0.55 * dim),
+                    )?;
+                    p.text(
+                        &fit(info_value(ui, info), 14),
+                        (r.0 + 40.0 * scale, r.1 + 19.0 * scale, r.2 - 6.0 * scale, r.3 - 3.0 * scale),
+                        13.5 * scale,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, dim),
+                    )?;
+                }
             }
         }
     }
@@ -1119,6 +1194,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         paint_discord_strip(p, pill, scale, ui)?;
     }
     paint_home_mixer(p, pill, scale, ui)?;
+    paint_widget_editor(p, pill, scale, ui)?;
     paint_menu(p, pill, scale, ui)
 }
 

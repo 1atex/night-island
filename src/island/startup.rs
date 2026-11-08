@@ -157,6 +157,7 @@ impl App {
         app.store = Store::open();
         app.apply_character();
         app.ui.cfg = app.settings.clone();
+        app.ui.yandex.legacy_layout = app.settings.wave_legacy_layout;
         app.ui.yandex.ratings_hidden = !app.settings.wave_ratings;
         app.ui.yandex.search_hidden = !app.settings.wave_search;
         app.ui.char_inset = if app.attached_character_on() { CHAR_INSET } else { 0.0 };

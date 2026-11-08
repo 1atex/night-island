@@ -56,6 +56,7 @@ impl App {
     }
 
     pub(in crate::island) fn setting_changed(&mut self, id: view::Sid, apply: bool) {
+        self.ui.yandex.legacy_layout = self.settings.wave_legacy_layout;
         self.ui.cfg = self.settings.clone();
         self.settings.assistant.apply();
         crate::platform::sounds::configure(&self.settings.sounds);
@@ -76,6 +77,10 @@ impl App {
         use view::Sid::*;
         if apply {
             match id {
+                HomeWidgets => {
+                    self.ui.home.widgets = Default::default();
+                    self.ui.home.edit = false;
+                }
                 LiquidIdleTravel => {
                     self.stop_idle();
                     self.start_liquid();

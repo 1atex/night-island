@@ -8,6 +8,7 @@ mod clipboard;
 mod command;
 mod controls;
 mod home;
+mod home_widgets;
 mod integrations;
 mod metrics;
 mod mixer;
@@ -43,6 +44,12 @@ impl App {
         self.start_tab_change(from, tab);
         self.ui.home.dev_menu = None;
         self.ui.home.edit = false;
+        if self.cancel_widget_resize() {
+            unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            }
+        }
+        self.ui.home.widgets = Default::default();
         self.ui.text.qr = None;
         self.refresh_reminder_labels();
         if tab == view::Tab::Text

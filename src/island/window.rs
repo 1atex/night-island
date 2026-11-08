@@ -328,6 +328,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         }
         WM_CAPTURECHANGED => {
             with_app(|a| {
+                a.cancel_widget_resize();
                 a.pointer.vol_drag = false;
                 if a.ui.pressed_action.take().is_some() {
                     a.repaint_expanded();

@@ -28,6 +28,7 @@ mod discord;
 mod frame;
 mod guide;
 mod home;
+mod home_widgets;
 mod integrations;
 mod live;
 mod memory_tools;
@@ -62,6 +63,7 @@ pub use self::{
     widgets::*, yandex::*,
 };
 pub use guide::*;
+pub use home_widgets::*;
 pub use live::*;
 pub use memory_tools::*;
 pub use pet_studio::*;
