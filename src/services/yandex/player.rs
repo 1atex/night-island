@@ -53,7 +53,7 @@ pub fn load_thumbnails(
                     if job.generation != THUMBNAIL_REVISION.load(Ordering::Acquire) {
                         break;
                     }
-                    if let Some(image) = crate::platform::media::cover_url(&url) {
+                    if let Some(image) = crate::platform::media::cover_url_sized(&url, 128) {
                         let _ = job.sender.send(Command::Thumbnail { account: job.account, id, image });
                     }
                 }
