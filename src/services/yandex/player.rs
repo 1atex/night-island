@@ -15,6 +15,7 @@ use super::{Command, Track};
 struct ThumbnailJob {
     account: u64,
     generation: u64,
+    persist: bool,
     tracks: Vec<(String, String)>,
     sender: SyncSender<Command>,
 }
@@ -26,19 +27,21 @@ pub fn load_thumbnails(
     tracks: &[Track],
     account: u64,
     cached: &std::collections::BTreeMap<String, Arc<crate::platform::media::Cover>>,
+    persist: bool,
     sender: SyncSender<Command>,
 ) {
     let tracks: Vec<_> = tracks
         .iter()
         .filter(|track| !track.cover.is_empty() && !cached.contains_key(&track.id))
         .take(32)
-        .map(|track| (track.id.clone(), track.cover.replace("300x300", "128x128")))
+        .map(|track| (track.id.clone(), track.cover.clone()))
         .collect();
     if tracks.is_empty() {
         return;
     }
     let generation = THUMBNAIL_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
-    *THUMBNAILS.lock().unwrap_or_else(|e| e.into_inner()) = Some(ThumbnailJob { account, generation, tracks, sender });
+    *THUMBNAILS.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some(ThumbnailJob { account, generation, persist, tracks, sender });
     static WORKER: OnceLock<SyncSender<()>> = OnceLock::new();
     let worker = WORKER.get_or_init(|| {
         let (tx, rx) = mpsc::sync_channel(1);
@@ -53,9 +56,12 @@ pub fn load_thumbnails(
                     if job.generation != THUMBNAIL_REVISION.load(Ordering::Acquire) {
                         break;
                     }
-                    if let Some(image) = crate::platform::media::cover_url_sized(&url, 128) {
+                    if let Some(image) = super::covers::load(&url, job.persist) {
                         let _ = job.sender.send(Command::Thumbnail { account: job.account, id, image });
                     }
+                }
+                if job.persist {
+                    super::covers::trim_cache();
                 }
             }
         });

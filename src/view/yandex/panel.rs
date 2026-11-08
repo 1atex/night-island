@@ -123,6 +123,22 @@ fn cover(p: &Painter, r: Rect, s: f32, ui: &YandexUi, track: &crate::services::y
     }
 }
 
+fn button_icon(hit: YandexHit) -> Option<char> {
+    use YandexHit::*;
+    Some(match hit {
+        StartWave => crate::ui::icons::YANDEX_MUSIC_GLYPH,
+        Disconnect => crate::ui::icons::SIGN_OUT_GLYPH,
+        Overview => '\u{E713}',
+        Search => '\u{E721}',
+        Library => '\u{E006}',
+        MenuPlay => '\u{E768}',
+        MenuTrackStation | CurrentStation(false) => '\u{E8D6}',
+        MenuArtistStation | CurrentStation(true) => '\u{E77B}',
+        Retry => '\u{E72C}',
+        _ => return None,
+    })
+}
+
 pub(super) fn paint(p: &Painter, pill: Rect, s: f32, ui: &YandexUi, editing: bool, caret: bool) -> Result<()> {
     use YandexHit::*;
     let w = pill.2 / s;
@@ -320,10 +336,16 @@ pub(super) fn paint(p: &Painter, pill: Rect, s: f32, ui: &YandexUi, editing: boo
                 }
             }
             CurrentStation(artist) => {
+                p.glyph(
+                    button_icon(hit).unwrap(),
+                    (button.0 + 6.0 * s, button.1, button.0 + 34.0 * s, button.3),
+                    17.0 * s,
+                    WHITE,
+                )?;
                 label(
                     p,
                     if artist { "Wave from artist" } else { "Wave from track" },
-                    (button.0 + 12.0 * s, button.1 + 3.0 * s, button.2 - 8.0 * s, button.1 + 25.0 * s),
+                    (button.0 + 40.0 * s, button.1 + 3.0 * s, button.2 - 8.0 * s, button.1 + 25.0 * s),
                     s,
                     12.0,
                     true,
@@ -333,7 +355,7 @@ pub(super) fn paint(p: &Painter, pill: Rect, s: f32, ui: &YandexUi, editing: boo
                     label(
                         p,
                         if artist { &track.artist } else { &track.title },
-                        (button.0 + 12.0 * s, button.1 + 25.0 * s, button.2 - 8.0 * s, button.3 - 2.0 * s),
+                        (button.0 + 40.0 * s, button.1 + 25.0 * s, button.2 - 8.0 * s, button.3 - 2.0 * s),
                         s,
                         11.0,
                         false,
@@ -395,7 +417,24 @@ pub(super) fn paint(p: &Painter, pill: Rect, s: f32, ui: &YandexUi, editing: boo
                         .unwrap_or("Any"),
                     _ => "",
                 };
-                label(p, text, (button.0 + 12.0 * s, button.1, button.2 - 8.0 * s, button.3), s, 12.0, true, 1.0)?;
+                let icon = button_icon(hit);
+                if let Some(glyph) = icon {
+                    p.glyph(glyph, (button.0 + 6.0 * s, button.1, button.0 + 30.0 * s, button.3), 15.0 * s, WHITE)?;
+                }
+                label(
+                    p,
+                    text,
+                    (
+                        button.0 + if icon.is_some() { 34.0 * s } else { 12.0 * s },
+                        button.1,
+                        button.2 - 8.0 * s,
+                        button.3,
+                    ),
+                    s,
+                    12.0,
+                    true,
+                    1.0,
+                )?;
             }
         }
     }

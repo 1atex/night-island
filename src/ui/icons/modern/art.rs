@@ -13,6 +13,9 @@ pub(super) fn paths(ch: char) -> Option<(&'static str, &'static str)> {
         return Some(("", super::super::YANDEX_MUSIC_PATH));
     }
     let outline = match ch {
+        super::super::SIGN_OUT_GLYPH => {
+            "M 10 4 L 5 4 Q 3 4 3 6 L 3 18 Q 3 20 5 20 L 10 20 M 9 12 L 21 12 M 16 7 L 21 12 L 16 17"
+        }
         '\u{E006}' => HEART,
         '\u{E189}' => "M 4 14 L 4 18 M 8 10 L 8 20 M 12 6 L 12 16 M 16 9 L 16 14 M 20 5 L 20 11",
         '\u{E701}' => "M 3 8.5 Q 12 1.5 21 8.5 M 6.5 12 Q 12 7.5 17.5 12 M 9.8 15.5 Q 12 13.6 14.2 15.5",

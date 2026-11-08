@@ -252,7 +252,7 @@ impl App {
             Timer::Expand if matches!(self.state, State::Hidden | State::Hiding) => self.reveal(),
             Timer::Expand => self.expand(),
             Timer::Collapse => {
-                if self.interacting_with_top_panel() {
+                if self.interacting_with_top_panel() || self.ui.home.widgets.interacting() {
                     self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(80));
                 } else {
                     self.collapse();

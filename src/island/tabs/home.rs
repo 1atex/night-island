@@ -34,9 +34,7 @@ impl App {
             Some(view::HomeHit::WidgetControl(control)) => self.widget_control(control),
             Some(view::HomeHit::WidgetHandle(id)) => self.begin_widget_resize(id, x, y),
             Some(view::HomeHit::Action(id)) if self.ui.home.widgets.editing && !self.ui.home.edit => {
-                self.ui.home.widgets.selected = Some(id as u8);
-                self.ui.home.widgets.status.clear();
-                self.repaint_expanded();
+                self.begin_widget_drag(id as u8, x, y);
             }
             Some(view::HomeHit::Live(index)) => self.open_live_activity(index),
             Some(view::HomeHit::Notification) => {
@@ -508,7 +506,7 @@ impl App {
     }
 
     pub(in crate::island) fn drag_tiles(&mut self, x: i32, y: i32) {
-        if self.drag_widget_resize(x, y) {
+        if self.drag_widget_resize(x, y) || self.drag_widget(x, y) {
             return;
         }
         if self.state != State::Expanded || self.ui.tab != view::Tab::Home {
@@ -539,7 +537,7 @@ impl App {
     }
 
     pub(in crate::island) fn finish_tile_press(&mut self) {
-        if self.finish_widget_resize() {
+        if self.finish_widget_resize() || self.finish_widget_drag() {
             return;
         }
         let press = self.ui.home.tile_press.take();

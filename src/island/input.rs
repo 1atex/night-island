@@ -835,7 +835,8 @@ impl App {
                 if self.ui.remind.alert.is_some()
                     || self.ui.pinned
                     || self.popup_open
-                    || self.pointer.moving.is_some() => {}
+                    || self.pointer.moving.is_some()
+                    || self.ui.home.widgets.interacting() => {}
             State::Expanded if self.ui.editing => {
                 self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1500))
             }

@@ -906,6 +906,9 @@ impl App {
                     Command::Connect
                 });
             }
+            view::Act::YandexCoverCache => crate::services::yandex::send(
+                crate::services::yandex::Command::CacheCovers(!self.ui.yandex.state.config.cache_covers),
+            ),
             view::Act::YandexAutoplay => crate::services::yandex::send(crate::services::yandex::Command::Autoplay(
                 !self.ui.yandex.state.config.autoplay,
             )),

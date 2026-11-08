@@ -1,4 +1,5 @@
 mod api;
+mod covers;
 pub mod palette;
 mod player;
 
@@ -137,12 +138,13 @@ fn track_key(id: &str) -> &str {
 pub struct Config {
     pub selection: BTreeMap<String, String>,
     pub autoplay: bool,
+    pub cache_covers: bool,
     pub volume: u8,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { selection: BTreeMap::new(), autoplay: false, volume: 100 }
+        Self { selection: BTreeMap::new(), autoplay: false, volume: 100, cache_covers: true }
     }
 }
 
@@ -222,6 +224,7 @@ pub enum Command {
     PlaySearch { query: String, id: String },
     Select(String, Option<String>),
     Autoplay(bool),
+    CacheCovers(bool),
     Ended(u64),
     Failed(u64),
     Cover(u64, std::sync::Arc<media::Cover>),
@@ -650,7 +653,13 @@ impl Worker {
             }
             Command::SearchDone { account, result } => {
                 if self.account_id == Some(account) && result.request == SEARCH_REQUEST.load(Ordering::Acquire) {
-                    player::load_thumbnails(&result.tracks, account, &self.state.thumbnails, self.tx.clone());
+                    player::load_thumbnails(
+                        &result.tracks,
+                        account,
+                        &self.state.thumbnails,
+                        self.state.config.cache_covers,
+                        self.tx.clone(),
+                    );
                     self.state.search = Some(result);
                 }
             }
@@ -730,6 +739,10 @@ impl Worker {
                     self.replace_pending = true;
                     self.queue.clear();
                 }
+            }
+            Command::CacheCovers(on) => {
+                self.state.config.cache_covers = on;
+                self.save_config();
             }
             Command::Autoplay(on) => {
                 self.state.config.autoplay = on;
@@ -917,7 +930,13 @@ impl Worker {
         let start = page * LIBRARY_PAGE;
         let end = (start + LIBRARY_PAGE + 3).min(total);
         let tracks = self.api.library_tracks(&ids[start..end])?;
-        player::load_thumbnails(&tracks, self.account_id.unwrap_or_default(), &self.state.thumbnails, self.tx.clone());
+        player::load_thumbnails(
+            &tracks,
+            self.account_id.unwrap_or_default(),
+            &self.state.thumbnails,
+            self.state.config.cache_covers,
+            self.tx.clone(),
+        );
         self.state.library = Some(LibraryPage { page, total, tracks });
         Ok(())
     }

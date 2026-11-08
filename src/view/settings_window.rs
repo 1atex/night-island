@@ -289,6 +289,7 @@ pub enum Act {
     YandexBrowser,
     YandexCopy,
     YandexAutoplay,
+    YandexCoverCache,
     DiscordMain,
     DiscordMute,
     DiscordDeaf,
@@ -445,7 +446,12 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     } else {
         crate::ui::i18n::tr("Not connected").into_owned()
     };
-    out.push(Item::Service { name: "Yandex Music", glyph: '\u{E8D6}', status, live: wave.has_token });
+    out.push(Item::Service {
+        name: "Yandex Music",
+        glyph: crate::ui::icons::YANDEX_MUSIC_GLYPH,
+        status,
+        live: wave.has_token,
+    });
     if !wave.code.is_empty() {
         out.push(Item::Text(format!("{}: {}", crate::ui::i18n::tr("Code"), wave.code)));
         out.push(Item::Button(Act::YandexCopy, if ui.yandex.copied { "Copied" } else { "Copy code" }.into(), true));
@@ -468,12 +474,18 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
         ));
     }
     out.push(Item::Button(Act::YandexWave, "Open My Wave".into(), true));
+    out.push(Item::Pair(
+        Act::YandexCoverCache,
+        "Keep music covers on this computer".into(),
+        if wave.config.cache_covers { "On" } else { "Off" }.into(),
+        wave.config.cache_covers,
+    ));
     out.push(Item::Row(Sid::WaveLegacyLayout, "Original My Wave layout", Kind::Toggle));
     out.push(Item::Row(Sid::WaveRatings, "Liked tracks and ratings in My Wave", Kind::Toggle));
     out.push(Item::Row(Sid::WaveSearch, "Track search in My Wave", Kind::Toggle));
 
     let (status, live) = discord_status_text(&ui.discord);
-    out.push(Item::Service { name: "Discord", glyph: '\u{E8F2}', status, live });
+    out.push(Item::Service { name: "Discord", glyph: crate::ui::icons::DISCORD_GLYPH, status, live });
     match &ui.discord.status {
         D::NoConfig => {
             out.push(Item::Field(Field::DiscordId, "Client ID", "Client ID"));
@@ -507,7 +519,7 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     }
 
     let (status, live) = spotify_status_text(&ui.spotify);
-    out.push(Item::Service { name: "Spotify", glyph: '\u{E8D6}', status, live });
+    out.push(Item::Service { name: "Spotify", glyph: crate::ui::icons::SPOTIFY_GLYPH, status, live });
     out.push(Item::Note("Shuffle, repeat and likes for the playing track."));
     match &ui.spotify.status {
         spotify::Status::Connecting => {
@@ -1841,10 +1853,11 @@ pub fn paint_settings_window(p: &Painter, size: (f32, f32), scale: f32, ui: &UiS
                     let colour = match name {
                         "Discord" => rgba(0.35, 0.4, 0.95, 1.0),
                         "Spotify" => rgba(0.12, 0.84, 0.38, 1.0),
+                        "Yandex Music" => rgba(1.0, 0.85, 0.12, 1.0),
                         _ => acc(0.9),
                     };
-                    p.fill_round_rect(circle, d / 2.0, colour)?;
-                    p.glyph(glyph, circle, 17.0 * scale, WHITE)?;
+                    p.fill_round_rect(circle, d / 2.0, rgba(colour.r, colour.g, colour.b, 0.12))?;
+                    p.glyph(glyph, circle, 24.0 * scale, colour)?;
                     p.text(
                         name,
                         (circle.2 + 12.0 * scale, circle.1 - 2.0 * scale, row.2, circle.1 + 20.0 * scale),

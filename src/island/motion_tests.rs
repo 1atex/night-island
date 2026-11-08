@@ -643,3 +643,91 @@ fn native_widget_resize_commits_on_release_and_cancels_without_saving() -> Resul
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "Exercises native widget dragging, live layout and capture cancellation"]
+fn native_widget_drag_previews_then_commits_or_cancels_at_every_scale() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    let queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for placement in [Placement::Floating, Placement::Docked] {
+            let owner = window(WS_EX_NOREDIRECTIONBITMAP)?;
+            let mut app = App::new_visuals(
+                owner.0,
+                scale,
+                Settings {
+                    home_actions: vec![0, 1, 2, 3],
+                    home_weather_widget: false,
+                    island_animations: true,
+                    character: Character::None,
+                    placement,
+                    ..Settings::default()
+                },
+            )?;
+            app.ui.cfg = app.settings.clone();
+            app.state = State::Expanded;
+            app.win = Win::Big;
+            app.toggle_widget_editor();
+            let pill = app.pill_rect(true);
+            let initial = view::home_widget_targets(pill, scale, &app.ui);
+            let center = |r: view::Rect| (((r.0 + r.2) / 2.0).round() as i32, ((r.1 + r.3) / 2.0).round() as i32);
+            let (x, y) = center(initial[0].1);
+            app.click_home(x, y);
+            assert!(app.ui.home.widgets.press.is_some());
+            let (to_x, to_y) = center(initial[3].1);
+            app.drag_tiles(to_x, to_y);
+            let preview = view::home_widget_targets(pill, scale, &app.ui);
+            assert_eq!(app.ui.home.widgets.drag.as_ref().unwrap().order, vec![1, 2, 3, 0]);
+            assert_eq!(app.settings.home_actions, vec![0, 1, 2, 3]);
+            app.on_mouse_leave();
+            app.on_timer(Timer::Collapse as usize);
+            assert!(app.state == State::Expanded);
+            app.finish_tile_press();
+            assert_eq!(app.settings.home_actions, vec![1, 2, 3, 0]);
+            assert_eq!(preview, view::home_widget_targets(pill, scale, &app.ui));
+            let now = view::home_widget_rects(pill, scale, &app.ui);
+            let (x, y) = center(now.into_iter().find(|v| v.0 == 0).unwrap().1);
+            app.begin_widget_drag(0, x, y);
+            app.drag_widget(to_x - ((132.0 * scale) as i32), to_y);
+            app.on_keydown(VK_ESCAPE.0);
+            assert!(!app.ui.home.widgets.interacting());
+            assert_eq!(app.settings.home_actions, vec![1, 2, 3, 0]);
+            let area = view::home_widget_area(pill, scale);
+            let target = view::home_widget_targets(pill, scale, &app.ui).into_iter().find(|v| v.0 == 0).unwrap().1;
+            let (x, y) = center(target);
+            app.begin_widget_drag(0, x, y);
+            app.drag_widget((area.0 - 50.0 * scale).round() as i32, y);
+            assert!(!app.ui.home.widgets.drag.as_ref().unwrap().valid);
+            app.finish_widget_drag();
+            assert_eq!(app.settings.home_actions, vec![1, 2, 3, 0]);
+            app.settings.home_actions = vec![0, 1, 2, 3, view::weather_widget_id()];
+            app.settings
+                .home_widget_sizes
+                .insert(view::weather_widget_id(), crate::data::home_widgets::WidgetSize::Wide4);
+            app.ui.cfg = app.settings.clone();
+            app.ui.home.widgets.motion = Default::default();
+            let start = view::home_widget_targets(pill, scale, &app.ui);
+            let (x, y) = center(start.iter().find(|v| v.0 == view::weather_widget_id()).unwrap().1);
+            app.begin_widget_drag(view::weather_widget_id(), x, y);
+            let area = view::home_widget_area(pill, scale);
+            app.drag_widget(x, (area.1 + 50.0 * scale).round() as i32);
+            let preview = view::home_widget_targets(pill, scale, &app.ui);
+            app.finish_widget_drag();
+            assert_eq!(app.settings.home_actions[0], view::weather_widget_id());
+            assert_eq!(preview, view::home_widget_targets(pill, scale, &app.ui));
+        }
+    }
+    drop(queue);
+    unsafe {
+        RoUninitialize();
+    }
+    Ok(())
+}

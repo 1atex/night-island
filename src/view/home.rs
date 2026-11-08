@@ -814,7 +814,7 @@ pub fn wave_active(ui: &UiState) -> bool {
 pub fn wave_rating_button(pill: Rect, s: f32, ui: &UiState, like: bool) -> Rect {
     let card = media_card(pill, s, home_wide(ui));
     let left = if like { card.0 + 10.0 * s } else { card.2 - 40.0 * s };
-    (left, card.3 - 40.0 * s, left + 30.0 * s, card.3 - 10.0 * s)
+    (left, card.3 - 34.0 * s, left + 30.0 * s, card.3 - 4.0 * s)
 }
 
 pub fn wave_link(pill: Rect, s: f32, ui: &UiState) -> Rect {
@@ -1195,6 +1195,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     }
     paint_home_mixer(p, pill, scale, ui)?;
     paint_widget_editor(p, pill, scale, ui)?;
+    paint_widget_drag(p, scale, ui)?;
     paint_menu(p, pill, scale, ui)
 }
 

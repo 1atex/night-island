@@ -489,6 +489,13 @@ mod tests {
                     .collect();
                 ui.yandex.state.media.cover = crate::platform::media::debug_cover(96, &pixels);
                 ui.media = ui.yandex.state.media.clone();
+                ui.discord.status = crate::services::discord::Status::Connected;
+                ui.discord.members = vec![crate::services::discord::Member {
+                    name: "Друг в голосовом канале".into(),
+                    muted: false,
+                    deaf: false,
+                    speaking: true,
+                }];
                 if let Some(image) = &ui.media.cover {
                     for id in ["1", "2", "3", "4"] {
                         ui.yandex.state.thumbnails.insert(id.into(), image.clone());
@@ -518,6 +525,22 @@ mod tests {
                     daily: Vec::new(),
                     city_missing: false,
                 });
+                if i == 1 {
+                    let origin = view::home_widget_targets((x, y, 640.0, 384.0), 1.0, &ui)
+                        .into_iter()
+                        .find(|v| v.0 == 0)
+                        .unwrap()
+                        .1;
+                    ui.home.widgets.selected = Some(0);
+                    ui.home.widgets.drag = Some(view::WidgetDrag {
+                        id: 0,
+                        offset: (40.0, 20.0),
+                        cursor: (origin.0 + 150.0, origin.1 + 46.0),
+                        origin,
+                        order: vec![1, 0, 2, 3, view::weather_widget_id()],
+                        valid: true,
+                    });
+                }
                 crate::platform::media::debug_timeline(83.0, 241.0);
                 crate::services::yandex::debug_timeline(83.0, 241.0);
                 p.fill_round_rect((x, y, x + 640.0, y + 384.0), 28.0, rgba(0.0, 0.0, 0.0, 1.0))?;
@@ -525,6 +548,19 @@ mod tests {
             }
             Ok(())
         })?;
+        if let Some(path) = std::env::var_os("NI_BRAND_PREVIEW") {
+            let settings = crate::ui::popup::PopupSurface::new((940, 1320))?;
+            ui.sw.group = view::GROUPS.iter().position(|g| g.name == "Integrations").unwrap();
+            ui.discord.status = crate::services::discord::Status::Idle;
+            ui.yandex.state.has_token = true;
+            ui.spotify.status = crate::services::spotify::Status::Connected;
+            settings.paint(&gpu, |p| view::paint_settings_window(p, (940.0, 1320.0), 1.0, &ui))?;
+            let pixels: Vec<u8> = settings.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+            let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 940, 1320);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+        }
         if let Some(path) = std::env::var_os("NI_WAVE_PREVIEW") {
             let rgba: Vec<u8> = surface.pixels().chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
             let mut encoder = png::Encoder::new(std::fs::File::create(path).unwrap(), 1320, 1230);

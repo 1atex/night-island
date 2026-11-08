@@ -1,5 +1,8 @@
 mod modern;
 
+pub const SIGN_OUT_GLYPH: char = '\u{F8FA}';
+pub const DISCORD_GLYPH: char = '\u{F8FC}';
+pub const SPOTIFY_GLYPH: char = '\u{F8FB}';
 pub const YANDEX_MUSIC_GLYPH: char = '\u{F8FD}';
 pub(super) const YANDEX_MUSIC_PATH: &str = include_str!("../../assets/brands/yandex-music.path");
 
@@ -26,6 +29,12 @@ pub fn lookup(ch: char) -> Option<(&'static str, &'static str)> {
     const NEW: &str = "0 -960 960 960";
     const OLD: &str = "0 0 24 24";
     Some(match ch {
+        SIGN_OUT_GLYPH => (
+            OLD,
+            "M5 3H11V5H5V19H11V21H5C3.9 21 3 20.1 3 19V5C3 3.9 3.9 3 5 3ZM15.6 6.6L21 12L15.6 17.4L14.2 16L17.2 13H8V11H17.2L14.2 8Z",
+        ),
+        DISCORD_GLYPH => (OLD, include_str!("../../assets/brands/discord.path")),
+        SPOTIFY_GLYPH => (OLD, include_str!("../../assets/brands/spotify.path")),
         YANDEX_MUSIC_GLYPH => (OLD, YANDEX_MUSIC_PATH),
         '\u{E006}' => (
             NEW,

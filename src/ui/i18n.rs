@@ -28,6 +28,8 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Keep music covers on this computer" => "Сохранять обложки музыки на компьютере",
+        "Drag tiles to arrange; pull a corner to resize" => "Перетаскивайте плитки; тяните за угол для размера",
         "Search" => "Поиск",
         "Dismiss notification" => "Закрыть уведомление",
         "Resizable widgets on Home" => "Изменяемые виджеты на главной",

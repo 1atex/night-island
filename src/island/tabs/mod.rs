@@ -44,7 +44,7 @@ impl App {
         self.start_tab_change(from, tab);
         self.ui.home.dev_menu = None;
         self.ui.home.edit = false;
-        if self.cancel_widget_resize() {
+        if self.cancel_widget_resize() | self.cancel_widget_drag() {
             unsafe {
                 let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
             }

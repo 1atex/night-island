@@ -432,6 +432,36 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Reads liked track metadata and public covers without changing playback or ratings"]
+    fn configured_liked_covers_can_download_and_decode() {
+        unsafe {
+            let _ = windows::Win32::System::WinRT::RoInitialize(windows::Win32::System::WinRT::RO_INIT_MULTITHREADED);
+        }
+        let api = Api {
+            token: crate::services::integrations::load_secret("yandex-music").expect("Yandex Music sign-in required"),
+            base: None,
+        };
+        let (_, uid) = api.account().unwrap();
+        let ids = api.library_ids(uid, false).unwrap();
+        let tracks = api.library_tracks(&ids[..ids.len().min(4)]).unwrap();
+        assert!(!tracks.is_empty());
+        let (tx, rx) = std::sync::mpsc::sync_channel(32);
+        let wanted = tracks.len();
+        assert!(tracks.iter().all(|track| !track.cover.is_empty()));
+        super::super::player::load_thumbnails(&tracks, uid, &Default::default(), true, tx);
+        for _ in 0..wanted {
+            let item = rx.recv_timeout(Duration::from_secs(20)).expect("Liked cover worker did not deliver a cover");
+            if let super::super::Command::Thumbnail { account, id, image } = item {
+                assert_eq!(account, uid);
+                assert!(tracks.iter().any(|track| track.id == id));
+                assert_eq!(image.size, 128);
+                assert_eq!(image.bgra.len(), 128 * 128 * 4);
+            } else {
+                panic!("Unexpected cover worker response");
+            }
+        }
+    }
+    #[test]
     #[ignore = "Reads the configured Yandex account and plays a catalog track muted without changing the library"]
     fn configured_account_can_read_wave_filters_and_search_a_station() {
         unsafe {

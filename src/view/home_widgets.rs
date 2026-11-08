@@ -8,8 +8,24 @@ pub enum WidgetControl {
     Add,
     Done,
     Remove,
-    Move(i8),
     Size(WidgetSize),
+}
+
+#[derive(Clone)]
+pub struct WidgetDrag {
+    pub id: u8,
+    pub offset: (f32, f32),
+    pub cursor: (f32, f32),
+    pub origin: Rect,
+    pub order: Vec<u8>,
+    pub valid: bool,
+}
+
+impl WidgetDrag {
+    pub fn rect(&self) -> Rect {
+        let (x, y) = (self.cursor.0 - self.offset.0, self.cursor.1 - self.offset.1);
+        (x, y, x + self.origin.2 - self.origin.0, y + self.origin.3 - self.origin.1)
+    }
 }
 
 #[derive(Default)]
@@ -19,11 +35,16 @@ pub struct HomeWidgets {
     pub selected: Option<u8>,
     pub resize: Option<(u8, i32, i32, WidgetSize)>,
     pub preview: Option<(u8, WidgetSize)>,
+    pub press: Option<(u8, i32, i32, Rect)>,
+    pub drag: Option<WidgetDrag>,
     pub status: String,
     pub motion: RefCell<WidgetMotion>,
 }
 
 impl HomeWidgets {
+    pub fn interacting(&self) -> bool {
+        self.resize.is_some() || self.press.is_some() || self.drag.is_some()
+    }
     pub fn editor_active(&self) -> bool {
         self.editor_motion.is_some_and(|(_, at)| at.elapsed().as_millis() < 220)
     }
@@ -54,6 +75,18 @@ pub struct WidgetMotion {
 }
 
 impl WidgetMotion {
+    pub fn release_from(&mut self, id: u8, rect: Rect) {
+        let now = Instant::now();
+        let current = self.at(now);
+        for node in &mut self.nodes {
+            if let Some((_, r, alpha)) = current.iter().find(|v| v.0 == node.id) {
+                node.from = if node.id == id { rect } else { *r };
+                node.opacity = *alpha;
+            }
+        }
+        self.start = Some(now);
+    }
+
     pub fn active(&self) -> bool {
         self.start.is_some_and(|at| at.elapsed() < Duration::from_millis(280))
     }
@@ -133,7 +166,14 @@ pub fn widget_size(ui: &UiState, id: u8) -> WidgetSize {
 }
 
 fn specs(ui: &UiState) -> Vec<(u8, WidgetSize)> {
-    ui.cfg.home_actions.iter().map(|&id| (id, widget_size(ui, id))).collect()
+    ui.home
+        .widgets
+        .drag
+        .as_ref()
+        .map_or(ui.cfg.home_actions.as_slice(), |d| d.order.as_slice())
+        .iter()
+        .map(|&id| (id, widget_size(ui, id)))
+        .collect()
 }
 
 pub fn can_resize_widget(ui: &UiState, id: u8, size: WidgetSize) -> bool {
@@ -159,7 +199,8 @@ fn layout_widgets(ui: &UiState) -> Vec<home_widgets::Placement> {
         }
     }
     let weather = weather_widget_id();
-    if ui.cfg.home_weather_widget && ui.cfg.weather && ui.weather.is_some() && !ui.cfg.home_actions.contains(&weather) {
+    if ui.cfg.home_weather_widget && ui.cfg.weather && ui.weather.is_some() && !selected.iter().any(|v| v.0 == weather)
+    {
         selected.push((weather, widget_size(ui, weather)));
         if let Some(next) = home_widgets::pack(&selected, occupied) {
             layout = next;
@@ -172,9 +213,15 @@ pub fn has_home_widgets(ui: &UiState) -> bool {
     !ui.cfg.home_actions.is_empty() || (ui.cfg.home_weather_widget && ui.cfg.weather && ui.weather.is_some())
 }
 
-pub fn home_widget_rects(pill: Rect, s: f32, ui: &UiState) -> Vec<(u8, Rect, f32)> {
+pub fn home_widget_area(pill: Rect, s: f32) -> Rect {
     let left = grid_left(pill, s, false);
-    let targets = layout_widgets(ui)
+    let top = pill.1 + HOME_TOP * s;
+    (left, top, left + (2.0 * GRID_COL_W + GRID_GAP) * s, top + (4.0 * GRID_ROW_H + 3.0 * GRID_GAP) * s)
+}
+
+pub fn home_widget_targets(pill: Rect, s: f32, ui: &UiState) -> Vec<(u8, Rect)> {
+    let left = grid_left(pill, s, false);
+    layout_widgets(ui)
         .into_iter()
         .map(|p| {
             let (w, h) = p.size.dimensions();
@@ -190,7 +237,11 @@ pub fn home_widget_rects(pill: Rect, s: f32, ui: &UiState) -> Vec<(u8, Rect, f32
                 ),
             )
         })
-        .collect();
+        .collect()
+}
+
+pub fn home_widget_rects(pill: Rect, s: f32, ui: &UiState) -> Vec<(u8, Rect, f32)> {
+    let targets = home_widget_targets(pill, s, ui);
     ui.home
         .widgets
         .motion
@@ -233,107 +284,117 @@ pub fn widget_editor_controls(pill: Rect, s: f32, ui: &UiState) -> Vec<(Rect, Wi
     }
     let row = volume_row(pill, s, false);
     let mut x = row.0 + 6.0 * s;
-    for (control, width) in [
-        (WidgetControl::Add, 90.0),
-        (WidgetControl::Move(-1), 32.0),
-        (WidgetControl::Move(1), 32.0),
-        (WidgetControl::Remove, 38.0),
-        (WidgetControl::Done, 82.0),
-    ] {
-        out.push(((x, row.1 + 7.0 * s, x + width * s, row.3 - 7.0 * s), control));
-        x += (width + 5.0) * s;
+    let width = (row.2 - row.0 - 24.0 * s) / 3.0;
+    for control in [WidgetControl::Add, WidgetControl::Remove, WidgetControl::Done] {
+        out.push(((x, row.1 + 7.0 * s, x + width, row.3 - 7.0 * s), control));
+        x += width + 6.0 * s;
     }
     out
 }
 
 pub fn paint_home_widgets(p: &Painter, pill: Rect, s: f32, ui: &UiState) -> Result<()> {
     for (id, r, alpha) in home_widget_rects(pill, s, ui) {
-        p.with_opacity(r, alpha, || {
-            let Some(kind) = tile_kind(usize::from(id)) else { return Ok(()) };
-            let recording = id == 6 && ui.recording_secs.is_some();
-            let kind = if recording { Tile::Action('\u{E714}', "Stop recording") } else { kind };
-            let selected = ui.home.widgets.editing && ui.home.widgets.selected == Some(id);
-            p.fill_round_rect(
-                r,
-                16.0 * s,
-                if selected {
-                    acc(0.19)
-                } else if recording {
-                    rgba(1.0, 0.3, 0.3, 0.25)
-                } else {
-                    rgba(1.0, 1.0, 1.0, 0.07 + ui.action_hover(usize::from(id)) * 0.06)
-                },
-            )?;
+        if ui.home.widgets.drag.as_ref().is_some_and(|d| d.id == id) {
+            continue;
+        }
+        paint_widget(p, r, s, ui, id, alpha)?;
+    }
+    if let Some(drag) = &ui.home.widgets.drag
+        && let Some((_, target)) = home_widget_targets(pill, s, ui).into_iter().find(|v| v.0 == drag.id)
+    {
+        let color = if drag.valid { acc(0.75) } else { rgba(1.0, 0.35, 0.35, 0.6) };
+        p.fill_round_rect(target, 16.0 * s, rgba(color.r, color.g, color.b, 0.12))?;
+        p.stroke_round_rect(target, 16.0 * s, 1.5 * s, color)?;
+    }
+    Ok(())
+}
+
+pub fn paint_widget_drag(p: &Painter, s: f32, ui: &UiState) -> Result<()> {
+    if let Some(drag) = &ui.home.widgets.drag {
+        let r = drag.rect();
+        p.fill_round_rect(
+            (r.0 + 2.0 * s, r.1 + 4.0 * s, r.2 + 2.0 * s, r.3 + 4.0 * s),
+            17.0 * s,
+            rgba(0.0, 0.0, 0.0, 0.5),
+        )?;
+        p.fill_round_rect(r, 16.0 * s, rgba(0.08, 0.08, 0.1, 0.98))?;
+        paint_widget(p, r, s, ui, drag.id, 0.95)?;
+    }
+    Ok(())
+}
+
+fn paint_widget(p: &Painter, r: Rect, s: f32, ui: &UiState, id: u8, alpha: f32) -> Result<()> {
+    p.with_opacity(r, alpha, || {
+        let Some(kind) = tile_kind(usize::from(id)) else { return Ok(()) };
+        let recording = id == 6 && ui.recording_secs.is_some();
+        let kind = if recording { Tile::Action('\u{E714}', "Stop recording") } else { kind };
+        let selected = ui.home.widgets.editing && ui.home.widgets.selected == Some(id);
+        p.fill_round_rect(
+            r,
+            16.0 * s,
             if selected {
-                p.stroke_round_rect(r, 16.0 * s, s, acc(0.85))?;
-            }
-            if let Tile::Info(_, _, Info::Weather) = kind {
-                paint_weather_widget(p, r, s, ui)?;
+                acc(0.19)
+            } else if recording {
+                rgba(1.0, 0.3, 0.3, 0.25)
             } else {
-                let (glyph, title, value) = match kind {
-                    Tile::Action(g, t) => (g, t, None),
-                    Tile::Info(g, t, i) => (g, t, Some(info_value(ui, i))),
-                };
-                let large = r.3 - r.1 > 60.0 * s;
-                if large {
-                    p.glyph(
-                        glyph,
-                        (r.0 + 10.0 * s, r.1 + 5.0 * s, r.0 + 38.0 * s, r.1 + 32.0 * s),
-                        17.0 * s,
-                        acc(1.0),
-                    )?;
+                rgba(1.0, 1.0, 1.0, 0.07 + ui.action_hover(usize::from(id)) * 0.06)
+            },
+        )?;
+        if selected {
+            p.stroke_round_rect(r, 16.0 * s, s, acc(0.85))?;
+        }
+        if let Tile::Info(_, _, Info::Weather) = kind {
+            paint_weather_widget(p, r, s, ui)?;
+        } else {
+            let (glyph, title, value) = match kind {
+                Tile::Action(g, t) => (g, t, None),
+                Tile::Info(g, t, i) => (g, t, Some(info_value(ui, i))),
+            };
+            let large = r.3 - r.1 > 60.0 * s;
+            if large {
+                p.glyph(glyph, (r.0 + 10.0 * s, r.1 + 5.0 * s, r.0 + 38.0 * s, r.1 + 32.0 * s), 17.0 * s, acc(1.0))?;
+                text(p, title, (r.0 + 40.0 * s, r.1 + 5.0 * s, r.2 - 8.0 * s, r.1 + 31.0 * s), s, 11.0, false, 0.7)?;
+                let value = value.unwrap_or_else(|| crate::ui::i18n::tr(title).into_owned());
+                text(
+                    p,
+                    &value,
+                    (r.0 + 12.0 * s, r.1 + 33.0 * s, r.2 - 10.0 * s, r.3 - 12.0 * s),
+                    s,
+                    if r.2 - r.0 > 150.0 * s { 25.0 } else { 21.0 },
+                    true,
+                    1.0,
+                )?;
+            } else {
+                p.glyph(glyph, (r.0 + 5.0 * s, r.1, r.0 + 37.0 * s, r.3), 17.0 * s, WHITE)?;
+                if let Some(value) = value {
                     text(
                         p,
                         title,
-                        (r.0 + 40.0 * s, r.1 + 5.0 * s, r.2 - 8.0 * s, r.1 + 31.0 * s),
+                        (r.0 + 39.0 * s, r.1 + 3.0 * s, r.2 - 6.0 * s, r.1 + 21.0 * s),
                         s,
-                        11.0,
+                        10.5,
                         false,
-                        0.7,
+                        0.55,
                     )?;
-                    let value = value.unwrap_or_else(|| crate::ui::i18n::tr(title).into_owned());
                     text(
                         p,
                         &value,
-                        (r.0 + 12.0 * s, r.1 + 33.0 * s, r.2 - 10.0 * s, r.3 - 12.0 * s),
+                        (r.0 + 39.0 * s, r.1 + 21.0 * s, r.2 - 6.0 * s, r.3 - 2.0 * s),
                         s,
-                        if r.2 - r.0 > 150.0 * s { 25.0 } else { 21.0 },
+                        13.0,
                         true,
                         1.0,
                     )?;
                 } else {
-                    p.glyph(glyph, (r.0 + 5.0 * s, r.1, r.0 + 37.0 * s, r.3), 17.0 * s, WHITE)?;
-                    if let Some(value) = value {
-                        text(
-                            p,
-                            title,
-                            (r.0 + 39.0 * s, r.1 + 3.0 * s, r.2 - 6.0 * s, r.1 + 21.0 * s),
-                            s,
-                            10.5,
-                            false,
-                            0.55,
-                        )?;
-                        text(
-                            p,
-                            &value,
-                            (r.0 + 39.0 * s, r.1 + 21.0 * s, r.2 - 6.0 * s, r.3 - 2.0 * s),
-                            s,
-                            13.0,
-                            true,
-                            1.0,
-                        )?;
-                    } else {
-                        text(p, title, (r.0 + 39.0 * s, r.1, r.2 - 6.0 * s, r.3), s, 12.0, true, 1.0)?;
-                    }
+                    text(p, title, (r.0 + 39.0 * s, r.1, r.2 - 6.0 * s, r.3), s, 12.0, true, 1.0)?;
                 }
             }
-            if ui.home.widgets.editing {
-                p.glyph('\u{E784}', widget_resize_handle(r, s), 12.0 * s, acc(0.8))?;
-            }
-            Ok(())
-        })?;
-    }
-    Ok(())
+        }
+        if ui.home.widgets.editing {
+            p.glyph('\u{E784}', widget_resize_handle(r, s), 12.0 * s, acc(0.8))?;
+        }
+        Ok(())
+    })
 }
 
 fn text(p: &Painter, value: &str, r: Rect, s: f32, size: f32, strong: bool, alpha: f32) -> Result<()> {
@@ -488,9 +549,7 @@ fn paint_widget_editor_contents(p: &Painter, pill: Rect, s: f32, ui: &UiState) -
                 }
             }
             WidgetControl::Done => "Done",
-            WidgetControl::Remove => "×",
-            WidgetControl::Move(-1) => "←",
-            WidgetControl::Move(_) => "→",
+            WidgetControl::Remove => "Remove",
         };
         p.text(label, rect, 12.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
     }
@@ -498,7 +557,7 @@ fn paint_widget_editor_contents(p: &Painter, pill: Rect, s: f32, ui: &UiState) -
         text(
             p,
             if ui.home.widgets.status.is_empty() {
-                "Drag the corner or choose a size"
+                "Drag tiles to arrange; pull a corner to resize"
             } else {
                 &ui.home.widgets.status
             },
@@ -531,6 +590,24 @@ mod tests {
             city_missing: false,
         });
         ui
+    }
+    #[test]
+    fn reorder_and_drop_retarget_from_the_current_visual_position() {
+        let mut motion = WidgetMotion::default();
+        let first = (10.0, 10.0, 134.0, 56.0);
+        let second = (142.0, 10.0, 266.0, 56.0);
+        motion.sample(vec![(0, first), (1, second)], false);
+        let moved = motion.sample(vec![(1, first), (0, second)], true);
+        assert_eq!(moved.iter().find(|v| v.0 == 1).unwrap().1, second);
+        motion.start = Some(Instant::now() - Duration::from_millis(140));
+        let mid = motion.at(Instant::now());
+        let x = mid.iter().find(|v| v.0 == 1).unwrap().1.0;
+        assert!(x > first.0 && x < second.0);
+        let ghost = (90.0, 28.0, 214.0, 74.0);
+        motion.release_from(0, ghost);
+        let restored = motion.sample(vec![(0, first), (1, second)], true);
+        let position = restored.iter().find(|v| v.0 == 0).unwrap().1;
+        assert!((position.0 - ghost.0).abs() < 0.1 && (position.1 - ghost.1).abs() < 0.1);
     }
     #[test]
     fn weather_occupies_unused_cells_and_returns_after_notification_closes() {

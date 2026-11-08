@@ -439,15 +439,22 @@ pub fn cover_url(url: &str) -> Option<Arc<Cover>> {
 }
 
 pub fn cover_url_sized(url: &str, side: u32) -> Option<Arc<Cover>> {
-    let side = side.clamp(16, 300);
-    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
     let reply = crate::services::http::get_bytes(url, 3_000_000, None)?;
     if reply.status != 200 {
         return None;
     }
+    cover_bytes_sized(&reply.body, side)
+}
+
+pub fn cover_bytes_sized(bytes: &[u8], side: u32) -> Option<Arc<Cover>> {
+    let side = side.clamp(16, 300);
+    if bytes.is_empty() || bytes.len() > 3_000_000 {
+        return None;
+    }
+    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
     let stream = InMemoryRandomAccessStream::new().ok()?;
     let writer = DataWriter::CreateDataWriter(&stream).ok()?;
-    writer.WriteBytes(&reply.body).ok()?;
+    writer.WriteBytes(bytes).ok()?;
     writer.StoreAsync().ok()?.join().ok()?;
     stream.Seek(0).ok()?;
     let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;

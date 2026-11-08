@@ -81,7 +81,7 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
             ("Dismiss notification".into(), home_notification_close(home_notification_rect(pill, scale, ui)?, scale))
         }
         HomeHit::WidgetHandle(id) => (
-            "Drag the corner or choose a size".into(),
+            "Drag tiles to arrange; pull a corner to resize".into(),
             widget_resize_handle(home_widget_rects(pill, scale, ui).into_iter().find(|v| v.0 == id)?.1, scale),
         ),
         HomeHit::Wave => ("Open My Wave settings".into(), wave_link(pill, scale, ui)),
