@@ -26,8 +26,12 @@ mod companion_popup;
 mod controls;
 mod discord;
 mod frame;
+mod guide;
 mod home;
+mod home_widgets;
 mod integrations;
+mod live;
+mod memory_tools;
 mod metrics;
 mod mixer;
 mod music_intro;
@@ -58,6 +62,10 @@ pub use self::{
     pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
     widgets::*, yandex::*,
 };
+pub use guide::*;
+pub use home_widgets::*;
+pub use live::*;
+pub use memory_tools::*;
 pub use pet_studio::*;
 
 pub type Rect = (f32, f32, f32, f32);
@@ -99,8 +107,8 @@ pub const TABS: [(Tab, char, &str); 17] = [
     (Tab::Steam, '\u{E7FC}', "Steam"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
     (Tab::Mixer, '\u{E9E9}', "App mixer"),
-    (Tab::Notifications, '\u{E7F4}', "Notifications"),
-    (Tab::Yandex, '\u{E189}', "My Wave"),
+    (Tab::Notifications, '\u{EA8F}', "Notifications"),
+    (Tab::Yandex, crate::ui::icons::YANDEX_MUSIC_GLYPH, "My Wave"),
     (Tab::Settings, '\u{E713}', "Settings"),
 ];
 
@@ -149,6 +157,8 @@ pub struct UiState {
     pub feedback: crate::ui::feedback::Feedback,
     pub pressed_action: Option<usize>,
     pub cover_in_flight: bool,
+    pub track_in_flight: bool,
+    pub composited_progress: bool,
     pub tab: Tab,
     pub tab_drag: Option<TabDrag>,
     pub tab_press: Option<(usize, i32, i32)>,
@@ -198,6 +208,8 @@ pub struct UiState {
     pub chat: ChatUi,
     pub privacy_log: PrivacyUi,
     pub activity: ActivityUi,
+    pub live: Vec<LiveActivity>,
+    pub live_changed: Option<std::time::Instant>,
     pub steam: SteamUi,
     pub metrics: MetricsUi,
     pub agents: Vec<crate::services::agents::Session>,
@@ -210,10 +222,14 @@ impl UiState {
             feedback: Default::default(),
             pressed_action: None,
             cover_in_flight: false,
+            track_in_flight: false,
+            composited_progress: false,
             agy: AgyUi::default(),
             chat: ChatUi::default(),
             privacy_log: PrivacyUi::default(),
             activity: ActivityUi::default(),
+            live: Vec::new(),
+            live_changed: None,
             steam: SteamUi::default(),
             metrics: MetricsUi::default(),
             agents: Vec::new(),
@@ -267,6 +283,18 @@ impl UiState {
 
 fn inside(r: Rect, px: f32, py: f32) -> bool {
     px >= r.0 && px < r.2 && py >= r.1 && py < r.3
+}
+
+pub(crate) fn rounded_body_contains((left, top, width, height): Rect, radius: f32, point: (f32, f32)) -> bool {
+    let x = point.0 - left;
+    let y = point.1 - top;
+    if !inside((0.0, 0.0, width, height), x, y) {
+        return false;
+    }
+    let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
+    let dx = x - x.clamp(radius, width - radius);
+    let dy = y - y.clamp(radius, height - radius);
+    dx * dx + dy * dy <= radius * radius
 }
 
 const DIM: f32 = 0.6;
