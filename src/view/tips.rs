@@ -3,6 +3,7 @@ use crate::view::*;
 pub fn content_tip(pill: Rect, scale: f32, ui: &UiState, clips: usize, px: f32, py: f32) -> Option<(String, Rect)> {
     match ui.tab {
         Tab::Home => home_tip(pill, scale, ui, px, py),
+        Tab::Yandex => yandex_tip(pill, scale, &ui.yandex, px, py),
         Tab::Note => {
             let tree = note_tree(pill, scale);
             let reminder = ui.notes.remind.is_some();
@@ -65,6 +66,24 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
     let (text, rect): (String, Rect) = match hit_home(pill, scale, px, py, ui)? {
         HomeHit::Media(i) => (["Previous", "Play or pause", "Next"][i].into(), media_btn(pill, scale, i, wide)),
         HomeHit::Extra(i) => (["Shuffle", "Repeat", "Like"][i].into(), extra_btn(pill, scale, i, wide)),
+        HomeHit::WaveRate(rating) => {
+            use crate::services::yandex::Rating;
+            let like = rating == Rating::Like;
+            let label = match (like, ui.yandex.state.rating == rating) {
+                (true, true) => "Remove like",
+                (true, false) => "Like",
+                (false, true) => "Remove dislike",
+                (false, false) => "Dislike and skip",
+            };
+            (label.into(), wave_rating_button(pill, scale, ui, like))
+        }
+        HomeHit::NotificationClose => {
+            ("Dismiss notification".into(), home_notification_close(home_notification_rect(pill, scale, ui)?, scale))
+        }
+        HomeHit::WidgetHandle(id) => (
+            "Drag tiles to arrange; pull a corner to resize".into(),
+            widget_resize_handle(home_widget_rects(pill, scale, ui).into_iter().find(|v| v.0 == id)?.1, scale),
+        ),
         HomeHit::Wave => ("Open My Wave settings".into(), wave_link(pill, scale, ui)),
         HomeHit::Notification | HomeHit::NotificationExpand => (
             if matches!(hit_home(pill, scale, px, py, ui), Some(HomeHit::Notification)) && ui.cfg.notification_open_app

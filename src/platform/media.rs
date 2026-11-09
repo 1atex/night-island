@@ -51,6 +51,11 @@ pub struct Media {
 static TIMELINE: Mutex<Option<(f32, f32, Instant, bool)>> = Mutex::new(None);
 static TIMELINE_START: Mutex<f32> = Mutex::new(0.0);
 
+#[cfg(test)]
+pub fn debug_progress(pos: f32, length: f32) {
+    *TIMELINE.lock().unwrap() = Some((pos, length, Instant::now(), false));
+}
+
 pub fn progress() -> Option<(f32, f32)> {
     if selected() == Source::Wave {
         return crate::services::yandex::progress();
@@ -430,14 +435,26 @@ fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 }
 
 pub fn cover_url(url: &str) -> Option<Arc<Cover>> {
-    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
+    cover_url_sized(url, 300)
+}
+
+pub fn cover_url_sized(url: &str, side: u32) -> Option<Arc<Cover>> {
     let reply = crate::services::http::get_bytes(url, 3_000_000, None)?;
     if reply.status != 200 {
         return None;
     }
+    cover_bytes_sized(&reply.body, side)
+}
+
+pub fn cover_bytes_sized(bytes: &[u8], side: u32) -> Option<Arc<Cover>> {
+    let side = side.clamp(16, 300);
+    if bytes.is_empty() || bytes.len() > 3_000_000 {
+        return None;
+    }
+    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
     let stream = InMemoryRandomAccessStream::new().ok()?;
     let writer = DataWriter::CreateDataWriter(&stream).ok()?;
-    writer.WriteBytes(&reply.body).ok()?;
+    writer.WriteBytes(bytes).ok()?;
     writer.StoreAsync().ok()?.join().ok()?;
     stream.Seek(0).ok()?;
     let decoder = BitmapDecoder::CreateAsync(&stream).ok()?.join().ok()?;
@@ -445,8 +462,8 @@ pub fn cover_url(url: &str) -> Option<Arc<Cover>> {
         return None;
     }
     let transform = BitmapTransform::new().ok()?;
-    transform.SetScaledWidth(300).ok()?;
-    transform.SetScaledHeight(300).ok()?;
+    transform.SetScaledWidth(side).ok()?;
+    transform.SetScaledHeight(side).ok()?;
     let bitmap = decoder
         .GetSoftwareBitmapTransformedAsync(
             BitmapPixelFormat::Bgra8,
@@ -458,15 +475,15 @@ pub fn cover_url(url: &str) -> Option<Arc<Cover>> {
         .ok()?
         .join()
         .ok()?;
-    let buffer = Buffer::Create(300 * 300 * 4).ok()?;
+    let buffer = Buffer::Create(side * side * 4).ok()?;
     bitmap.CopyToBuffer(&buffer).ok()?;
-    let mut bgra = vec![0; 300 * 300 * 4];
+    let mut bgra = vec![0; (side * side * 4) as usize];
     DataReader::FromBuffer(&buffer).ok()?.ReadBytes(&mut bgra).ok()?;
     Some(Arc::new(Cover {
         id: COVER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        size: 300,
-        full_w: 300,
-        full_h: 300,
+        size: side,
+        full_w: side,
+        full_h: side,
         full: bgra.clone(),
         bgra,
     }))

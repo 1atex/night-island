@@ -2,6 +2,7 @@ use crate::island::*;
 
 #[derive(Default)]
 pub(in crate::island) struct Pointer {
+    pub(in crate::island) expand_pending: std::cell::Cell<bool>,
     pub(in crate::island) decoration_through: bool,
     pub(in crate::island) tracking: bool,
     pub(in crate::island) press: Option<((i32, i32), (i32, i32))>,
@@ -137,7 +138,8 @@ impl App {
         } else {
             (self.collapsed().0 * s, self.collapsed().1 * s)
         };
-        let (px, py) = (rc.left as f32 + self.win_pad().0 * s, rc.top as f32 + self.win_pad().1 * s);
+        let pill = if self.state == State::Expanded { self.pill_full() } else { self.pill_rect(false) };
+        let (px, py) = (rc.left as f32 + pill.0, rc.top as f32 + pill.1);
         let (mid_x, mid_y) = (px + cw / 2.0, py + ch / 2.0);
         if self.docked() {
             let near = [
@@ -187,6 +189,7 @@ impl App {
         if self.state != State::Expanded {
             return;
         }
+        let Some((x, y)) = self.open_content_point(x, y) else { return };
         let pill = self.pill_rect(true);
         let (fx, fy) = (x as f32, y as f32);
         if self.ui.remind.alert.is_some() {
@@ -340,6 +343,8 @@ impl App {
             }
         } else if self.ui.tab == view::Tab::Home {
             match view::hit_home(pill, self.scale, fx, fy, &self.ui) {
+                Some(view::HomeHit::WidgetControl(_)) => Some(2200),
+                Some(view::HomeHit::WidgetHandle(id)) => Some(2000 + usize::from(id)),
                 Some(view::HomeHit::Action(i)) => Some(i),
                 Some(view::HomeHit::Device) => Some(100),
                 Some(view::HomeHit::Media(i)) => Some(500 + i),
@@ -355,7 +360,12 @@ impl App {
                 Some(view::HomeHit::Edit) => Some(550),
                 Some(view::HomeHit::Player) => Some(560),
                 Some(view::HomeHit::Wave) => Some(561),
+                Some(view::HomeHit::Live(index)) => Some(570 + index),
                 Some(view::HomeHit::Notification) => Some(562),
+                Some(view::HomeHit::WaveRate(rating)) => {
+                    Some(if rating == crate::services::yandex::Rating::Like { 564 } else { 565 })
+                }
+                Some(view::HomeHit::NotificationClose) => Some(566),
                 Some(view::HomeHit::NotificationExpand) => Some(563),
                 _ => None,
             }
@@ -464,6 +474,7 @@ impl App {
         if self.state != State::Expanded {
             return;
         }
+        let Some((x, y)) = self.open_content_point(x, y) else { return };
         if self.ui.remind.alert.is_some() {
             return self.click_alert(x, y);
         }
@@ -558,6 +569,14 @@ impl App {
             let scroll = &mut self.ui.home.edit_scroll;
             *scroll = if delta > 0 { scroll.saturating_sub(1) } else { (*scroll + 1).min(view::home_edit_rows()) };
             return self.repaint_expanded();
+        }
+        if self.ui.tab == view::Tab::Yandex && self.ui.yandex.open_group.is_some() {
+            self.scroll_wave_group(if delta > 0 { -2 } else { 2 });
+            return;
+        }
+        if self.ui.tab == view::Tab::Yandex && self.ui.yandex.show_library && self.ui.yandex.track_menu.is_none() {
+            self.move_wave_library(if delta > 0 { -1 } else { 1 });
+            return;
         }
         if self.ui.tab == view::Tab::Steam {
             let most = self.ui.steam.games.len().saturating_sub(view::steam_rows(self.pill_rect(true), self.scale));
@@ -675,7 +694,12 @@ impl App {
             return true;
         }
         let (at, size, radius) = self.pill(self.win, false, false);
-        rounded_body_contains((at.X, at.Y, size.X, size.Y), radius.X, (x as f32, y as f32))
+        if let Some(tween) = self.pill_motion.width {
+            let rect = tween.at(Instant::now());
+            let origin = self.window_origin(self.win);
+            return view::rounded_body_contains(rect, radius.X, (x as f32 + origin.0, y as f32 + origin.1));
+        }
+        view::rounded_body_contains((at.X, at.Y, size.X, size.Y), radius.X, (x as f32, y as f32))
     }
 
     pub(in crate::island) fn set_decoration_through(&mut self, through: bool) {
@@ -703,9 +727,9 @@ impl App {
         let valid = unsafe { GetCursorPos(&mut point).is_ok() && GetWindowRect(self.hwnd, &mut window).is_ok() };
         let through = valid
             && self.state == State::Collapsed
-            && self.liquid_on()
+            && (self.liquid_on() || self.pill_motion.width.is_some())
             && !self.character_interacting()
-            && !self.pill_motion_busy()
+            && (!self.pill_motion_busy() || self.pill_motion.width.is_some())
             && !self.on_interactive_body(point.x - window.left, point.y - window.top);
         let was_through = self.pointer.decoration_through;
         self.set_decoration_through(through);
@@ -748,6 +772,9 @@ impl App {
         }
         self.kill_timer(Timer::Collapse);
         self.kill_timer(Timer::Autohide);
+        if self.state == State::Collapsing && self.transition_hit(x, y) == Some(true) {
+            self.expand();
+        }
         if self.state != State::Expanded {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed
@@ -808,7 +835,8 @@ impl App {
                 if self.ui.remind.alert.is_some()
                     || self.ui.pinned
                     || self.popup_open
-                    || self.pointer.moving.is_some() => {}
+                    || self.pointer.moving.is_some()
+                    || self.ui.home.widgets.interacting() => {}
             State::Expanded if self.ui.editing => {
                 self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(1500))
             }
@@ -817,16 +845,6 @@ impl App {
             _ => {}
         }
     }
-}
-
-fn rounded_body_contains((left, top, width, height): view::Rect, radius: f32, (x, y): (f32, f32)) -> bool {
-    if x < left || x >= left + width || y < top || y >= top + height {
-        return false;
-    }
-    let radius = radius.min(width / 2.0).min(height / 2.0).max(0.0);
-    let cx = x.clamp(left + radius, left + width - radius);
-    let cy = y.clamp(top + radius, top + height - radius);
-    (x - cx).powi(2) + (y - cy).powi(2) <= radius.powi(2)
 }
 
 #[cfg(test)]
@@ -838,10 +856,10 @@ mod input_tests {
         for scale in [0.75, 1.0, 1.5, 2.0] {
             let frame = (50.0 * scale, 40.0 * scale, 220.0 * scale, 36.0 * scale);
             for point in [(160.0, 50.0), (60.0, 58.0), (260.0, 58.0)] {
-                assert!(rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
+                assert!(view::rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
             }
             for point in [(160.0, 85.0), (35.0, 58.0), (285.0, 58.0), (51.0, 41.0), (160.0, 30.0)] {
-                assert!(!rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
+                assert!(!view::rounded_body_contains(frame, 18.0 * scale, (point.0 * scale, point.1 * scale)));
             }
         }
     }

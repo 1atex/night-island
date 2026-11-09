@@ -31,12 +31,26 @@ impl App {
         }
         let pill = self.pill_rect(true);
         match view::hit_home(pill, self.scale, x as f32, y as f32, &self.ui) {
+            Some(view::HomeHit::WidgetControl(control)) => self.widget_control(control),
+            Some(view::HomeHit::WidgetHandle(id)) => self.begin_widget_resize(id, x, y),
+            Some(view::HomeHit::Action(id)) if self.ui.home.widgets.editing && !self.ui.home.edit => {
+                self.begin_widget_drag(id as u8, x, y);
+            }
+            Some(view::HomeHit::Live(index)) => self.open_live_activity(index),
             Some(view::HomeHit::Notification) => {
                 if self.settings.notification_open_app {
                     self.activate_notification();
                 } else {
                     self.expand_notification_text();
                 }
+            }
+            Some(view::HomeHit::WaveRate(rating)) => {
+                if let Some(id) = self.ui.yandex.state.current_id.clone() {
+                    crate::services::yandex::send(crate::services::yandex::Command::Rate(id, rating));
+                }
+            }
+            Some(view::HomeHit::NotificationClose) => {
+                self.dismiss_home_notification();
             }
             Some(view::HomeHit::NotificationExpand) => self.expand_notification_text(),
             Some(view::HomeHit::Mixer(_)) => self.click_mixer(x, y),
@@ -48,7 +62,13 @@ impl App {
             Some(view::HomeHit::Player) => media::next_player(),
             Some(view::HomeHit::Wave) => self.select_tab(view::Tab::Yandex),
             Some(view::HomeHit::Action(i)) if self.ui.home.edit => self.toggle_home_action(i),
-            Some(view::HomeHit::Action(i)) if self.ui.notifications.preview.is_some() => self.home_action(i),
+            Some(view::HomeHit::Action(i))
+                if self.settings.home_widgets
+                    || self.ui.notifications.preview.is_some()
+                    || !self.ui.live.is_empty() =>
+            {
+                self.home_action(i)
+            }
             Some(view::HomeHit::Action(i)) => {
                 match self.settings.home_actions.iter().position(|&a| usize::from(a) == i) {
                     Some(slot) => self.ui.home.tile_press = Some((slot, x, y)),
@@ -56,6 +76,10 @@ impl App {
                 }
             }
             Some(view::HomeHit::Edit) => {
+                if self.settings.home_widgets {
+                    self.toggle_widget_editor();
+                    return;
+                }
                 self.close_home_mixer();
                 self.ui.home.edit = !self.ui.home.edit;
                 self.ui.home.edit_scroll = 0;
@@ -136,14 +160,33 @@ impl App {
 
     fn toggle_home_action(&mut self, id: usize) {
         let id = id as u8;
+        if self.settings.home_widgets
+            && !self.settings.home_actions.contains(&id)
+            && !view::can_resize_widget(&self.ui, id, crate::data::home_widgets::WidgetSize::Tile)
+        {
+            self.ui.home.widgets.status = crate::ui::i18n::tr("Not enough room in the grid").into_owned();
+            self.repaint_expanded();
+            return;
+        }
         match self.settings.home_actions.iter().position(|&a| a == id) {
             Some(at) => {
                 self.settings.home_actions.remove(at);
+                self.settings.home_widget_sizes.remove(&id);
+                if id == view::weather_widget_id() {
+                    self.settings.home_weather_widget = false;
+                }
             }
             None if self.settings.home_actions.len() >= view::MAX_HOME_TILES => {
                 return self.notify(Notice::Error, '\u{E783}', "Up to 8 tiles fit: take one off first");
             }
-            None => self.settings.home_actions.push(id),
+            None => {
+                self.settings.home_widget_sizes.remove(&id);
+                self.settings.home_actions.push(id);
+            }
+        }
+        if self.ui.home.widgets.editing {
+            self.ui.home.widgets.selected = self.settings.home_actions.contains(&id).then_some(id);
+            self.ui.home.widgets.status.clear();
         }
         self.settings.save();
         self.ui.cfg = self.settings.clone();
@@ -173,13 +216,24 @@ impl App {
         if !self.pointer.vol_drag {
             return;
         }
+        if self.ui.tab == view::Tab::Yandex {
+            let level =
+                view::wave_volume_level_for(self.pill_rect(true), self.scale, x as f32, self.ui.yandex.legacy_layout);
+            let current = self.ui.yandex.volume_preview.unwrap_or(self.ui.yandex.state.config.volume);
+            if level != current && crate::services::yandex::set_volume(f32::from(level) / 100.0) {
+                self.ui.yandex.volume_preview = Some(level);
+                self.repaint_expanded();
+            }
+            return;
+        }
         let (tl, tr, _) = view::volume_track(self.pill_rect(true), self.scale, view::home_wide(&self.ui));
         let level = ((x as f32 - tl) / (tr - tl).max(1.0)).clamp(0.0, 1.0);
         let current = if self.ui.home.vol_track { self.ui.home.app_vol } else { self.ui.home.vol };
         if (level - current).abs() > 0.004 {
             if self.ui.home.vol_track {
-                self.ui.home.app_vol = level;
-                volume::set_app_volume(&self.ui.media.source, level);
+                if volume::set_app_volume(&self.ui.media.source, level) {
+                    self.ui.home.app_vol = level;
+                }
             } else {
                 self.ui.home.vol = level;
                 volume::set(level);
@@ -452,6 +506,9 @@ impl App {
     }
 
     pub(in crate::island) fn drag_tiles(&mut self, x: i32, y: i32) {
+        if self.drag_widget_resize(x, y) || self.drag_widget(x, y) {
+            return;
+        }
         if self.state != State::Expanded || self.ui.tab != view::Tab::Home {
             return;
         }
@@ -480,6 +537,9 @@ impl App {
     }
 
     pub(in crate::island) fn finish_tile_press(&mut self) {
+        if self.finish_widget_resize() || self.finish_widget_drag() {
+            return;
+        }
         let press = self.ui.home.tile_press.take();
         if let Some(r) = self.ui.home.tile_reorder.take() {
             unsafe {
