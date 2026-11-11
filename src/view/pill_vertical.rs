@@ -20,7 +20,7 @@ const V_DOT: f32 = 15.0;
 
 pub(in crate::view) fn indicators_height(ui: &UiState) -> f32 {
     let dots = usize::from(ui.privacy.mic || ui.mic_muted == Some(true)) + usize::from(ui.privacy.cam);
-    dots as f32 * V_DOT + if vpn_visible(ui) { V_DOT + 2.0 } else { 0.0 }
+    dots as f32 * V_DOT
 }
 
 pub(in crate::view) fn top_reserved(ui: &UiState) -> f32 {
@@ -52,14 +52,16 @@ pub struct VSlots {
 
 pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
     let top = top_reserved(ui);
+    let bottom = V_PAD + vpn_tail(ui);
     let m = music_slots(ui, 1.0, 0.0);
     let weather = m.weather.map(|_| V_WEATHER);
     let battery = battery_height(ui);
     if !row_pill(ui) {
-        let length = (top + weather.unwrap_or(0.0) + V_CLOCK + battery.unwrap_or(0.0) + 2.0 * V_GAP + V_PAD).max(V_MIN);
+        let length =
+            (top + weather.unwrap_or(0.0) + V_CLOCK + battery.unwrap_or(0.0) + 2.0 * V_GAP + bottom).max(V_MIN);
         let total = if pill_len > 0.0 { pill_len / scale } else { length };
         let at = |y: f32, h: f32| (y * scale, h * scale);
-        let free_bottom = total - V_PAD - battery.map_or(0.0, |h| h + V_GAP);
+        let free_bottom = total - bottom - battery.map_or(0.0, |h| h + V_GAP);
         let group_h = V_CLOCK + weather.map_or(0.0, |h| h + V_GAP);
         let start = top + ((free_bottom - top - group_h) / 2.0).max(0.0);
         let before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
@@ -75,7 +77,7 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
             agent: None,
             metrics: None,
             clock: at(clock_y, V_CLOCK),
-            battery: battery.map(|h| at(total - V_PAD - h, h)),
+            battery: battery.map(|h| at(total - bottom - h, h)),
             length,
         };
     }
@@ -89,9 +91,9 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
     let heights = [cover, weather, bars, title, rec, live, agent, metrics, Some(V_CLOCK), battery];
     let count = heights.iter().flatten().count() as f32;
     let content: f32 = heights.iter().flatten().sum::<f32>() + V_GAP * (count - 1.0).max(0.0);
-    let length = (top + content + V_PAD).max(V_MIN);
+    let length = (top + content + bottom).max(V_MIN);
     let total = if pill_len > 0.0 { pill_len / scale } else { length };
-    let mut y = top + (total - top - V_PAD - content).max(0.0) / 2.0;
+    let mut y = top + (total - top - bottom - content).max(0.0) / 2.0;
     let mut place = |h: Option<f32>| {
         h.map(|h| {
             let slot = (y * scale, h * scale);
@@ -120,10 +122,11 @@ pub fn vertical_length(ui: &UiState) -> f32 {
         return (46.0 + notice_text_width(ui, text) + 16.0).clamp(V_MIN, 460.0);
     }
     if ui.volume.is_some() {
-        return V_MIN + 20.0;
+        return V_MIN + 20.0 + vpn_tail(ui);
     }
     if let Some(name) = legacy_download(ui) {
-        return (top_reserved(ui) + 40.0 + chars(&downloading_label(name)) * 6.9 + 16.0).clamp(V_MIN, 420.0);
+        return (top_reserved(ui) + 40.0 + chars(&downloading_label(name)) * 6.9 + 16.0 + vpn_tail(ui))
+            .clamp(V_MIN, 420.0);
     }
     vertical_slots(ui, 1.0, 0.0).length
 }
@@ -148,6 +151,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
         );
     }
     paint_indicators(p, pill, scale, ui)?;
+    let bottom = bottom - vpn_tail(ui) * scale;
     if let Some(level) = ui.volume {
         let level = level.clamp(0.0, 1.0);
         let icon = if level <= 0.001 { '\u{E74F}' } else { '\u{E767}' };

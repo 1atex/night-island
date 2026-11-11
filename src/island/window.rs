@@ -109,7 +109,7 @@ fn show_header_menu(hwnd: HWND) {
             102,
             &crate::ui::i18n::tr(if a.settings.tab_drag { "Stop moving tabs" } else { "Move tabs by dragging" }),
         ));
-        let r = view::more_rect(pill, a.scale);
+        let r = view::more_rect(pill, a.scale, &a.ui);
         point.x = r.0 as i32;
         point.y = (r.3 + 6.0 * a.scale) as i32;
     });

@@ -102,8 +102,7 @@ pub fn tab_rects(pill: Rect, scale: f32, ui: &UiState) -> [Rect; TABS.len()] {
     let (bh, gap, icon_w) = (36.0 * scale, 4.0 * scale, 36.0 * scale);
     let top = y + 12.0 * scale;
     let mut left = x + 12.0 * scale;
-    let more = more_rect(pill, scale);
-    let right = vpn_btn_rect(pill, scale, ui).map_or(more.0, |r| r.0);
+    let right = more_rect(pill, scale, ui).0;
     let dots = [mic_on(ui), ui.privacy.cam].iter().filter(|on| **on).count() as f32 * DOT_STEP * scale;
     let room = (right - dots - 12.0 * scale - left).max(icon_w);
     let home = TABS.iter().position(|tab| tab.0 == Tab::Home).unwrap();
@@ -209,15 +208,16 @@ pub fn pin_rect(pill: Rect, scale: f32) -> Rect {
 const LOCK_STEP: f32 = 34.0;
 const DOT_STEP: f32 = 20.0;
 
-pub fn more_rect(pill: Rect, scale: f32) -> Rect {
+pub fn more_rect(pill: Rect, scale: f32, ui: &UiState) -> Rect {
     let pin = pin_rect(pill, scale);
-    (pin.0 - 66.0 * scale, pin.1, pin.0 - 6.0 * scale, pin.3)
+    let right = pin.0 - (6.0 + if vpn_button(ui) { LOCK_STEP } else { 0.0 }) * scale;
+    (right - 60.0 * scale, pin.1, right, pin.3)
 }
 
 pub fn vpn_btn_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
     vpn_button(ui).then(|| {
-        let more = more_rect(pill, scale);
-        (more.0 - LOCK_STEP * scale, more.1, more.0 - 2.0 * scale, more.3)
+        let pin = pin_rect(pill, scale);
+        (pin.0 - (LOCK_STEP + 2.0) * scale, pin.1, pin.0 - 4.0 * scale, pin.3)
     })
 }
 
@@ -233,15 +233,16 @@ pub fn mic_on(ui: &UiState) -> bool {
 pub enum HeadHit {
     Pin,
     More,
+    Vpn,
     Mic,
     Cam,
 }
 
 pub fn privacy_dots(pill: Rect, scale: f32, ui: &UiState) -> (Option<Rect>, Option<Rect>) {
-    let sw = more_rect(pill, scale);
+    let sw = more_rect(pill, scale, ui);
     let size = 11.0 * scale;
     let mid = (sw.1 + sw.3) / 2.0;
-    let mut right = vpn_btn_rect(pill, scale, ui).map_or(sw.0, |r| r.0) - 6.0 * scale;
+    let mut right = sw.0 - 6.0 * scale;
     let mut next = |on: bool| {
         on.then(|| {
             let r = (right - size, mid - size / 2.0, right, mid + size / 2.0);
@@ -258,8 +259,11 @@ pub fn hit_head(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Optio
     if inside(pin_rect(pill, scale), px, py) {
         return Some(HeadHit::Pin);
     }
-    if inside(more_rect(pill, scale), px, py) {
+    if inside(more_rect(pill, scale, ui), px, py) {
         return Some(HeadHit::More);
+    }
+    if hit_vpn_btn(pill, scale, ui, px, py) {
+        return Some(HeadHit::Vpn);
     }
     let pad = 5.0 * scale;
     let near =
@@ -282,7 +286,7 @@ fn active_header_rect(rects: &[Rect; TABS.len()], pill: Rect, scale: f32, ui: &U
     {
         return drag.reorder.dragged_rect((rect.2 - rect.0, rect.3 - rect.1));
     }
-    if rect.2 > rect.0 { rect } else { more_rect(pill, scale) }
+    if rect.2 > rect.0 { rect } else { more_rect(pill, scale, ui) }
 }
 
 fn paint_active_header(p: &Painter, rect: Rect, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
@@ -409,7 +413,7 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         16.0 * scale,
         rgba(1.0, 1.0, 1.0, if ui.pinned { 1.0 } else { 0.62 }),
     )?;
-    let more = more_rect(pill, scale);
+    let more = more_rect(pill, scale, ui);
     let overflow_active = overflow_tabs(pill, scale, ui).iter().any(|&i| TABS[i].0 == bar_tab(ui.tab));
     if !ui.cfg.header_active_accent && overflow_active || ui.hover_head == Some(HeadHit::More) {
         p.fill_round_rect(
@@ -433,7 +437,7 @@ pub fn paint_expanded(p: &Painter, pill: Rect, scale: f32, ui: &UiState, clips: 
         rgba(1.0, 1.0, 1.0, 0.78),
     )?;
     if let Some(r) = vpn_btn_rect(pill, scale, ui) {
-        p.glyph(VPN_GLYPH, r, 16.0 * scale, vpn_color(ui))?;
+        paint_vpn_button(p, r, scale, ui)?;
     }
     let (mic, cam) = privacy_dots(pill, scale, ui);
     if let Some(r) = mic {
@@ -580,7 +584,7 @@ mod tests {
                     let active = TABS.iter().position(|entry| entry.0 == bar_tab(tab)).unwrap();
                     assert_eq!(
                         target,
-                        if rects[active].2 > rects[active].0 { rects[active] } else { more_rect(pill, scale) }
+                        if rects[active].2 > rects[active].0 { rects[active] } else { more_rect(pill, scale, &ui) }
                     );
                 }
             }
@@ -629,7 +633,7 @@ mod tests {
                     assert!(!overflow.contains(&i));
                     let mut boxes: Vec<_> = rects.into_iter().filter(|r| r.2 > r.0).collect();
                     assert!(boxes.len() <= 7);
-                    boxes.extend([more_rect(pill, scale), pin_rect(pill, scale)]);
+                    boxes.extend([more_rect(pill, scale, &ui), pin_rect(pill, scale)]);
                     boxes.extend(vpn_btn_rect(pill, scale, &ui));
                     let (mic, cam) = privacy_dots(pill, scale, &ui);
                     boxes.extend(mic);
@@ -643,7 +647,7 @@ mod tests {
                             assert_eq!(overflow.contains(&j), rects[j].2 <= rects[j].0);
                         }
                     }
-                    let more = more_rect(pill, scale);
+                    let more = more_rect(pill, scale, &ui);
                     assert!(matches!(
                         hit_head(pill, scale, &ui, (more.0 + more.2) / 2.0, (more.1 + more.3) / 2.0),
                         Some(HeadHit::More)

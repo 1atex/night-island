@@ -99,6 +99,11 @@ impl App {
     }
 
     pub(in crate::island) fn click_collapsed(&mut self, x: i32, y: i32) {
+        if self.pill_motion.intro.is_none()
+            && view::collapsed_vpn_at(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32).is_some()
+        {
+            return self.toggle_vpn();
+        }
         if self.ui.notice.is_none() && self.ui.volume.is_none() && !self.ui.live.is_empty() {
             let pill = self.pill_rect(false);
             let slot = if self.settings.vertical() {

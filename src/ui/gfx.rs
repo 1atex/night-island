@@ -1216,6 +1216,35 @@ impl Painter<'_> {
         from: D2D1_COLOR_F,
         to: D2D1_COLOR_F,
     ) -> Result<()> {
+        let brush = self.linear_brush((rect.0, rect.1), (rect.2, rect.3), from, to)?;
+        unsafe {
+            self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
+        }
+        Ok(())
+    }
+
+    pub fn card_shadow(&self, rect: (f32, f32, f32, f32), radius: f32, scale: f32) -> Result<()> {
+        let (l, t, r, b) = rect;
+        let brush = self.linear_brush(
+            (l, b - radius.max(scale)),
+            (l, b + scale),
+            rgba(0.0, 0.0, 0.0, 0.0),
+            rgba(0.0, 0.0, 0.0, 0.16),
+        )?;
+        let offset = 0.75 * scale;
+        unsafe {
+            self.dc.DrawRoundedRectangle(&rounded((l, t + offset, r, b + offset), radius), &brush, scale, None);
+        }
+        Ok(())
+    }
+
+    fn linear_brush(
+        &self,
+        start: (f32, f32),
+        end: (f32, f32),
+        from: D2D1_COLOR_F,
+        to: D2D1_COLOR_F,
+    ) -> Result<windows::Win32::Graphics::Direct2D::ID2D1LinearGradientBrush> {
         use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
         use windows::Win32::Graphics::Direct2D::{
             D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
@@ -1226,17 +1255,15 @@ impl Painter<'_> {
                 D2D1_GAMMA_2_2,
                 D2D1_EXTEND_MODE_CLAMP,
             )?;
-            let brush = self.dc.CreateLinearGradientBrush(
+            self.dc.CreateLinearGradientBrush(
                 &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                    startPoint: windows_numerics::Vector2 { X: rect.0, Y: rect.1 },
-                    endPoint: windows_numerics::Vector2 { X: rect.2, Y: rect.3 },
+                    startPoint: windows_numerics::Vector2 { X: start.0, Y: start.1 },
+                    endPoint: windows_numerics::Vector2 { X: end.0, Y: end.1 },
                 },
                 None,
                 &stops,
-            )?;
-            self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
+            )
         }
-        Ok(())
     }
 
     pub fn fill_capsule_progress(&self, rect: (f32, f32, f32, f32), fraction: f32, base: (u8, u8, u8)) -> Result<()> {

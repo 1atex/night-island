@@ -99,6 +99,12 @@ fn home_tip(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<(S
         HomeHit::Edit => {
             (if ui.home.edit { "Done" } else { "Choose the tiles" }.into(), edit_button(pill, scale, wide))
         }
+        HomeHit::WidgetCommand(WidgetCommand::Vpn)
+            if ui.cfg.vpn_provider != crate::data::settings::VpnProvider::Happ =>
+        {
+            let (_, rect, _) = home_widget_rects(pill, scale, ui).into_iter().find(|(_, r, _)| inside(*r, px, py))?;
+            (vpn_action(ui).into(), vpn_quick_rect(rect, scale))
+        }
         HomeHit::VolumeIcon => {
             let row = volume_row(pill, scale, wide);
             (

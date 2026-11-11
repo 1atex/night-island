@@ -4,19 +4,7 @@ pub(in crate::view) fn card_depth(p: &Painter, rect: Rect, radius: f32, scale: f
     if !ui.cfg.card_shadows {
         return Ok(());
     }
-    for (spread, opacity) in [(1.65, 0.10), (0.75, 0.22)] {
-        let d = spread * scale;
-        let outline = (rect.0 - d, rect.1, rect.2 + d, rect.3 + 2.0 * d);
-        p.stroke_round_rect(outline, radius + d, 1.4 * scale, rgba(0.0, 0.0, 0.0, opacity))?;
-    }
-    p.fill_round_gradient(rect, radius, rgba(1.0, 1.0, 1.0, 0.055), rgba(0.0, 0.0, 0.0, 0.035))?;
-    let inset = 0.5 * scale;
-    p.stroke_round_rect(
-        (rect.0 + inset, rect.1 + inset, rect.2 - inset, rect.3 - inset),
-        (radius - inset).max(0.0),
-        scale,
-        rgba(1.0, 1.0, 1.0, 0.095),
-    )
+    p.card_shadow(rect, radius, scale)
 }
 
 #[allow(clippy::too_many_arguments)]

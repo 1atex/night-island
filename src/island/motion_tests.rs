@@ -748,6 +748,23 @@ fn native_tool_widgets_and_assistant_settings_preview() -> Result<()> {
     };
     let compositor = Compositor::new()?;
     let gpu = Gpu::new(&compositor)?;
+    let shadows = crate::ui::popup::PopupSurface::new((256, 128))?;
+    for scale in [1.0, 1.5, 2.0] {
+        let bounds = (10.0 * scale, 10.0 * scale, 110.0 * scale, 50.0 * scale);
+        shadows.paint(&gpu, |p| {
+            p.fill_rect((0.0, 0.0, 256.0, 128.0), crate::ui::gfx::rgba(0.6, 0.6, 0.6, 1.0))?;
+            p.card_shadow(bounds, 12.0 * scale, scale)
+        })?;
+        let pixels = shadows.pixels();
+        let sample = |x: f32, y: f32| pixels[4 * (y as usize * 256 + x as usize)];
+        let background = sample(0.0, 0.0);
+        let center = (bounds.0 + bounds.2) / 2.0;
+        assert_eq!(sample(center, bounds.1), background);
+        assert_eq!(sample(bounds.0, (bounds.1 + bounds.3) / 2.0), background);
+        let contact = sample(center, bounds.3 + (0.75 * scale).floor());
+        assert!(contact < background && background - contact < 32);
+        assert_eq!(sample(center, bounds.3 + 2.0 * scale), background);
+    }
     let surface = crate::ui::popup::PopupSurface::new((1320, 1230))?;
     let mut ui = view::UiState::new();
     ui.cfg.home_weather_widget = false;

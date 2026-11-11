@@ -54,7 +54,6 @@ impl App {
             if in_header
                 && view::hit_tab(self.pill_full(), self.scale, fx, fy, &self.ui).is_none()
                 && view::hit_head(self.pill_full(), self.scale, &self.ui, fx, fy).is_none()
-                && !view::hit_vpn_btn(self.pill_full(), self.scale, &self.ui, fx, fy)
             {
                 let mut pt = windows::Win32::Foundation::POINT::default();
                 unsafe {
@@ -432,7 +431,8 @@ impl App {
             view::HeadHit::Pin => {
                 (if self.ui.pinned { "Let it close" } else { "Keep open" }, view::pin_rect(self.pill_full(), s))
             }
-            view::HeadHit::More => ("More tabs and actions", view::more_rect(self.pill_full(), s)),
+            view::HeadHit::More => ("More tabs and actions", view::more_rect(self.pill_full(), s, &self.ui)),
+            view::HeadHit::Vpn => (view::vpn_action(&self.ui), view::vpn_btn_rect(self.pill_full(), s, &self.ui)?),
             view::HeadHit::Mic => {
                 let muted = self.ui.mic_muted == Some(true);
                 (
@@ -494,12 +494,10 @@ impl App {
                 self.want_header_menu = true;
                 return;
             }
+            Some(view::HeadHit::Vpn) => return self.toggle_vpn(),
             Some(view::HeadHit::Mic) => return self.toggle_mic(),
             Some(view::HeadHit::Cam) => return,
             None => {}
-        }
-        if view::hit_vpn_btn(self.pill_full(), self.scale, &self.ui, x as f32, y as f32) {
-            return self.toggle_vpn();
         }
         if let Some(sub) = view::hit_subtab(self.pill_full(), self.scale, x as f32, y as f32, &self.ui) {
             if self.ui.tab != sub {
@@ -779,11 +777,13 @@ impl App {
             let hidden = matches!(self.state, State::Hidden | State::Hiding);
             let over_mic = self.state == State::Collapsed
                 && view::hit_mic_dot(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32);
+            let vpn = view::collapsed_vpn_at(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32)
+                .filter(|_| self.state == State::Collapsed && self.pill_motion.intro.is_none());
             let over_spark = self.can_release_character(x, y);
             self.ui.hand = self.state == State::Collapsed
                 && self.on_pill(x, y)
-                && (over_mic || over_spark || self.recording.is_some() || self.notice_link.is_some());
-            let hover = over_mic.then_some(view::HeadHit::Mic);
+                && (over_mic || vpn.is_some() || over_spark || self.recording.is_some() || self.notice_link.is_some());
+            let hover = over_mic.then_some(view::HeadHit::Mic).or(vpn.map(|_| view::HeadHit::Vpn));
             if self.state == State::Collapsed && hover != self.ui.hover_head {
                 self.ui.hover_head = hover;
                 self.repaint_collapsed();
@@ -791,6 +791,8 @@ impl App {
             let tip = if over_spark {
                 let (w, h) = self.char_size();
                 Some(("Click or drag to release the character".to_string(), (x as f32 + w / 2.0, y as f32 + h)))
+            } else if let Some(r) = vpn {
+                Some((view::vpn_action(&self.ui).to_owned(), ((r.0 + r.2) / 2.0, r.3)))
             } else {
                 hover.and_then(|_| {
                     let dot = view::indicators(self.pill_rect(false), self.scale, &self.ui).0?;
@@ -799,7 +801,7 @@ impl App {
                 })
             };
             self.set_tip(tip);
-            if !over_mic && !over_spark && (hidden || self.on_pill(x, y)) {
+            if hover.is_none() && !over_spark && (hidden || self.on_pill(x, y)) {
                 self.set_timer(Timer::Expand, self.settings.open_delay_ms.max(1));
             } else {
                 self.kill_timer(Timer::Expand);

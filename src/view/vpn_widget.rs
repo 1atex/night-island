@@ -13,11 +13,7 @@ fn caption(p: &Painter, text: &str, r: Rect, s: f32, strong: bool, alpha: f32) -
 }
 
 pub fn vpn_quick_rect(r: Rect, s: f32) -> Rect {
-    if r.3 - r.1 > 120.0 * s {
-        (r.0 + 8.0 * s, r.3 - 30.0 * s, r.2 - 8.0 * s, r.3 - 6.0 * s)
-    } else {
-        (r.2 - 34.0 * s, r.1 + 8.0 * s, r.2 - 8.0 * s, r.1 + 34.0 * s)
-    }
+    (r.2 - 40.0 * s, r.1 + 6.0 * s, r.2 - 8.0 * s, r.1 + 38.0 * s)
 }
 
 pub fn vpn_favorite_rects(r: Rect, s: f32, ui: &UiState) -> Vec<(Rect, Option<usize>)> {
@@ -62,7 +58,7 @@ pub fn paint_vpn_widget(p: &Painter, r: Rect, s: f32, ui: &UiState) -> Result<()
     let (w, h) = ((r.2 - r.0) / s, (r.3 - r.1) / s);
     let quick = vpn_quick_rect(r, s);
     let x = r.0 + 10.0 * s;
-    let end = if h > 120.0 { r.2 - 8.0 * s } else { quick.0 - 4.0 * s };
+    let end = quick.0 - 4.0 * s;
     let compact = w < 150.0 && h < 60.0;
     let title = if off {
         "VPN".to_owned()
@@ -115,38 +111,20 @@ pub fn paint_vpn_widget(p: &Painter, r: Rect, s: f32, ui: &UiState) -> Result<()
     } else {
         crate::ui::i18n::tr(status).into_owned()
     };
-    caption(
-        p,
-        &detail,
-        (x, r.1 + 23.0 * s, if h > 120.0 { r.2 - 8.0 * s } else { end }, r.1 + 43.0 * s),
-        s,
-        false,
-        0.65,
-    )?;
+    caption(p, &detail, (x, r.1 + 23.0 * s, end, r.1 + 43.0 * s), s, false, 0.65)?;
     p.fill_round_rect(quick, 8.0 * s, acc(if ui.vpn_busy { 0.1 } else { 0.22 }))?;
-    if h > 120.0 {
-        caption(
-            p,
-            if off { "VPN" } else { state.action() },
-            (quick.0 + 6.0 * s, quick.1, quick.2 - 4.0 * s, quick.3),
-            s,
-            true,
-            0.95,
-        )?;
-    } else {
-        p.glyph(
-            if ui.vpn_busy {
-                '\u{E712}'
-            } else if state.access != "allowed" {
-                '\u{E8A7}'
-            } else {
-                '\u{E7E8}'
-            },
-            quick,
-            14.0 * s,
-            acc(0.95),
-        )?;
-    }
+    p.glyph(
+        if ui.vpn_busy {
+            '\u{E712}'
+        } else if state.access != "allowed" {
+            '\u{E8A7}'
+        } else {
+            '\u{E7E8}'
+        },
+        quick,
+        18.0 * s,
+        acc(0.95),
+    )?;
     let favorites = vpn_favorite_rects(r, s, ui);
     if (w > 150.0 && h > 80.0 || h > 160.0) && favorites.is_empty() && !off {
         caption(

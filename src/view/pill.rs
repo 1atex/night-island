@@ -85,7 +85,7 @@ pub fn indicators(pill: Rect, scale: f32, ui: &UiState) -> (Option<Rect>, Option
 
 pub fn indicators_width(ui: &UiState, scale: f32) -> f32 {
     let any = ui.privacy.mic || ui.mic_muted == Some(true) || ui.privacy.cam;
-    (if any { 12.0 } else { 0.0 } + if vpn_visible(ui) { 19.0 } else { 0.0 }) * scale
+    if any { 12.0 * scale } else { 0.0 }
 }
 
 pub fn vpn_visible(ui: &UiState) -> bool {
@@ -94,6 +94,20 @@ pub fn vpn_visible(ui: &UiState) -> bool {
 
 pub fn vpn_button(ui: &UiState) -> bool {
     ui.cfg.vpn_pill && ui.vpn.is_some()
+}
+
+pub fn vpn_action(ui: &UiState) -> &str {
+    if ui.vpn_busy {
+        "Please wait…"
+    } else if ui.cfg.vpn_provider == crate::data::settings::VpnProvider::Svoi {
+        ui.svoi.action()
+    } else if ui.vpn == Some(true) {
+        "Disconnect"
+    } else if ui.cfg.vpn_provider == crate::data::settings::VpnProvider::Off {
+        "VPN"
+    } else {
+        "Connect"
+    }
 }
 
 pub const VPN_GLYPH: char = '\u{EA18}';
@@ -109,20 +123,33 @@ pub fn vpn_color(ui: &UiState) -> windows::Win32::Graphics::Direct2D::Common::D2
     }
 }
 
+const VPN_TARGET: f32 = 28.0;
+const VPN_MARGIN: f32 = 8.0;
+
+pub(in crate::view) fn vpn_tail(ui: &UiState) -> f32 {
+    if vpn_visible(ui) { VPN_TARGET } else { 0.0 }
+}
+
 pub fn vpn_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
-    if !vpn_visible(ui) {
+    if !vpn_visible(ui) || ui.notice.is_some() {
         return None;
     }
     let (x, y, w, h) = pill;
-    let any = ui.privacy.mic || ui.mic_muted == Some(true) || ui.privacy.cam;
-    let size = 14.0 * scale;
-    if ui.cfg.vertical() {
-        let dots = usize::from(ui.privacy.mic || ui.mic_muted == Some(true)) + usize::from(ui.privacy.cam);
-        let top = y + (16.0 + ui.char_inset + dots as f32 * 15.0) * scale;
-        return Some((x + (w - size) / 2.0, top, x + (w + size) / 2.0, top + size));
+    let half = VPN_TARGET * scale / 2.0;
+    let end = (VPN_MARGIN + VPN_TARGET / 2.0) * scale;
+    let (cx, cy) = if ui.cfg.vertical() { (x + w / 2.0, y + h - end) } else { (x + w - end, y + h / 2.0) };
+    Some((cx - half, cy - half, cx + half, cy + half))
+}
+
+pub fn collapsed_vpn_at(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> Option<Rect> {
+    vpn_rect(pill, scale, ui).filter(|r| !ui.track_in_flight && inside(*r, px, py))
+}
+
+pub(in crate::view) fn paint_vpn_button(p: &Painter, r: Rect, scale: f32, ui: &UiState) -> Result<()> {
+    if ui.hover_head == Some(HeadHit::Vpn) {
+        p.fill_round_rect(r, (r.3 - r.1) / 2.0, rgba(1.0, 1.0, 1.0, 0.09))?;
     }
-    let left = x + (15.0 + ui.char_inset) * scale + if any { 12.0 * scale } else { 0.0 };
-    Some((left, y + h / 2.0 - size / 2.0, left + size, y + h / 2.0 + size / 2.0))
+    p.glyph(VPN_GLYPH, r, 20.0 * scale, vpn_color(ui))
 }
 
 pub fn hit_mic_dot(pill: Rect, scale: f32, ui: &UiState, px: f32, py: f32) -> bool {
@@ -162,7 +189,7 @@ pub(in crate::view) fn paint_indicators(p: &Painter, pill: Rect, scale: f32, ui:
         p.glyph('\u{E714}', (cx - half, cy - half, cx + half, cy + half), 11.0 * scale, rgba(0.3, 0.85, 0.45, 1.0))?;
     }
     if let Some(r) = vpn_rect(pill, scale, ui) {
-        p.glyph(VPN_GLYPH, r, 12.0 * scale, vpn_color(ui))?;
+        paint_vpn_button(p, r, scale, ui)?;
     }
     Ok(())
 }
@@ -343,9 +370,10 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let count = widths.iter().flatten().count() as f32;
     let content: f32 = widths.iter().flatten().sum::<f32>() + SLOT_GAP * (count - 1.0).max(0.0)
         - if weather.is_some() { SLOT_GAP - weather_clock_gap(ui) } else { 0.0 };
-    let width = (32.0 + shift + content).max(200.0);
+    let tail = vpn_tail(ui);
+    let width = (32.0 + shift + content + tail).max(200.0);
     let total = if pill_w > 0.0 { pill_w / scale } else { width };
-    let mut x = 16.0 + shift + (total - 32.0 - shift - content).max(0.0) / 2.0;
+    let mut x = 16.0 + shift + (total - 32.0 - shift - content - tail).max(0.0) / 2.0;
     let mut place = |w: Option<f32>, gap: f32| {
         w.map(|w| {
             let slot = (x * scale, w * scale);
@@ -383,11 +411,12 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
         return (ui.char_inset + notice_text_width(ui, text) + 60.0).clamp(base.min(460.0), 460.0);
     }
     if ui.volume.is_some() {
-        return base;
+        return base + vpn_tail(ui);
     }
     if let Some(name) = legacy_download(ui) {
         let shift = ui.char_inset + indicators_width(ui, 1.0);
-        return (shift + 40.0 + chars(&downloading_label(name)) * 6.9 + 18.0).clamp(base.min(420.0), 420.0);
+        return (shift + 40.0 + chars(&downloading_label(name)) * 6.9 + 18.0 + vpn_tail(ui))
+            .clamp(base.min(420.0), 420.0);
     }
     if row_pill(ui) {
         return music_slots(ui, 1.0, 0.0).width.max(base);
@@ -624,10 +653,11 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         );
     }
     paint_indicators(p, pill, scale, ui)?;
+    let end = x + w - vpn_tail(ui) * scale;
     if let Some(level) = ui.volume {
         let icon = if level <= 0.001 { '\u{E74F}' } else { '\u{E767}' };
         p.glyph(icon, (x + 10.0 * scale + inset, y, x + 40.0 * scale + inset, y + h), 16.0 * scale, WHITE)?;
-        let (tl, tr) = (x + 46.0 * scale + inset, x + w - 52.0 * scale);
+        let (tl, tr) = (x + 46.0 * scale + inset, end - 52.0 * scale);
         let cy = y + h / 2.0;
         p.fill_round_rect((tl, cy - 3.0 * scale, tr, cy + 3.0 * scale), 3.0 * scale, rgba(1.0, 1.0, 1.0, 0.22))?;
         p.fill_round_rect(
@@ -637,7 +667,7 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         )?;
         return p.text(
             &format!("{}%", (level * 100.0).round() as u32),
-            (tr + 4.0 * scale, y, x + w - 8.0 * scale, y + h),
+            (tr + 4.0 * scale, y, end - 8.0 * scale, y + h),
             12.5 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_TRAILING,
@@ -650,7 +680,7 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
         let label = downloading_label(name);
         return p.text(
             &label,
-            (x + 40.0 * scale + shift, y, x + w - 14.0 * scale, y + h),
+            (x + 40.0 * scale + shift, y, end - 14.0 * scale, y + h),
             12.5 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_LEADING,
@@ -841,6 +871,50 @@ mod tests {
             city_missing: false,
         });
         ui
+    }
+
+    #[test]
+    fn vpn_button_keeps_its_trailing_slot_across_pill_layouts() {
+        let mut ui = weather_ui();
+        ui.cfg.vpn_pill = true;
+        ui.vpn = Some(true);
+        ui.privacy.mic = true;
+        ui.privacy.cam = true;
+        ui.char_inset = 28.0;
+        ui.media.playing = true;
+        ui.media.title = "Track".into();
+        for scale in [0.75, 1.0, 1.25, 1.5, 2.0] {
+            for edge in Edge::ALL {
+                ui.cfg.placement = Placement::Docked;
+                ui.cfg.dock_edge = edge;
+                let length = collapsed_width(&ui, 200.0) * scale;
+                let (w, h) = if ui.cfg.vertical() { (46.0 * scale, length) } else { (length, 34.0 * scale) };
+                let pill = (12.0, 19.0, w, h);
+                let r = vpn_rect(pill, scale, &ui).unwrap();
+                assert!((r.2 - r.0 - 28.0 * scale).abs() < 0.01);
+                let (cx, cy) = ((r.0 + r.2) / 2.0, (r.1 + r.3) / 2.0);
+                assert_eq!(collapsed_vpn_at(pill, scale, &ui, cx, cy), Some(r));
+                if ui.cfg.vertical() {
+                    let slots = vertical_slots(&ui, scale, length);
+                    for (offset, size) in [Some(slots.clock), slots.weather, slots.battery].into_iter().flatten() {
+                        assert!(pill.1 + offset + size <= r.1);
+                    }
+                    assert!((pill.1 + h - r.3 - 8.0 * scale).abs() < 0.01);
+                } else {
+                    let slots = music_slots(&ui, scale, length);
+                    for (offset, size) in [Some(slots.clock), slots.weather, slots.battery].into_iter().flatten() {
+                        assert!(pill.0 + offset + size <= r.0);
+                    }
+                    assert!((pill.0 + w - r.2 - 8.0 * scale).abs() < 0.01);
+                }
+                ui.notice = Some(('!', "Notice".into()));
+                assert!(collapsed_vpn_at(pill, scale, &ui, cx, cy).is_none());
+                ui.notice = None;
+            }
+        }
+        ui.cfg.vpn_pill = false;
+        assert_eq!(vpn_tail(&ui), 0.0);
+        assert!(vpn_rect((0.0, 0.0, 250.0, 34.0), 1.0, &ui).is_none());
     }
 
     #[test]
