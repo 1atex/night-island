@@ -45,6 +45,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Card shadows in the open island" => "Тени карточек в раскрытом острове",
         "Window switcher" => "Переключатель окон",
         "All windows" => "Все окна",
+        "Use Island for Alt+Tab" => "Открывать меню Island по Alt+Tab",
+        "Release Alt to switch" => "Отпустите Alt для перехода",
         "Middle-click the dock for all windows. Click a grouped app to choose its window." => {
             "Нажмите колёсико над доком для обзора всех окон. Нажмите значок программы с несколькими окнами, чтобы выбрать окно."
         }

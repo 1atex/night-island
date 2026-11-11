@@ -156,10 +156,10 @@ pub fn handle_cli() -> bool {
     }
     let action = args.get(2).map(String::as_str).unwrap_or("state");
     let id = args.get(3).map(String::as_str).unwrap_or("");
-    if ["state", "favorites", "connect", "switch", "disconnect"].contains(&action) {
-        if let Ok(value) = serde_json::to_string(&svoi::request(action, id)) {
-            println!("{value}");
-        }
+    if ["state", "favorites", "connect", "switch", "disconnect"].contains(&action)
+        && let Ok(value) = serde_json::to_string(&svoi::request(action, id))
+    {
+        println!("{value}");
     }
     true
 }

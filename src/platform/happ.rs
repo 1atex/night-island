@@ -256,10 +256,10 @@ pub fn toggle(hwnd: HWND) -> bool {
     let generation = GENERATION.load(Ordering::SeqCst);
     std::thread::spawn(move || {
         let outcome = switch_now();
-        if generation == GENERATION.load(Ordering::SeqCst) {
-            if let Ok(mut r) = RESULT.lock() {
-                *r = Some(outcome);
-            }
+        if generation == GENERATION.load(Ordering::SeqCst)
+            && let Ok(mut r) = RESULT.lock()
+        {
+            *r = Some(outcome);
         }
         SWITCHING.store(false, Ordering::SeqCst);
         post(raw);

@@ -603,6 +603,50 @@ fn native_alpha_popup_thumbnail_compatibility() -> Result<()> {
     Ok(())
 }
 
+fn focus_fixture(hwnd: HWND) -> Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    unsafe {
+        let _ = SetForegroundWindow(hwnd);
+        pump();
+        if GetForegroundWindow() == hwnd {
+            return Ok(());
+        }
+        let mut rect = RECT::default();
+        let mut old = POINT::default();
+        GetCursorPos(&mut old)?;
+        GetWindowRect(hwnd, &mut rect)?;
+        let work = desktop::monitors().into_iter().find(|m| m.primary).unwrap().work;
+        let pos = POINT { x: (work.left + work.right) / 2 - 105, y: (work.top + work.bottom) / 2 - 80 };
+        SetWindowPos(hwnd, Some(HWND_TOPMOST), pos.x, pos.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE)?;
+        let point = POINT { x: pos.x + 98, y: pos.y + 62 };
+        let mouse = |dw_flags| INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 { mi: MOUSEINPUT { dwFlags: dw_flags, ..Default::default() } },
+        };
+        let result = (|| -> Result<()> {
+            for _ in 0..12 {
+                pump();
+                if WindowFromPoint(point) == hwnd {
+                    break;
+                }
+            }
+            assert_eq!(WindowFromPoint(point), hwnd, "Fixture must own the click location");
+            SetCursorPos(point.x, point.y)?;
+            assert_eq!(WindowFromPoint(point), hwnd);
+            if SendInput(&[mouse(MOUSEEVENTF_LEFTDOWN), mouse(MOUSEEVENTF_LEFTUP)], size_of::<INPUT>() as i32) != 2 {
+                return Err(windows::core::Error::from_thread());
+            }
+            pump();
+            Ok(())
+        })();
+        let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), rect.left, rect.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        let _ = SetCursorPos(old.x, old.y);
+        result?;
+        assert_eq!(GetForegroundWindow(), hwnd, "Fixture needs foreground input");
+    }
+    Ok(())
+}
+
 #[test]
 #[ignore = "Uses live DWM thumbnails and the Windows foreground window"]
 fn native_switcher_and_window_flight() -> Result<()> {
@@ -624,7 +668,17 @@ fn native_switcher_and_window_flight() -> Result<()> {
     let compositor = Compositor::new()?;
     let gpu = Gpu::new(&compositor)?;
     let work = desktop::monitors().into_iter().find(|m| m.primary).unwrap().work;
+    struct Foreground(HWND);
+    impl Drop for Foreground {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = SetForegroundWindow(self.0);
+            }
+        }
+    }
+    let _foreground = Foreground(unsafe { GetForegroundWindow() });
     let sources = fixture_sources(work, WS_EX_APPWINDOW)?;
+    focus_fixture(sources.0[0])?;
     let path = std::env::current_exe().unwrap().to_string_lossy().into_owned();
     let windows: Vec<_> = sources
         .0
@@ -645,7 +699,12 @@ fn native_switcher_and_window_flight() -> Result<()> {
         &gpu,
         items,
         "Windows".into(),
-        Placement { work, above: work.bottom - 100, scale: 1.0, hidden: false },
+        Placement {
+            work,
+            anchor: crate::ui::dock_switcher::Anchor::Dock(work.bottom - 100),
+            scale: 1.0,
+            hidden: false,
+        },
         &Default::default(),
     )?;
     let until = Instant::now() + Duration::from_millis(250);
@@ -670,6 +729,7 @@ fn native_switcher_and_window_flight() -> Result<()> {
     }
     assert_eq!(popup.take_choice().unwrap().handle, windows[1].handle);
     drop(popup);
+    focus_fixture(sources.0[0])?;
     let anchor =
         RECT { left: work.left + 500, top: work.bottom - 90, right: work.left + 550, bottom: work.bottom - 40 };
     let mut flight = Flight::start(&windows[1], anchor, false, false).expect("minimize animation");
@@ -698,5 +758,8 @@ fn native_switcher_and_window_flight() -> Result<()> {
     pump();
     assert!(!unsafe { IsIconic(sources.0[1]).as_bool() });
     assert_eq!(unsafe { GetForegroundWindow() }, sources.0[1]);
+    let (_child, external) = desktop::tests::window_fixture(true);
+    focus_fixture(HWND(external[1].handle as _))?;
+    crate::ui::desktop_dock::tests::exercise_keyboard_switcher(sources.0[0], &compositor, &gpu, &external)?;
     Ok(())
 }

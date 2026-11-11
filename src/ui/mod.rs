@@ -27,6 +27,7 @@ pub mod notification_card;
 
 pub mod desktop_dock;
 
+mod dock_alt_tab;
 pub mod dock_preview;
 mod dock_switcher;
 mod dock_window_motion;

@@ -56,12 +56,11 @@ impl App {
             Some(view::HomeHit::VpnFavorite(index)) => {
                 if !self.ui.vpn_busy
                     && let Some(server) = self.ui.svoi.favorites.get(index)
+                    && vpn::command(self.hwnd, "switch", &server.id)
                 {
-                    if vpn::command(self.hwnd, "switch", &server.id) {
-                        self.ui.vpn_busy = true;
-                        self.repaint_expanded();
-                        self.repaint_collapsed();
-                    }
+                    self.ui.vpn_busy = true;
+                    self.repaint_expanded();
+                    self.repaint_collapsed();
                 }
             }
             Some(view::HomeHit::VpnMore) => {

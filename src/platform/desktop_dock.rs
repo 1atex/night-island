@@ -348,7 +348,7 @@ pub fn foreground_app_hidden(monitor: &Monitor, hidden_apps: &[String]) -> bool 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::os::windows::process::CommandExt;
     use std::process::{Child, Command, Stdio};
@@ -453,15 +453,16 @@ mod tests {
         let Some(file) = std::env::var_os("NI_DOCK_WINDOW_FIXTURE") else { return };
         unsafe {
             let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap();
+            let interactive = std::env::var_os("NI_DOCK_SHORTCUT_FIXTURE").is_some();
             let handles: Vec<_> = (0..2)
                 .map(|_| {
                     CreateWindowExW(
-                        WS_EX_NOACTIVATE,
+                        if interactive { WS_EX_APPWINDOW } else { WS_EX_NOACTIVATE },
                         w!("STATIC"),
                         w!("Night Island dock test fixture"),
                         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                        -12000,
-                        -12000,
+                        if interactive { 80 } else { -12000 },
+                        if interactive { 100 } else { -12000 },
                         320,
                         180,
                         None,
@@ -492,27 +493,37 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "Creates temporary offscreen native windows in a child process"]
-    fn native_dock_discovers_and_restores_other_process_windows() {
-        struct Fixture {
-            child: Child,
-            file: std::path::PathBuf,
-            foreground: HWND,
-        }
-        impl Drop for Fixture {
-            fn drop(&mut self) {
-                let _ = self.child.kill();
-                let _ = self.child.wait();
-                let _ = std::fs::remove_file(&self.file);
-                unsafe {
-                    let _ = SetForegroundWindow(self.foreground);
-                }
+    pub(crate) struct Fixture {
+        child: Child,
+        file: std::path::PathBuf,
+        foreground: HWND,
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_file(&self.file);
+            unsafe {
+                let _ = SetForegroundWindow(self.foreground);
             }
         }
+    }
+    fn wait(predicate: &dyn Fn() -> bool) {
+        let started = Instant::now();
+        while !predicate() && started.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(predicate());
+    }
+
+    pub(crate) fn window_fixture(interactive: bool) -> (Fixture, Vec<Window>) {
         let file = std::env::temp_dir().join(format!("night-island-dock-fixture-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&file);
-        let child = Command::new(std::env::current_exe().unwrap())
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        if interactive {
+            command.env("NI_DOCK_SHORTCUT_FIXTURE", "1");
+        }
+        let child = command
             .args([
                 "--ignored",
                 "--exact",
@@ -527,13 +538,6 @@ mod tests {
             .spawn()
             .unwrap();
         let fixture = Fixture { child, file, foreground: unsafe { GetForegroundWindow() } };
-        let wait = |predicate: &dyn Fn() -> bool| {
-            let started = Instant::now();
-            while !predicate() && started.elapsed() < Duration::from_secs(5) {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            assert!(predicate());
-        };
         wait(&|| {
             std::fs::read(&fixture.file).ok().and_then(|b| serde_json::from_slice::<Vec<isize>>(&b).ok()).is_some()
         });
@@ -543,6 +547,13 @@ mod tests {
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].path, found[1].path);
         assert!(!found[0].path.is_empty());
+        (fixture, found)
+    }
+
+    #[test]
+    #[ignore = "Creates temporary offscreen native windows in a child process"]
+    fn native_dock_discovers_and_restores_other_process_windows() {
+        let (_fixture, found) = window_fixture(false);
         let hwnd = HWND(found[0].handle as *mut _);
         assert!(change_window(&found[0], WindowAction::Minimize));
         wait(&|| unsafe { IsIconic(hwnd) }.as_bool());

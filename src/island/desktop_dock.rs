@@ -206,10 +206,8 @@ fn menu_title(value: &str) -> String {
 }
 
 fn current_windows(entry: &crate::ui::desktop_dock::Entry) -> Vec<desktop::Window> {
-    desktop::windows()
-        .into_iter()
-        .filter(|w| entry.windows.iter().any(|old| old.handle == w.handle && key(&old.path) == key(&w.path)))
-        .collect()
+    let app_path = key(&entry_app_path(entry));
+    desktop::windows().into_iter().filter(|w| key(&w.path) == app_path).collect()
 }
 
 fn entry_app_path(entry: &crate::ui::desktop_dock::Entry) -> String {
@@ -475,12 +473,13 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
         Some(Request::Add) => add_file(hwnd),
         Some(Request::Capture(entry)) => capture_application(&entry),
         Some(Request::Launch(entry)) => {
-            let live: Vec<_> = desktop::windows()
-                .into_iter()
-                .filter(|w| entry.windows.iter().any(|old| old.handle == w.handle && key(&old.path) == key(&w.path)))
-                .collect();
+            let live = current_windows(&entry);
             if live.is_empty() {
-                cmd::shell_open(&entry.pin.target, None);
+                let mut launch = false;
+                with_app(|a| launch = a.desktop_dock.as_mut().is_some_and(|d| d.can_launch(&entry_app_path(&entry))));
+                if launch {
+                    cmd::shell_open(&entry.pin.target, None);
+                }
             } else {
                 if live.len() > 1 && show_windows(live.clone(), entry.pin.name.clone()) {
                     return;

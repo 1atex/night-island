@@ -27,9 +27,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Result, w};
 
+#[derive(Clone, Copy)]
+pub(super) enum Anchor {
+    Dock(i32),
+    Keyboard(usize),
+}
+
 pub(super) struct Placement {
     pub work: RECT,
-    pub above: i32,
+    pub anchor: Anchor,
     pub scale: f32,
     pub hidden: bool,
 }
@@ -54,6 +60,8 @@ struct Layout {
     count: usize,
     tile: f32,
     scale: f32,
+    overview: bool,
+    spans: Vec<(f32, f32)>,
 }
 
 impl Layout {
@@ -64,12 +72,42 @@ impl Layout {
         let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 244.0);
         let size =
             (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
-        Self { size, count, tile, scale }
+        Self { size, count, tile, scale, overview: false, spans: Vec::new() }
+    }
+    fn overview(work: RECT, scale: f32, windows: usize) -> Self {
+        let room = (((work.right - work.left) as f32 / scale) * 0.94).max(1.0);
+        let height = (((work.bottom - work.top) as f32 / scale) * 0.38).clamp(1.0, 290.0);
+        let count = (((room - 30.0) / 265.0) as usize).clamp(1, 6).min(windows.max(1));
+        let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 344.0);
+        let size =
+            (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
+        Self { size, count, tile, scale, overview: true, spans: Vec::new() }
+    }
+    fn arrange_page(&mut self, aspects: &[f32]) {
+        if !self.overview || aspects.is_empty() {
+            return;
+        }
+        let image_height = (self.size.1 as f32 / self.scale - 108.0).max(1.0);
+        let widths: Vec<_> = aspects.iter().map(|a| (a * image_height + 12.0).clamp(134.0, 370.0)).collect();
+        let total = widths.iter().sum::<f32>();
+        let gaps = (widths.len() - 1) as f32 * 8.0;
+        let room = (self.size.0 as f32 / self.scale - 38.0 - gaps).max(1.0);
+        let factor = (room / total).min(1.0);
+        let mut x = (self.size.0 as f32 / self.scale - total * factor - gaps) / 2.0;
+        self.spans = widths
+            .into_iter()
+            .map(|width| {
+                let left = x;
+                x += width * factor + 8.0;
+                (left, width * factor)
+            })
+            .collect();
     }
     fn card(&self, slot: usize) -> Rect {
         let s = self.scale;
-        let x = (19.0 + (self.tile + 8.0) * slot as f32) * s;
-        (x, 48.0 * s, x + self.tile * s, self.size.1 as f32 - 19.0 * s)
+        let (left, width) =
+            self.spans.get(slot).copied().unwrap_or((19.0 + (self.tile + 8.0) * slot as f32, self.tile));
+        (left * s, 48.0 * s, (left + width) * s, self.size.1 as f32 - 19.0 * s)
     }
     fn image(&self, slot: usize) -> Rect {
         let (l, t, r, b) = self.card(slot);
@@ -139,12 +177,28 @@ impl State {
     }
     fn bind(&mut self) {
         self.thumbnails.clear();
-        for (slot, item) in self.items.iter().skip(self.start()).take(self.layout.count).enumerate() {
-            let thumbnail = Thumbnail::new(self.hwnd, &item.window).and_then(|mut t| {
-                let size = t.source_size()?;
-                t.update(fit((size.cx, size.cy), self.layout.image(slot)), true).then_some(t)
-            });
-            self.thumbnails.push(thumbnail);
+        let sizes: Vec<_> = self
+            .items
+            .iter()
+            .skip(self.start())
+            .take(self.layout.count)
+            .map(|item| {
+                let thumbnail = Thumbnail::new(self.hwnd, &item.window);
+                let size = thumbnail.as_ref().and_then(Thumbnail::source_size);
+                self.thumbnails.push(thumbnail);
+                size
+            })
+            .collect();
+        if self.layout.overview {
+            self.layout
+                .arrange_page(&sizes.iter().map(|s| s.map_or(1.6, |s| s.cx as f32 / s.cy as f32)).collect::<Vec<_>>());
+        }
+        for (slot, (thumb, size)) in self.thumbnails.iter_mut().zip(sizes).enumerate() {
+            if let (Some(t), Some(size)) = (thumb.as_mut(), size)
+                && !t.update(fit((size.cx, size.cy), self.layout.image(slot)), true)
+            {
+                *thumb = None;
+            }
         }
     }
     fn paint(&self) -> Result<()> {
@@ -167,6 +221,16 @@ impl State {
                 DWRITE_TEXT_ALIGNMENT_LEADING,
                 rgba(1.0, 1.0, 1.0, 0.92),
             )?;
+            if self.layout.overview && w / s >= 410.0 {
+                p.text(
+                    "Release Alt to switch",
+                    (w * 0.42, 14.0 * s, w - if pages > 1 { 90.0 } else { 23.0 } * s, 43.0 * s),
+                    12.0 * s,
+                    DWRITE_FONT_WEIGHT_NORMAL,
+                    windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_ALIGNMENT_TRAILING,
+                    rgba(1.0, 1.0, 1.0, 0.68),
+                )?;
+            }
             if pages > 1 {
                 for (next, hit, glyph) in [(false, Hit::Prev, '\u{E76B}'), (true, Hit::Next, '\u{E76C}')] {
                     let r = self.layout.page_button(next);
@@ -215,7 +279,7 @@ impl State {
                 if self.hover == Some(Hit::Close(i)) {
                     p.fill_round_rect(close, 8.0 * s, rgba(0.9, 0.28, 0.28, 0.35))?;
                 }
-                if selected {
+                if selected || matches!(self.hover, Some(Hit::Window(n) | Hit::Close(n)) if n == i) {
                     p.glyph('\u{E711}', close, 10.0 * s, rgba(1.0, 1.0, 1.0, 0.7))?;
                 }
                 if self.thumbnails.get(slot).is_none_or(Option::is_none) {
@@ -232,11 +296,12 @@ impl State {
             if !self.items.is_empty() {
                 let slot = self.selected % self.layout.count;
                 let x = self.focus_motion.follow(1, slot as f32, slot as f32, 130);
-                let (l, t, r, b) = self.layout.card(0);
-                let dx = x * (self.layout.tile + 8.0) * s;
+                let x = x.clamp(0.0, (self.items.len() - self.start() - 1).min(self.layout.count - 1) as f32);
+                let (l, t, r, b) = self.layout.card(x.floor() as usize);
+                let (next_l, _, next_r, _) = self.layout.card(x.ceil() as usize);
                 let (red, green, blue) = crate::ui::theme::accent();
                 p.stroke_round_rect(
-                    (l + dx, t, r + dx, b),
+                    (l + (next_l - l) * x.fract(), t, r + (next_r - r) * x.fract(), b),
                     13.0 * s,
                     1.8 * s,
                     rgba(0.48 + red * 0.52, 0.48 + green * 0.52, 0.48 + blue * 0.52, 0.95),
@@ -275,7 +340,17 @@ impl State {
         Ok(())
     }
     fn animate(&mut self, show: bool) {
-        let ms = if self.config.animations && motion_allowed() { if show { 165 } else { 105 } } else { 0 };
+        let ms = if self.config.animations && motion_allowed() {
+            if self.layout.overview {
+                if show { 95 } else { 65 }
+            } else if show {
+                165
+            } else {
+                105
+            }
+        } else {
+            0
+        };
         self.reveal.retarget(show, ms, AnimCurve::Smooth, Instant::now());
         let _ = self.frame();
     }
@@ -301,7 +376,7 @@ impl State {
     }
     fn reset_focus_motion(&self) {
         self.focus_motion.set_enabled(false);
-        self.focus_motion.set_enabled(self.config.animations && motion_allowed());
+        self.focus_motion.set_enabled(!self.layout.overview && self.config.animations && motion_allowed());
     }
     fn step(&mut self, amount: isize) {
         if !self.items.is_empty() {
@@ -330,7 +405,9 @@ impl State {
         match msg {
             WM_MOUSEMOVE if self.hover != hit => {
                 self.hover = hit;
-                if let Some(Hit::Window(i) | Hit::Close(i)) = hit {
+                if !self.layout.overview
+                    && let Some(Hit::Window(i) | Hit::Close(i)) = hit
+                {
                     self.select(i);
                 } else {
                     let _ = self.paint();
@@ -412,12 +489,19 @@ impl Switcher {
         placement: Placement,
         config: &DockSettings,
     ) -> Result<Self> {
-        let Placement { work, above, scale, hidden } = placement;
-        let layout = Layout::new(work, scale, items.len());
+        let Placement { work, anchor, scale, hidden } = placement;
+        let overview = matches!(anchor, Anchor::Keyboard(_));
+        let layout =
+            if overview { Layout::overview(work, scale, items.len()) } else { Layout::new(work, scale, items.len()) };
         let surface = PopupSurface::new(layout.size)?;
         let origin = (
             work.left + (work.right - work.left - layout.size.0) / 2,
-            (above - layout.size.1).clamp(work.top, (work.bottom - layout.size.1).max(work.top)),
+            match anchor {
+                Anchor::Dock(above) => {
+                    (above - layout.size.1).clamp(work.top, (work.bottom - layout.size.1).max(work.top))
+                }
+                Anchor::Keyboard(_) => work.top + (work.bottom - work.top - layout.size.1) / 2,
+            },
         );
         let instance = unsafe { GetModuleHandleW(None)? };
         static CLASS: std::sync::Once = std::sync::Once::new();
@@ -432,7 +516,10 @@ impl Switcher {
         });
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+                WS_EX_LAYERED
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | if overview { WS_EX_NOACTIVATE } else { WINDOW_EX_STYLE(0) },
                 w!("NightIsland.WindowSwitcher"),
                 w!("Night Island"),
                 WS_POPUP,
@@ -446,7 +533,10 @@ impl Switcher {
                 None,
             )?
         };
-        let selected = items.iter().position(|item| item.window.active).unwrap_or(0);
+        let selected = match anchor {
+            Anchor::Keyboard(i) => i.min(items.len().saturating_sub(1)),
+            Anchor::Dock(_) => items.iter().position(|item| item.window.active).unwrap_or(0),
+        };
         let backdrop =
             if config.blur { gpu.compositor().ok().and_then(|c| PopupBackdrop::new(hwnd, &c).ok()) } else { None };
         let state = Box::new(RefCell::new(State {
@@ -482,11 +572,50 @@ impl Switcher {
             s.paint()?;
         }
         unsafe {
-            let _ = ShowWindow(hwnd, SW_SHOW);
-            let _ = SetForegroundWindow(hwnd);
+            let _ = ShowWindow(hwnd, if overview { SW_SHOWNOACTIVATE } else { SW_SHOW });
+            if !overview {
+                let _ = SetForegroundWindow(hwnd);
+            }
         }
         popup.state.borrow_mut().animate(true);
         Ok(popup)
+    }
+    pub fn retain_icon_paths(&self, paths: &mut Vec<String>) {
+        paths.extend(self.state.borrow().items.iter().map(|item| item.window.path.clone()));
+    }
+    pub fn load_icons(&self, cache: &mut crate::platform::apps::DockIconCache) {
+        let mut s = self.state.borrow_mut();
+        if s.closing {
+            return;
+        }
+        let start = s.start();
+        let count = s.layout.count;
+        let size = (20.0 * s.layout.scale).ceil() as u32;
+        let mut changed = false;
+        for item in s.items.iter_mut().skip(start).take(count) {
+            if item.icon.is_none()
+                && let Some(icon) = cache.get(&item.window.path, size)
+            {
+                item.icon = Some(icon);
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = s.paint();
+        }
+    }
+    pub fn keyboard(&self) -> bool {
+        self.state.borrow().layout.overview
+    }
+    pub fn step(&self, delta: isize) {
+        self.state.borrow_mut().step(delta);
+    }
+    pub fn selected(&self) -> Option<Window> {
+        let s = self.state.borrow();
+        if s.closing {
+            return None;
+        }
+        s.items.get(s.selected).map(|i| i.window.clone())
     }
     pub fn dismiss(&self) {
         self.state.borrow_mut().finish(None);

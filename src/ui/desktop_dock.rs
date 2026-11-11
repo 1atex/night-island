@@ -14,7 +14,8 @@ use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetCapture, GetKeyState, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_MENU,
+    GetCapture, GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT,
+    TrackMouseEvent, VK_MENU,
 };
 use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -33,6 +34,12 @@ const FRAME: usize = 2;
 const BACKDROP_REFRESH: usize = 3;
 const PREVIEW_HOVER: usize = 4;
 const WINDOW_FLIGHT: usize = 5;
+const ALT_REVEAL: usize = 6;
+
+struct PendingSwitch {
+    windows: Vec<desktop::Window>,
+    selected: usize,
+}
 
 #[derive(Clone)]
 pub struct Entry {
@@ -94,6 +101,13 @@ struct State {
     resumed: bool,
     preview: Option<crate::ui::dock_preview::Preview>,
     switcher: Option<super::dock_switcher::Switcher>,
+    pending_switch: Option<PendingSwitch>,
+    shortcut_foreground: Option<HWND>,
+    recent_windows: Vec<isize>,
+    shortcut: Option<super::dock_alt_tab::Shortcut>,
+    launching: HashMap<String, Instant>,
+    last_app_click: Option<(String, Instant)>,
+    transition_icon: Option<(isize, Instant)>,
     flight: Option<super::dock_window_motion::Flight>,
     actions: Arc<crate::platform::dock_actions::Client>,
     preview_candidate: Option<(String, Instant)>,
@@ -222,6 +236,11 @@ impl State {
             return;
         }
         self.scan = scan;
+        self.recent_windows.retain(|h| self.scan.iter().any(|w| w.handle == *h));
+        if let Some(active) = self.scan.iter().find(|w| w.active) {
+            let handle = active.handle;
+            self.remember_window(handle);
+        }
         let previous: Vec<String> = self.entries.iter().map(|e| key(&e.pin.target)).collect();
         let mut entries: Vec<Entry> = self
             .config
@@ -270,7 +289,13 @@ impl State {
             self.pointer = None;
             self.preview_candidate = None;
         }
+        if !self.launching.is_empty() {
+            for window in &self.scan {
+                self.launching.remove(&key(&window.path));
+            }
+        }
         self.entries = entries;
+        self.enable_shortcut();
         if let Some(preview) = &mut self.preview {
             if let Some(entry) = self.entries.iter().find(|e| e.pin.target == preview.target()) {
                 preview.sync_entry(entry);
@@ -294,12 +319,15 @@ impl State {
             self.config.zoom,
         )
         .saturating_sub(usize::from(self.config.show_add));
-        let targets: Vec<_> = self
+        let mut targets: Vec<_> = self
             .entries
             .iter()
             .flat_map(|e| [e.pin.target.clone(), e.pin.icon.clone()])
             .filter(|path| !path.is_empty())
             .collect();
+        if let Some(switcher) = &self.switcher {
+            switcher.retain_icon_paths(&mut targets);
+        }
         self.icons.retain(&targets);
         for (i, entry) in self.entries.iter_mut().enumerate() {
             entry.icon = if i >= self.offset && i < self.offset + slots {
@@ -325,7 +353,10 @@ impl State {
     fn set_suppressed(&mut self, suppressed: bool) {
         if suppressed != self.suppressed {
             self.suppressed = suppressed;
+            self.enable_shortcut();
             if suppressed {
+                self.pending_switch = None;
+                self.shortcut_foreground = None;
                 self.switcher.take();
                 self.finish_flight();
             }
@@ -542,7 +573,10 @@ impl State {
                 }
             }
         }
-        if self.feedback.active() {
+        if self.transition_icon.as_ref().is_some_and(|(_, at)| at.elapsed() >= Duration::from_millis(200)) {
+            self.transition_icon = None;
+        }
+        if self.feedback.active() || self.transition_icon.is_some() {
             self.request_frame();
         } else {
             self.frame_pending = false;
@@ -628,7 +662,17 @@ impl State {
                 0.0,
                 90,
             );
-            let image = (rect.0 + shrink, rect.1 + shrink, rect.2 - shrink, rect.3 - shrink);
+            let lift = self
+                .transition_icon
+                .as_ref()
+                .and_then(|(handle, started)| {
+                    self.entries.get(i).filter(|e| e.windows.iter().any(|w| w.handle == *handle)).map(|_| {
+                        let t = (started.elapsed().as_secs_f32() / 0.20).clamp(0.0, 1.0);
+                        3.5 * s * (std::f32::consts::PI * t).sin()
+                    })
+                })
+                .unwrap_or(0.0);
+            let image = (rect.0 + shrink, rect.1 + shrink - lift, rect.2 - shrink, rect.3 - shrink - lift);
             if let Some(entry) = self.entries.get(i) {
                 if let Some(icon) = &entry.icon {
                     let reveal = self.feedback.sample(motion_key(target, 3), 1.0, 0.0, 180);
@@ -801,6 +845,165 @@ impl State {
         }
     }
 
+    fn open_switcher(
+        &mut self,
+        windows: Vec<desktop::Window>,
+        title: String,
+        placement: super::dock_switcher::Placement,
+    ) -> bool {
+        if !self.config.window_switcher || self.suppressed {
+            return false;
+        }
+        self.hide_preview();
+        self.switcher.take();
+        let items = windows
+            .into_iter()
+            .map(|window| {
+                let icon = self
+                    .entries
+                    .iter()
+                    .find(|e| e.windows.iter().any(|w| w.handle == window.handle))
+                    .and_then(|e| e.icon.clone());
+                super::dock_switcher::Item { window, icon }
+            })
+            .collect();
+        self.switcher =
+            super::dock_switcher::Switcher::new(self.hwnd, &self.gpu, items, title, placement, &self.config).ok();
+        if let Some(popup) = &self.switcher {
+            popup.load_icons(&mut self.icons);
+        }
+        self.switcher.is_some()
+    }
+
+    fn remember_window(&mut self, handle: isize) {
+        if self.recent_windows.first() != Some(&handle) {
+            self.recent_windows.retain(|h| *h != handle);
+            self.recent_windows.insert(0, handle);
+        }
+    }
+
+    fn configure_shortcut(&mut self) {
+        if !(self.allowed_visible && self.config.window_switcher && self.config.alt_tab) {
+            self.shortcut.take();
+            self.pending_switch = None;
+            self.shortcut_foreground = None;
+            return;
+        }
+        if self.shortcut.is_none() {
+            self.shortcut = super::dock_alt_tab::Shortcut::install(self.hwnd);
+            if self.shortcut.is_none() {
+                crate::log_warn!("could not register Island Alt+Tab");
+            }
+        }
+        self.enable_shortcut();
+    }
+
+    fn enable_shortcut(&self) {
+        if let Some(shortcut) = &self.shortcut {
+            shortcut.enable(!self.suppressed && !self.menu_open && !self.scan.is_empty());
+        }
+    }
+
+    fn reveal_keyboard_switcher(&mut self) {
+        let Some(pending) = self.pending_switch.take() else { return };
+        let foreground = unsafe { GetForegroundWindow() };
+        use windows::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+        };
+        use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+        let mut work = self.monitor.work;
+        let mut scale = self.scale;
+        unsafe {
+            let monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if GetMonitorInfoW(monitor, &mut info).as_bool() {
+                work = info.rcWork;
+            }
+            let (mut x, mut y) = (0, 0);
+            if GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut x, &mut y).is_ok() && x > 0 {
+                scale = x as f32 / 96.0;
+            }
+        }
+        let placement = super::dock_switcher::Placement {
+            work,
+            scale,
+            hidden: self.capture_hidden.get(),
+            anchor: super::dock_switcher::Anchor::Keyboard(pending.selected),
+        };
+        if !self.open_switcher(pending.windows.clone(), crate::ui::i18n::tr("All windows").into_owned(), placement) {
+            self.pending_switch = Some(pending);
+        }
+    }
+
+    fn keyboard_command(&mut self, command: super::dock_alt_tab::Command) {
+        use super::dock_alt_tab::Command;
+        if self.suppressed || self.shortcut.is_none() {
+            return;
+        }
+        let foreground = unsafe { GetForegroundWindow() };
+        let command =
+            if self.shortcut_foreground.is_some_and(|source| source != foreground) { Command::Cancel } else { command };
+        let popup = self.switcher.as_ref().filter(|s| s.keyboard() && s.selected().is_some());
+        match command {
+            Command::Accept | Command::Cancel => {
+                self.shortcut_foreground = None;
+                unsafe {
+                    let _ = KillTimer(Some(self.hwnd), ALT_REVEAL);
+                }
+                let selection = self
+                    .pending_switch
+                    .take()
+                    .and_then(|p| p.windows.into_iter().nth(p.selected))
+                    .or_else(|| popup.and_then(|s| s.selected()));
+                if let Some(popup) = popup {
+                    popup.dismiss();
+                }
+                if command == Command::Accept
+                    && let Some(window) = selection
+                {
+                    desktop::activate(&window, false);
+                    self.remember_window(window.handle);
+                }
+            }
+            Command::Next | Command::Previous => {
+                let delta = if command == Command::Next { 1 } else { -1 };
+                if let Some(popup) = popup {
+                    popup.step(delta);
+                } else if let Some(pending) = &mut self.pending_switch {
+                    pending.selected =
+                        (pending.selected as isize + delta).rem_euclid(pending.windows.len() as isize) as usize;
+                } else {
+                    self.switcher.take();
+                    let front = foreground.0 as isize;
+                    let mut windows: Vec<_> = self
+                        .scan
+                        .iter()
+                        .filter(|w| unsafe { IsWindowVisible(HWND(w.handle as _)).as_bool() })
+                        .cloned()
+                        .collect();
+                    if windows.is_empty() {
+                        return;
+                    }
+                    windows
+                        .sort_by_key(|w| self.recent_windows.iter().position(|h| *h == w.handle).unwrap_or(usize::MAX));
+                    let current = windows.iter().position(|w| w.handle == front);
+                    if let Some(i) = current {
+                        self.remember_window(front);
+                        let active = windows.remove(i);
+                        windows.insert(0, active);
+                    }
+                    let selected =
+                        if delta < 0 { windows.len() - 1 } else { usize::from(current.is_some()) % windows.len() };
+                    self.shortcut_foreground = Some(foreground);
+                    self.pending_switch = Some(PendingSwitch { windows, selected });
+                    unsafe {
+                        SetTimer(Some(self.hwnd), ALT_REVEAL, 86, None);
+                    }
+                }
+            }
+        }
+    }
+
     fn finish_flight(&mut self) {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), WINDOW_FLIGHT);
@@ -821,6 +1024,9 @@ impl State {
         if self.icons.poll() {
             self.load_icons();
             self.render();
+        }
+        if let Some(popup) = &self.switcher {
+            popup.load_icons(&mut self.icons);
         }
         let mut pt = POINT::default();
         unsafe {
@@ -876,6 +1082,12 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 }
                 LRESULT(0)
             }
+            super::dock_alt_tab::MESSAGE => {
+                if let Some(cmd) = super::dock_alt_tab::Command::decode(wparam.0) {
+                    (*ptr).keyboard_command(cmd);
+                }
+                LRESULT(0)
+            }
             super::dock_switcher::DONE => {
                 let state = &mut *ptr;
                 if state.switcher.as_ref().is_some_and(|s| s.hwnd().0 as usize == wparam.0) {
@@ -901,7 +1113,10 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             WM_ERASEBKGND => LRESULT(1),
             WM_TIMER => {
                 let state = &mut *ptr;
-                if wparam.0 == WINDOW_FLIGHT {
+                if wparam.0 == ALT_REVEAL {
+                    let _ = KillTimer(Some(hwnd), ALT_REVEAL);
+                    state.reveal_keyboard_switcher();
+                } else if wparam.0 == WINDOW_FLIGHT {
                     if state.flight.as_mut().is_none_or(|f| !f.tick()) {
                         state.finish_flight();
                     }
@@ -1006,7 +1221,15 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                         state.refresh(true);
                     } else if hit == Some(from) {
                         if let Some(entry) = state.entries.get(from).cloned() {
-                            state.post(Request::Launch(entry));
+                            let now = Instant::now();
+                            let repeated = state.last_app_click.as_ref().is_some_and(|(target, at)| {
+                                target == &entry.pin.target
+                                    && now.duration_since(*at) < Duration::from_millis(u64::from(GetDoubleClickTime()))
+                            });
+                            if !repeated {
+                                state.last_app_click = Some((entry.pin.target.clone(), now));
+                                state.post(Request::Launch(entry));
+                            }
                         } else {
                             state.post(Request::Add);
                         }
@@ -1039,6 +1262,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                     }
                 } else {
                     state.menu_open = true;
+                    state.enable_shortcut();
                     state.post(Request::Menu(entry));
                 }
                 LRESULT(0)
@@ -1204,6 +1428,13 @@ impl Dock {
             resumed: false,
             preview: None,
             switcher: None,
+            pending_switch: None,
+            shortcut_foreground: None,
+            recent_windows: Vec::new(),
+            shortcut: None,
+            launching: HashMap::new(),
+            last_app_click: None,
+            transition_icon: None,
             flight: None,
             actions: Arc::new(crate::platform::dock_actions::Client::new()),
             preview_candidate: None,
@@ -1225,6 +1456,7 @@ impl Dock {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             }
         }
+        state.configure_shortcut();
         std::mem::forget(guard);
         Ok(Self { state })
     }
@@ -1235,6 +1467,9 @@ impl Dock {
         self.state.switcher.take();
         self.state.finish_flight();
         self.state.config = config.clone();
+        self.state.pending_switch = None;
+        self.state.shortcut_foreground = None;
+        self.state.configure_shortcut();
         self.state.feedback.set_enabled(config.animations && motion_allowed());
         if self.state.update_suppression() {
             return;
@@ -1267,31 +1502,23 @@ impl Dock {
 
     pub fn show_windows(&mut self, windows: Vec<desktop::Window>, title: String) -> bool {
         let state = &mut self.state;
-        if !state.config.window_switcher || state.suppressed {
-            return false;
-        }
-        state.hide_preview();
-        state.switcher.take();
-        let items = windows
-            .into_iter()
-            .map(|window| {
-                let icon = state
-                    .entries
-                    .iter()
-                    .find(|e| e.windows.iter().any(|w| w.handle == window.handle))
-                    .and_then(|e| e.icon.clone());
-                super::dock_switcher::Item { window, icon }
-            })
-            .collect();
         let placement = super::dock_switcher::Placement {
             work: state.monitor.work,
-            above: state.origin.1 + state.panel.1 as i32,
+            anchor: super::dock_switcher::Anchor::Dock(state.origin.1 + state.panel.1 as i32),
             scale: state.scale,
             hidden: state.capture_hidden.get(),
         };
-        state.switcher =
-            super::dock_switcher::Switcher::new(state.hwnd, &state.gpu, items, title, placement, &state.config).ok();
-        state.switcher.is_some()
+        state.open_switcher(windows, title, placement)
+    }
+
+    pub fn can_launch(&mut self, target: &str) -> bool {
+        let now = Instant::now();
+        self.state.launching.retain(|_, started| now.duration_since(*started) < Duration::from_millis(1600));
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.state.launching.entry(key(target)) {
+            slot.insert(now);
+            return true;
+        }
+        false
     }
 
     pub fn animate_window(&mut self, window: &desktop::Window, restoring: bool) -> bool {
@@ -1311,6 +1538,14 @@ impl Dock {
         else {
             return false;
         };
+        if state.flight.as_ref().is_some_and(|f| f.matches(window, restoring)) {
+            return true;
+        }
+        if super::dock_window_motion::system_animates_windows() {
+            state.transition_icon = Some((window.handle, Instant::now()));
+            state.request_frame();
+            return false;
+        }
         let anchor = windows::Win32::Foundation::RECT {
             left: state.origin.0 + r.0 as i32,
             top: state.origin.1 + r.1 as i32,
@@ -1370,6 +1605,7 @@ impl Dock {
     }
     pub fn close_menu(&mut self) {
         self.state.menu_open = false;
+        self.state.enable_shortcut();
         self.state.leave_at = Instant::now();
         self.state.pointer = None;
         self.state.hover = None;
@@ -1379,6 +1615,7 @@ impl Dock {
 
 impl Drop for Dock {
     fn drop(&mut self) {
+        self.state.shortcut.take();
         self.state.switcher.take();
         self.state.finish_flight();
         self.state.actions.set_notify(HWND::default());
@@ -1396,8 +1633,117 @@ impl Drop for Dock {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
+
+    pub(in crate::ui) fn exercise_keyboard_switcher(
+        dock_owner: HWND,
+        compositor: &Compositor,
+        gpu: &Gpu,
+        windows: &[desktop::Window],
+    ) -> Result<()> {
+        use windows::Win32::UI::Input::KeyboardAndMouse::*;
+        fn send(key: VIRTUAL_KEY, up: bool) {
+            let input = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: key,
+                        dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                        ..Default::default()
+                    },
+                },
+            };
+            assert_eq!(unsafe { SendInput(&[input], size_of::<INPUT>() as i32) }, 1);
+        }
+        fn pump_for(ms: u64) {
+            let until = Instant::now() + Duration::from_millis(ms);
+            while Instant::now() < until {
+                unsafe {
+                    let mut msg = MSG::default();
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        struct HeldAlt;
+        impl Drop for HeldAlt {
+            fn drop(&mut self) {
+                send(VK_LMENU, true);
+            }
+        }
+        let chord = || {
+            send(VK_LMENU, false);
+            send(VK_TAB, false);
+            send(VK_TAB, true);
+            HeldAlt
+        };
+        let config = DockSettings { enabled: true, hide_fullscreen: false, ..Default::default() };
+        let mut dock = Dock::create(dock_owner, compositor, gpu, &config, false)?;
+        unsafe {
+            let _ = KillTimer(Some(dock.state.hwnd), PULSE);
+        }
+        dock.state.scan = windows.to_vec();
+        dock.state.suppressed = false;
+        dock.state.allowed_visible = true;
+        dock.state.configure_shortcut();
+        assert!(dock.state.shortcut.is_some());
+        assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, windows[1].handle);
+        for key in [VK_MENU, VK_CONTROL, VK_SHIFT, VK_LWIN, VK_RWIN] {
+            assert!(
+                unsafe { GetAsyncKeyState(i32::from(key.0)) } >= 0,
+                "Release the modifiers before running the desktop fixture"
+            );
+        }
+        let alt = chord();
+        pump_for(220);
+        let popup = dock.state.switcher.as_ref().expect("Keyboard overview");
+        assert!(popup.keyboard());
+        assert_eq!(popup.selected().unwrap().handle, windows[0].handle);
+        assert_eq!(
+            unsafe { GetForegroundWindow() }.0 as isize,
+            windows[1].handle,
+            "The preview should not steal focus"
+        );
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        unsafe {
+            GetWindowRect(popup.hwnd(), &mut rect)?;
+        }
+        assert!((rect.top + rect.bottom - dock.state.monitor.work.top - dock.state.monitor.work.bottom).abs() < 4);
+        send(VK_ESCAPE, false);
+        send(VK_ESCAPE, true);
+        drop(alt);
+        pump_for(140);
+        assert!(dock.state.switcher.is_none());
+        assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, windows[1].handle);
+        let alt = chord();
+        drop(alt);
+        pump_for(140);
+        assert!(dock.state.switcher.is_none());
+        assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, windows[0].handle);
+        let alt = chord();
+        pump_for(200);
+        send(VK_LSHIFT, false);
+        send(VK_TAB, false);
+        send(VK_TAB, true);
+        send(VK_LSHIFT, true);
+        pump_for(40);
+        assert_eq!(dock.state.switcher.as_ref().unwrap().selected().unwrap().handle, windows[0].handle);
+        send(VK_TAB, false);
+        send(VK_TAB, true);
+        drop(alt);
+        pump_for(150);
+        assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, windows[1].handle);
+        assert!(dock.can_launch("test.exe"));
+        assert!(!dock.can_launch("TEST.EXE"));
+        dock.state.config.alt_tab = false;
+        dock.state.configure_shortcut();
+        assert!(dock.state.shortcut.is_none());
+        Ok(())
+    }
 
     fn verify_live_backdrop(dock: &mut Dock, folder: &std::path::Path) -> Result<()> {
         use windows::Win32::Foundation::{COLORREF, RECT};

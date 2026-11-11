@@ -91,13 +91,14 @@ impl Thumbnail {
         }
     }
 
-    fn valid(&self) -> bool {
+    fn available(&self) -> bool {
         unsafe {
             let mut pid = 0;
             if GetWindowThreadProcessId(self.destination, Some(&mut pid)) != self.destination_thread
                 || pid != std::process::id()
                 || !IsWindowVisible(self.source).as_bool()
-                || Identity::read(self.source).as_ref() != Some(&self.identity)
+                || GetWindowThreadProcessId(self.source, Some(&mut pid)) != self.identity.thread
+                || pid != self.identity.pid
             {
                 return false;
             }
@@ -114,7 +115,7 @@ impl Thumbnail {
     }
 
     pub fn source_size(&self) -> Option<SIZE> {
-        if !self.valid() {
+        if !self.available() || Identity::read(self.source).as_ref() != Some(&self.identity) {
             return None;
         }
         let size = unsafe { DwmQueryThumbnailSourceSize(self.handle?).ok()? };
@@ -126,11 +127,24 @@ impl Thumbnail {
     }
 
     pub fn update(&mut self, destination: RECT, visible: bool) -> bool {
+        if self.source_size().is_none() {
+            self.unregister();
+            return false;
+        }
+        self.set_rect(destination, visible)
+    }
+
+    pub fn move_registered(&mut self, destination: RECT) -> bool {
+        if !self.available() {
+            self.unregister();
+            return false;
+        }
+        self.set_rect(destination, true)
+    }
+
+    fn set_rect(&mut self, destination: RECT, visible: bool) -> bool {
         let Some(handle) = self.handle else { return false };
-        if self.source_size().is_none()
-            || destination.right <= destination.left
-            || destination.bottom <= destination.top
-        {
+        if destination.right <= destination.left || destination.bottom <= destination.top {
             self.unregister();
             return false;
         }

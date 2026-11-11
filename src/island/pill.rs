@@ -164,15 +164,16 @@ impl App {
     pub(in crate::island) fn on_vpn(&mut self) {
         if self.settings.vpn_provider == crate::data::settings::VpnProvider::Svoi {
             let next = vpn::snapshot();
-            if next.verified && next.state == "running" {
-                if let Some(active) = &next.active {
-                    let key = format!("{}/{}/{:?}", next.instance, active.id, next.started_at);
-                    if self.ui.svoi_announced != key {
-                        if let Some(text) = vpn::announced_change(&self.ui.svoi, &next) {
-                            self.show_notice_for(view::VPN_GLYPH, &text, 2200);
-                        }
-                        self.ui.svoi_announced = key;
+            if next.verified
+                && next.state == "running"
+                && let Some(active) = &next.active
+            {
+                let key = format!("{}/{}/{:?}", next.instance, active.id, next.started_at);
+                if self.ui.svoi_announced != key {
+                    if let Some(text) = vpn::announced_change(&self.ui.svoi, &next) {
+                        self.show_notice_for(view::VPN_GLYPH, &text, 2200);
                     }
+                    self.ui.svoi_announced = key;
                 }
             }
             if !next.error.is_empty() && next.error != self.ui.svoi.error {

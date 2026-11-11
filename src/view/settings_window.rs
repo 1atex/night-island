@@ -1327,6 +1327,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockPreview, "Window previews and controls on hover", Kind::Toggle),
         Item::Row(Sid::DockWindowSwitcher, "Window switcher", Kind::Toggle),
         Item::Note("Middle-click the dock for all windows. Click a grouped app to choose its window."),
+        Item::Row(Sid::DockAltTab, "Use Island for Alt+Tab", Kind::Toggle),
         Item::Row(Sid::DockWindowMotion, "Animate windows to and from the dock", Kind::Toggle),
         Item::Row(Sid::DockFullscreen, "Hide over fullscreen applications", Kind::Toggle),
         Item::Note("Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back."),

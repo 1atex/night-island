@@ -27,6 +27,19 @@ pub(super) struct Flight {
     started: Instant,
 }
 
+pub(super) fn system_animates_windows() -> bool {
+    let mut info = ANIMATIONINFO { cbSize: size_of::<ANIMATIONINFO>() as u32, ..Default::default() };
+    let result = unsafe {
+        SystemParametersInfoW(
+            SPI_GETANIMATION,
+            info.cbSize,
+            Some((&raw mut info).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    result.is_err() || info.iMinAnimate != 0
+}
+
 fn bounds(hwnd: HWND, restoring: bool) -> Option<RECT> {
     unsafe {
         if !restoring {
@@ -127,7 +140,7 @@ impl Flight {
     fn place(&mut self, r: RECT) -> bool {
         let width = (r.right - r.left).max(1);
         let height = (r.bottom - r.top).max(1);
-        if !self.thumbnail.update(RECT { left: 0, top: 0, right: width, bottom: height }, true) {
+        if !self.thumbnail.move_registered(RECT { left: 0, top: 0, right: width, bottom: height }) {
             return false;
         }
         unsafe {
@@ -142,6 +155,9 @@ impl Flight {
             )
             .is_ok()
         }
+    }
+    pub fn matches(&self, window: &Window, restoring: bool) -> bool {
+        self.window.handle == window.handle && self.window.path == window.path && self.restoring == restoring
     }
     pub fn set_capture(&self, hidden: bool) {
         unsafe {
