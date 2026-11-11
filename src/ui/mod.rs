@@ -28,6 +28,8 @@ pub mod notification_card;
 pub mod desktop_dock;
 
 pub mod dock_preview;
+mod dock_switcher;
+mod dock_window_motion;
 
 pub mod shortcut_editor;
 pub mod top_panel;

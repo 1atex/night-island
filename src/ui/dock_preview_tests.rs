@@ -276,24 +276,7 @@ fn verify_preview_material(preview: &mut Preview, work: RECT) -> Result<()> {
     Ok(())
 }
 
-#[test]
-#[ignore = "Shows synthetic source windows and the live dock hover popup without activating user apps"]
-fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
-    unsafe {
-        RoInitialize(RO_INIT_SINGLETHREADED)?;
-    }
-    let _runtime = Runtime(unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) });
-    let _queue = unsafe {
-        CreateDispatcherQueueController(DispatcherQueueOptions {
-            dwSize: size_of::<DispatcherQueueOptions>() as u32,
-            threadType: DQTYPE_THREAD_CURRENT,
-            apartmentType: DQTAT_COM_NONE,
-        })?
-    };
-    let compositor = Compositor::new()?;
-    let gpu = Gpu::new(&compositor)?;
-    let monitor = desktop::monitors().into_iter().find(|monitor| monitor.primary).unwrap();
-    let work = monitor.work;
+fn fixture_sources(work: RECT, style: WINDOW_EX_STYLE) -> Result<Sources> {
     let instance = unsafe { GetModuleHandleW(None)? };
     let class = w!("NightIsland.DockPreviewFixture");
     unsafe {
@@ -308,7 +291,7 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
     for (index, color) in [0x0011bb33, 0x00bb3311].into_iter().enumerate() {
         let source = unsafe {
             CreateWindowExW(
-                WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                style,
                 class,
                 w!("Synthetic dock preview source"),
                 WS_POPUP,
@@ -328,6 +311,28 @@ fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
             let _ = ShowWindow(source, SW_SHOWNOACTIVATE);
         }
     }
+    Ok(sources)
+}
+
+#[test]
+#[ignore = "Shows synthetic source windows and the live dock hover popup without activating user apps"]
+fn native_dock_preview_live_paint_switch_close_sync_and_dpi() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    let _runtime = Runtime(unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) });
+    let _queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    let compositor = Compositor::new()?;
+    let gpu = Gpu::new(&compositor)?;
+    let monitor = desktop::monitors().into_iter().find(|monitor| monitor.primary).unwrap();
+    let work = monitor.work;
+    let sources = fixture_sources(work, WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)?;
     let path = std::env::current_exe().unwrap().to_string_lossy().into_owned();
     let mut entry = Entry {
         pin: Pin { name: "Preview fixture".into(), target: path.clone(), icon: String::new() },
@@ -595,5 +600,103 @@ fn native_alpha_popup_thumbnail_compatibility() -> Result<()> {
         }
     }
     assert_eq!(center, 0x00cc4422, "Re-presenting alpha content must preserve live thumbnail updates");
+    Ok(())
+}
+
+#[test]
+#[ignore = "Uses live DWM thumbnails and the Windows foreground window"]
+fn native_switcher_and_window_flight() -> Result<()> {
+    use crate::ui::{
+        dock_switcher::{Item, Placement, Switcher},
+        dock_window_motion::Flight,
+    };
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    let _runtime = Runtime(unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) });
+    let _queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    let compositor = Compositor::new()?;
+    let gpu = Gpu::new(&compositor)?;
+    let work = desktop::monitors().into_iter().find(|m| m.primary).unwrap().work;
+    let sources = fixture_sources(work, WS_EX_APPWINDOW)?;
+    let path = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+    let windows: Vec<_> = sources
+        .0
+        .iter()
+        .enumerate()
+        .map(|(i, h)| desktop::Window {
+            handle: h.0 as isize,
+            path: path.clone(),
+            title: format!("Window {i}"),
+            active: i == 0,
+            minimized: false,
+            island_settings: false,
+        })
+        .collect();
+    let items = windows.iter().map(|w| Item { window: w.clone(), icon: None }).collect();
+    let popup = Switcher::new(
+        sources.0[0],
+        &gpu,
+        items,
+        "Windows".into(),
+        Placement { work, above: work.bottom - 100, scale: 1.0, hidden: false },
+        &Default::default(),
+    )?;
+    let until = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < until {
+        pump();
+    }
+    let mut rect = RECT::default();
+    unsafe {
+        GetWindowRect(popup.hwnd(), &mut rect)?;
+    }
+    for (i, color) in [0x0011bb33, 0x00bb3311].into_iter().enumerate() {
+        let dc = unsafe { GetDC(None) };
+        let pixel = unsafe { GetPixel(dc, rect.left + 141 + i as i32 * 252, rect.top + 130) };
+        unsafe {
+            ReleaseDC(None, dc);
+        }
+        assert_eq!(pixel.0, color, "Switcher preview {i}");
+    }
+    unsafe {
+        SendMessageW(popup.hwnd(), WM_KEYDOWN, Some(WPARAM(39)), None);
+        SendMessageW(popup.hwnd(), WM_KEYDOWN, Some(WPARAM(13)), None);
+    }
+    assert_eq!(popup.take_choice().unwrap().handle, windows[1].handle);
+    drop(popup);
+    let anchor =
+        RECT { left: work.left + 500, top: work.bottom - 90, right: work.left + 550, bottom: work.bottom - 40 };
+    let mut flight = Flight::start(&windows[1], anchor, false, false).expect("minimize animation");
+    pump();
+    assert!(unsafe { IsIconic(sources.0[1]).as_bool() });
+    flight.tick();
+    let overlay = unsafe { FindWindowW(w!("STATIC"), w!("Night Island Window Motion"))? };
+    unsafe {
+        GetWindowRect(overlay, &mut rect)?;
+        DwmFlush()?;
+    }
+    let dc = unsafe { GetDC(None) };
+    let pixel = unsafe { GetPixel(dc, (rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2) };
+    unsafe {
+        ReleaseDC(None, dc);
+    }
+    assert_eq!(pixel.0, 0x00bb3311, "Flying thumbnail");
+    flight.finish();
+    let mut flight = Flight::start(&windows[1], anchor, true, false).expect("restore animation");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while flight.tick() {
+        assert!(Instant::now() < deadline, "Restore animation did not finish");
+        pump();
+    }
+    flight.finish();
+    pump();
+    assert!(!unsafe { IsIconic(sources.0[1]).as_bool() });
+    assert_eq!(unsafe { GetForegroundWindow() }, sources.0[1]);
     Ok(())
 }

@@ -105,6 +105,7 @@ struct State {
     thumbnail: Option<Thumbnail>,
     thumbnail_visible: bool,
     window_index: usize,
+    choice: Option<desktop::Window>,
     media_id: Option<u64>,
     scale: f32,
     work: RECT,
@@ -141,7 +142,7 @@ fn scaled(r: Rect, s: f32) -> Rect {
     (r.0 * s, r.1 * s, r.2 * s, r.3 * s)
 }
 
-fn fit(source: (i32, i32), area: Rect) -> RECT {
+pub(super) fn fit(source: (i32, i32), area: Rect) -> RECT {
     let scale = ((area.2 - area.0) / source.0.max(1) as f32).min((area.3 - area.1) / source.1.max(1) as f32);
     let w = (source.0 as f32 * scale).round().max(1.0);
     let h = (source.1 as f32 * scale).round().max(1.0);
@@ -878,7 +879,14 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
                     let _ = ReleaseCapture();
                 }
                 if let Some(window) = activate {
-                    desktop::activate(&window, false);
+                    let state = &mut *ptr;
+                    state.choice = Some(window);
+                    let _ = PostMessageW(
+                        Some(state.parent),
+                        crate::ui::desktop_dock::WM_DESKTOP_DOCK,
+                        WPARAM(6),
+                        LPARAM(0),
+                    );
                 }
                 LRESULT(0)
             }
@@ -943,6 +951,7 @@ impl Preview {
             snapshot: Snapshot::default(),
             thumbnail: None,
             thumbnail_visible: false,
+            choice: None,
             window_index: entry.windows.iter().position(|w| w.active).unwrap_or(0),
             media_id: None,
             scale,
@@ -1058,6 +1067,10 @@ impl Preview {
         self.state.snapshot = self.state.actions.snapshot();
         self.state.arrange();
         self.state.rebuild_thumbnail();
+    }
+
+    pub fn take_choice(&mut self) -> Option<desktop::Window> {
+        self.state.choice.take()
     }
 
     pub fn allow_reopen(&mut self) {

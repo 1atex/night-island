@@ -32,6 +32,7 @@ const PULSE: usize = 1;
 const FRAME: usize = 2;
 const BACKDROP_REFRESH: usize = 3;
 const PREVIEW_HOVER: usize = 4;
+const WINDOW_FLIGHT: usize = 5;
 
 #[derive(Clone)]
 pub struct Entry {
@@ -44,6 +45,8 @@ pub struct Entry {
 pub enum Request {
     Save,
     Launch(Entry),
+    AllWindows,
+    Activate(desktop::Window),
     Menu(Option<Entry>),
     Capture(Entry),
     Add,
@@ -90,6 +93,8 @@ struct State {
     allowed_visible: bool,
     resumed: bool,
     preview: Option<crate::ui::dock_preview::Preview>,
+    switcher: Option<super::dock_switcher::Switcher>,
+    flight: Option<super::dock_window_motion::Flight>,
     actions: Arc<crate::platform::dock_actions::Client>,
     preview_candidate: Option<(String, Instant)>,
     capture_hidden: std::cell::Cell<bool>,
@@ -320,6 +325,10 @@ impl State {
     fn set_suppressed(&mut self, suppressed: bool) {
         if suppressed != self.suppressed {
             self.suppressed = suppressed;
+            if suppressed {
+                self.switcher.take();
+                self.finish_flight();
+            }
             self.hide_preview();
             self.pointer = None;
             self.hover = None;
@@ -741,7 +750,13 @@ impl State {
     }
 
     fn update_preview(&mut self, point: POINT) {
-        if self.suppressed || self.hidden || self.pressed.is_some() || self.menu_open || !self.allowed_visible {
+        if self.suppressed
+            || self.hidden
+            || self.pressed.is_some()
+            || self.menu_open
+            || self.switcher.is_some()
+            || !self.allowed_visible
+        {
             self.hide_preview();
             return;
         }
@@ -786,6 +801,15 @@ impl State {
         }
     }
 
+    fn finish_flight(&mut self) {
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), WINDOW_FLIGHT);
+        }
+        if let Some(flight) = self.flight.take() {
+            flight.finish();
+        }
+    }
+
     fn pulse(&mut self) {
         if self.update_suppression() {
             return;
@@ -803,7 +827,10 @@ impl State {
             let _ = GetCursorPos(&mut pt);
         }
         self.update_preview(pt);
-        let preview_open = self.preview.as_ref().is_some_and(|p| p.is_open());
+        if let Some(switcher) = &self.switcher {
+            switcher.prune();
+        }
+        let preview_open = self.switcher.is_some() || self.preview.as_ref().is_some_and(|p| p.is_open());
         let point = ((pt.x - self.origin.0) as f32, (pt.y - self.origin.1) as f32);
         let near = inside(
             (0.0, self.panel.1.min(self.size.1 as f32 - 12.0 * self.scale), self.size.0 as f32, self.size.1 as f32),
@@ -832,7 +859,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             return DefWindowProcW(hwnd, msg, wparam, lparam);
         }
         if (*ptr).suppressed
-            && matches!(msg, WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONUP | WM_MOUSEWHEEL)
+            && matches!(msg, WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP | WM_MOUSEWHEEL)
         {
             return LRESULT(0);
         }
@@ -849,11 +876,36 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 }
                 LRESULT(0)
             }
+            super::dock_switcher::DONE => {
+                let state = &mut *ptr;
+                if state.switcher.as_ref().is_some_and(|s| s.hwnd().0 as usize == wparam.0) {
+                    let choice = state.switcher.take().and_then(|s| s.take_choice());
+                    state.leave_at = Instant::now();
+                    if let Some(window) = choice {
+                        state.post(Request::Activate(window));
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_MBUTTONUP => {
+                let state = &mut *ptr;
+                if let Some(switcher) = &state.switcher {
+                    switcher.dismiss();
+                } else if state.config.window_switcher {
+                    state.hide_preview();
+                    state.post(Request::AllWindows);
+                }
+                LRESULT(0)
+            }
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
             WM_ERASEBKGND => LRESULT(1),
             WM_TIMER => {
                 let state = &mut *ptr;
-                if wparam.0 == FRAME {
+                if wparam.0 == WINDOW_FLIGHT {
+                    if state.flight.as_mut().is_none_or(|f| !f.tick()) {
+                        state.finish_flight();
+                    }
+                } else if wparam.0 == FRAME {
                     let _ = KillTimer(Some(hwnd), FRAME);
                     state.frame_pending = false;
                     state.render();
@@ -1151,6 +1203,8 @@ impl Dock {
             allowed_visible: visible,
             resumed: false,
             preview: None,
+            switcher: None,
+            flight: None,
             actions: Arc::new(crate::platform::dock_actions::Client::new()),
             preview_candidate: None,
             capture_hidden: std::cell::Cell::new(false),
@@ -1178,6 +1232,8 @@ impl Dock {
     pub fn update(&mut self, config: &DockSettings) {
         let rebuild = self.state.config.pins != config.pins || self.state.config.show_running != config.show_running;
         self.state.hide_preview();
+        self.state.switcher.take();
+        self.state.finish_flight();
         self.state.config = config.clone();
         self.state.feedback.set_enabled(config.animations && motion_allowed());
         if self.state.update_suppression() {
@@ -1209,6 +1265,77 @@ impl Dock {
         }
     }
 
+    pub fn show_windows(&mut self, windows: Vec<desktop::Window>, title: String) -> bool {
+        let state = &mut self.state;
+        if !state.config.window_switcher || state.suppressed {
+            return false;
+        }
+        state.hide_preview();
+        state.switcher.take();
+        let items = windows
+            .into_iter()
+            .map(|window| {
+                let icon = state
+                    .entries
+                    .iter()
+                    .find(|e| e.windows.iter().any(|w| w.handle == window.handle))
+                    .and_then(|e| e.icon.clone());
+                super::dock_switcher::Item { window, icon }
+            })
+            .collect();
+        let placement = super::dock_switcher::Placement {
+            work: state.monitor.work,
+            above: state.origin.1 + state.panel.1 as i32,
+            scale: state.scale,
+            hidden: state.capture_hidden.get(),
+        };
+        state.switcher =
+            super::dock_switcher::Switcher::new(state.hwnd, &state.gpu, items, title, placement, &state.config).ok();
+        state.switcher.is_some()
+    }
+
+    pub fn animate_window(&mut self, window: &desktop::Window, restoring: bool) -> bool {
+        let state = &mut self.state;
+        if !state.config.window_motion
+            || !state.config.animations
+            || !motion_allowed()
+            || state.hidden
+            || state.suppressed
+        {
+            return false;
+        }
+        let Some((_, r)) = state
+            .rects
+            .iter()
+            .find(|(i, _)| state.entries.get(*i).is_some_and(|e| e.windows.iter().any(|w| w.handle == window.handle)))
+        else {
+            return false;
+        };
+        let anchor = windows::Win32::Foundation::RECT {
+            left: state.origin.0 + r.0 as i32,
+            top: state.origin.1 + r.1 as i32,
+            right: state.origin.0 + r.2 as i32,
+            bottom: state.origin.1 + r.3 as i32,
+        };
+        state.finish_flight();
+        let Some(flight) =
+            super::dock_window_motion::Flight::start(window, anchor, restoring, state.capture_hidden.get())
+        else {
+            return false;
+        };
+        state.flight = Some(flight);
+        unsafe {
+            if SetTimer(Some(state.hwnd), WINDOW_FLIGHT, if state.config.economy { 33 } else { 15 }, None) == 0 {
+                state.finish_flight();
+            }
+        }
+        true
+    }
+
+    pub fn take_preview_choice(&mut self) -> Option<desktop::Window> {
+        self.state.preview.as_mut()?.take_choice()
+    }
+
     pub fn show_preview(&mut self, entry: &Entry) {
         if !self.state.suppressed {
             self.state.show_preview(entry);
@@ -1217,6 +1344,12 @@ impl Dock {
 
     pub fn set_capture_hidden(&self, hidden: bool) {
         self.state.capture_hidden.set(hidden);
+        if let Some(flight) = &self.state.flight {
+            flight.set_capture(hidden);
+        }
+        if let Some(switcher) = &self.state.switcher {
+            switcher.set_capture(hidden);
+        }
         if let Some(preview) = &self.state.preview {
             preview.set_capture_hidden(hidden);
         }
@@ -1246,6 +1379,8 @@ impl Dock {
 
 impl Drop for Dock {
     fn drop(&mut self) {
+        self.state.switcher.take();
+        self.state.finish_flight();
         self.state.actions.set_notify(HWND::default());
         self.state.actions.clear();
         self.state.preview.take();

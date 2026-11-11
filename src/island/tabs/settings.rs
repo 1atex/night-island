@@ -126,6 +126,8 @@ impl App {
                 | DockEnabled
                 | DockAutoHide
                 | DockRunning
+                | DockWindowSwitcher
+                | DockWindowMotion
                 | DockPreview
                 | DockFullscreen
                 | DockEconomy

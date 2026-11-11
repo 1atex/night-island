@@ -29,6 +29,13 @@ pub fn is_ru() -> bool {
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
         "Card shadows in the open island" => "Тени карточек в раскрытом острове",
+        "Window switcher" => "Переключатель окон",
+        "All windows" => "Все окна",
+        "Middle-click the dock for all windows. Click a grouped app to choose its window." => {
+            "Нажмите колёсико над доком для обзора всех окон. Нажмите значок программы с несколькими окнами, чтобы выбрать окно."
+        }
+        "Animate windows to and from the dock" => "Сворачивание к значку и восстановление окна",
+        "No open windows" => "Нет открытых окон",
         "Settings transfer" => "Перенос настроек",
         "Export settings…" => "Экспорт настроек…",
         "Import settings…" => "Импорт настроек…",

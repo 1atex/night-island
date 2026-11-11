@@ -6,6 +6,7 @@ use crate::ui::i18n::tr;
 
 const IMPORT_TASKBAR: usize = 28;
 const MEMORY_MANAGER: usize = 29;
+const ALL_WINDOWS: usize = 30;
 
 impl App {
     pub(in crate::island) fn configure_desktop_dock(&mut self) {
@@ -358,6 +359,9 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
                     .glyph('\u{E8B3}'),
             );
         }
+        if config.window_switcher && (entry.is_none() || page == 0) {
+            items.push(Entry::item(ALL_WINDOWS, &tr("All windows")).glyph('\u{E737}'));
+        }
         if entry.is_none() || page == 1 {
             if with_app_value(|a| a.settings.memory_tools).unwrap_or(false) {
                 items.push(Entry::item(MEMORY_MANAGER, &tr("Memory manager")).glyph('\u{E964}'));
@@ -377,6 +381,25 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
             Some(21) => page = if page == 2 { 1 } else { 0 },
             other => return other,
         }
+    }
+}
+
+fn show_windows(windows: Vec<desktop::Window>, title: String) -> bool {
+    let mut shown = false;
+    with_app(|a| shown = a.desktop_dock.as_mut().is_some_and(|dock| dock.show_windows(windows, title)));
+    shown
+}
+
+fn activate_window(window: &desktop::Window, toggle: bool) {
+    let handle = HWND(window.handle as _);
+    let restoring = unsafe { IsIconic(handle).as_bool() };
+    let minimizing = toggle && unsafe { GetForegroundWindow() } == handle;
+    let mut animated = false;
+    if restoring || minimizing {
+        with_app(|a| animated = a.desktop_dock.as_mut().is_some_and(|d| d.animate_window(window, restoring)));
+    }
+    if !animated {
+        desktop::activate(window, toggle);
     }
 }
 
@@ -412,6 +435,14 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
         }
         return;
     }
+    if command == 6 {
+        let mut window = None;
+        with_app(|a| window = a.desktop_dock.as_mut().and_then(Dock::take_preview_choice));
+        if let Some(window) = window {
+            activate_window(&window, false);
+        }
+        return;
+    }
     if command == 1 {
         add_file(hwnd);
         return;
@@ -437,6 +468,10 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
             }
             a.save_desktop_dock();
         }),
+        Some(Request::AllWindows) => {
+            show_windows(desktop::windows(), tr("All windows").into_owned());
+        }
+        Some(Request::Activate(window)) => activate_window(&window, false),
         Some(Request::Add) => add_file(hwnd),
         Some(Request::Capture(entry)) => capture_application(&entry),
         Some(Request::Launch(entry)) => {
@@ -447,8 +482,11 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
             if live.is_empty() {
                 cmd::shell_open(&entry.pin.target, None);
             } else {
+                if live.len() > 1 && show_windows(live.clone(), entry.pin.name.clone()) {
+                    return;
+                }
                 let index = live.iter().position(|w| w.active).map_or(0, |i| (i + 1) % live.len());
-                desktop::activate(&live[index], live.len() == 1);
+                activate_window(&live[index], live.len() == 1);
             }
         }
         Some(Request::Menu(entry)) => {
@@ -471,7 +509,7 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                 Some(1) => {
                     if let Some(entry) = entry {
                         if let Some(window) = entry.windows.iter().find(|w| w.island_settings) {
-                            desktop::activate(window, false);
+                            activate_window(window, false);
                         } else {
                             cmd::shell_open(&entry.pin.target, None);
                         }
@@ -533,7 +571,22 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                             Some(12) => desktop::WindowAction::Minimize,
                             _ => desktop::WindowAction::Close,
                         };
-                        for window in current_windows(entry) {
+                        let windows = current_windows(entry);
+                        if let [window] = windows.as_slice() {
+                            let restore = matches!(action, desktop::WindowAction::Restore) && window.minimized;
+                            let minimize = matches!(action, desktop::WindowAction::Minimize) && !window.minimized;
+                            let mut animated = false;
+                            if restore || minimize {
+                                with_app(|a| {
+                                    animated =
+                                        a.desktop_dock.as_mut().is_some_and(|d| d.animate_window(window, restore))
+                                });
+                            }
+                            if animated {
+                                return;
+                            }
+                        }
+                        for window in windows {
                             desktop::change_window(&window, action);
                         }
                     }
@@ -560,7 +613,7 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                 }
                 Some(25) => {
                     if let Some(window) = entry.as_ref().and_then(|e| e.windows.first()) {
-                        desktop::activate(window, false);
+                        activate_window(window, false);
                     }
                 }
                 Some(27) => {
@@ -597,6 +650,9 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                         });
                     }
                 }
+                Some(ALL_WINDOWS) => {
+                    show_windows(desktop::windows(), tr("All windows").into_owned());
+                }
                 Some(22) => import_dock(hwnd),
                 Some(IMPORT_TASKBAR) => crate::platform::taskbar_pins::start(hwnd, true),
                 Some(MEMORY_MANAGER) => with_app(|a| {
@@ -611,7 +667,7 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                 }),
                 Some(id) if id >= 100 => {
                     if let Some(window) = entry.as_ref().and_then(|e| e.windows.get(id - 100)) {
-                        desktop::activate(window, false);
+                        activate_window(window, false);
                     }
                 }
                 _ => {}
