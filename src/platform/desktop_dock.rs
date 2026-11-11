@@ -185,19 +185,39 @@ pub fn windows() -> Vec<Window> {
     scan.out
 }
 
-pub fn activate(window: &Window, minimize_active: bool) {
-    let hwnd = HWND(window.handle as *mut _);
+fn checked_window(window: &Window) -> Option<HWND> {
+    let hwnd = HWND(window.handle as _);
+    let mut pid = 0;
     unsafe {
-        if !IsWindow(Some(hwnd)).as_bool() {
-            return;
-        }
-        let mut pid = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if process_path(pid)
-            .is_none_or(|path| crate::data::desktop_dock::key(&path) != crate::data::desktop_dock::key(&window.path))
-        {
-            return;
+    }
+    let path = process_path(pid)?;
+    (crate::data::desktop_dock::key(&path) == crate::data::desktop_dock::key(&window.path)).then_some(hwnd)
+}
+
+pub fn switch_window(window: &Window) {
+    let Some(hwnd) = checked_window(window) else { return };
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindowAsync(hwnd, SW_RESTORE);
         }
+        let popup = GetLastActivePopup(hwnd);
+        let target = if !windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled(hwnd).as_bool()
+            && IsWindowVisible(popup).as_bool()
+        {
+            popup
+        } else {
+            hwnd
+        };
+        if !SetForegroundWindow(target).as_bool() {
+            SwitchToThisWindow(target, true);
+        }
+    }
+}
+
+pub fn activate(window: &Window, minimize_active: bool) {
+    let Some(hwnd) = checked_window(window) else { return };
+    unsafe {
         if minimize_active && GetForegroundWindow() == hwnd {
             let _ = ShowWindowAsync(hwnd, SW_MINIMIZE);
         } else {
@@ -267,18 +287,8 @@ pub enum WindowAction {
 }
 
 pub fn change_window(window: &Window, action: WindowAction) -> bool {
-    let hwnd = HWND(window.handle as *mut _);
+    let Some(hwnd) = checked_window(window) else { return false };
     unsafe {
-        if !IsWindow(Some(hwnd)).as_bool() {
-            return false;
-        }
-        let mut pid = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if process_path(pid)
-            .is_none_or(|path| crate::data::desktop_dock::key(&path) != crate::data::desktop_dock::key(&window.path))
-        {
-            return false;
-        }
         match action {
             WindowAction::Restore => ShowWindowAsync(hwnd, SW_RESTORE).as_bool(),
             WindowAction::Maximize => ShowWindowAsync(hwnd, SW_MAXIMIZE).as_bool(),
@@ -517,7 +527,9 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn window_fixture(interactive: bool) -> (Fixture, Vec<Window>) {
-        let file = std::env::temp_dir().join(format!("night-island-dock-fixture-{}.json", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let index = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let file = std::env::temp_dir().join(format!("night-island-dock-fixture-{}-{index}.json", std::process::id()));
         let _ = std::fs::remove_file(&file);
         let mut command = Command::new(std::env::current_exe().unwrap());
         if interactive {

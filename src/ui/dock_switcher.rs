@@ -27,10 +27,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Result, w};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum Anchor {
     Dock(i32),
-    Keyboard(usize),
+    Keyboard(super::dock_alt_tab::Cycle),
 }
 
 pub(super) struct Placement {
@@ -40,6 +40,7 @@ pub(super) struct Placement {
     pub hidden: bool,
 }
 
+pub(super) const CHOSEN: u32 = WM_APP + 119;
 pub(super) const DONE: u32 = WM_APP + 117;
 
 pub(super) struct Item {
@@ -76,9 +77,9 @@ impl Layout {
     }
     fn overview(work: RECT, scale: f32, windows: usize) -> Self {
         let room = (((work.right - work.left) as f32 / scale) * 0.94).max(1.0);
-        let height = (((work.bottom - work.top) as f32 / scale) * 0.38).clamp(1.0, 290.0);
-        let count = (((room - 30.0) / 265.0) as usize).clamp(1, 6).min(windows.max(1));
-        let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 344.0);
+        let height = (((work.bottom - work.top) as f32 / scale) * 0.38).clamp(1.0, 352.0);
+        let count = (((room - 30.0) / 320.0) as usize).clamp(1, 6).min(windows.max(1));
+        let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 450.0);
         let size =
             (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
         Self { size, count, tile, scale, overview: true, spans: Vec::new() }
@@ -88,7 +89,7 @@ impl Layout {
             return;
         }
         let image_height = (self.size.1 as f32 / self.scale - 108.0).max(1.0);
-        let widths: Vec<_> = aspects.iter().map(|a| (a * image_height + 12.0).clamp(134.0, 370.0)).collect();
+        let widths: Vec<_> = aspects.iter().map(|a| (a * image_height + 12.0).clamp(134.0, 465.0)).collect();
         let total = widths.iter().sum::<f32>();
         let gaps = (widths.len() - 1) as f32 * 8.0;
         let room = (self.size.0 as f32 / self.scale - 38.0 - gaps).max(1.0);
@@ -107,13 +108,25 @@ impl Layout {
         let s = self.scale;
         let (left, width) =
             self.spans.get(slot).copied().unwrap_or((19.0 + (self.tile + 8.0) * slot as f32, self.tile));
-        (left * s, 48.0 * s, (left + width) * s, self.size.1 as f32 - 19.0 * s)
+        ((left * s).round(), (48.0 * s).round(), ((left + width) * s).round(), (self.size.1 as f32 - 19.0 * s).round())
     }
     fn image(&self, slot: usize) -> Rect {
         let (l, t, r, b) = self.card(slot);
         let s = self.scale;
         (l + 6.0 * s, t + 32.0 * s, r - 6.0 * s, b - 6.0 * s)
     }
+    fn thumbnail(&self, slot: usize, source: (i32, i32)) -> RECT {
+        let area = self.image(slot);
+        if !self.overview {
+            return fit(source, area);
+        }
+        let cx = (area.0 + area.2) / 2.0;
+        let cy = (area.1 + area.3) / 2.0;
+        let hw = (area.2 - area.0).min(source.0 as f32) / 2.0;
+        let hh = (area.3 - area.1).min(source.1 as f32) / 2.0;
+        fit(source, (cx - hw, cy - hh, cx + hw, cy + hh))
+    }
+
     fn close(&self, slot: usize) -> Rect {
         let (_, t, r, _) = self.card(slot);
         let s = self.scale;
@@ -149,6 +162,7 @@ struct State {
     reveal: Reveal,
     closing: bool,
     choice: Option<Window>,
+    cycle: Option<super::dock_alt_tab::Cycle>,
 }
 impl State {
     fn start(&self) -> usize {
@@ -195,7 +209,7 @@ impl State {
         }
         for (slot, (thumb, size)) in self.thumbnails.iter_mut().zip(sizes).enumerate() {
             if let (Some(t), Some(size)) = (thumb.as_mut(), size)
-                && !t.update(fit((size.cx, size.cy), self.layout.image(slot)), true)
+                && !t.update(self.layout.thumbnail(slot, (size.cx, size.cy)), true)
             {
                 *thumb = None;
             }
@@ -256,19 +270,26 @@ impl State {
                 let item = &self.items[i];
                 let r = self.layout.card(slot);
                 let selected = i == self.selected;
-                p.fill_round_rect(r, 13.0 * s, rgba(1.0, 1.0, 1.0, if selected { 0.115 } else { 0.06 }))?;
-                let icon = (r.0 + 9.0 * s, r.1 + 7.0 * s, r.0 + 26.0 * s, r.1 + 24.0 * s);
+                let face = if self.layout.overview {
+                    if selected { rgba(0.17, 0.17, 0.19, 0.98) } else { rgba(0.105, 0.105, 0.12, 0.98) }
+                } else {
+                    rgba(1.0, 1.0, 1.0, if selected { 0.115 } else { 0.06 })
+                };
+                p.fill_round_rect(r, 13.0 * s, face)?;
+                let icon_side = (18.0 * s).round();
+                let (ix, iy) = ((r.0 + 9.0 * s).round(), (r.1 + 7.0 * s).round());
+                let icon = (ix, iy, ix + icon_side, iy + icon_side);
                 if let Some(icon_data) = &item.icon {
                     p.image(icon, 3.0 * s, icon_data.side, &icon_data.bgra)?;
                 } else {
                     p.glyph('\u{E737}', icon, 14.0 * s, rgba(1.0, 1.0, 1.0, 0.65))?;
                 }
-                let caption = (icon.2 + 6.0 * s, r.1, r.2 - 30.0 * s, r.1 + 31.0 * s);
+                let caption = ((icon.2 + 6.0 * s).round(), r.1, (r.2 - 30.0 * s).round(), (r.1 + 31.0 * s).round());
                 p.push_clip(caption);
                 let title = p.text(
                     &item.window.title,
                     caption,
-                    12.0 * s,
+                    if self.layout.overview { 13.0 } else { 12.0 } * s,
                     DWRITE_FONT_WEIGHT_SEMI_BOLD,
                     DWRITE_TEXT_ALIGNMENT_LEADING,
                     rgba(1.0, 1.0, 1.0, 0.93),
@@ -314,7 +335,11 @@ impl State {
     fn frame(&self) -> Result<()> {
         let now = Instant::now();
         let t = self.reveal.value(now);
-        let at = (self.origin.0, self.origin.1 + ((1.0 - t) * 9.0 * self.layout.scale).round() as i32);
+        let at = if self.layout.overview {
+            self.origin
+        } else {
+            (self.origin.0, self.origin.1 + ((1.0 - t) * 9.0 * self.layout.scale).round() as i32)
+        };
         let moving = self.reveal.active(now) || self.focus_motion.active();
         unsafe {
             if moving {
@@ -356,7 +381,20 @@ impl State {
     }
     fn finish(&mut self, choice: Option<Window>) {
         if !self.closing {
-            self.choice = choice;
+            if let Some(cycle) = &self.cycle {
+                let index =
+                    choice.as_ref().and_then(|window| cycle.windows.iter().position(|w| w.handle == window.handle));
+                if let Some(window) = cycle.finish(index)
+                    && index.is_some()
+                {
+                    desktop::switch_window(window);
+                }
+            } else if choice.is_some() {
+                self.choice = choice;
+                unsafe {
+                    let _ = PostMessageW(Some(self.dock), CHOSEN, WPARAM(self.hwnd.0 as usize), LPARAM(0));
+                }
+            }
             self.focus_motion.set_enabled(false);
             self.closing = true;
             self.animate(false);
@@ -390,6 +428,12 @@ impl State {
             self.hover = None;
             let page = self.selected / self.layout.count;
             self.select((page + if next { 1 } else { pages - 1 }) % pages * self.layout.count);
+            if let Some(cycle) = &self.cycle
+                && let Some(item) = self.items.get(self.selected)
+                && let Some(i) = cycle.windows.iter().position(|w| w.handle == item.window.handle)
+            {
+                cycle.select(i);
+            }
         }
     }
     fn choose(&mut self) {
@@ -442,7 +486,7 @@ impl State {
                 34 => self.page(true),
                 _ => {}
             },
-            WM_ACTIVATE if w.0 & 0xffff == WA_INACTIVE as usize => self.finish(None),
+            WM_ACTIVATE if !self.layout.overview && w.0 & 0xffff == WA_INACTIVE as usize => self.finish(None),
             WM_CLOSE => self.finish(None),
             _ => {}
         }
@@ -454,6 +498,9 @@ extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<State>;
         if !ptr.is_null() {
             match msg {
+                WM_MOUSEACTIVATE if (*ptr).try_borrow().is_ok_and(|s| s.layout.overview) => {
+                    return LRESULT(MA_NOACTIVATE as isize);
+                }
                 WM_TIMER if w.0 == 1 => {
                     if let Ok(s) = (*ptr).try_borrow() {
                         if s.focus_motion.active() {
@@ -533,8 +580,8 @@ impl Switcher {
                 None,
             )?
         };
-        let selected = match anchor {
-            Anchor::Keyboard(i) => i.min(items.len().saturating_sub(1)),
+        let selected = match &anchor {
+            Anchor::Keyboard(cycle) => cycle.selected().unwrap_or(0),
             Anchor::Dock(_) => items.iter().position(|item| item.window.active).unwrap_or(0),
         };
         let backdrop =
@@ -559,6 +606,10 @@ impl Switcher {
             reveal: Reveal::new(0.0),
             closing: false,
             choice: None,
+            cycle: match anchor {
+                Anchor::Keyboard(cycle) => Some(cycle),
+                Anchor::Dock(_) => None,
+            },
         }));
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&*state as *const RefCell<State>) as isize);
@@ -570,6 +621,9 @@ impl Switcher {
             s.reset_focus_motion();
             s.bind();
             s.paint()?;
+        }
+        if popup.state.borrow().cycle.as_ref().is_some_and(|cycle| cycle.selected().is_none()) {
+            return Err(windows::core::Error::from(windows::Win32::Foundation::E_ABORT));
         }
         unsafe {
             let _ = ShowWindow(hwnd, if overview { SW_SHOWNOACTIVATE } else { SW_SHOW });
@@ -607,15 +661,32 @@ impl Switcher {
     pub fn keyboard(&self) -> bool {
         self.state.borrow().layout.overview
     }
-    pub fn step(&self, delta: isize) {
-        self.state.borrow_mut().step(delta);
+    pub fn sync_selection(&self, cycle: &super::dock_alt_tab::Cycle) -> bool {
+        let mut s = self.state.borrow_mut();
+        if s.closing || !s.cycle.as_ref().is_some_and(|own| own.same(cycle)) {
+            return false;
+        }
+        if let Some(i) = cycle.selected()
+            && let Some(index) = s.items.iter().position(|item| item.window.handle == cycle.windows[i].handle)
+            && s.selected != index
+        {
+            s.select(index);
+        }
+        true
     }
+    #[cfg(test)]
     pub fn selected(&self) -> Option<Window> {
         let s = self.state.borrow();
         if s.closing {
             return None;
         }
         s.items.get(s.selected).map(|i| i.window.clone())
+    }
+    #[cfg(test)]
+    pub fn selected_point(&self) -> (i32, i32) {
+        let state = self.state.borrow();
+        let (l, t, r, b) = state.layout.image(state.selected % state.layout.count);
+        (((l + r) / 2.0) as i32, ((t + b) / 2.0) as i32)
     }
     pub fn dismiss(&self) {
         self.state.borrow_mut().finish(None);
@@ -669,6 +740,23 @@ impl Drop for Switcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overview_previews_never_enlarge_the_source_bitmap() {
+        let work = RECT { left: 0, top: 0, right: 2560, bottom: 1440 };
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let mut layout = Layout::overview(work, scale, 2);
+            layout.arrange_page(&[1.5, 16.0 / 9.0]);
+            for (slot, size) in [(150, 100), (1920, 1080)].into_iter().enumerate() {
+                let r = layout.thumbnail(slot, size);
+                assert!(r.right - r.left <= size.0 && r.bottom - r.top <= size.1);
+                if slot == 0 {
+                    assert_eq!((r.right - r.left, r.bottom - r.top), size);
+                }
+                assert!(r.left >= 0 && r.right <= layout.size.0 && r.bottom <= layout.size.1);
+            }
+        }
+    }
 
     #[test]
     fn pages_fit_the_work_area_at_each_monitor_scale() {

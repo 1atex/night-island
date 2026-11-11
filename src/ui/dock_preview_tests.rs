@@ -606,10 +606,14 @@ fn native_alpha_popup_thumbnail_compatibility() -> Result<()> {
 fn focus_fixture(hwnd: HWND) -> Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     unsafe {
-        let _ = SetForegroundWindow(hwnd);
-        pump();
-        if GetForegroundWindow() == hwnd {
-            return Ok(());
+        if !SetForegroundWindow(hwnd).as_bool() {
+            SwitchToThisWindow(hwnd, false);
+        }
+        for _ in 0..8 {
+            pump();
+            if GetForegroundWindow() == hwnd {
+                return Ok(());
+            }
         }
         let mut rect = RECT::default();
         let mut old = POINT::default();
@@ -636,7 +640,12 @@ fn focus_fixture(hwnd: HWND) -> Result<()> {
             if SendInput(&[mouse(MOUSEEVENTF_LEFTDOWN), mouse(MOUSEEVENTF_LEFTUP)], size_of::<INPUT>() as i32) != 2 {
                 return Err(windows::core::Error::from_thread());
             }
-            pump();
+            for _ in 0..12 {
+                pump();
+                if GetForegroundWindow() == hwnd {
+                    break;
+                }
+            }
             Ok(())
         })();
         let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), rect.left, rect.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
@@ -758,7 +767,9 @@ fn native_switcher_and_window_flight() -> Result<()> {
     pump();
     assert!(!unsafe { IsIconic(sources.0[1]).as_bool() });
     assert_eq!(unsafe { GetForegroundWindow() }, sources.0[1]);
-    let (_child, external) = desktop::tests::window_fixture(true);
+    let (_first, first) = desktop::tests::window_fixture(true);
+    let (_second, second) = desktop::tests::window_fixture(true);
+    let external = [first[0].clone(), second[0].clone()];
     focus_fixture(HWND(external[1].handle as _))?;
     crate::ui::desktop_dock::tests::exercise_keyboard_switcher(sources.0[0], &compositor, &gpu, &external)?;
     Ok(())

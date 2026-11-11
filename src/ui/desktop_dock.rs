@@ -36,11 +36,6 @@ const PREVIEW_HOVER: usize = 4;
 const WINDOW_FLIGHT: usize = 5;
 const ALT_REVEAL: usize = 6;
 
-struct PendingSwitch {
-    windows: Vec<desktop::Window>,
-    selected: usize,
-}
-
 #[derive(Clone)]
 pub struct Entry {
     pub pin: Pin,
@@ -101,9 +96,7 @@ struct State {
     resumed: bool,
     preview: Option<crate::ui::dock_preview::Preview>,
     switcher: Option<super::dock_switcher::Switcher>,
-    pending_switch: Option<PendingSwitch>,
-    shortcut_foreground: Option<HWND>,
-    recent_windows: Vec<isize>,
+    pending_switch: Option<super::dock_alt_tab::Cycle>,
     shortcut: Option<super::dock_alt_tab::Shortcut>,
     launching: HashMap<String, Instant>,
     last_app_click: Option<(String, Instant)>,
@@ -236,11 +229,6 @@ impl State {
             return;
         }
         self.scan = scan;
-        self.recent_windows.retain(|h| self.scan.iter().any(|w| w.handle == *h));
-        if let Some(active) = self.scan.iter().find(|w| w.active) {
-            let handle = active.handle;
-            self.remember_window(handle);
-        }
         let previous: Vec<String> = self.entries.iter().map(|e| key(&e.pin.target)).collect();
         let mut entries: Vec<Entry> = self
             .config
@@ -356,7 +344,6 @@ impl State {
             self.enable_shortcut();
             if suppressed {
                 self.pending_switch = None;
-                self.shortcut_foreground = None;
                 self.switcher.take();
                 self.finish_flight();
             }
@@ -875,18 +862,10 @@ impl State {
         self.switcher.is_some()
     }
 
-    fn remember_window(&mut self, handle: isize) {
-        if self.recent_windows.first() != Some(&handle) {
-            self.recent_windows.retain(|h| *h != handle);
-            self.recent_windows.insert(0, handle);
-        }
-    }
-
     fn configure_shortcut(&mut self) {
         if !(self.allowed_visible && self.config.window_switcher && self.config.alt_tab) {
             self.shortcut.take();
             self.pending_switch = None;
-            self.shortcut_foreground = None;
             return;
         }
         if self.shortcut.is_none() {
@@ -900,12 +879,13 @@ impl State {
 
     fn enable_shortcut(&self) {
         if let Some(shortcut) = &self.shortcut {
+            shortcut.update(&self.scan);
             shortcut.enable(!self.suppressed && !self.menu_open && !self.scan.is_empty());
         }
     }
 
     fn reveal_keyboard_switcher(&mut self) {
-        let Some(pending) = self.pending_switch.take() else { return };
+        let Some(cycle) = self.pending_switch.take().filter(|c| c.selected().is_some()) else { return };
         let foreground = unsafe { GetForegroundWindow() };
         use windows::Win32::Graphics::Gdi::{
             GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
@@ -928,78 +908,31 @@ impl State {
             work,
             scale,
             hidden: self.capture_hidden.get(),
-            anchor: super::dock_switcher::Anchor::Keyboard(pending.selected),
+            anchor: super::dock_switcher::Anchor::Keyboard(cycle.clone()),
         };
-        if !self.open_switcher(pending.windows.clone(), crate::ui::i18n::tr("All windows").into_owned(), placement) {
-            self.pending_switch = Some(pending);
-        }
+        self.open_switcher(cycle.windows.to_vec(), crate::ui::i18n::tr("All windows").into_owned(), placement);
     }
 
-    fn keyboard_command(&mut self, command: super::dock_alt_tab::Command) {
-        use super::dock_alt_tab::Command;
-        if self.suppressed || self.shortcut.is_none() {
-            return;
-        }
-        let foreground = unsafe { GetForegroundWindow() };
-        let command =
-            if self.shortcut_foreground.is_some_and(|source| source != foreground) { Command::Cancel } else { command };
-        let popup = self.switcher.as_ref().filter(|s| s.keyboard() && s.selected().is_some());
-        match command {
-            Command::Accept | Command::Cancel => {
-                self.shortcut_foreground = None;
-                unsafe {
-                    let _ = KillTimer(Some(self.hwnd), ALT_REVEAL);
-                }
-                let selection = self
-                    .pending_switch
-                    .take()
-                    .and_then(|p| p.windows.into_iter().nth(p.selected))
-                    .or_else(|| popup.and_then(|s| s.selected()));
-                if let Some(popup) = popup {
-                    popup.dismiss();
-                }
-                if command == Command::Accept
-                    && let Some(window) = selection
-                {
-                    desktop::activate(&window, false);
-                    self.remember_window(window.handle);
-                }
+    fn sync_keyboard_switcher(&mut self) {
+        let cycle = self.shortcut.as_ref().and_then(|shortcut| shortcut.snapshot());
+        let popup = self.switcher.as_ref().filter(|s| s.keyboard());
+        if let Some(cycle) = cycle {
+            if popup.is_some_and(|s| s.sync_selection(&cycle))
+                || self.pending_switch.as_ref().is_some_and(|p| p.same(&cycle))
+            {
+                return;
             }
-            Command::Next | Command::Previous => {
-                let delta = if command == Command::Next { 1 } else { -1 };
-                if let Some(popup) = popup {
-                    popup.step(delta);
-                } else if let Some(pending) = &mut self.pending_switch {
-                    pending.selected =
-                        (pending.selected as isize + delta).rem_euclid(pending.windows.len() as isize) as usize;
-                } else {
-                    self.switcher.take();
-                    let front = foreground.0 as isize;
-                    let mut windows: Vec<_> = self
-                        .scan
-                        .iter()
-                        .filter(|w| unsafe { IsWindowVisible(HWND(w.handle as _)).as_bool() })
-                        .cloned()
-                        .collect();
-                    if windows.is_empty() {
-                        return;
-                    }
-                    windows
-                        .sort_by_key(|w| self.recent_windows.iter().position(|h| *h == w.handle).unwrap_or(usize::MAX));
-                    let current = windows.iter().position(|w| w.handle == front);
-                    if let Some(i) = current {
-                        self.remember_window(front);
-                        let active = windows.remove(i);
-                        windows.insert(0, active);
-                    }
-                    let selected =
-                        if delta < 0 { windows.len() - 1 } else { usize::from(current.is_some()) % windows.len() };
-                    self.shortcut_foreground = Some(foreground);
-                    self.pending_switch = Some(PendingSwitch { windows, selected });
-                    unsafe {
-                        SetTimer(Some(self.hwnd), ALT_REVEAL, 86, None);
-                    }
-                }
+            self.pending_switch = Some(cycle);
+            unsafe {
+                SetTimer(Some(self.hwnd), ALT_REVEAL, 100, None);
+            }
+        } else {
+            self.pending_switch = None;
+            unsafe {
+                let _ = KillTimer(Some(self.hwnd), ALT_REVEAL);
+            }
+            if let Some(popup) = popup {
+                popup.dismiss();
             }
         }
     }
@@ -1083,19 +1016,23 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 LRESULT(0)
             }
             super::dock_alt_tab::MESSAGE => {
-                if let Some(cmd) = super::dock_alt_tab::Command::decode(wparam.0) {
-                    (*ptr).keyboard_command(cmd);
+                (*ptr).sync_keyboard_switcher();
+                LRESULT(0)
+            }
+            super::dock_switcher::CHOSEN => {
+                let state = &mut *ptr;
+                if let Some(window) =
+                    state.switcher.as_ref().filter(|s| s.hwnd().0 as usize == wparam.0).and_then(|s| s.take_choice())
+                {
+                    state.post(Request::Activate(window));
                 }
                 LRESULT(0)
             }
             super::dock_switcher::DONE => {
                 let state = &mut *ptr;
                 if state.switcher.as_ref().is_some_and(|s| s.hwnd().0 as usize == wparam.0) {
-                    let choice = state.switcher.take().and_then(|s| s.take_choice());
+                    state.switcher.take();
                     state.leave_at = Instant::now();
-                    if let Some(window) = choice {
-                        state.post(Request::Activate(window));
-                    }
                 }
                 LRESULT(0)
             }
@@ -1429,8 +1366,6 @@ impl Dock {
             preview: None,
             switcher: None,
             pending_switch: None,
-            shortcut_foreground: None,
-            recent_windows: Vec::new(),
             shortcut: None,
             launching: HashMap::new(),
             last_app_click: None,
@@ -1468,7 +1403,6 @@ impl Dock {
         self.state.finish_flight();
         self.state.config = config.clone();
         self.state.pending_switch = None;
-        self.state.shortcut_foreground = None;
         self.state.configure_shortcut();
         self.state.feedback.set_enabled(config.animations && motion_allowed());
         if self.state.update_suppression() {
@@ -1721,9 +1655,17 @@ pub(super) mod tests {
         assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, windows[1].handle);
         let alt = chord();
         drop(alt);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while unsafe { GetForegroundWindow() }.0 as isize != windows[0].handle && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(
+            unsafe { GetForegroundWindow() }.0 as isize,
+            windows[0].handle,
+            "Quick switch must commit while the dock UI thread is busy"
+        );
         pump_for(140);
         assert!(dock.state.switcher.is_none());
-        assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, windows[0].handle);
         let alt = chord();
         pump_for(200);
         send(VK_LSHIFT, false);
@@ -1737,6 +1679,23 @@ pub(super) mod tests {
         drop(alt);
         pump_for(150);
         assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, windows[1].handle);
+        let alt = chord();
+        let until = Instant::now() + Duration::from_secs(2);
+        while dock.state.switcher.as_ref().is_none_or(|s| s.selected().is_none()) && Instant::now() < until {
+            pump_for(2);
+        }
+        let popup = dock.state.switcher.as_ref().expect("overview at the start of its appearance");
+        let choice = popup.selected().unwrap().handle;
+        let (x, y) = popup.selected_point();
+        let point = LPARAM(((y as u32) << 16 | x as u32) as isize);
+        unsafe {
+            SendMessageW(popup.hwnd(), WM_LBUTTONDOWN, Some(WPARAM(1)), Some(point));
+            SendMessageW(popup.hwnd(), WM_LBUTTONUP, None, Some(point));
+        }
+        drop(alt);
+        pump_for(150);
+        assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, choice);
+        assert!(dock.state.switcher.is_none());
         assert!(dock.can_launch("test.exe"));
         assert!(!dock.can_launch("TEST.EXE"));
         dock.state.config.alt_tab = false;

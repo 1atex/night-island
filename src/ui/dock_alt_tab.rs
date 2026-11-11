@@ -1,7 +1,8 @@
+use crate::platform::desktop_dock::{self as desktop, Window};
 use std::cell::RefCell;
 use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc,
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -70,8 +71,82 @@ impl Chord {
     }
 }
 
+#[derive(Clone)]
+pub(super) struct Cycle {
+    pub windows: Arc<[Window]>,
+    index: Arc<AtomicUsize>,
+}
+
+impl Cycle {
+    pub fn selected(&self) -> Option<usize> {
+        let index = self.index.load(Ordering::Acquire);
+        (index < self.windows.len()).then_some(index)
+    }
+
+    pub fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.index, &other.index)
+    }
+
+    pub fn select(&self, index: usize) {
+        if index < self.windows.len() {
+            let _ = self
+                .index
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| (old != usize::MAX).then_some(index));
+        }
+    }
+
+    pub fn finish(&self, choice: Option<usize>) -> Option<&Window> {
+        let index = self.index.swap(usize::MAX, Ordering::AcqRel);
+        if index == usize::MAX {
+            return None;
+        }
+        self.windows.get(choice.unwrap_or(index))
+    }
+}
+
+#[derive(Default)]
+struct Sessions {
+    windows: Vec<Window>,
+    recent: Vec<isize>,
+    current: Option<Cycle>,
+}
+
+impl Sessions {
+    fn remember(&mut self, handle: isize) {
+        self.recent.retain(|h| *h != handle);
+        self.recent.insert(0, handle);
+    }
+
+    fn step(&mut self, reverse: bool) {
+        let delta = if reverse { -1 } else { 1 };
+        if let Some(cycle) = &self.current {
+            let _ = cycle.index.fetch_update(Ordering::AcqRel, Ordering::Acquire, |i| {
+                (i != usize::MAX).then(|| (i as isize + delta).rem_euclid(cycle.windows.len() as isize) as usize)
+            });
+            return;
+        }
+        let front = unsafe { GetForegroundWindow() };
+        let mut windows: Vec<_> = self
+            .windows
+            .iter()
+            .filter(|w| unsafe { IsWindowVisible(HWND(w.handle as _)).as_bool() })
+            .cloned()
+            .collect();
+        if windows.is_empty() {
+            return;
+        }
+        let owner = unsafe { GetAncestor(front, GA_ROOTOWNER) };
+        let current = [front, owner].into_iter().map(|h| h.0 as isize).find(|h| windows.iter().any(|w| w.handle == *h));
+        if let Some(handle) = current {
+            self.remember(handle);
+        }
+        windows.sort_by_key(|w| self.recent.iter().position(|h| *h == w.handle).unwrap_or(usize::MAX));
+        let selected = if reverse { windows.len() - 1 } else { usize::from(current.is_some()) % windows.len() };
+        self.current = Some(Cycle { windows: windows.into(), index: Arc::new(AtomicUsize::new(selected)) });
+    }
+}
+
 struct Route {
-    dock: HWND,
     enabled: Arc<AtomicBool>,
     chord: Chord,
 }
@@ -95,7 +170,8 @@ extern "system" fn shortcut(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
                         route.enabled.load(Ordering::Acquire),
                     );
                     if let Some(command) = command
-                        && PostMessageW(Some(route.dock), MESSAGE, WPARAM(command as usize), LPARAM(0)).is_err()
+                        && PostThreadMessageW(GetCurrentThreadId(), MESSAGE, WPARAM(command as usize), LPARAM(0))
+                            .is_err()
                     {
                         route.chord = Chord::default();
                         return false;
@@ -113,6 +189,7 @@ extern "system" fn shortcut(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
 
 pub(super) struct Shortcut {
     thread: u32,
+    sessions: Arc<Mutex<Sessions>>,
     enabled: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
@@ -121,6 +198,8 @@ impl Shortcut {
         let dock = dock.0 as isize;
         let enabled = Arc::new(AtomicBool::new(false));
         let flag = enabled.clone();
+        let sessions = Arc::new(Mutex::new(Sessions::default()));
+        let worker_sessions = sessions.clone();
         let (tx, rx) = mpsc::sync_channel(1);
         let worker = std::thread::Builder::new()
             .name("Island Alt+Tab".into())
@@ -128,20 +207,61 @@ impl Shortcut {
                 let mut msg = MSG::default();
                 let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
                 let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(shortcut), None, 0) else { return };
-                ROUTE.replace(Some(Route { dock: HWND(dock as _), enabled: flag, chord: Chord::default() }));
+                ROUTE.replace(Some(Route { enabled: flag.clone(), chord: Chord::default() }));
                 if tx.send(GetCurrentThreadId()).is_ok() {
                     while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
-                        DispatchMessageW(&msg);
+                        if msg.message != MESSAGE {
+                            DispatchMessageW(&msg);
+                            continue;
+                        }
+                        let Some(cmd) = Command::decode(msg.wParam.0) else { continue };
+                        let command = if flag.load(Ordering::Acquire) { cmd } else { Command::Cancel };
+                        let cycle = {
+                            let mut sessions = worker_sessions.lock().unwrap();
+                            match command {
+                                Command::Next | Command::Previous => {
+                                    sessions.step(command == Command::Previous);
+                                    None
+                                }
+                                Command::Accept | Command::Cancel => sessions.current.take(),
+                            }
+                        };
+                        if let Some(cycle) = cycle
+                            && let Some(window) = cycle.finish(None)
+                            && command == Command::Accept
+                        {
+                            desktop::switch_window(window);
+                        }
+                        let _ = PostMessageW(Some(HWND(dock as _)), MESSAGE, WPARAM(0), LPARAM(0));
                     }
                 }
                 let _ = UnhookWindowsHookEx(hook);
                 ROUTE.replace(None);
             })
             .ok()?;
-        Some(Self { thread: rx.recv().ok()?, enabled, worker: Some(worker) })
+        Some(Self { thread: rx.recv().ok()?, sessions, enabled, worker: Some(worker) })
     }
+    pub fn snapshot(&self) -> Option<Cycle> {
+        self.sessions.lock().unwrap().current.clone().filter(|c| c.selected().is_some())
+    }
+
+    pub fn update(&self, windows: &[Window]) {
+        let mut sessions = self.sessions.lock().unwrap();
+        if sessions.windows == windows {
+            return;
+        }
+        sessions.recent.retain(|h| windows.iter().any(|w| w.handle == *h));
+        if let Some(active) = windows.iter().find(|w| w.active) {
+            sessions.remember(active.handle);
+        }
+        sessions.windows = windows.to_vec();
+    }
+
     pub fn enable(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Release);
+        if !enabled && let Some(cycle) = self.sessions.lock().unwrap().current.take() {
+            cycle.finish(None);
+        }
     }
 }
 impl Drop for Shortcut {
