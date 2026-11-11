@@ -14,6 +14,7 @@ pub fn discord_strip(ui: &UiState) -> bool {
 pub(in crate::view) fn paint_discord_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let z = strip_zone(pill, scale);
     p.fill_round_rect(z, 18.0 * scale, rgba(0.35, 0.4, 0.95, 0.14))?;
+    card_depth(p, z, 18.0 * scale, scale, ui)?;
     p.glyph(
         crate::ui::icons::DISCORD_GLYPH,
         (z.0 + 8.0 * scale, z.1, z.0 + 32.0 * scale, z.3),

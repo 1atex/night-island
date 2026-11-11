@@ -118,6 +118,7 @@ pub fn paint_home_notification(p: &Painter, pill: Rect, scale: f32, ui: &UiState
     let large = notification_tile_count(ui) == 4;
     let hover = matches!(ui.home.hover_act, Some(562 | 563 | 566));
     p.fill_round_rect(rect, 16.0 * scale, acc(if hover { 0.23 } else { 0.14 }))?;
+    card_depth(p, rect, 16.0 * scale, scale, ui)?;
     if notification_tile_count(ui) == 1 {
         p.text(
             &record.title,

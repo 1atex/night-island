@@ -231,6 +231,7 @@ pub(in crate::view) fn paint_weather(p: &Painter, pill: Rect, scale: f32, ui: &U
 
     let now = (left, top, split - 6.0 * scale, top + 150.0 * scale);
     p.fill_round_rect(now, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+    card_depth(p, now, 20.0 * scale, scale, ui)?;
     animated_weather_icon(p, now.0 + 56.0 * scale, now.1 + 62.0 * scale, 40.0 * scale, wx.sky, wx.night)?;
     p.text(
         &format!("{}°", wx.temp.round() as i32),
@@ -263,6 +264,7 @@ pub(in crate::view) fn paint_weather(p: &Painter, pill: Rect, scale: f32, ui: &U
         let l = split + 6.0 * scale + col * (tw + 8.0 * scale);
         let t = top + row * (th + 8.0 * scale);
         p.fill_round_rect((l, t, l + tw, t + th), 16.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+        card_depth(p, (l, t, l + tw, t + th), 16.0 * scale, scale, ui)?;
         p.text(
             label,
             (l + 14.0 * scale, t + 10.0 * scale, l + tw - 6.0 * scale, t + 30.0 * scale),
@@ -283,6 +285,7 @@ pub(in crate::view) fn paint_weather(p: &Painter, pill: Rect, scale: f32, ui: &U
 
     let strip = (left, top + 160.0 * scale, right, top + 160.0 * scale + 86.0 * scale);
     p.fill_round_rect(strip, 18.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+    card_depth(p, strip, 18.0 * scale, scale, ui)?;
     let n = wx.hourly.len().max(1) as f32;
     let cell = (strip.2 - strip.0) / n;
     for (i, h) in wx.hourly.iter().enumerate() {
@@ -314,6 +317,7 @@ pub(in crate::view) fn paint_weather(p: &Painter, pill: Rect, scale: f32, ui: &U
         let l = left + i as f32 * (dw + 8.0 * scale);
         let r = (l, row_top, l + dw, row_top + 60.0 * scale);
         p.fill_round_rect(r, 16.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+        card_depth(p, r, 16.0 * scale, scale, ui)?;
         let name = if i == 0 { crate::ui::i18n::tr("Today").into_owned() } else { weekday_name(d.weekday).to_string() };
         p.text(
             &name,

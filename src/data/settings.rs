@@ -10,7 +10,7 @@ use crate::ui::characters::Character;
 
 const MAX_LYRICS_APPS: usize = 20;
 
-const MAX_FILE_BYTES: u64 = 64 * 1024;
+const MAX_FILE_BYTES: u64 = super::profile::MAX_BYTES;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
@@ -426,6 +426,7 @@ pub struct Settings {
     pub top_panel: crate::data::top_panel::TopPanelSettings,
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
+    pub card_shadows: bool,
     pub legacy_icons: bool,
     pub live_activities: bool,
     pub live_music_priority: bool,
@@ -574,6 +575,7 @@ impl Default for Settings {
             top_panel: Default::default(),
             desktop_dock: Default::default(),
             language: Language::Ru,
+            card_shadows: true,
             legacy_icons: false,
             live_activities: true,
             live_music_priority: true,
@@ -1065,7 +1067,7 @@ impl Settings {
         }
     }
 
-    fn path() -> Option<PathBuf> {
+    pub(crate) fn path() -> Option<PathBuf> {
         let dir = PathBuf::from(std::env::var_os("APPDATA")?).join("NightIsland");
         Some(dir.join("settings.json"))
     }
@@ -1243,16 +1245,19 @@ impl Settings {
         if cfg!(test) {
             return;
         }
-        let Some(path) = Self::path() else { return };
-        let Some(dir) = path.parent() else { return };
-        if fs::create_dir_all(dir).is_err() {
-            return;
+        if let Err(error) = self.save_checked() {
+            crate::log_warn!("could not save settings.json: {error}");
         }
-        let Ok(json) = serde_json::to_string_pretty(self) else { return };
-        let tmp = path.with_extension("json.tmp");
-        if fs::write(&tmp, json).is_err() || fs::rename(&tmp, &path).is_err() {
-            crate::log_warn!("could not save settings.json");
+    }
+
+    pub fn save_checked(&self) -> std::io::Result<()> {
+        let path = Self::path().ok_or_else(|| std::io::Error::other("Profile folder unavailable"))?;
+        fs::create_dir_all(path.parent().ok_or_else(|| std::io::Error::other("Profile folder unavailable"))?)?;
+        let bytes = serde_json::to_vec_pretty(self)?;
+        if bytes.len() as u64 > MAX_FILE_BYTES {
+            return Err(std::io::Error::other("Profile is too large"));
         }
+        super::profile::write_atomic(&path, &bytes)
     }
 }
 

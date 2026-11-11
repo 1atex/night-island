@@ -196,6 +196,7 @@ pub struct TopPanel {
     pub(super) scale: f32,
     snapshot: Snapshot,
     shown: bool,
+    island_bounds: Rect,
     last_inside: Instant,
     revealed: bool,
 }
@@ -220,6 +221,39 @@ fn across_gap(island: Rect, panel: Rect, point: (f32, f32), padding: f32) -> boo
     } else {
         false
     }
+}
+
+fn card_position(
+    work: windows::Win32::Foundation::RECT,
+    island: Rect,
+    anchor: (i32, i32),
+    size: (i32, i32),
+    scale: f32,
+) -> Option<(i32, i32)> {
+    let (w, h) = size;
+    if w > work.right - work.left || h > work.bottom - work.top {
+        return None;
+    }
+    let gap = (6.0 * scale).ceil() as i32;
+    let x = anchor.0.clamp(work.left, work.right - w);
+    let y = anchor.1.clamp(work.top, work.bottom - h);
+    [
+        (x, y),
+        (island.2.ceil() as i32 + gap, y),
+        (island.0.floor() as i32 - w - gap, y),
+        (x, island.3.ceil() as i32 + gap),
+        (x, island.1.floor() as i32 - h - gap),
+    ]
+    .into_iter()
+    .filter(|&(cx, cy)| {
+        cx >= work.left
+            && cy >= work.top
+            && cx + w <= work.right
+            && cy + h <= work.bottom
+            && !overlaps((cx as f32, cy as f32, (cx + w) as f32, (cy + h) as f32), island)
+    })
+    .min_by_key(|&(cx, cy)| i64::from(cx - x).pow(2) + i64::from(cy - y).pow(2))
+    .or(Some((x, y)))
 }
 
 fn app_name(snapshot: &Snapshot) -> String {
@@ -1549,6 +1583,7 @@ impl TopPanel {
             scale: 1.0,
             snapshot: Default::default(),
             shown: false,
+            island_bounds: (0.0, 0.0, 0.0, 0.0),
             last_inside: Instant::now(),
             revealed: false,
         })
@@ -1586,9 +1621,10 @@ impl TopPanel {
     }
 
     pub fn update(&mut self, snapshot: Snapshot, island: Rect, hidden: bool) {
+        self.island_bounds = island;
         let active_changed =
             snapshot.active.as_ref().map(|w| w.handle) != self.snapshot.active.as_ref().map(|w| w.handle);
-        if active_changed {
+        if active_changed && matches!(self.card.state.role, Role::Card(Block::Application)) {
             self.card.state.hide();
         }
         self.snapshot = snapshot;
@@ -1705,18 +1741,7 @@ impl TopPanel {
         if suppressed {
             self.card.state.hide();
         } else if self.card.state.visible {
-            let card = &self.card.state;
-            let bounds = (
-                card.origin.0 as f32,
-                card.origin.1 as f32,
-                (card.origin.0 + card.size.0) as f32,
-                (card.origin.1 + card.size.1) as f32,
-            );
-            if overlaps(bounds, island) {
-                self.card.state.hide();
-            } else {
-                self.card.place(self.card.state.origin, self.scale, true);
-            }
+            self.place_card(island);
         }
     }
 
@@ -1781,17 +1806,22 @@ impl TopPanel {
         self.card.state.role = Role::Card(block);
         self.card.state.dirty = true;
         self.card.state.snapshot = self.snapshot.clone();
-        let width = self.card.state.dimensions().0 * self.scale;
-        let x = if block == Block::Application {
-            self.left.state.origin.0
+        self.place_card(self.island_bounds);
+    }
+
+    fn place_card(&mut self, island: Rect) {
+        let Role::Card(block) = self.card.state.role else { return };
+        let wing = if block == Block::Application { &self.left.state } else { &self.right.state };
+        let (w, h) = self.card.state.dimensions();
+        let size = ((w * self.scale).ceil() as i32, (h * self.scale).ceil() as i32);
+        let anchor = (wing.destination.0, wing.destination.1 + wing.size.1);
+        let x = if block == Block::Application { anchor.0 } else { anchor.0 + wing.size.0 - size.0 };
+        let position = card_position(self.monitor.work, island, (x, anchor.1), size, self.scale);
+        if let Some(origin) = position {
+            self.card.place(origin, self.scale, true);
         } else {
-            self.right.state.origin.0 + self.right.state.size.0 - width as i32
-        };
-        let x = x.clamp(self.monitor.work.left, (self.monitor.work.right - width as i32).max(self.monitor.work.left));
-        let y =
-            if block == Block::Application { self.left.state.destination.1 } else { self.right.state.destination.1 }
-                + (54.0 * self.scale) as i32;
-        self.card.place((x, y), self.scale, true);
+            self.card.state.hide();
+        }
     }
 
     pub fn take_request(&mut self, id: usize) -> Option<Request> {

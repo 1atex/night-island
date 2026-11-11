@@ -213,6 +213,7 @@ impl App {
     }
 
     pub(in crate::island) fn open_settings_window(&mut self) {
+        self.ui.sw.has_settings_backup = crate::data::profile::backup_path().is_ok_and(|path| path.is_file());
         if let Some(hwnd) = self.settings_win {
             unsafe {
                 let _ = ShowWindow(hwnd, SW_RESTORE);
@@ -860,6 +861,9 @@ impl App {
                     }
                 }
             }
+            view::Act::ExportSettings(scope) => profile_transfer::post(self.hwnd, scope, 0),
+            view::Act::ImportSettings(scope) => profile_transfer::post(self.hwnd, scope, 1),
+            view::Act::RestoreSettings => profile_transfer::post(self.hwnd, crate::data::profile::Scope::Island, 2),
             view::Act::OpenGuide => self.open_guide(),
             view::Act::Rebind(hotkey) => self.begin_rebind(hotkey),
             view::Act::KeysReset => {

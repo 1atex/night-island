@@ -28,6 +28,37 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Card shadows in the open island" => "Тени карточек в раскрытом острове",
+        "Settings transfer" => "Перенос настроек",
+        "Export settings…" => "Экспорт настроек…",
+        "Import settings…" => "Импорт настроек…",
+        "Restore pre-import settings" => "Вернуть настройки до импорта",
+        "Includes Island, the dock and the top panel. Keys, accounts and media files stay on this PC." => {
+            "В файле будут настройки острова, дока и верхней панели. Ключи, аккаунты и медиафайлы хранятся отдельно."
+        }
+        "Could not open the file picker" => "Не удалось открыть окно выбора файла",
+        "Choose another file name" => "Выберите другое имя файла",
+        "Settings exported" => "Настройки экспортированы",
+        "Settings imported" => "Настройки применены",
+        "Replace Island settings and restart the app?" => "Заменить настройки Island и перезапустить приложение?",
+        "Replace the dock settings and pinned shortcuts?" => "Заменить настройки дока и закреплённые ярлыки?",
+        "Replace the top panel settings and visible blocks?" => "Заменить настройки верхней панели и её блоки?",
+        "You can restore the previous settings in General." => {
+            "Предыдущие настройки можно вернуть в разделе «Основные»."
+        }
+        "Finish the screen recording before restoring the full profile" => {
+            "Завершите запись экрана перед импортом полного профиля."
+        }
+        "Settings saved. Restart Island to apply them." => "Настройки сохранены. Для применения перезапустите Island.",
+        "Could not read the settings file" => "Не удалось прочитать файл настроек",
+        "Profile is too large" => "Файл настроек слишком большой",
+        "Invalid settings file" => "Файл настроек повреждён или неполон",
+        "Choose an exported Night Island profile" => "Выберите файл, экспортированный из Night Island",
+        "Unsupported profile version" => "Эта версия файла настроек не поддерживается",
+        "This profile belongs to another settings section" => "Этот файл предназначен для другого раздела настроек",
+        "AI server" => "Сервер модели ИИ",
+        "Speech server" => "Сервер распознавания",
+        "Voice server" => "Сервер озвучки",
         "Last active app" => "Последняя активная программа",
         "Your app rules" => "Ваши правила для программ",
         "Without an AI key, built-in rules and your own rules still work." => {

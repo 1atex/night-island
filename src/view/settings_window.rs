@@ -1,4 +1,5 @@
 use crate::data::keys::Hotkey;
+use crate::data::profile::Scope;
 use crate::services::{discord, spotify};
 use crate::view::*;
 
@@ -62,12 +63,13 @@ const ANIMATIONS: [(Sid, &str, Kind); 10] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 10] = [
+const APPEARANCE: [(Sid, &str, Kind); 11] = [
     (Sid::InterfaceFont, "Interface font", Kind::Cycle),
     (Sid::LegacyIcons, "Classic interface icons", Kind::Toggle),
     (Sid::HeaderIcons, "Icons beside tab names", Kind::Toggle),
     (Sid::HeaderIconColors, "Colored header icons", Kind::Toggle),
     (Sid::HeaderActiveAccent, "Expressive active tab", Kind::Toggle),
+    (Sid::CardShadows, "Card shadows in the open island", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
     (Sid::LiquidSoftness, "Liquid softness", Kind::Slider),
@@ -183,7 +185,7 @@ pub const GROUPS: [Group; 19] = [
         name: "Appearance",
         rows: &APPEARANCE,
         custom: None,
-        sections: &[(0, "Interface"), (2, "Liquid shape"), (5, "Text tab")],
+        sections: &[(0, "Interface"), (6, "Liquid shape"), (10, "Text tab")],
     },
     Group { glyph: '\u{EB52}', name: "Theme", rows: &THEME_ROWS, custom: Some(theme_items), sections: &[] },
     Group {
@@ -280,6 +282,9 @@ pub enum Field {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
+    ExportSettings(Scope),
+    ImportSettings(Scope),
+    RestoreSettings,
     SoundImport(usize),
     SoundPreview(usize),
     SoundReset(usize),
@@ -329,6 +334,8 @@ pub enum Act {
 
 #[derive(Default)]
 pub struct SwUi {
+    pub transfer_status: Option<(Scope, String, bool)>,
+    pub has_settings_backup: bool,
     pub dock_status: String,
     pub font_status: String,
     pub sound_status: String,
@@ -1221,6 +1228,29 @@ fn matches(label: &str, query: &str) -> bool {
     q.is_empty() || label.to_lowercase().contains(&q) || crate::ui::i18n::tr(label).to_lowercase().contains(&q)
 }
 
+fn transfer_items(ui: &UiState, scope: Scope) -> Vec<Item> {
+    use crate::ui::i18n::tr;
+    let mut items = vec![
+        Item::Section("Settings transfer"),
+        Item::Button(Act::ExportSettings(scope), tr("Export settings…").into_owned(), true),
+        Item::Button(Act::ImportSettings(scope), tr("Import settings…").into_owned(), true),
+    ];
+    if scope == Scope::Island {
+        items.push(Item::Note(
+            "Includes Island, the dock and the top panel. Keys, accounts and media files stay on this PC.",
+        ));
+        if ui.sw.has_settings_backup {
+            items.push(Item::Button(Act::RestoreSettings, tr("Restore pre-import settings").into_owned(), true));
+        }
+    }
+    if let Some((source, text, ok)) = &ui.sw.transfer_status
+        && *source == scope
+    {
+        items.push(Item::Message(text.clone(), *ok));
+    }
+    items
+}
+
 fn top_panel_items(ui: &UiState) -> Vec<Item> {
     use crate::ui::i18n::tr;
     let mut items = vec![
@@ -1264,6 +1294,7 @@ fn top_panel_items(ui: &UiState) -> Vec<Item> {
     if ui.cfg.top_panel.entrance != crate::data::top_panel::PanelEntrance::Island {
         items.retain(|item| !matches!(item, Item::Row(Sid::TopGap, _, _)));
     }
+    items.extend(transfer_items(ui, Scope::Top));
     items
 }
 
@@ -1344,6 +1375,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
     for (i, pin) in ui.cfg.desktop_dock.pins.iter().enumerate() {
         out.push(Item::Pair(Act::DockRemove(i), pin.name.clone(), "Remove".into(), false));
     }
+    out.extend(transfer_items(ui, Scope::Dock));
     out
 }
 
@@ -1370,6 +1402,9 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
         }
         out.push(Item::Heading(group.name));
         out.extend(rows_with_sections(group));
+        if group.name == "General" {
+            out.extend(transfer_items(ui, Scope::Island));
+        }
         if group.name == "Appearance" {
             let at = out.iter().position(|item| matches!(item, Item::Row(Sid::InterfaceFont, _, _))).unwrap_or(0);
             let mut font_items = vec![
@@ -1438,6 +1473,20 @@ pub(in crate::view) fn items(ui: &UiState) -> Vec<Item> {
                 out.insert(start, Item::Heading(group.name));
             }
             continue;
+        }
+        let transfer_scope = match group.name {
+            "General" => Some(Scope::Island),
+            "Desktop dock" => Some(Scope::Dock),
+            "Top panel" => Some(Scope::Top),
+            _ => None,
+        };
+        if let Some(scope) = transfer_scope {
+            let results: Vec<_> = transfer_items(ui, scope).into_iter().filter(|item|
+                matches!(item, Item::Button(_, label, _) if matches(label, &ui.sw.search) || matches("Settings transfer", &ui.sw.search))).collect();
+            if !results.is_empty() {
+                out.push(Item::Heading(group.name));
+                out.extend(results);
+            }
         }
         let found: Vec<_> = group.rows.iter().filter(|r| matches(r.1, &ui.sw.search)).collect();
         if found.is_empty() {

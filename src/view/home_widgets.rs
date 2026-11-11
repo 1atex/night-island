@@ -347,7 +347,8 @@ pub fn paint_widget_drag(p: &Painter, s: f32, ui: &UiState) -> Result<()> {
 }
 
 fn paint_widget(p: &Painter, r: Rect, s: f32, ui: &UiState, id: u8, alpha: f32) -> Result<()> {
-    p.with_opacity(r, alpha, || {
+    let bounds = (r.0 - 3.0 * s, r.1 - s, r.2 + 3.0 * s, r.3 + 5.0 * s);
+    p.with_opacity(bounds, alpha, || {
         let Some(kind) = tile_kind(usize::from(id)) else { return Ok(()) };
         let recording = id == 6 && ui.recording_secs.is_some();
         let kind = if recording { Tile::Action('\u{E714}', "Stop recording") } else { kind };
@@ -363,6 +364,7 @@ fn paint_widget(p: &Painter, r: Rect, s: f32, ui: &UiState, id: u8, alpha: f32) 
                 rgba(1.0, 1.0, 1.0, 0.07 + ui.action_hover(usize::from(id)) * 0.06)
             },
         )?;
+        card_depth(p, r, 16.0 * s, s, ui)?;
         if selected {
             p.stroke_round_rect(r, 16.0 * s, s, acc(0.85))?;
         }

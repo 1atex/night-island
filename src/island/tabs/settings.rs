@@ -85,6 +85,7 @@ impl App {
                     self.stop_idle();
                     self.start_liquid();
                 }
+                CardShadows => self.repaint_expanded(),
                 LegacyIcons => {
                     crate::ui::icons::set_legacy(self.settings.legacy_icons);
                     self.repaint_themed_surfaces();

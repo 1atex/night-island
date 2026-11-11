@@ -514,6 +514,7 @@ pub(in crate::view) fn paint_dock(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
         p.fill_round_rect(zone, 18.0 * scale, rgba(r, g, b, 1.0))?;
     }
     p.fill_round_rect(zone, 18.0 * scale, rgba(1.0, 1.0, 1.0, if layout.open { 0.07 } else { 0.05 }))?;
+    card_depth(p, zone, 18.0 * scale, scale, ui)?;
     let reorder = ui.home.reorder.as_ref();
     let mut hovered: Option<&str> = None;
     let paint_icon = |item: &ShelfItem, slot: Rect| -> Result<()> {
@@ -860,6 +861,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
             )?;
         }
     }
+    card_depth(p, card, 20.0 * scale, scale, ui)?;
     let (cl, ct, cr, cb) = card;
     let pad = 16.0 * scale;
     if ui.media.title.is_empty() {
@@ -1030,6 +1032,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
 
     let row = volume_row(pill, scale, wide);
     p.fill_round_rect(row, 16.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+    card_depth(p, row, 16.0 * scale, scale, ui)?;
     let level = if ui.home.vol_track { ui.home.app_vol } else { ui.home.vol };
     let tint = if ui.home.vol_track {
         ui.media
@@ -1131,6 +1134,7 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
                 rgba(1.0, 1.0, 1.0, if ui.home.edit { 0.05 + hovered * 0.1 } else { 0.08 + hovered * 0.07 })
             };
             p.fill_round_rect(r, 16.0 * scale, bg)?;
+            card_depth(p, r, 16.0 * scale, scale, ui)?;
             if ui.home.edit && chosen {
                 p.stroke_round_rect(r, 16.0 * scale, 1.2 * scale, acc(0.8))?;
             }

@@ -805,6 +805,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             crate::island::desktop_dock::handle_request(hwnd, wparam.0);
             LRESULT(0)
         }
+        profile_transfer::MESSAGE => {
+            profile_transfer::handle(hwnd, wparam.0, lparam.0);
+            LRESULT(0)
+        }
         settings_win::WM_SETTINGS_WINDOW_CHANGED => {
             settings_win::on_settings_window_changed();
             LRESULT(0)

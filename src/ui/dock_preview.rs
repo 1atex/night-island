@@ -774,6 +774,18 @@ impl State {
     }
 }
 
+fn crosses_preview_gap(anchor: Rect, panel: Rect, point: (f32, f32), scale: f32) -> bool {
+    let inset = crate::ui::popup::POPUP_MARGIN * scale;
+    let bottom = panel.3 - inset;
+    if point.1 < bottom || point.1 > anchor.1 || bottom >= anchor.1 {
+        return false;
+    }
+    let t = (point.1 - bottom) / (anchor.1 - bottom);
+    let left = (panel.0 + inset) * (1.0 - t) + anchor.0 * t;
+    let right = (panel.2 - inset) * (1.0 - t) + anchor.2 * t;
+    point.0 >= left && point.0 <= right
+}
+
 fn position(work: RECT, anchor: Rect, size: (i32, i32), scale: f32) -> (i32, i32) {
     let x = (((anchor.0 + anchor.2) / 2.0) as i32 - size.0 / 2)
         .clamp(work.left + 4, (work.right - size.0 - 4).max(work.left + 4));
@@ -1085,7 +1097,18 @@ impl Preview {
             self.state.hide();
             return;
         }
-        if over_source || self.contains(point) || self.state.pressed.is_some() {
+        let (x, y) = self.state.origin;
+        let panel = (
+            x as f32,
+            y as f32,
+            x as f32 + self.state.layout.width * self.state.scale,
+            y as f32 + self.state.layout.height * self.state.scale,
+        );
+        if over_source
+            || self.contains(point)
+            || self.state.pressed.is_some()
+            || crosses_preview_gap(self.state.anchor, panel, (point.x as f32, point.y as f32), self.state.scale)
+        {
             self.state.last_inside = Instant::now();
             if self.state.closing && !self.state.dismissed {
                 self.state.animate_visibility(true);
@@ -1135,6 +1158,15 @@ impl Drop for Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slow_diagonal_crossings_keep_the_source_preview_open() {
+        let panel = (-1480.0, 220.0, -1200.0, 520.0);
+        let anchor = (-1410.0, 540.0, -1360.0, 590.0);
+        assert!(crosses_preview_gap(anchor, panel, (-1320.0, 518.0), 1.5));
+        assert!(!crosses_preview_gap(anchor, panel, (-1210.0, 538.0), 1.5));
+        assert!(!crosses_preview_gap(anchor, panel, (-1380.0, 565.0), 1.5));
+    }
 
     #[test]
     fn preview_fits_windows_without_stretching_and_stays_on_negative_monitor() {

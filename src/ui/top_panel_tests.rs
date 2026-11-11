@@ -960,3 +960,19 @@ fn native_top_panel_space_is_reserved_once_and_restored() -> Result<()> {
     assert!(first.bottom - first.top == 50 && first != RECT::default());
     Ok(())
 }
+
+#[test]
+fn open_cards_fit_next_to_the_expanded_island_on_scaled_monitors() {
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let work = windows::Win32::Foundation::RECT { left: -1920, top: -200, right: 0, bottom: 880 };
+        let island = (-960.0 - 320.0 * scale, -190.0, -960.0 + 320.0 * scale, -190.0 + 380.0 * scale);
+        let size = ((306.0 * scale) as i32, (190.0 * scale) as i32);
+        let (x, y) = card_position(work, island, (-820, -142), size, scale).unwrap();
+        assert!(x >= work.left && y >= work.top && x + size.0 <= work.right && y + size.1 <= work.bottom);
+        if scale < 2.0 {
+            assert!(!overlaps((x as f32, y as f32, (x + size.0) as f32, (y + size.1) as f32), island));
+        } else {
+            assert_eq!((x, y), (-820, -142));
+        }
+    }
+}

@@ -80,6 +80,7 @@ pub(in crate::view) fn paint_controls(p: &Painter, pill: Rect, scale: f32, ui: &
         );
         let bg = if armed { rgba(1.0, 0.35, 0.35, 0.28) } else { rgba(1.0, 1.0, 1.0, 0.08 + 0.05 * hover) };
         p.fill_round_rect(r, 20.0 * scale, bg)?;
+        card_depth(p, r, 20.0 * scale, scale, ui)?;
 
         if i < CTL_COLS {
             let d = 46.0 * scale;

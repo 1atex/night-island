@@ -90,6 +90,7 @@ mod motion;
 mod pet_studio;
 mod pill;
 mod pill_motion;
+mod profile_transfer;
 mod settings_win;
 mod startup;
 mod system_notifications;

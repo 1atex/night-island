@@ -11,9 +11,9 @@ fn mutex_name() -> windows::core::HSTRING {
 pub fn run() -> Result<()> {
     unsafe {
         let mut _mutex = CreateMutexW(None, false, &mutex_name())?;
-        let updated = std::env::args().any(|a| a == "--updated");
+        let restarting = std::env::args().any(|a| matches!(a.as_str(), "--updated" | "--restore-settings"));
         let mut waited = 0;
-        while updated
+        while restarting
             && waited < 50
             && windows::Win32::Foundation::GetLastError() == windows::Win32::Foundation::ERROR_ALREADY_EXISTS
         {
