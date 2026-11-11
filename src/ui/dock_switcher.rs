@@ -54,6 +54,7 @@ enum Hit {
     Close(usize),
     Prev,
     Next,
+    ActualSize,
 }
 
 struct Layout {
@@ -77,9 +78,9 @@ impl Layout {
     }
     fn overview(work: RECT, scale: f32, windows: usize) -> Self {
         let room = (((work.right - work.left) as f32 / scale) * 0.94).max(1.0);
-        let height = (((work.bottom - work.top) as f32 / scale) * 0.38).clamp(1.0, 352.0);
-        let count = (((room - 30.0) / 320.0) as usize).clamp(1, 6).min(windows.max(1));
-        let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 450.0);
+        let height = (((work.bottom - work.top) as f32 / scale) * 0.48).clamp(1.0, 490.0);
+        let count = (((room - 30.0) / 450.0) as usize).clamp(1, 4).min(windows.max(1));
+        let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 680.0);
         let size =
             (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
         Self { size, count, tile, scale, overview: true, spans: Vec::new() }
@@ -89,7 +90,7 @@ impl Layout {
             return;
         }
         let image_height = (self.size.1 as f32 / self.scale - 108.0).max(1.0);
-        let widths: Vec<_> = aspects.iter().map(|a| (a * image_height + 12.0).clamp(134.0, 465.0)).collect();
+        let widths: Vec<_> = aspects.iter().map(|a| (a * image_height + 12.0).clamp(134.0, 700.0)).collect();
         let total = widths.iter().sum::<f32>();
         let gaps = (widths.len() - 1) as f32 * 8.0;
         let room = (self.size.0 as f32 / self.scale - 38.0 - gaps).max(1.0);
@@ -132,6 +133,10 @@ impl Layout {
         let s = self.scale;
         (r - 28.0 * s, t + 3.0 * s, r - 4.0 * s, t + 29.0 * s)
     }
+    fn actual_size_button(&self, multiple_pages: bool) -> Rect {
+        let right = self.size.0 as f32 - (if multiple_pages { 90.0 } else { 21.0 }) * self.scale;
+        (right - 44.0 * self.scale, 13.0 * self.scale, right, 43.0 * self.scale)
+    }
     fn page_button(&self, next: bool) -> Rect {
         let s = self.scale;
         let r = self.size.0 as f32 - (if next { 18.0 } else { 49.0 }) * s;
@@ -142,6 +147,15 @@ impl Layout {
 fn contains(r: Rect, p: (f32, f32)) -> bool {
     p.0 >= r.0 && p.0 < r.2 && p.1 >= r.1 && p.1 < r.3
 }
+fn source_view(size: (i32, i32), dest: RECT, cursor: Option<(f32, f32)>) -> RECT {
+    let Some((x, y)) = cursor else { return RECT { left: 0, top: 0, right: size.0, bottom: size.1 } };
+    let w = (dest.right - dest.left).clamp(1, size.0);
+    let h = (dest.bottom - dest.top).clamp(1, size.1);
+    let left = ((size.0 - w) as f32 * ((x - dest.left as f32) / w as f32).clamp(0.0, 1.0)).round() as i32;
+    let top = ((size.1 - h) as f32 * ((y - dest.top as f32) / h as f32).clamp(0.0, 1.0)).round() as i32;
+    RECT { left, top, right: left + w, bottom: top + h }
+}
+
 struct State {
     hwnd: HWND,
     dock: HWND,
@@ -155,6 +169,9 @@ struct State {
     origin: (i32, i32),
     items: Vec<Item>,
     thumbnails: Vec<Option<Thumbnail>>,
+    sizes: Vec<Option<windows::Win32::Foundation::SIZE>>,
+    actual_size: bool,
+    pointer: Option<(i32, i32)>,
     selected: usize,
     hover: Option<Hit>,
     pressed: Option<Hit>,
@@ -172,6 +189,9 @@ impl State {
         self.items.len().div_ceil(self.layout.count)
     }
     fn hit(&self, p: (f32, f32)) -> Option<Hit> {
+        if self.layout.overview && contains(self.layout.actual_size_button(self.pages() > 1), p) {
+            return Some(Hit::ActualSize);
+        }
         if self.pages() > 1 {
             for (next, hit) in [(false, Hit::Prev), (true, Hit::Next)] {
                 if contains(self.layout.page_button(next), p) {
@@ -191,7 +211,7 @@ impl State {
     }
     fn bind(&mut self) {
         self.thumbnails.clear();
-        let sizes: Vec<_> = self
+        self.sizes = self
             .items
             .iter()
             .skip(self.start())
@@ -204,17 +224,36 @@ impl State {
             })
             .collect();
         if self.layout.overview {
-            self.layout
-                .arrange_page(&sizes.iter().map(|s| s.map_or(1.6, |s| s.cx as f32 / s.cy as f32)).collect::<Vec<_>>());
+            self.layout.arrange_page(
+                &self.sizes.iter().map(|s| s.map_or(1.6, |s| s.cx as f32 / s.cy as f32)).collect::<Vec<_>>(),
+            );
         }
-        for (slot, (thumb, size)) in self.thumbnails.iter_mut().zip(sizes).enumerate() {
+        for (slot, (thumb, size)) in self.thumbnails.iter_mut().zip(&self.sizes).enumerate() {
             if let (Some(t), Some(size)) = (thumb.as_mut(), size)
                 && !t.update(self.layout.thumbnail(slot, (size.cx, size.cy)), true)
             {
                 *thumb = None;
             }
         }
+        if self.actual_size {
+            for slot in 0..self.thumbnails.len() {
+                self.update_source(slot, None);
+            }
+        }
     }
+
+    fn update_source(&self, slot: usize, position: Option<(f32, f32)>) {
+        if let (Some(Some(thumb)), Some(Some(size))) = (self.thumbnails.get(slot), self.sizes.get(slot)) {
+            let dest = self.layout.thumbnail(slot, (size.cx, size.cy));
+            let center = ((dest.left + dest.right) as f32 / 2.0, (dest.top + dest.bottom) as f32 / 2.0);
+            thumb.set_source_rect(source_view(
+                (size.cx, size.cy),
+                dest,
+                self.actual_size.then_some(position.unwrap_or(center)),
+            ));
+        }
+    }
+
     fn paint(&self) -> Result<()> {
         let s = self.layout.scale;
         let (w, h) = (self.layout.size.0 as f32, self.layout.size.1 as f32);
@@ -227,18 +266,35 @@ impl State {
             } else {
                 self.title.clone()
             };
+            let right = if self.layout.overview {
+                self.layout.actual_size_button(pages > 1).0 - 8.0 * s
+            } else {
+                w - if pages > 1 { 84.0 } else { 20.0 } * s
+            };
             p.text(
                 &label,
-                (22.0 * s, 14.0 * s, w - if pages > 1 { 84.0 * s } else { 20.0 * s }, 43.0 * s),
+                (22.0 * s, 14.0 * s, right, 43.0 * s),
                 14.0 * s,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_TEXT_ALIGNMENT_LEADING,
                 rgba(1.0, 1.0, 1.0, 0.92),
             )?;
-            if self.layout.overview && w / s >= 410.0 {
+            if self.layout.overview {
+                let button = self.layout.actual_size_button(pages > 1);
+                p.fill_round_rect(button, 9.0 * s, rgba(1.0, 1.0, 1.0, if self.actual_size { 0.24 } else { 0.095 }))?;
+                p.text(
+                    "1:1",
+                    button,
+                    13.0 * s,
+                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                    DWRITE_TEXT_ALIGNMENT_CENTER,
+                    rgba(1.0, 1.0, 1.0, 1.0),
+                )?;
+            }
+            if self.layout.overview && w / s >= 500.0 {
                 p.text(
                     "Release Alt to switch",
-                    (w * 0.42, 14.0 * s, w - if pages > 1 { 90.0 } else { 23.0 } * s, 43.0 * s),
+                    (w * 0.42, 14.0 * s, right, 43.0 * s),
                     12.0 * s,
                     DWRITE_FONT_WEIGHT_NORMAL,
                     windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_ALIGNMENT_TRAILING,
@@ -271,7 +327,7 @@ impl State {
                 let r = self.layout.card(slot);
                 let selected = i == self.selected;
                 let face = if self.layout.overview {
-                    if selected { rgba(0.17, 0.17, 0.19, 0.98) } else { rgba(0.105, 0.105, 0.12, 0.98) }
+                    if selected { rgba(0.17, 0.17, 0.19, 1.0) } else { rgba(0.105, 0.105, 0.12, 1.0) }
                 } else {
                     rgba(1.0, 1.0, 1.0, if selected { 0.115 } else { 0.06 })
                 };
@@ -286,14 +342,18 @@ impl State {
                 }
                 let caption = ((icon.2 + 6.0 * s).round(), r.1, (r.2 - 30.0 * s).round(), (r.1 + 31.0 * s).round());
                 p.push_clip(caption);
-                let title = p.text(
-                    &item.window.title,
-                    caption,
-                    if self.layout.overview { 13.0 } else { 12.0 } * s,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    DWRITE_TEXT_ALIGNMENT_LEADING,
-                    rgba(1.0, 1.0, 1.0, 0.93),
-                );
+                let title = if self.layout.overview {
+                    p.window_caption(&item.window.title, caption, 15.0 * s)
+                } else {
+                    p.text(
+                        &item.window.title,
+                        caption,
+                        12.0 * s,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                        DWRITE_TEXT_ALIGNMENT_LEADING,
+                        rgba(1.0, 1.0, 1.0, 0.93),
+                    )
+                };
                 p.pop_clip();
                 title?;
                 let close = self.layout.close(slot);
@@ -427,14 +487,17 @@ impl State {
         if pages > 1 {
             self.hover = None;
             let page = self.selected / self.layout.count;
-            self.select((page + if next { 1 } else { pages - 1 }) % pages * self.layout.count);
-            if let Some(cycle) = &self.cycle
-                && let Some(item) = self.items.get(self.selected)
-                && let Some(i) = cycle.windows.iter().position(|w| w.handle == item.window.handle)
-            {
-                cycle.select(i);
-            }
+            self.select_from_pointer((page + if next { 1 } else { pages - 1 }) % pages * self.layout.count);
         }
+    }
+    fn select_from_pointer(&mut self, index: usize) {
+        if let Some(cycle) = &self.cycle
+            && let Some(item) = self.items.get(index)
+            && let Some(i) = cycle.windows.iter().position(|w| w.handle == item.window.handle)
+        {
+            cycle.select(i);
+        }
+        self.select(index);
     }
     fn choose(&mut self) {
         if let Some(item) = self.items.get(self.selected) {
@@ -447,13 +510,23 @@ impl State {
         }
         let hit = self.hit((l.0 as i16 as f32, (l.0 >> 16) as i16 as f32));
         match msg {
-            WM_MOUSEMOVE if self.hover != hit => {
+            WM_MOUSEMOVE => {
+                let position = (l.0 as i16 as i32, (l.0 >> 16) as i16 as i32);
+                if self.pointer.replace(position) == Some(position) {
+                    return;
+                }
+                let previous = self.hover;
                 self.hover = hit;
-                if !self.layout.overview
-                    && let Some(Hit::Window(i) | Hit::Close(i)) = hit
-                {
-                    self.select(i);
-                } else {
+                if let Some(Hit::Window(i) | Hit::Close(i)) = hit {
+                    if self.actual_size {
+                        self.update_source(i - self.start(), Some((position.0 as f32, position.1 as f32)));
+                    }
+                    if i != self.selected {
+                        self.select_from_pointer(i);
+                        return;
+                    }
+                }
+                if previous != hit {
                     let _ = self.paint();
                 }
             }
@@ -469,6 +542,13 @@ impl State {
                     }
                     Some(Hit::Close(i)) => {
                         desktop::change_window(&self.items[i].window, desktop::WindowAction::Close);
+                    }
+                    Some(Hit::ActualSize) => {
+                        self.actual_size = !self.actual_size;
+                        for slot in 0..self.thumbnails.len() {
+                            self.update_source(slot, None);
+                        }
+                        let _ = self.paint();
                     }
                     Some(Hit::Prev) => self.page(false),
                     Some(Hit::Next) => self.page(true),
@@ -599,6 +679,12 @@ impl Switcher {
             origin,
             items,
             thumbnails: Vec::new(),
+            sizes: Vec::new(),
+            actual_size: false,
+            pointer: {
+                let mut pt = POINT::default();
+                unsafe { GetCursorPos(&mut pt) }.ok().map(|_| (pt.x - origin.0, pt.y - origin.1))
+            },
             selected,
             hover: None,
             pressed: None,
@@ -740,6 +826,34 @@ impl Drop for Switcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actual_size_preserves_one_source_pixel_per_display_pixel_and_reaches_every_edge() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let mut layout = Layout::overview(RECT { left: 0, top: 0, right: 1920, bottom: 1080 }, scale, 3);
+            layout.arrange_page(&[16.0 / 9.0, 1.6, 0.6]);
+            let size = (2560, 1440);
+            let dest = layout.thumbnail(0, size);
+            for edge in [0.0, 0.5, 1.0] {
+                let px = (
+                    dest.left as f32 + (dest.right - dest.left) as f32 * edge,
+                    dest.top as f32 + (dest.bottom - dest.top) as f32 * edge,
+                );
+                let source = source_view(size, dest, Some(px));
+                assert_eq!(
+                    (source.right - source.left, source.bottom - source.top),
+                    (dest.right - dest.left, dest.bottom - dest.top)
+                );
+                if edge == 0.0 {
+                    assert_eq!((source.left, source.top), (0, 0));
+                }
+                if edge == 1.0 {
+                    assert_eq!((source.right, source.bottom), size);
+                }
+            }
+            assert_eq!(source_view(size, dest, None), RECT { left: 0, top: 0, right: size.0, bottom: size.1 });
+        }
+    }
 
     #[test]
     fn overview_previews_never_enlarge_the_source_bitmap() {

@@ -338,6 +338,25 @@ impl Painter<'_> {
         self.text_in(w!("Segoe UI"), &crate::ui::i18n::tr(text), rect, size, weight, align, color)
     }
 
+    pub fn window_caption(&self, title: &str, rect: (f32, f32, f32, f32), size: f32) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE;
+        unsafe {
+            let old = self.dc.GetTextAntialiasMode();
+            self.dc.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+            let result = self.text_in(
+                w!("Segoe UI"),
+                title,
+                rect,
+                size.round(),
+                windows::Win32::Graphics::DirectWrite::DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_ALIGNMENT_LEADING,
+                rgba(1.0, 1.0, 1.0, 1.0),
+            );
+            self.dc.SetTextAntialiasMode(old);
+            result
+        }
+    }
+
     pub fn text_wrapped(
         &self,
         text: &str,

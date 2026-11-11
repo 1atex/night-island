@@ -7,6 +7,7 @@ use std::sync::{
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -107,16 +108,10 @@ impl Cycle {
 #[derive(Default)]
 struct Sessions {
     windows: Vec<Window>,
-    recent: Vec<isize>,
     current: Option<Cycle>,
 }
 
 impl Sessions {
-    fn remember(&mut self, handle: isize) {
-        self.recent.retain(|h| *h != handle);
-        self.recent.insert(0, handle);
-    }
-
     fn step(&mut self, reverse: bool) {
         let delta = if reverse { -1 } else { 1 };
         if let Some(cycle) = &self.current {
@@ -132,15 +127,23 @@ impl Sessions {
             .filter(|w| unsafe { IsWindowVisible(HWND(w.handle as _)).as_bool() })
             .cloned()
             .collect();
+        let owner = unsafe { GetAncestor(front, GA_ROOTOWNER) };
+        let recent = RECENT.with_borrow(Clone::clone);
+        for handle in [front.0 as isize, owner.0 as isize].into_iter().chain(recent.iter().take(4).copied()) {
+            if handle != 0
+                && !windows.iter().any(|w| w.handle == handle)
+                && let Some(window) = desktop::uncached_window(HWND(handle as _), front)
+            {
+                windows.push(window);
+            }
+        }
         if windows.is_empty() {
             return;
         }
-        let owner = unsafe { GetAncestor(front, GA_ROOTOWNER) };
         let current = [front, owner].into_iter().map(|h| h.0 as isize).find(|h| windows.iter().any(|w| w.handle == *h));
-        if let Some(handle) = current {
-            self.remember(handle);
-        }
-        windows.sort_by_key(|w| self.recent.iter().position(|h| *h == w.handle).unwrap_or(usize::MAX));
+        windows.sort_by_key(|w| {
+            (Some(w.handle) != current, recent.iter().position(|h| *h == w.handle).unwrap_or(usize::MAX))
+        });
         let selected = if reverse { windows.len() - 1 } else { usize::from(current.is_some()) % windows.len() };
         self.current = Some(Cycle { windows: windows.into(), index: Arc::new(AtomicUsize::new(selected)) });
     }
@@ -152,6 +155,34 @@ struct Route {
 }
 thread_local! { static ROUTE: RefCell<Option<Route>> = const { RefCell::new(None) }; }
 
+thread_local! { static RECENT: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) }; }
+
+unsafe extern "system" fn foreground_changed(_: HWINEVENTHOOK, _: u32, hwnd: HWND, _: i32, _: i32, _: u32, _: u32) {
+    if hwnd.is_invalid() {
+        return;
+    }
+    let owner = unsafe { GetAncestor(hwnd, GA_ROOTOWNER) };
+    RECENT.with_borrow_mut(|recent| {
+        for handle in [owner, hwnd] {
+            let handle = handle.0 as isize;
+            if handle != 0 && recent.first() != Some(&handle) {
+                recent.retain(|h| *h != handle);
+                recent.truncate(255);
+                recent.insert(0, handle);
+            }
+        }
+    });
+}
+
+fn mask_alt_menu() -> bool {
+    let event = |flags| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(0xe8), dwFlags: flags, ..Default::default() } },
+    };
+    let pair = [event(KEYBD_EVENT_FLAGS(0)), event(KEYEVENTF_KEYUP)];
+    unsafe { SendInput(&pair, size_of::<INPUT>() as i32) == 2 }
+}
+
 extern "system" fn shortcut(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     unsafe {
         if code == HC_ACTION as i32 {
@@ -161,6 +192,7 @@ extern "system" fn shortcut(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
                 let consumed = ROUTE.with_borrow_mut(|route| {
                     let Some(route) = route else { return false };
                     let down = |k: VIRTUAL_KEY| GetAsyncKeyState(i32::from(k.0)) < 0;
+                    let already_held = route.chord.held;
                     let (eat, command) = route.chord.input(
                         key,
                         matches!(w.0 as u32, WM_KEYUP | WM_SYSKEYUP),
@@ -169,6 +201,10 @@ extern "system" fn shortcut(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
                         key == VK_TAB && (down(VK_CONTROL) || down(VK_LWIN) || down(VK_RWIN)),
                         route.enabled.load(Ordering::Acquire),
                     );
+                    if !already_held && matches!(command, Some(Command::Next | Command::Previous)) && !mask_alt_menu() {
+                        route.chord = Chord::default();
+                        return false;
+                    }
                     if let Some(command) = command
                         && PostThreadMessageW(GetCurrentThreadId(), MESSAGE, WPARAM(command as usize), LPARAM(0))
                             .is_err()
@@ -207,6 +243,19 @@ impl Shortcut {
                 let mut msg = MSG::default();
                 let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
                 let Ok(hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(shortcut), None, 0) else { return };
+                let foreground_hook = SetWinEventHook(
+                    EVENT_SYSTEM_FOREGROUND,
+                    EVENT_SYSTEM_FOREGROUND,
+                    None,
+                    Some(foreground_changed),
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                );
+                if foreground_hook.is_invalid() {
+                    let _ = UnhookWindowsHookEx(hook);
+                    return;
+                }
                 ROUTE.replace(Some(Route { enabled: flag.clone(), chord: Chord::default() }));
                 if tx.send(GetCurrentThreadId()).is_ok() {
                     while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
@@ -235,6 +284,7 @@ impl Shortcut {
                         let _ = PostMessageW(Some(HWND(dock as _)), MESSAGE, WPARAM(0), LPARAM(0));
                     }
                 }
+                let _ = UnhookWinEvent(foreground_hook);
                 let _ = UnhookWindowsHookEx(hook);
                 ROUTE.replace(None);
             })
@@ -249,10 +299,6 @@ impl Shortcut {
         let mut sessions = self.sessions.lock().unwrap();
         if sessions.windows == windows {
             return;
-        }
-        sessions.recent.retain(|h| windows.iter().any(|w| w.handle == *h));
-        if let Some(active) = windows.iter().find(|w| w.active) {
-            sessions.remember(active.handle);
         }
         sessions.windows = windows.to_vec();
     }

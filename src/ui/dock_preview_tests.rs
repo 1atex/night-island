@@ -600,6 +600,26 @@ fn native_alpha_popup_thumbnail_compatibility() -> Result<()> {
         }
     }
     assert_eq!(center, 0x00cc4422, "Re-presenting alpha content must preserve live thumbnail updates");
+    unsafe {
+        SetWindowLongPtrW(source, GWLP_USERDATA, 0);
+        let _ = InvalidateRect(Some(source), None, false);
+    }
+    assert!(thumbnail.update(RECT { left: 30, top: 40, right: 150, bottom: 120 }, true));
+    assert!(thumbnail.set_source_rect(RECT { left: 9, top: 8, right: 129, bottom: 88 }));
+    let mut samples = Vec::new();
+    for _ in 0..20 {
+        pump();
+        unsafe {
+            let dc = GetDC(None);
+            samples = (0..16).map(|i| GetPixel(dc, x + 30 + i, y + 60).0).collect();
+            ReleaseDC(None, dc);
+        }
+        if samples.contains(&0xffffff) {
+            break;
+        }
+    }
+    let expected: Vec<_> = (0..16).map(|i| if (9 + i) % 8 < 4 { 0xffffff } else { 0 }).collect();
+    assert_eq!(samples, expected, "Original-size thumbnail must preserve sharp pixel boundaries");
     Ok(())
 }
 
@@ -770,6 +790,11 @@ fn native_switcher_and_window_flight() -> Result<()> {
     let (_first, first) = desktop::tests::window_fixture(true);
     let (_second, second) = desktop::tests::window_fixture(true);
     let external = [first[0].clone(), second[0].clone()];
+    for window in &external {
+        unsafe {
+            let _ = ShowWindowAsync(HWND(window.handle as _), SW_MAXIMIZE);
+        }
+    }
     focus_fixture(HWND(external[1].handle as _))?;
     crate::ui::desktop_dock::tests::exercise_keyboard_switcher(sources.0[0], &compositor, &gpu, &external)?;
     Ok(())

@@ -163,6 +163,13 @@ impl Thumbnail {
         true
     }
 
+    pub fn set_source_rect(&self, source: RECT) -> bool {
+        let Some(handle) = self.handle else { return false };
+        let properties =
+            DWM_THUMBNAIL_PROPERTIES { dwFlags: DWM_TNP_RECTSOURCE, rcSource: source, ..Default::default() };
+        unsafe { DwmUpdateThumbnailProperties(handle, &properties).is_ok() }
+    }
+
     pub fn set_opacity(&self, opacity: u8) {
         if let Some(handle) = self.handle {
             let properties = DWM_THUMBNAIL_PROPERTIES { dwFlags: DWM_TNP_OPACITY, opacity, ..Default::default() };

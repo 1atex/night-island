@@ -1570,26 +1570,71 @@ impl Drop for Dock {
 pub(super) mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "Sends the fixture's Alt+Tab input from a separate process"]
+    fn native_switcher_input_driver() {
+        use std::io::{BufRead, Write};
+        use windows::Win32::UI::Input::KeyboardAndMouse::*;
+        if std::env::var_os("NI_ALT_TAB_TEST_INPUT").is_none() {
+            return;
+        }
+        for line in std::io::stdin().lock().lines().map_while(std::result::Result::ok) {
+            let (key, up) = line.split_once(' ').unwrap();
+            let key = VIRTUAL_KEY(key.parse().unwrap());
+            assert!(matches!(key, VK_LMENU | VK_TAB | VK_LSHIFT | VK_ESCAPE));
+            let input = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: key,
+                        dwFlags: if up == "1" { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                        ..Default::default()
+                    },
+                },
+            };
+            assert_eq!(unsafe { SendInput(&[input], size_of::<INPUT>() as i32) }, 1);
+            println!("INPUT_ACK");
+            std::io::stdout().flush().unwrap();
+        }
+    }
+
     pub(in crate::ui) fn exercise_keyboard_switcher(
         dock_owner: HWND,
         compositor: &Compositor,
         gpu: &Gpu,
         windows: &[desktop::Window],
     ) -> Result<()> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::windows::process::CommandExt;
+        use std::process::{Command, Stdio};
         use windows::Win32::UI::Input::KeyboardAndMouse::*;
-        fn send(key: VIRTUAL_KEY, up: bool) {
-            let input = INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: key,
-                        dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
-                        ..Default::default()
-                    },
-                },
-            };
-            assert_eq!(unsafe { SendInput(&[input], size_of::<INPUT>() as i32) }, 1);
-        }
+        let config = DockSettings { enabled: true, hide_fullscreen: false, ..Default::default() };
+        let mut dock = Dock::create(dock_owner, compositor, gpu, &config, false)?;
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "ui::desktop_dock::tests::native_switcher_input_driver",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("NI_ALT_TAB_TEST_INPUT", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .creation_flags(0x08000000)
+            .spawn()
+            .unwrap();
+        let driver =
+            std::cell::RefCell::new((child.stdin.take().unwrap(), BufReader::new(child.stdout.take().unwrap())));
+        let send = |key: VIRTUAL_KEY, up: bool| {
+            let mut io = driver.borrow_mut();
+            writeln!(io.0, "{} {}", key.0, u8::from(up)).unwrap();
+            io.0.flush().unwrap();
+            let mut response = String::new();
+            while !response.contains("INPUT_ACK") {
+                assert_ne!(io.1.read_line(&mut response).unwrap(), 0);
+            }
+        };
         fn pump_for(ms: u64) {
             let until = Instant::now() + Duration::from_millis(ms);
             while Instant::now() < until {
@@ -1603,20 +1648,18 @@ pub(super) mod tests {
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
-        struct HeldAlt;
-        impl Drop for HeldAlt {
+        struct HeldAlt<'a>(&'a dyn Fn(VIRTUAL_KEY, bool));
+        impl Drop for HeldAlt<'_> {
             fn drop(&mut self) {
-                send(VK_LMENU, true);
+                (self.0)(VK_LMENU, true);
             }
         }
         let chord = || {
             send(VK_LMENU, false);
             send(VK_TAB, false);
             send(VK_TAB, true);
-            HeldAlt
+            HeldAlt(&send)
         };
-        let config = DockSettings { enabled: true, hide_fullscreen: false, ..Default::default() };
-        let mut dock = Dock::create(dock_owner, compositor, gpu, &config, false)?;
         unsafe {
             let _ = KillTimer(Some(dock.state.hwnd), PULSE);
         }
@@ -1644,7 +1687,7 @@ pub(super) mod tests {
         );
         let mut rect = windows::Win32::Foundation::RECT::default();
         unsafe {
-            GetWindowRect(popup.hwnd(), &mut rect)?;
+            GetWindowRect(popup.hwnd(), &mut rect).unwrap();
         }
         assert!((rect.top + rect.bottom - dock.state.monitor.work.top - dock.state.monitor.work.bottom).abs() < 4);
         send(VK_ESCAPE, false);
@@ -1696,11 +1739,51 @@ pub(super) mod tests {
         pump_for(150);
         assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, choice);
         assert!(dock.state.switcher.is_none());
+        for _ in 0..12 {
+            let front = unsafe { GetForegroundWindow() }.0 as isize;
+            let target = windows.iter().find(|w| w.handle != front).unwrap().handle;
+            drop(chord());
+            let deadline = Instant::now() + Duration::from_millis(600);
+            while unsafe { GetForegroundWindow() }.0 as isize != target && Instant::now() < deadline {
+                pump_for(2);
+            }
+            assert_eq!(
+                unsafe { GetForegroundWindow() }.0 as isize,
+                target,
+                "Repeated external Alt+Tab must switch on every tap"
+            );
+            let mut info = GUITHREADINFO { cbSize: size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+            unsafe {
+                GetGUIThreadInfo(0, &mut info).unwrap();
+            }
+            assert!(!info.flags.contains(GUI_INMENUMODE));
+        }
+        let alt = chord();
+        pump_for(200);
+        let popup = dock.state.switcher.as_ref().unwrap();
+        let hover_target = popup.selected().unwrap().handle;
+        let (x, y) = popup.selected_point();
+        let point = LPARAM(((y as u32) << 16 | x as u32) as isize);
+        send(VK_TAB, false);
+        send(VK_TAB, true);
+        pump_for(40);
+        let popup = dock.state.switcher.as_ref().unwrap();
+        assert_ne!(popup.selected().unwrap().handle, hover_target);
+        unsafe {
+            SendMessageW(popup.hwnd(), WM_MOUSEMOVE, None, Some(point));
+        }
+        assert_eq!(popup.selected().unwrap().handle, hover_target);
+        drop(alt);
+        pump_for(150);
+        assert_eq!(unsafe { GetForegroundWindow() }.0 as isize, hover_target);
         assert!(dock.can_launch("test.exe"));
         assert!(!dock.can_launch("TEST.EXE"));
         dock.state.config.alt_tab = false;
         dock.state.configure_shortcut();
         assert!(dock.state.shortcut.is_none());
+        let (input, _output) = driver.into_inner();
+        drop(input);
+        assert!(child.wait().unwrap().success());
         Ok(())
     }
 

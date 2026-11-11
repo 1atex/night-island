@@ -125,6 +125,63 @@ fn process_path(pid: u32) -> Option<String> {
     }
 }
 
+pub fn uncached_window(hwnd: HWND, foreground: HWND) -> Option<Window> {
+    let mut pid = 0;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
+    if pid == std::process::id() {
+        return None;
+    }
+    window_info(hwnd, foreground, &mut HashMap::new())
+}
+
+fn window_info(hwnd: HWND, foreground: HWND, paths: &mut HashMap<u32, Option<String>>) -> Option<Window> {
+    unsafe {
+        if !IsWindowVisible(hwnd).as_bool() || GetWindowTextLengthW(hwnd) == 0 {
+            return None;
+        }
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        if style & WS_EX_TOOLWINDOW.0 != 0
+            || (GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.0.is_null()) && style & WS_EX_APPWINDOW.0 == 0)
+        {
+            return None;
+        }
+        let mut cloaked = 0u32;
+        let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), size_of::<u32>() as u32);
+        if cloaked != 0 {
+            return None;
+        }
+        let mut class = [0u16; 128];
+        let n = GetClassNameW(hwnd, &mut class) as usize;
+        if matches!(
+            String::from_utf16_lossy(&class[..n]).as_str(),
+            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        ) {
+            return None;
+        }
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let island_settings =
+            pid == std::process::id() && String::from_utf16_lossy(&class[..n]) == "NightIsland.Settings";
+        if pid == std::process::id() && !island_settings {
+            return None;
+        }
+        let path = paths.entry(pid).or_insert_with(|| process_path(pid));
+        let path = path.as_ref()?;
+        let mut title = [0u16; 512];
+        let n = GetWindowTextW(hwnd, &mut title) as usize;
+        Some(Window {
+            handle: hwnd.0 as isize,
+            path: path.clone(),
+            title: String::from_utf16_lossy(&title[..n]),
+            active: hwnd == foreground,
+            minimized: IsIconic(hwnd).as_bool(),
+            island_settings,
+        })
+    }
+}
+
 pub fn windows() -> Vec<Window> {
     struct Scan {
         out: Vec<Window>,
@@ -133,48 +190,8 @@ pub fn windows() -> Vec<Window> {
     }
     unsafe extern "system" fn each(hwnd: HWND, param: LPARAM) -> BOOL {
         let scan = unsafe { &mut *(param.0 as *mut Scan) };
-        unsafe {
-            if !IsWindowVisible(hwnd).as_bool() || GetWindowTextLengthW(hwnd) == 0 {
-                return true.into();
-            }
-            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-            if style & WS_EX_TOOLWINDOW.0 != 0
-                || (GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.0.is_null()) && style & WS_EX_APPWINDOW.0 == 0)
-            {
-                return true.into();
-            }
-            let mut cloaked = 0u32;
-            let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), size_of::<u32>() as u32);
-            if cloaked != 0 {
-                return true.into();
-            }
-            let mut class = [0u16; 128];
-            let n = GetClassNameW(hwnd, &mut class) as usize;
-            if matches!(
-                String::from_utf16_lossy(&class[..n]).as_str(),
-                "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
-            ) {
-                return true.into();
-            }
-            let mut pid = 0;
-            GetWindowThreadProcessId(hwnd, Some(&mut pid));
-            let island_settings =
-                pid == std::process::id() && String::from_utf16_lossy(&class[..n]) == "NightIsland.Settings";
-            if pid == std::process::id() && !island_settings {
-                return true.into();
-            }
-            let path = scan.paths.entry(pid).or_insert_with(|| process_path(pid));
-            let Some(path) = path else { return true.into() };
-            let mut title = [0u16; 512];
-            let n = GetWindowTextW(hwnd, &mut title) as usize;
-            scan.out.push(Window {
-                handle: hwnd.0 as isize,
-                path: path.clone(),
-                title: String::from_utf16_lossy(&title[..n]),
-                active: hwnd == scan.foreground,
-                minimized: IsIconic(hwnd).as_bool(),
-                island_settings,
-            });
+        if let Some(window) = window_info(hwnd, scan.foreground, &mut scan.paths) {
+            scan.out.push(window);
         }
         (scan.out.len() < 256).into()
     }
@@ -198,6 +215,7 @@ fn checked_window(window: &Window) -> Option<HWND> {
 pub fn switch_window(window: &Window) {
     let Some(hwnd) = checked_window(window) else { return };
     unsafe {
+        let source = GetForegroundWindow();
         if IsIconic(hwnd).as_bool() {
             let _ = ShowWindowAsync(hwnd, SW_RESTORE);
         }
@@ -209,6 +227,21 @@ pub fn switch_window(window: &Window) {
         } else {
             hwnd
         };
+        if !source.is_invalid() && source != target {
+            let _ = SendMessageTimeoutW(
+                source,
+                WM_SYSCOMMAND,
+                windows::Win32::Foundation::WPARAM(SC_HOTKEY as usize),
+                LPARAM(target.0 as isize),
+                SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                80,
+                None,
+            );
+            let foreground = GetForegroundWindow();
+            if foreground == target || (!foreground.is_invalid() && foreground != source && foreground != hwnd) {
+                return;
+            }
+        }
         if !SetForegroundWindow(target).as_bool() {
             SwitchToThisWindow(target, true);
         }
