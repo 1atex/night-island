@@ -272,6 +272,12 @@ pub fn hit_home_widget(pill: Rect, s: f32, ui: &UiState, x: f32, y: f32) -> Opti
             return Some(HomeHit::WidgetHandle(id));
         }
         if inside(r, x, y) {
+            if !ui.home.widgets.editing
+                && matches!(tile_kind(id as usize), Some(Tile::Info(_, _, Info::Vpn)))
+                && ui.cfg.vpn_provider != crate::data::settings::VpnProvider::Happ
+            {
+                return hit_vpn_widget(r, s, ui, x, y);
+            }
             if ui.cfg.home_widget_details
                 && !ui.home.widgets.editing
                 && r.3 - r.1 > 60.0 * s
@@ -368,7 +374,11 @@ fn paint_widget(p: &Painter, r: Rect, s: f32, ui: &UiState, id: u8, alpha: f32) 
         if selected {
             p.stroke_round_rect(r, 16.0 * s, s, acc(0.85))?;
         }
-        if paint_widget_details(p, r, s, ui, id)? {
+        if matches!(kind, Tile::Info(_, _, Info::Vpn))
+            && ui.cfg.vpn_provider != crate::data::settings::VpnProvider::Happ
+        {
+            paint_vpn_widget(p, r, s, ui)?;
+        } else if paint_widget_details(p, r, s, ui, id)? {
         } else if let Tile::Info(_, _, Info::Weather) = kind {
             paint_weather_widget(p, r, s, ui)?;
         } else {

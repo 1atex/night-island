@@ -49,6 +49,7 @@ mod settings_window;
 mod steam;
 mod text;
 mod tips;
+mod vpn_widget;
 mod wave_theme;
 mod weather;
 mod widget_details;
@@ -68,6 +69,7 @@ pub use home_widgets::*;
 pub use live::*;
 pub use memory_tools::*;
 pub use pet_studio::*;
+pub use vpn_widget::*;
 pub use widget_details::*;
 
 pub type Rect = (f32, f32, f32, f32);
@@ -185,6 +187,9 @@ pub struct UiState {
     pub privacy: Privacy,
     pub mic_muted: Option<bool>,
     pub vpn: Option<bool>,
+    pub svoi: crate::platform::vpn::Snapshot,
+    pub svoi_announced: String,
+    pub vpn_favorite_offset: usize,
     pub vpn_busy: bool,
     pub notice: Option<(char, String)>,
     pub volume: Option<f32>,
@@ -262,6 +267,9 @@ impl UiState {
             tab_drag: None,
             tab_press: None,
             vpn: None,
+            svoi: crate::platform::vpn::Snapshot::closed(),
+            svoi_announced: String::new(),
+            vpn_favorite_offset: 0,
             vpn_busy: false,
             notice: None,
             volume: None,

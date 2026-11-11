@@ -9,6 +9,9 @@ mod ui;
 mod view;
 
 fn main() -> windows_core::Result<()> {
+    if platform::vpn::handle_cli() {
+        return Ok(());
+    }
     if platform::localvoice::run_helper() {
         return Ok(());
     }

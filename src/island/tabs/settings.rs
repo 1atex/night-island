@@ -156,6 +156,16 @@ impl App {
                 }
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
+                VpnProvider => {
+                    vpn::set_provider(self.settings.vpn_provider);
+                    self.ui.svoi = vpn::snapshot();
+                    self.ui.vpn = vpn::state();
+                    self.ui.vpn_busy = false;
+                    self.kill_timer(Timer::VpnWait);
+                    self.update_eq();
+                    self.repaint_collapsed();
+                    self.repaint_expanded();
+                }
                 VpnPill => {
                     self.ui.vpn = vpn::state();
                     self.update_eq();

@@ -166,6 +166,7 @@ mod tests {
         let mut source = Settings::default();
         source.desktop_dock.icon_size = 66;
         source.top_panel.volume = false;
+        source.vpn_provider = super::super::settings::VpnProvider::Svoi;
         source.desktop_dock.pins[0].name = "Проводник".into();
         source.home_widget_sizes.insert(9, crate::data::home_widgets::WidgetSize::Tall4);
         let current = Settings { tour_revision: 42, ..Settings::default() };
@@ -183,6 +184,7 @@ mod tests {
             assert_eq!(restored.tour_revision, 42);
             if scope == Scope::Island {
                 assert_eq!(restored.home_widget_sizes, source.home_widget_sizes);
+                assert_eq!(restored.vpn_provider, source.vpn_provider);
                 let dock_only = Import::read(&path, Scope::Dock).unwrap().apply(&current);
                 assert_eq!(dock_only.top_panel, current.top_panel);
                 assert_eq!(dock_only.desktop_dock, source.desktop_dock);
