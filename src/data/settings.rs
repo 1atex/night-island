@@ -14,6 +14,26 @@ const MAX_FILE_BYTES: u64 = super::profile::MAX_BYTES;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum VpnProvider {
+    #[default]
+    Happ,
+    Svoi,
+    Off,
+}
+
+impl VpnProvider {
+    pub const ALL: [Self; 3] = [Self::Happ, Self::Svoi, Self::Off];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Happ => "Happ",
+            Self::Svoi => "SVOI",
+            Self::Off => "Disabled",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum Placement {
     #[default]
     Floating,
@@ -485,6 +505,7 @@ pub struct Settings {
     pub activity_track: bool,
     pub activity_ai: bool,
     pub vpn_pill: bool,
+    pub vpn_provider: VpnProvider,
     pub voice_paste: bool,
     pub music_lyrics: bool,
     pub music_progress: bool,
@@ -633,6 +654,7 @@ impl Default for Settings {
             activity_track: true,
             activity_ai: false,
             vpn_pill: true,
+            vpn_provider: VpnProvider::Happ,
             metrics_tab: ["cpu", "ram", "net_down", "net_up", "gpu", "disk", "uptime"].map(String::from).to_vec(),
             metrics_pill: Vec::new(),
             metrics_secs: 2,

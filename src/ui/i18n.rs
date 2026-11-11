@@ -28,6 +28,20 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "No access" => "Нет доступа",
+        "Closed" => "Закрыт",
+        "Star servers in SVOI" => "Добавьте избранные в SVOI",
+        "In SVOI: Settings → Integrations → Allow control from Night Island" => {
+            "В SVOI: Настройки → Интеграции → Разрешить управление из Night Island"
+        }
+        "Open SVOI to enable the integration" => "Откройте SVOI для настройки доступа",
+        "Open SVOI" => "Открыть SVOI",
+        "Disconnecting…" => "Отключение…",
+        "VPN on · Check connection" => "VPN включён · Нужна проверка",
+        "Allow control in SVOI" => "Разрешите доступ в SVOI",
+        "SVOI is closed" => "SVOI закрыт",
+        "VPN shield and button" => "Щит и кнопка VPN",
+        "VPN provider" => "VPN-клиент",
         "Card shadows in the open island" => "Тени карточек в раскрытом острове",
         "Window switcher" => "Переключатель окон",
         "All windows" => "Все окна",

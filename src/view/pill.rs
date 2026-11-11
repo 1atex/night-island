@@ -99,6 +99,9 @@ pub fn vpn_button(ui: &UiState) -> bool {
 pub const VPN_GLYPH: char = '\u{EA18}';
 
 pub fn vpn_color(ui: &UiState) -> windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F {
+    if ui.cfg.vpn_provider == crate::data::settings::VpnProvider::Svoi && ui.vpn == Some(true) && !ui.svoi.verified {
+        return rgba(1.0, 0.75, 0.3, 1.0);
+    }
     match (ui.vpn, ui.vpn_busy) {
         (_, true) => rgba(1.0, 0.75, 0.3, 1.0),
         (Some(true), _) => rgba(0.4, 0.9, 0.55, 1.0),

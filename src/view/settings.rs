@@ -159,6 +159,7 @@ pub enum Sid {
     ActivityTrack,
     ActivityAi,
     VpnPill,
+    VpnProvider,
     SharedLyrics,
     UpdateCheck,
     UpdateBeta,
@@ -816,6 +817,11 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
                 _ => 1,
             };
         }
+        Sid::VpnProvider => {
+            let all = crate::data::settings::VpnProvider::ALL;
+            let at = all.iter().position(|p| *p == c.vpn_provider).unwrap_or(0);
+            c.vpn_provider = all[if forward { (at + 1) % 3 } else { (at + 2) % 3 }];
+        }
         Sid::Character => c.character = c.character.step(forward),
         Sid::InterfaceFont => c.interface_font = c.interface_font.step(forward),
         Sid::PetPerformance => c.pet_performance = c.pet_performance.step(forward),
@@ -859,6 +865,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
             2 => "2 tiles",
             _ => "4 tiles",
         },
+        Sid::VpnProvider => c.vpn_provider.name(),
         Sid::Character => c.character.name(),
         Sid::InterfaceFont => c.interface_font.name(),
         Sid::PetPerformance => c.pet_performance.name(),
@@ -899,6 +906,7 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
             vec!["1 tile", "2 tiles", "4 tiles"],
             [1, 2, 4].iter().position(|v| *v == c.notification_tiles).unwrap_or(2),
         ),
+        Sid::VpnProvider => all(&crate::data::settings::VpnProvider::ALL, c.vpn_provider, |v| v.name()),
         Sid::PetPerformance => all(&crate::ui::pet_motion::PetPerformance::ALL, c.pet_performance, |v| v.name()),
         Sid::TopEntrance => all(&crate::data::top_panel::PanelEntrance::ALL, c.top_panel.entrance, |v| v.name()),
         Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
@@ -933,6 +941,7 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
             let all = crate::services::assistant::TtsProvider::ALL;
             c.assistant.set_provider(all[k.min(all.len() - 1)]);
         }
+        Sid::VpnProvider => c.vpn_provider = crate::data::settings::VpnProvider::ALL[k.min(2)],
         Sid::NotificationTiles => c.notification_tiles = [1, 2, 4][k.min(2)],
         Sid::InterfaceFont => c.interface_font = InterfaceFont::ALL[k.min(InterfaceFont::ALL.len() - 1)],
         Sid::Character => {

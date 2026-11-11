@@ -53,6 +53,21 @@ impl App {
                     }
                 }
             },
+            Some(view::HomeHit::VpnFavorite(index)) => {
+                if !self.ui.vpn_busy
+                    && let Some(server) = self.ui.svoi.favorites.get(index)
+                {
+                    if vpn::command(self.hwnd, "switch", &server.id) {
+                        self.ui.vpn_busy = true;
+                        self.repaint_expanded();
+                        self.repaint_collapsed();
+                    }
+                }
+            }
+            Some(view::HomeHit::VpnMore) => {
+                self.ui.vpn_favorite_offset = (self.ui.vpn_favorite_offset + 3) % self.ui.svoi.favorites.len().max(1);
+                self.repaint_expanded();
+            }
             Some(view::HomeHit::WidgetHandle(id)) => self.begin_widget_resize(id, x, y),
             Some(view::HomeHit::Action(id)) if self.ui.home.widgets.editing && !self.ui.home.edit => {
                 self.begin_widget_drag(id as u8, x, y);

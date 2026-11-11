@@ -166,7 +166,7 @@ impl App {
             app.apply_layout();
         }
         app.ui.mic_muted = volume::mic_muted();
-        vpn::set_enabled(true);
+        vpn::set_provider(app.settings.vpn_provider);
         vpn::start_watch(app.hwnd);
         app.reload_clips();
         if let Some(store) = &app.store {

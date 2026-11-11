@@ -646,6 +646,8 @@ pub(in crate::view) fn media_btn(pill: Rect, scale: f32, i: usize, wide: bool) -
 pub enum HomeHit {
     WidgetControl(WidgetControl),
     WidgetCommand(WidgetCommand),
+    VpnFavorite(usize),
+    VpnMore,
     WidgetHandle(u8),
     Live(usize),
     Notification,

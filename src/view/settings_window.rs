@@ -79,7 +79,7 @@ const APPEARANCE: [(Sid, &str, Kind); 11] = [
 
 const PILL: [(Sid, &str, Kind); 23] = [
     (Sid::PillUnifiedLayout, "Balanced pill layout", Kind::Toggle),
-    (Sid::VpnPill, "VPN shield and button (Happ)", Kind::Toggle),
+    (Sid::VpnPill, "VPN shield and button", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
@@ -481,7 +481,18 @@ fn game_mode_items(ui: &UiState) -> Vec<Item> {
 
 fn integration_items(ui: &UiState) -> Vec<Item> {
     use discord::Status as D;
-    let mut out = vec![Item::Heading("Integrations")];
+    let mut out = vec![
+        Item::Heading("Integrations"),
+        Item::Section("VPN"),
+        Item::Row(Sid::VpnProvider, "VPN provider", Kind::Cycle),
+        Item::Row(Sid::VpnPill, "VPN shield and button", Kind::Toggle),
+    ];
+    if ui.cfg.vpn_provider == crate::data::settings::VpnProvider::Svoi {
+        out.push(Item::Text(crate::ui::i18n::tr(ui.svoi.status()).into_owned()));
+        if ui.svoi.access != "allowed" {
+            out.push(Item::Note("In SVOI: Settings → Integrations → Allow control from Night Island"));
+        }
+    }
 
     let wave = &ui.yandex.state;
     let status = if !wave.error.is_empty() {

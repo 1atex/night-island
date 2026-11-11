@@ -134,6 +134,25 @@ impl App {
     }
 
     pub(in crate::island) fn toggle_vpn(&mut self) {
+        if self.settings.vpn_provider == crate::data::settings::VpnProvider::Off {
+            if let Some(group) = view::GROUPS.iter().position(|g| g.name == "Integrations") {
+                self.open_settings_at(group);
+            }
+            return;
+        }
+        if self.settings.vpn_provider == crate::data::settings::VpnProvider::Svoi && self.ui.svoi.access != "allowed" {
+            if !vpn::open_svoi() {
+                self.notify(Notice::Error, view::VPN_GLYPH, "Open SVOI to enable the integration");
+            } else if self.ui.svoi.access == "denied" {
+                self.notify_for(
+                    Notice::Integrations,
+                    view::VPN_GLYPH,
+                    "In SVOI: Settings → Integrations → Allow control from Night Island",
+                    4000,
+                );
+            }
+            return;
+        }
         if self.ui.vpn_busy || !vpn::toggle(self.hwnd) {
             return;
         }
@@ -143,6 +162,33 @@ impl App {
     }
 
     pub(in crate::island) fn on_vpn(&mut self) {
+        if self.settings.vpn_provider == crate::data::settings::VpnProvider::Svoi {
+            let next = vpn::snapshot();
+            if next.verified && next.state == "running" {
+                if let Some(active) = &next.active {
+                    let key = format!("{}/{}/{:?}", next.instance, active.id, next.started_at);
+                    if self.ui.svoi_announced != key {
+                        if let Some(text) = vpn::announced_change(&self.ui.svoi, &next) {
+                            self.show_notice_for(view::VPN_GLYPH, &text, 2200);
+                        }
+                        self.ui.svoi_announced = key;
+                    }
+                }
+            }
+            if !next.error.is_empty() && next.error != self.ui.svoi.error {
+                self.notify_for(Notice::Error, view::VPN_GLYPH, &next.error, 3500);
+            }
+            self.ui.vpn = next.connected();
+            self.ui.vpn_busy = vpn::switching() || next.busy;
+            self.ui.svoi = next;
+            self.update_eq();
+            self.repaint_collapsed();
+            self.repaint_expanded();
+            if self.ui.sw.group == view::GROUPS.iter().position(|g| g.name == "Integrations").unwrap_or(usize::MAX) {
+                self.render_settings_win();
+            }
+            return;
+        }
         let state = vpn::state();
         let was = self.ui.vpn;
         let result = vpn::take_result();
