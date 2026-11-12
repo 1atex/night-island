@@ -40,6 +40,7 @@ pub enum Sid {
     DockPreview,
     DockWindowSwitcher,
     DockAltTab,
+    DockSwitcherStyle,
     DockWindowMotion,
     DockFullscreen,
     DockEconomy,
@@ -829,6 +830,7 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
         Sid::InterfaceFont => c.interface_font = c.interface_font.step(forward),
         Sid::PetPerformance => c.pet_performance = c.pet_performance.step(forward),
         Sid::TopEntrance => c.top_panel.entrance = c.top_panel.entrance.step(forward),
+        Sid::DockSwitcherStyle => c.desktop_dock.switcher_style = c.desktop_dock.switcher_style.step(forward),
         Sid::AiProvider => c.ai.provider = c.ai.provider.step(forward),
         Sid::PillBattery => c.pill_battery = c.pill_battery.step(forward),
         Sid::PillWeatherSide => c.pill_weather_side = c.pill_weather_side.step(forward),
@@ -873,6 +875,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
         Sid::InterfaceFont => c.interface_font.name(),
         Sid::PetPerformance => c.pet_performance.name(),
         Sid::TopEntrance => c.top_panel.entrance.name(),
+        Sid::DockSwitcherStyle => c.desktop_dock.switcher_style.name(),
         Sid::AiProvider => c.ai.provider.name(),
         Sid::Edge => c.dock_edge.name(),
         Sid::PillBattery => c.pill_battery.name(),
@@ -912,6 +915,9 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
         Sid::VpnProvider => all(&crate::data::settings::VpnProvider::ALL, c.vpn_provider, |v| v.name()),
         Sid::PetPerformance => all(&crate::ui::pet_motion::PetPerformance::ALL, c.pet_performance, |v| v.name()),
         Sid::TopEntrance => all(&crate::data::top_panel::PanelEntrance::ALL, c.top_panel.entrance, |v| v.name()),
+        Sid::DockSwitcherStyle => {
+            all(&crate::data::desktop_dock::SwitcherStyle::ALL, c.desktop_dock.switcher_style, |v| v.name())
+        }
         Sid::Character => all(&crate::ui::characters::Character::ALL, c.character, |v| v.name()),
         Sid::InterfaceFont => all(&InterfaceFont::ALL, c.interface_font, |v| v.name()),
         Sid::AiProvider => all(&AiProvider::ALL, c.ai.provider, |v| v.name()),
@@ -952,6 +958,9 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
         }
         Sid::PetPerformance => c.pet_performance = crate::ui::pet_motion::PetPerformance::ALL[k.min(3)],
         Sid::TopEntrance => c.top_panel.entrance = crate::data::top_panel::PanelEntrance::ALL[k.min(2)],
+        Sid::DockSwitcherStyle => {
+            c.desktop_dock.switcher_style = crate::data::desktop_dock::SwitcherStyle::ALL[k.min(2)]
+        }
         Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
         Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],
         Sid::PillWeatherSide => c.pill_weather_side = WeatherSide::ALL[k.min(1)],

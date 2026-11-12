@@ -1328,6 +1328,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockWindowSwitcher, "Window switcher", Kind::Toggle),
         Item::Note("Middle-click the dock for all windows. Click a grouped app to choose its window."),
         Item::Row(Sid::DockAltTab, "Use Island for Alt+Tab", Kind::Toggle),
+        Item::Row(Sid::DockSwitcherStyle, "Alt+Tab layout", Kind::Cycle),
         Item::Row(Sid::DockWindowMotion, "Animate windows to and from the dock", Kind::Toggle),
         Item::Row(Sid::DockFullscreen, "Hide over fullscreen applications", Kind::Toggle),
         Item::Note("Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back."),
@@ -1374,6 +1375,9 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockReplaceTaskbar, "Replace Windows taskbar while dock is enabled", Kind::Toggle),
         Item::Note("The Windows taskbar returns when the dock or Island closes."),
     ];
+    if !ui.cfg.desktop_dock.alt_tab || !ui.cfg.desktop_dock.window_switcher {
+        out.retain(|item| !matches!(item, Item::Row(Sid::DockSwitcherStyle, ..)));
+    }
     if !ui.sw.dock_status.is_empty() {
         let index = out.iter().position(|item| matches!(item, Item::Row(Sid::DockImport, ..))).unwrap_or(0);
         out.insert(index + 1, Item::Text(ui.sw.dock_status.clone()));

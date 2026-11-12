@@ -46,6 +46,10 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Window switcher" => "Переключатель окон",
         "All windows" => "Все окна",
         "Use Island for Alt+Tab" => "Открывать меню Island по Alt+Tab",
+        "Alt+Tab layout" => "Вид Alt+Tab",
+        "Window overview" => "Обзор окон",
+        "Window carousel" => "Карусель",
+        "Icon strip" => "Иконки",
         "Release Alt to switch" => "Отпустите Alt для перехода",
         "Middle-click the dock for all windows. Click a grouped app to choose its window." => {
             "Нажмите колёсико над доком для обзора всех окон. Нажмите значок программы с несколькими окнами, чтобы выбрать окно."

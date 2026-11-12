@@ -349,6 +349,15 @@ fn top_panel_blocks_can_all_be_removed_and_persist_independently() {
     let old: crate::data::settings::Settings = serde_json::from_str("{}").unwrap();
     assert!(!old.top_panel.enabled);
     assert!(old.top_panel.auto_hide && old.top_panel.tray && old.desktop_dock.replace_taskbar);
+    use crate::data::desktop_dock::SwitcherStyle;
+    assert_eq!(old.desktop_dock.switcher_style, SwitcherStyle::Overview);
+    for (index, style) in SwitcherStyle::ALL.into_iter().enumerate() {
+        crate::view::cycle_pick(crate::view::Sid::DockSwitcherStyle, &mut settings, index);
+        assert_eq!(settings.desktop_dock.switcher_style, style);
+        let restored: crate::data::desktop_dock::DockSettings =
+            serde_json::from_value(serde_json::to_value(&settings.desktop_dock).unwrap()).unwrap();
+        assert_eq!(restored.switcher_style, style);
+    }
     for (index, entrance) in PanelEntrance::ALL.into_iter().enumerate() {
         crate::view::cycle_pick(crate::view::Sid::TopEntrance, &mut settings, index);
         assert_eq!(settings.top_panel.entrance, entrance);

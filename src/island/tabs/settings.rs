@@ -127,6 +127,7 @@ impl App {
                 | DockAutoHide
                 | DockRunning
                 | DockWindowSwitcher
+                | DockSwitcherStyle
                 | DockAltTab
                 | DockWindowMotion
                 | DockPreview

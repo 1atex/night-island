@@ -1,8 +1,14 @@
+mod strip;
+
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::time::Instant;
+use strip::Strip;
 
-use crate::data::{desktop_dock::DockSettings, settings::AnimCurve};
+use crate::data::{
+    desktop_dock::{DockSettings, SwitcherStyle},
+    settings::AnimCurve,
+};
 use crate::platform::{
     apps::Icon,
     desktop_dock::{self as desktop, Window},
@@ -12,7 +18,7 @@ use crate::ui::{
     desktop_dock::paint_material,
     dock_preview::fit,
     feedback::{Feedback, motion_allowed},
-    gfx::{Gpu, rgba},
+    gfx::{Gpu, Painter, rgba},
     popup::{PopupBackdrop, PopupSurface},
     reveal::Reveal,
 };
@@ -63,6 +69,7 @@ struct Layout {
     tile: f32,
     scale: f32,
     overview: bool,
+    strip: Option<Strip>,
     spans: Vec<(f32, f32)>,
 }
 
@@ -74,7 +81,7 @@ impl Layout {
         let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 244.0);
         let size =
             (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
-        Self { size, count, tile, scale, overview: false, spans: Vec::new() }
+        Self { size, count, tile, scale, overview: false, strip: None, spans: Vec::new() }
     }
     fn overview(work: RECT, scale: f32, windows: usize) -> Self {
         let room = (((work.right - work.left) as f32 / scale) * 0.94).max(1.0);
@@ -83,7 +90,22 @@ impl Layout {
         let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 680.0);
         let size =
             (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
-        Self { size, count, tile, scale, overview: true, spans: Vec::new() }
+        Self { size, count, tile, scale, overview: true, strip: None, spans: Vec::new() }
+    }
+    fn keyboard(work: RECT, scale: f32, windows: usize, style: SwitcherStyle) -> Self {
+        if style == SwitcherStyle::Overview {
+            return Self::overview(work, scale, windows);
+        }
+        let strip = Strip::new(work, scale, windows, style);
+        Self {
+            size: strip.size,
+            count: strip.capacity,
+            tile: 0.0,
+            scale,
+            overview: true,
+            strip: Some(strip),
+            spans: Vec::new(),
+        }
     }
     fn arrange_page(&mut self, aspects: &[f32]) {
         if !self.overview || aspects.is_empty() {
@@ -117,7 +139,7 @@ impl Layout {
         (l + 6.0 * s, t + 32.0 * s, r - 6.0 * s, b - 6.0 * s)
     }
     fn thumbnail(&self, slot: usize, source: (i32, i32)) -> RECT {
-        let area = self.image(slot);
+        let area = self.strip.map_or_else(|| self.image(slot), Strip::preview);
         if !self.overview {
             return fit(source, area);
         }
@@ -171,6 +193,10 @@ struct State {
     thumbnails: Vec<Option<Thumbnail>>,
     sizes: Vec<Option<windows::Win32::Foundation::SIZE>>,
     actual_size: bool,
+    previous_preview: Option<Thumbnail>,
+    preview_mix: Reveal,
+    strip_offset: Cell<f32>,
+    strip_target: f32,
     pointer: Option<(i32, i32)>,
     selected: usize,
     hover: Option<Hit>,
@@ -189,6 +215,9 @@ impl State {
         self.items.len().div_ceil(self.layout.count)
     }
     fn hit(&self, p: (f32, f32)) -> Option<Hit> {
+        if let Some(strip) = self.layout.strip {
+            return strip.hit(p, self.strip_offset.get(), self.items.len(), self.selected);
+        }
         if self.layout.overview && contains(self.layout.actual_size_button(self.pages() > 1), p) {
             return Some(Hit::ActualSize);
         }
@@ -210,20 +239,20 @@ impl State {
         None
     }
     fn bind(&mut self) {
+        self.previous_preview = None;
         self.thumbnails.clear();
-        self.sizes = self
-            .items
-            .iter()
-            .skip(self.start())
-            .take(self.layout.count)
-            .map(|item| {
-                let thumbnail = Thumbnail::new(self.hwnd, &item.window);
-                let size = thumbnail.as_ref().and_then(Thumbnail::source_size);
-                self.thumbnails.push(thumbnail);
-                size
-            })
-            .collect();
-        if self.layout.overview {
+        self.sizes.clear();
+        let (start, count) = match self.layout.strip {
+            Some(strip) if strip.carousel => (self.selected, 1),
+            Some(_) => return,
+            None => (self.start(), self.layout.count),
+        };
+        for item in self.items.iter().skip(start).take(count) {
+            let thumbnail = Thumbnail::new(self.hwnd, &item.window);
+            self.sizes.push(thumbnail.as_ref().and_then(Thumbnail::source_size));
+            self.thumbnails.push(thumbnail);
+        }
+        if self.layout.overview && self.layout.strip.is_none() {
             self.layout.arrange_page(
                 &self.sizes.iter().map(|s| s.map_or(1.6, |s| s.cx as f32 / s.cy as f32)).collect::<Vec<_>>(),
             );
@@ -260,6 +289,9 @@ impl State {
         self.surface.paint(&self.gpu, |p| {
             crate::view::paint_popup_shadow(p, (w, h), s)?;
             paint_material(p, (9.0 * s, 9.0 * s, w - 9.0 * s, h - 9.0 * s), 24.0 * s, s, &self.config)?;
+            if let Some(strip) = self.layout.strip {
+                return self.paint_strip(p, strip);
+            }
             let pages = self.pages();
             let label = if pages > 1 {
                 format!("{}   ·   {} / {}", self.title, self.selected / self.layout.count + 1, pages)
@@ -400,7 +432,9 @@ impl State {
         } else {
             (self.origin.0, self.origin.1 + ((1.0 - t) * 9.0 * self.layout.scale).round() as i32)
         };
-        let moving = self.reveal.active(now) || self.focus_motion.active();
+        let moving = self.reveal.active(now)
+            || self.focus_motion.active()
+            || self.previous_preview.is_some() && self.preview_mix.active(now);
         unsafe {
             if moving {
                 SetTimer(Some(self.hwnd), 1, if self.config.economy { 33 } else { 15 }, None);
@@ -413,8 +447,15 @@ impl State {
             }
         }
         self.surface.present(self.hwnd, Some(POINT { x: at.0, y: at.1 }), (255.0 * t) as u8)?;
+        let mix = if let Some(previous) = &self.previous_preview {
+            let mix = self.preview_mix.value(now);
+            previous.set_opacity((255.0 * t * (1.0 - mix)) as u8);
+            mix
+        } else {
+            1.0
+        };
         for thumbnail in self.thumbnails.iter().flatten() {
-            thumbnail.set_opacity((255.0 * t) as u8);
+            thumbnail.set_opacity((255.0 * t * mix) as u8);
         }
         if let Some(backdrop) = &self.backdrop {
             if unsafe { IsWindowVisible(self.hwnd).as_bool() } && self.backdrop_at.replace(Some(at)) != Some(at) {
@@ -460,13 +501,36 @@ impl State {
             self.animate(false);
         }
     }
-    fn select(&mut self, index: usize) {
+    fn select(&mut self, index: usize, scroll: bool) {
         if self.items.is_empty() {
             return;
         }
         let page = self.start();
+        let previous = self.selected;
         self.selected = index.min(self.items.len() - 1);
-        if self.start() != page {
+        if let Some(strip) = self.layout.strip {
+            if scroll {
+                self.strip_target = strip.target(self.selected, self.items.len());
+            } else {
+                self.strip_target = self.strip_offset.get();
+            }
+            if previous.abs_diff(self.selected) > strip.capacity.max(1) / 2 + 1 {
+                self.reset_focus_motion();
+            }
+            if strip.carousel && previous != self.selected {
+                let old = self.thumbnails.pop().flatten();
+                self.bind();
+                if self.config.animations
+                    && motion_allowed()
+                    && !self.config.economy
+                    && self.thumbnails.first().is_some_and(Option::is_some)
+                {
+                    self.previous_preview = old;
+                    self.preview_mix = Reveal::new(0.0);
+                    self.preview_mix.retarget(true, 120, AnimCurve::Smooth, Instant::now());
+                }
+            }
+        } else if self.start() != page {
             self.reset_focus_motion();
             self.bind();
         }
@@ -474,30 +538,39 @@ impl State {
     }
     fn reset_focus_motion(&self) {
         self.focus_motion.set_enabled(false);
-        self.focus_motion.set_enabled(!self.layout.overview && self.config.animations && motion_allowed());
+        self.focus_motion.set_enabled(
+            (!self.layout.overview || self.layout.strip.is_some()) && self.config.animations && motion_allowed(),
+        );
     }
     fn step(&mut self, amount: isize) {
         if !self.items.is_empty() {
             self.hover = None;
-            self.select((self.selected as isize + amount).rem_euclid(self.items.len() as isize) as usize);
+            self.select_from_pointer(
+                (self.selected as isize + amount).rem_euclid(self.items.len() as isize) as usize,
+                true,
+            );
         }
     }
     fn page(&mut self, next: bool) {
+        if self.layout.strip.is_some() {
+            self.step(if next { 1 } else { -1 });
+            return;
+        }
         let pages = self.pages();
         if pages > 1 {
             self.hover = None;
             let page = self.selected / self.layout.count;
-            self.select_from_pointer((page + if next { 1 } else { pages - 1 }) % pages * self.layout.count);
+            self.select_from_pointer((page + if next { 1 } else { pages - 1 }) % pages * self.layout.count, true);
         }
     }
-    fn select_from_pointer(&mut self, index: usize) {
+    fn select_from_pointer(&mut self, index: usize, scroll: bool) {
         if let Some(cycle) = &self.cycle
             && let Some(item) = self.items.get(index)
             && let Some(i) = cycle.windows.iter().position(|w| w.handle == item.window.handle)
         {
             cycle.select(i);
         }
-        self.select(index);
+        self.select(index, scroll);
     }
     fn choose(&mut self) {
         if let Some(item) = self.items.get(self.selected) {
@@ -519,10 +592,17 @@ impl State {
                 self.hover = hit;
                 if let Some(Hit::Window(i) | Hit::Close(i)) = hit {
                     if self.actual_size {
-                        self.update_source(i - self.start(), Some((position.0 as f32, position.1 as f32)));
+                        let point = (position.0 as f32, position.1 as f32);
+                        if let Some(strip) = self.layout.strip {
+                            if contains(strip.preview(), point) {
+                                self.update_source(0, Some(point));
+                            }
+                        } else {
+                            self.update_source(i - self.start(), Some(point));
+                        }
                     }
                     if i != self.selected {
-                        self.select_from_pointer(i);
+                        self.select_from_pointer(i, false);
                         return;
                     }
                 }
@@ -582,7 +662,10 @@ extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                     return LRESULT(MA_NOACTIVATE as isize);
                 }
                 WM_TIMER if w.0 == 1 => {
-                    if let Ok(s) = (*ptr).try_borrow() {
+                    if let Ok(mut s) = (*ptr).try_borrow_mut() {
+                        if s.previous_preview.is_some() && !s.preview_mix.active(Instant::now()) {
+                            s.previous_preview = None;
+                        }
                         if s.focus_motion.active() {
                             let _ = s.paint();
                         } else {
@@ -618,8 +701,11 @@ impl Switcher {
     ) -> Result<Self> {
         let Placement { work, anchor, scale, hidden } = placement;
         let overview = matches!(anchor, Anchor::Keyboard(_));
-        let layout =
-            if overview { Layout::overview(work, scale, items.len()) } else { Layout::new(work, scale, items.len()) };
+        let layout = if overview {
+            Layout::keyboard(work, scale, items.len(), config.switcher_style)
+        } else {
+            Layout::new(work, scale, items.len())
+        };
         let surface = PopupSurface::new(layout.size)?;
         let origin = (
             work.left + (work.right - work.left - layout.size.0) / 2,
@@ -664,6 +750,7 @@ impl Switcher {
             Anchor::Keyboard(cycle) => cycle.selected().unwrap_or(0),
             Anchor::Dock(_) => items.iter().position(|item| item.window.active).unwrap_or(0),
         };
+        let strip_target = layout.strip.map_or(0.0, |strip| strip.target(selected, items.len()));
         let backdrop =
             if config.blur { gpu.compositor().ok().and_then(|c| PopupBackdrop::new(hwnd, &c).ok()) } else { None };
         let state = Box::new(RefCell::new(State {
@@ -673,7 +760,7 @@ impl Switcher {
             surface,
             backdrop,
             config: config.clone(),
-            focus_motion: Feedback::with_capacity(1),
+            focus_motion: Feedback::with_capacity(2),
             backdrop_at: Cell::new(None),
             layout,
             origin,
@@ -681,6 +768,10 @@ impl Switcher {
             thumbnails: Vec::new(),
             sizes: Vec::new(),
             actual_size: false,
+            previous_preview: None,
+            preview_mix: Reveal::new(1.0),
+            strip_offset: Cell::new(strip_target),
+            strip_target,
             pointer: {
                 let mut pt = POINT::default();
                 unsafe { GetCursorPos(&mut pt) }.ok().map(|_| (pt.x - origin.0, pt.y - origin.1))
@@ -728,11 +819,14 @@ impl Switcher {
         if s.closing {
             return;
         }
-        let start = s.start();
-        let count = s.layout.count;
-        let size = (20.0 * s.layout.scale).ceil() as u32;
+        let range = if let Some(strip) = s.layout.strip {
+            strip.range(s.strip_target, s.items.len())
+        } else {
+            s.start()..(s.start() + s.layout.count).min(s.items.len())
+        };
+        let size = (if s.layout.strip.is_some() { 52.0 } else { 20.0 } * s.layout.scale).ceil() as u32;
         let mut changed = false;
-        for item in s.items.iter_mut().skip(start).take(count) {
+        for item in &mut s.items[range] {
             if item.icon.is_none()
                 && let Some(icon) = cache.get(&item.window.path, size)
             {
@@ -756,7 +850,7 @@ impl Switcher {
             && let Some(index) = s.items.iter().position(|item| item.window.handle == cycle.windows[i].handle)
             && s.selected != index
         {
-            s.select(index);
+            s.select(index, true);
         }
         true
     }
@@ -769,9 +863,13 @@ impl Switcher {
         s.items.get(s.selected).map(|i| i.window.clone())
     }
     #[cfg(test)]
-    pub fn selected_point(&self) -> (i32, i32) {
+    pub fn window_point(&self, handle: isize) -> (i32, i32) {
         let state = self.state.borrow();
-        let (l, t, r, b) = state.layout.image(state.selected % state.layout.count);
+        let index = state.items.iter().position(|item| item.window.handle == handle).unwrap();
+        let (l, t, r, b) = match state.layout.strip {
+            Some(strip) => strip.tile(index as f32, state.strip_offset.get()),
+            None => state.layout.image(index % state.layout.count),
+        };
         (((l + r) / 2.0) as i32, ((t + b) / 2.0) as i32)
     }
     pub fn dismiss(&self) {
@@ -793,6 +891,20 @@ impl Switcher {
                 .unwrap_or_else(|| s.selected.min(s.items.len().saturating_sub(1)));
             s.hover = None;
             s.pressed = None;
+            if s.items.is_empty() {
+                s.finish(None);
+                return;
+            }
+            if let Some(strip) = s.layout.strip {
+                s.strip_target = strip.target(s.selected, s.items.len());
+                s.reset_focus_motion();
+            }
+            if let Some(cycle) = &s.cycle
+                && let Some(item) = s.items.get(s.selected)
+                && let Some(i) = cycle.windows.iter().position(|w| w.handle == item.window.handle)
+            {
+                cycle.select(i);
+            }
             s.bind();
             let _ = s.paint();
         }

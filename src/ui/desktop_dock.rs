@@ -1603,12 +1603,13 @@ pub(super) mod tests {
         compositor: &Compositor,
         gpu: &Gpu,
         windows: &[desktop::Window],
+        switcher_style: crate::data::desktop_dock::SwitcherStyle,
     ) -> Result<()> {
         use std::io::{BufRead, BufReader, Write};
         use std::os::windows::process::CommandExt;
         use std::process::{Command, Stdio};
         use windows::Win32::UI::Input::KeyboardAndMouse::*;
-        let config = DockSettings { enabled: true, hide_fullscreen: false, ..Default::default() };
+        let config = DockSettings { enabled: true, hide_fullscreen: false, switcher_style, ..Default::default() };
         let mut dock = Dock::create(dock_owner, compositor, gpu, &config, false)?;
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
@@ -1729,7 +1730,7 @@ pub(super) mod tests {
         }
         let popup = dock.state.switcher.as_ref().expect("overview at the start of its appearance");
         let choice = popup.selected().unwrap().handle;
-        let (x, y) = popup.selected_point();
+        let (x, y) = popup.window_point(choice);
         let point = LPARAM(((y as u32) << 16 | x as u32) as isize);
         unsafe {
             SendMessageW(popup.hwnd(), WM_LBUTTONDOWN, Some(WPARAM(1)), Some(point));
@@ -1762,13 +1763,13 @@ pub(super) mod tests {
         pump_for(200);
         let popup = dock.state.switcher.as_ref().unwrap();
         let hover_target = popup.selected().unwrap().handle;
-        let (x, y) = popup.selected_point();
-        let point = LPARAM(((y as u32) << 16 | x as u32) as isize);
         send(VK_TAB, false);
         send(VK_TAB, true);
-        pump_for(40);
+        pump_for(220);
         let popup = dock.state.switcher.as_ref().unwrap();
         assert_ne!(popup.selected().unwrap().handle, hover_target);
+        let (x, y) = popup.window_point(hover_target);
+        let point = LPARAM(((y as u32) << 16 | x as u32) as isize);
         unsafe {
             SendMessageW(popup.hwnd(), WM_MOUSEMOVE, None, Some(point));
         }

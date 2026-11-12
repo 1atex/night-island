@@ -787,15 +787,17 @@ fn native_switcher_and_window_flight() -> Result<()> {
     pump();
     assert!(!unsafe { IsIconic(sources.0[1]).as_bool() });
     assert_eq!(unsafe { GetForegroundWindow() }, sources.0[1]);
-    let (_first, first) = desktop::tests::window_fixture(true);
-    let (_second, second) = desktop::tests::window_fixture(true);
-    let external = [first[0].clone(), second[0].clone()];
-    for window in &external {
-        unsafe {
-            let _ = ShowWindowAsync(HWND(window.handle as _), SW_MAXIMIZE);
+    for style in crate::data::desktop_dock::SwitcherStyle::ALL {
+        let (_first, first) = desktop::tests::window_fixture(true);
+        let (_second, second) = desktop::tests::window_fixture(true);
+        let external = [first[0].clone(), second[0].clone()];
+        for window in &external {
+            unsafe {
+                let _ = ShowWindowAsync(HWND(window.handle as _), SW_MAXIMIZE);
+            }
         }
+        focus_fixture(HWND(external[1].handle as _))?;
+        crate::ui::desktop_dock::tests::exercise_keyboard_switcher(sources.0[0], &compositor, &gpu, &external, style)?;
     }
-    focus_fixture(HWND(external[1].handle as _))?;
-    crate::ui::desktop_dock::tests::exercise_keyboard_switcher(sources.0[0], &compositor, &gpu, &external)?;
     Ok(())
 }
