@@ -36,6 +36,7 @@ use windows::core::{Result, w};
 #[derive(Clone)]
 pub(super) enum Anchor {
     Dock { above: i32, center: i32 },
+    FileDrag { above: i32, center: i32 },
     Keyboard(super::dock_alt_tab::Cycle),
 }
 
@@ -198,6 +199,7 @@ struct State {
     thumbnails: Vec<Option<Thumbnail>>,
     sizes: Vec<Option<windows::Win32::Foundation::SIZE>>,
     actual_size: bool,
+    file_drag: bool,
     previous_preview: Option<Thumbnail>,
     preview_mix: Reveal,
     strip_offset: Cell<f32>,
@@ -225,7 +227,7 @@ impl State {
             return Some(Hit::ActualSize);
         }
         for (slot, i) in (self.start()..self.items.len()).take(self.layout.count).enumerate() {
-            if contains(self.layout.close(slot), p) {
+            if !self.file_drag && contains(self.layout.close(slot), p) {
                 return Some(Hit::Close(i));
             }
             if contains(self.layout.card(slot), p) {
@@ -369,7 +371,8 @@ impl State {
                 if self.hover == Some(Hit::Close(i)) {
                     p.fill_round_rect(close, 8.0 * s, rgba(0.9, 0.28, 0.28, 0.35))?;
                 }
-                if selected || matches!(self.hover, Some(Hit::Window(n) | Hit::Close(n)) if n == i) {
+                if !self.file_drag && (selected || matches!(self.hover, Some(Hit::Window(n) | Hit::Close(n)) if n == i))
+                {
                     p.glyph('\u{E711}', close, 10.0 * s, rgba(1.0, 1.0, 1.0, 0.7))?;
                 }
                 if self.thumbnails.get(slot).is_none_or(Option::is_none) {
@@ -643,7 +646,9 @@ impl State {
                 34 => self.scroll(true),
                 _ => {}
             },
-            WM_ACTIVATE if !self.layout.overview && w.0 & 0xffff == WA_INACTIVE as usize => self.finish(None),
+            WM_ACTIVATE if !self.layout.overview && !self.file_drag && w.0 & 0xffff == WA_INACTIVE as usize => {
+                self.finish(None)
+            }
             WM_CLOSE => self.finish(None),
             _ => {}
         }
@@ -655,7 +660,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<State>;
         if !ptr.is_null() {
             match msg {
-                WM_MOUSEACTIVATE if (*ptr).try_borrow().is_ok_and(|s| s.layout.overview) => {
+                WM_MOUSEACTIVATE if (*ptr).try_borrow().is_ok_and(|s| s.layout.overview || s.file_drag) => {
                     return LRESULT(MA_NOACTIVATE as isize);
                 }
                 WM_TIMER if w.0 == 1 => {
@@ -684,6 +689,7 @@ extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     }
 }
 pub(super) struct Switcher {
+    file_target: Option<crate::platform::dnd::FileRegistration>,
     hwnd: HWND,
     state: Box<RefCell<State>>,
 }
@@ -698,6 +704,7 @@ impl Switcher {
     ) -> Result<Self> {
         let Placement { work, anchor, scale, hidden } = placement;
         let overview = matches!(anchor, Anchor::Keyboard(_));
+        let file_drag = matches!(anchor, Anchor::FileDrag { .. });
         let mut layout = if overview {
             Layout::keyboard(work, scale, items.len(), config.switcher_style)
         } else {
@@ -706,7 +713,7 @@ impl Switcher {
         let surface = PopupSurface::new(layout.size)?;
         let origin = (
             match &anchor {
-                Anchor::Dock { center, .. } => {
+                Anchor::Dock { center, .. } | Anchor::FileDrag { center, .. } => {
                     (*center - layout.size.0 / 2).clamp(work.left, (work.right - layout.size.0).max(work.left))
                 }
                 Anchor::Keyboard(_) if config.switcher_style == SwitcherStyle::SideLeft => {
@@ -718,7 +725,7 @@ impl Switcher {
                 _ => work.left + (work.right - work.left - layout.size.0) / 2,
             },
             match anchor {
-                Anchor::Dock { above, .. } => {
+                Anchor::Dock { above, .. } | Anchor::FileDrag { above, .. } => {
                     (above - layout.size.1).clamp(work.top, (work.bottom - layout.size.1).max(work.top))
                 }
                 Anchor::Keyboard(_) => work.top + (work.bottom - work.top - layout.size.1) / 2,
@@ -740,7 +747,7 @@ impl Switcher {
                 WS_EX_LAYERED
                     | WS_EX_TOOLWINDOW
                     | WS_EX_TOPMOST
-                    | if overview { WS_EX_NOACTIVATE } else { WINDOW_EX_STYLE(0) },
+                    | if overview || file_drag { WS_EX_NOACTIVATE } else { WINDOW_EX_STYLE(0) },
                 w!("NightIsland.WindowSwitcher"),
                 w!("Night Island"),
                 WS_POPUP,
@@ -756,7 +763,9 @@ impl Switcher {
         };
         let selected = match &anchor {
             Anchor::Keyboard(cycle) => cycle.selected().unwrap_or(0),
-            Anchor::Dock { .. } => items.iter().position(|item| item.window.active).unwrap_or(0),
+            Anchor::Dock { .. } | Anchor::FileDrag { .. } => {
+                items.iter().position(|item| item.window.active).unwrap_or(0)
+            }
         };
         if layout.strip.is_none() {
             layout.reveal_row(selected, items.len());
@@ -779,6 +788,7 @@ impl Switcher {
             thumbnails: Vec::new(),
             sizes: Vec::new(),
             actual_size: false,
+            file_drag,
             previous_preview: None,
             preview_mix: Reveal::new(1.0),
             strip_offset: Cell::new(strip_target),
@@ -797,13 +807,14 @@ impl Switcher {
             choice: None,
             cycle: match anchor {
                 Anchor::Keyboard(cycle) => Some(cycle),
-                Anchor::Dock { .. } => None,
+                Anchor::Dock { .. } | Anchor::FileDrag { .. } => None,
             },
         }));
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&*state as *const RefCell<State>) as isize);
         }
-        let popup = Self { hwnd, state };
+        let file_target = file_drag.then(|| crate::platform::dnd::FileRegistration::new(hwnd, dock)).flatten();
+        let popup = Self { hwnd, state, file_target };
         popup.set_capture(hidden);
         {
             let mut s = popup.state.borrow_mut();
@@ -815,14 +826,31 @@ impl Switcher {
             return Err(windows::core::Error::from(windows::Win32::Foundation::E_ABORT));
         }
         unsafe {
-            let _ = ShowWindow(hwnd, if overview { SW_SHOWNOACTIVATE } else { SW_SHOW });
-            if !overview {
+            let _ = ShowWindow(hwnd, if overview || file_drag { SW_SHOWNOACTIVATE } else { SW_SHOW });
+            if !overview && !file_drag {
                 let _ = SetForegroundWindow(hwnd);
             }
         }
         popup.state.borrow_mut().animate(true);
         Ok(popup)
     }
+    pub fn drag_window(&self, x: i32, y: i32) -> Option<Window> {
+        let mut s = self.state.try_borrow_mut().ok()?;
+        if !s.file_drag || s.closing {
+            return None;
+        }
+        let p = ((x - s.origin.0) as f32, (y - s.origin.1) as f32);
+        let index = match s.hit(p)? {
+            Hit::Close(i) | Hit::Window(i) => i,
+            _ => return None,
+        };
+        if s.hover != Some(Hit::Window(index)) {
+            s.hover = Some(Hit::Window(index));
+            s.select(index, false);
+        }
+        s.items.get(index).map(|i| i.window.clone())
+    }
+
     pub fn retain_icon_paths(&self, paths: &mut Vec<String>) {
         paths.extend(self.state.borrow().items.iter().map(|item| item.window.path.clone()));
     }
@@ -941,6 +969,7 @@ impl Switcher {
 }
 impl Drop for Switcher {
     fn drop(&mut self) {
+        self.file_target.take();
         unsafe {
             SetWindowLongPtrW(self.hwnd, GWLP_USERDATA, 0);
             self.state.get_mut().thumbnails.clear();

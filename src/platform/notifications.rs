@@ -39,12 +39,14 @@ pub struct Record {
     pub body: String,
     pub icon: Option<Arc<super::apps::Icon>>,
     pub avatar: Option<Arc<super::apps::Icon>>,
+    pub urgent: bool,
 }
 
 impl PartialEq for Record {
     fn eq(&self, other: &Self) -> bool {
         (self.id, self.created, &self.app_id, &self.app, &self.title, &self.body)
             == (other.id, other.created, &other.app_id, &other.app, &other.title, &other.body)
+            && self.urgent == other.urgent
             && match (&self.avatar, &other.avatar) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b) || (a.side == b.side && a.bgra == b.bgra),
                 (None, None) => true,
@@ -228,8 +230,8 @@ fn read_record(
     let icon = icons.entry(app_id.clone()).or_insert_with(|| info.as_ref().and_then(app_icon)).clone();
     let title = lines.first().map(|line| text(line, 512)).unwrap_or_else(|| "New notification".into());
     let body = text(&lines.into_iter().skip(1).collect::<Vec<_>>().join("\n"), 16384);
-    let avatar = avatars.resolve_notification(id, &app_id, &title, &body);
-    Ok(Record { id, created, app_id, app, title, body, icon, avatar })
+    let (urgent, avatar) = avatars.resolve_notification(id, &app_id, &title, &body);
+    Ok(Record { id, created, app_id, app, title, body, icon, avatar, urgent })
 }
 
 fn merge(state: &mut Snapshot, status: Status, records: Vec<Record>, added: Vec<Record>) -> bool {
@@ -480,6 +482,7 @@ mod tests {
             body: "Body".into(),
             icon: None,
             avatar: None,
+            urgent: false,
         }
     }
 

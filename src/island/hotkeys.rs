@@ -111,6 +111,7 @@ impl App {
             }
             self.start_char();
         }
+        self.notification_foreground_changed();
     }
 
     fn hide_window(&mut self) {

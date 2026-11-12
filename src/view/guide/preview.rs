@@ -351,6 +351,7 @@ fn sample_notification() -> crate::platform::notifications::Record {
         body: crate::ui::i18n::tr("New messages can appear here while you work.").into_owned(),
         icon: None,
         avatar: None,
+        urgent: false,
     }
 }
 

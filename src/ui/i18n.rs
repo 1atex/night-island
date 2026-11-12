@@ -179,6 +179,21 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Balanced pill layout" => "Единые размеры и отступы в пилюле",
         "Smooth liquid equalizer" => "Плавная жидкая форма эквалайзера",
         "Hide the island" => "Когда скрывать остров",
+        "Keep music volume" => "Без изменений",
+        "Lower music volume" => "Приглушать",
+        "Pause music" => "Ставить на паузу",
+        "My Wave during a voice conversation" => "Моя волна во время разговора с ассистентом",
+        "Hold a file over an app, choose its window and release the file inside." => {
+            "Задержи файл над значком, выбери окно и отпусти файл внутри него."
+        }
+        "Reveal a window while dragging files" => "Раскрывать окна при переносе файлов через док",
+        "Summarize notifications when the island returns" => "Сводка при возвращении из игры или видео",
+        "Show calls and alarms while the island is hidden" => "Показывать звонки и таймеры сразу",
+        "Play a sound for notifications and summaries" => "Звук уведомлений и сводки",
+        "Notification summary" => "Сводка уведомлений",
+        "Incoming notification" => "Входящее уведомление",
+        "While the island was hidden" => "Пока остров был скрыт",
+        "All notifications" => "Все уведомления",
         "Hide on fullscreen YouTube" => "Скрывать при полноэкранном просмотре YouTube",
         "Choose a running app…" => "Выбрать запущенное приложение…",
         "Close app list" => "Закрыть список приложений",

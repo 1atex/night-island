@@ -37,14 +37,27 @@ impl AvatarCache {
         }
     }
 
-    pub fn resolve_notification(&mut self, id: u32, app_id: &str, title: &str, body: &str) -> Option<Arc<Icon>> {
+    pub fn resolve_notification(
+        &mut self,
+        id: u32,
+        app_id: &str,
+        title: &str,
+        body: &str,
+    ) -> (bool, Option<Arc<Icon>>) {
         if let Some(xml) =
             self.history.as_ref().and_then(|db| super::notification_payload::read(db, id, app_id, title, body))
-            && let Some(item) = image_source(&xml)
         {
-            return self.resolve_image(app_id, &item.source);
+            let urgent = xml
+                .DocumentElement()
+                .and_then(|root| root.GetAttribute(&HSTRING::from("scenario")))
+                .is_ok_and(|scenario| matches!(scenario.to_string().as_str(), "incomingCall" | "alarm" | "reminder"));
+            let avatar = match image_source(&xml) {
+                Some(item) => self.resolve_image(app_id, &item.source),
+                None => self.resolve(app_id, title, body),
+            };
+            return (urgent, avatar);
         }
-        self.resolve(app_id, title, body)
+        (false, self.resolve(app_id, title, body))
     }
 
     pub fn resolve(&mut self, app_id: &str, title: &str, body: &str) -> Option<Arc<Icon>> {

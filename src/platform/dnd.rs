@@ -29,6 +29,125 @@ thread_local! {
     static DROPPED: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
 }
 
+pub const WM_FILE_OVER: u32 = WM_APP + 126;
+pub const WM_FILE_LEAVE: u32 = WM_APP + 127;
+pub const WM_FILE_PIN: u32 = WM_APP + 128;
+thread_local! {
+    static PINS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn take_pins() -> Vec<PathBuf> {
+    PINS.take()
+}
+
+pub struct FileRegistration(HWND);
+
+impl FileRegistration {
+    pub fn new(hwnd: HWND, dock: HWND) -> Option<Self> {
+        unsafe {
+            OleInitialize(None).ok()?;
+            let target: IDropTarget =
+                DockTarget { dock: dock.0 as isize, window: hwnd.0 as isize, files: std::cell::Cell::new(false) }
+                    .into();
+            if RegisterDragDrop(hwnd, &target).is_err() {
+                windows::Win32::System::Ole::OleUninitialize();
+                return None;
+            }
+        }
+        Some(Self(hwnd))
+    }
+}
+
+impl Drop for FileRegistration {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = RevokeDragDrop(self.0);
+            windows::Win32::System::Ole::OleUninitialize();
+        }
+    }
+}
+
+#[implement(IDropTarget)]
+struct DockTarget {
+    dock: isize,
+    window: isize,
+    files: std::cell::Cell<bool>,
+}
+
+impl DockTarget {
+    fn over(&self, pt: &POINTL, effect: *mut DROPEFFECT) -> bool {
+        let pin = self.files.get()
+            && unsafe {
+                windows::Win32::UI::WindowsAndMessaging::SendMessageW(
+                    HWND(self.dock as _),
+                    WM_FILE_OVER,
+                    Some(WPARAM(pt.x as usize)),
+                    Some(LPARAM(pt.y as isize)),
+                )
+                .0 != 0
+            }
+            && self.window == self.dock;
+        if !effect.is_null() {
+            unsafe {
+                let allowed = *effect;
+                *effect = if pin && allowed.contains(DROPEFFECT_LINK) {
+                    DROPEFFECT_LINK
+                } else if pin && allowed.contains(DROPEFFECT_COPY) {
+                    DROPEFFECT_COPY
+                } else {
+                    DROPEFFECT_NONE
+                };
+            }
+        }
+        pin && !effect.is_null() && unsafe { *effect != DROPEFFECT_NONE }
+    }
+    fn leave(&self) {
+        self.files.set(false);
+        unsafe {
+            let _ = PostMessageW(Some(HWND(self.dock as _)), WM_FILE_LEAVE, WPARAM(self.window as usize), LPARAM(0));
+        }
+    }
+}
+
+impl IDropTarget_Impl for DockTarget_Impl {
+    fn DragEnter(
+        &self,
+        data: Ref<IDataObject>,
+        _: MODIFIERKEYS_FLAGS,
+        pt: &POINTL,
+        effect: *mut DROPEFFECT,
+    ) -> Result<()> {
+        self.files.set(data.as_ref().is_some_and(has_files));
+        self.over(pt, effect);
+        Ok(())
+    }
+    fn DragOver(&self, _: MODIFIERKEYS_FLAGS, pt: &POINTL, effect: *mut DROPEFFECT) -> Result<()> {
+        self.over(pt, effect);
+        Ok(())
+    }
+    fn DragLeave(&self) -> Result<()> {
+        self.leave();
+        Ok(())
+    }
+    fn Drop(&self, data: Ref<IDataObject>, _: MODIFIERKEYS_FLAGS, pt: &POINTL, effect: *mut DROPEFFECT) -> Result<()> {
+        if self.over(pt, effect) {
+            let paths = data.as_ref().map(read_paths).unwrap_or_default();
+            if paths.is_empty() {
+                unsafe {
+                    *effect = DROPEFFECT_NONE;
+                }
+            } else {
+                PINS.with(|pending| pending.borrow_mut().extend(paths));
+                unsafe {
+                    let _ = PostMessageW(Some(HWND(self.dock as _)), WM_FILE_PIN, WPARAM(0), LPARAM(0));
+                }
+            }
+        }
+        self.leave();
+        Ok(())
+    }
+}
+
 pub fn take_dropped() -> Vec<PathBuf> {
     DROPPED.with(|d| std::mem::take(&mut *d.borrow_mut()))
 }
@@ -160,13 +279,13 @@ impl IDropSource_Impl for Source_Impl {
     }
 }
 
-pub fn drag_out(path: &Path) -> bool {
+pub(crate) fn file_data(path: &Path) -> Option<IDataObject> {
     let wide: Vec<u16> = path.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let mut pidl = std::ptr::null_mut();
         if SHParseDisplayName(windows::core::PCWSTR(wide.as_ptr()), None, &mut pidl, 0, None).is_err() || pidl.is_null()
         {
-            return false;
+            return None;
         }
         let parent = ILClone(pidl);
         let _ = ILRemoveLastID(Some(parent));
@@ -175,8 +294,13 @@ pub fn drag_out(path: &Path) -> bool {
             SHCreateDataObject(Some(parent as *const _), Some(&[child as *const _]), None::<&IDataObject>);
         ILFree(Some(parent as *const _));
         ILFree(Some(pidl as *const _));
-        let Ok(data) = data else { return false };
+        data.ok()
+    }
+}
 
+pub fn drag_out(path: &Path) -> bool {
+    let Some(data) = file_data(path) else { return false };
+    unsafe {
         let source: IDropSource = Source.into();
         let mut effect = DROPEFFECT_NONE;
         let _ = DoDragDrop(&data, &source, DROPEFFECT_COPY | DROPEFFECT_LINK, &mut effect);

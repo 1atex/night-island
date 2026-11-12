@@ -126,6 +126,7 @@ impl App {
                 | DockEnabled
                 | DockAutoHide
                 | DockRunning
+                | DockDragToWindow
                 | DockWindowSwitcher
                 | DockFullscreenAltTab
                 | DockSwitcherStyle
@@ -146,6 +147,7 @@ impl App {
                 | DockTintHue
                 | DockTintSaturation
                 | DockTintBrightness => self.configure_desktop_dock(),
+                NotificationDigest | NotificationPriority => self.configure_digest(),
                 SystemNotifications => self.configure_system_notifications(),
                 WaveRatings => {
                     self.ui.yandex.ratings_hidden = !self.settings.wave_ratings;
@@ -197,6 +199,7 @@ impl App {
                     }
                     self.maybe_show_notification();
                 }
+                VoiceMusic => self.sync_music_focus(),
                 AsstTtsProvider => self.sync_voice_fields(),
                 AutoHide => {
                     if self.settings.auto_hide {

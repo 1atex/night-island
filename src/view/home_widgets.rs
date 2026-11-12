@@ -662,6 +662,7 @@ mod tests {
             body: "Body".into(),
             icon: None,
             avatar: None,
+            urgent: false,
         });
         let during = layout_widgets(&ui);
         assert!(during.iter().all(|v| v.row >= 2));

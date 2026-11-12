@@ -134,8 +134,7 @@ impl Player {
         }
         updater.Update()?;
         inner.SetSource(&MediaSource::CreateFromUri(&Uri::CreateUri(&HSTRING::from(url))?)?)?;
-        inner.SetVolume(f64::from(volume.min(100)) / 100.0)?;
-        inner.Play()?;
+        super::focus::install(&inner, volume)?;
         Ok(Self { inner, outcome })
     }
 
@@ -144,14 +143,14 @@ impl Player {
     }
 
     pub fn set_volume(&self, volume: u8) -> windows::core::Result<()> {
-        self.inner.SetVolume(f64::from(volume.min(100)) / 100.0)
+        super::focus::volume(&self.inner, volume)
     }
 
     pub fn pause(&self) {
-        let _ = self.inner.Pause();
+        super::focus::playback(&self.inner, false);
     }
     pub fn play(&self) {
-        let _ = self.inner.Play();
+        super::focus::playback(&self.inner, true);
     }
     pub fn seek(&self, seconds: f32) {
         if seconds.is_finite()
@@ -206,6 +205,7 @@ pub fn load_cover(url: String, generation: u64, sender: SyncSender<Command>) {
 
 impl Drop for Player {
     fn drop(&mut self) {
+        super::focus::remove(&self.inner);
         let _ = self.inner.Pause();
         if let Ok(c) = self.inner.SystemMediaTransportControls() {
             let _ = c.SetIsEnabled(false);
@@ -226,7 +226,7 @@ mod tests {
         }
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let path = std::env::temp_dir().join(format!("night-island-wave-test-{stamp}.wav"));
-        let bytes = 64_000u32;
+        let bytes = 128_000u32;
         let mut wav = Vec::new();
         wav.extend_from_slice(b"RIFF");
         wav.extend_from_slice(&(bytes + 36).to_le_bytes());
@@ -262,6 +262,42 @@ mod tests {
         assert!(player.state().2, "native player did not start");
         assert!(player.state().1 > 1.5);
         assert!((player.inner.Volume()? - 0.37).abs() < 0.001);
+        use super::super::focus::{self, VoiceMusic};
+        let wait_gain = |expected: f64| {
+            let until = Instant::now() + Duration::from_secs(2);
+            while (player.inner.Volume().unwrap() - expected).abs() > 0.001 && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(15));
+            }
+            assert!((player.inner.Volume().unwrap() - expected).abs() < 0.001);
+        };
+        focus::set(VoiceMusic::Lower);
+        wait_gain(0.37 * 0.25);
+        player.set_volume(64)?;
+        wait_gain(0.64 * 0.25);
+        focus::set(VoiceMusic::Unchanged);
+        wait_gain(0.64);
+        focus::set(VoiceMusic::Pause);
+        let until = Instant::now() + Duration::from_secs(2);
+        while player.state().2 && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!player.state().2);
+        let wait_playing = |playing| {
+            let until = Instant::now() + Duration::from_secs(2);
+            while player.state().2 != playing && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(player.state().2, playing);
+        };
+        focus::set(VoiceMusic::Unchanged);
+        wait_playing(true);
+        focus::set(VoiceMusic::Pause);
+        wait_playing(false);
+        player.pause();
+        focus::set(VoiceMusic::Unchanged);
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!player.state().2);
+        player.play();
         player.set_volume(0)?;
         assert_eq!(player.inner.Volume()?, 0.0);
         player.set_volume(27)?;
@@ -291,7 +327,7 @@ mod tests {
         player.pause();
         std::thread::sleep(Duration::from_millis(100));
         assert!(!player.state().2);
-        player.seek(1.4);
+        player.seek(3.4);
         player.play();
         let end = rx.recv_timeout(Duration::from_secs(5)).expect("missing ended event");
         assert!(matches!(end, Command::Ended(73)));

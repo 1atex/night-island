@@ -37,15 +37,20 @@ pub enum Cue {
     Done,
     Error,
     Reminder,
+    Notification,
+    Summary,
 }
 
 impl Cue {
-    pub const OPTIONS: [Self; 4] = [Self::Heard, Self::Done, Self::Error, Self::Reminder];
+    pub const OPTIONS: [Self; 6] =
+        [Self::Heard, Self::Done, Self::Error, Self::Reminder, Self::Notification, Self::Summary];
     pub fn key(self) -> &'static str {
         match self {
             Self::Heard => "heard",
             Self::Done => "done",
             Self::Error => "error",
+            Self::Notification => "notification",
+            Self::Summary => "summary",
             Self::Reminder => "reminder",
         }
     }
@@ -54,12 +59,14 @@ impl Cue {
             Self::Heard => "Assistant is listening",
             Self::Done => "Assistant finished",
             Self::Error => "Assistant error",
+            Self::Notification => "Incoming notification",
+            Self::Summary => "Notification summary",
             Self::Reminder => "Timer and reminder",
         }
     }
 
     #[cfg(test)]
-    const ALL: [Cue; 4] = [Cue::Heard, Cue::Done, Cue::Error, Cue::Reminder];
+    const ALL: [Cue; 6] = Self::OPTIONS;
 
     fn index(self) -> usize {
         self as usize
@@ -70,6 +77,8 @@ impl Cue {
             Cue::Heard => &[(659.25, 0.075), (987.77, 0.11)],
             Cue::Done => &[(987.77, 0.06), (659.25, 0.12)],
             Cue::Error => &[(329.63, 0.09), (261.63, 0.16)],
+            Cue::Notification => &[(880.0, 0.09)],
+            Cue::Summary => &[(659.25, 0.065), (880.0, 0.12)],
             Cue::Reminder => &[(784.0, 0.11), (987.77, 0.11), (1174.66, 0.14)],
         }
     }
@@ -101,8 +110,8 @@ fn wav(samples: &[i16]) -> Vec<u8> {
     crate::platform::dictation::wav(samples)
 }
 
-fn cache() -> &'static [[OnceLock<Vec<u8>>; STEPS]; 4] {
-    static CACHE: [[OnceLock<Vec<u8>>; STEPS]; 4] = [const { [const { OnceLock::new() }; STEPS] }; 4];
+fn cache() -> &'static [[OnceLock<Vec<u8>>; STEPS]; 6] {
+    static CACHE: [[OnceLock<Vec<u8>>; STEPS]; 6] = [const { [const { OnceLock::new() }; STEPS] }; 6];
     &CACHE
 }
 
@@ -170,12 +179,14 @@ fn worker() -> &'static mpsc::SyncSender<()> {
 }
 
 fn glass(cue: Cue) -> &'static [u8] {
-    static CACHE: [OnceLock<Vec<u8>>; 4] = [const { OnceLock::new() }; 4];
+    static CACHE: [OnceLock<Vec<u8>>; 6] = [const { OnceLock::new() }; 6];
     CACHE[cue.index()].get_or_init(|| {
         let notes: &[f32] = match cue {
             Cue::Heard => &[880.0, 1318.51],
             Cue::Done => &[1318.51, 1046.5],
             Cue::Error => &[440.0, 392.0],
+            Cue::Notification => &[1174.66],
+            Cue::Summary => &[783.99, 1046.50],
             Cue::Reminder => &[1046.5, 1318.51, 1567.98],
         };
         let duration = if cue == Cue::Heard { 0.20 } else { notes.len() as f32 * 0.085 + 0.33 };
@@ -241,7 +252,7 @@ pub fn take_import() -> Option<Imported> {
 }
 
 #[cfg(test)]
-pub fn all() -> [Cue; 4] {
+pub fn all() -> [Cue; 6] {
     Cue::ALL
 }
 

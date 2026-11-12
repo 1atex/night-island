@@ -38,7 +38,7 @@ impl SoundSettings {
     pub fn sanitize(&mut self) {
         self.volume = self.volume.min(100);
         self.custom.retain(|key, path| {
-            matches!(key.as_str(), "heard" | "done" | "error" | "reminder")
+            matches!(key.as_str(), "heard" | "done" | "error" | "reminder" | "notification" | "summary")
                 && !path.is_empty()
                 && path.len() <= 4096
                 && !path.chars().any(char::is_control)
@@ -60,10 +60,13 @@ mod tests {
         assert!(settings.live_activities);
         let mut sounds = SoundSettings { volume: 255, ..SoundSettings::default() };
         sounds.custom.insert("heard".into(), "C:/sound.wav".into());
+        sounds.custom.insert("notification".into(), "C:/message.wav".into());
+        sounds.custom.insert("summary".into(), "C:/summary.wav".into());
         sounds.custom.insert("unknown".into(), "C:/unknown.wav".into());
         sounds.sanitize();
         assert_eq!(sounds.volume, 100);
-        assert_eq!(sounds.custom.len(), 1);
+        assert_eq!(sounds.custom.len(), 3);
+        assert!(!sounds.custom.contains_key("unknown"));
         assert_eq!(serde_json::from_str::<SoundSettings>(&serde_json::to_string(&sounds).unwrap()).unwrap(), sounds);
     }
 }

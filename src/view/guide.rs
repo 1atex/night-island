@@ -1077,6 +1077,7 @@ fn paint_ready(v: &Preview<'_>, guide: &GuideUi) -> Result<()> {
         body: crate::ui::i18n::tr("New messages can appear here while you work.").into_owned(),
         icon: None,
         avatar: None,
+        urgent: false,
     };
     v.island(479.0, card_y, 360.0, 147.0)?;
     let _ = paint_notification_card(

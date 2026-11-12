@@ -49,9 +49,17 @@ impl App {
         let now = chrono::Local::now().timestamp();
         let due = self.reminders.iter().filter(|r| r.due <= now + 1).min_by_key(|r| r.due);
         let Some(r) = due else { return self.schedule_reminder() };
+        if self.foreground_hidden() && !self.settings.notification_priority {
+            self.kill_timer(Timer::Remind);
+            return;
+        }
         self.ui.remind.alert = Some((r.id, r.text.clone()));
         self.ui.cmd.open = false;
         crate::platform::sounds::play(crate::platform::sounds::Cue::Reminder, 100);
+        if self.foreground_hidden() {
+            self.hidden_timer_card(self.ui.remind.alert.as_ref().unwrap().1.clone());
+            return;
+        }
         self.kill_timer(Timer::Collapse);
         self.expand();
         self.repaint_expanded();

@@ -104,11 +104,14 @@ const PILL: [(Sid, &str, Kind); 24] = [
     (Sid::SpikeColor, "Spike tips in track colour", Kind::Toggle),
 ];
 
-const NOTIFICATIONS: [(Sid, &str, Kind); 20] = [
+const NOTIFICATIONS: [(Sid, &str, Kind); 23] = [
     (Sid::SystemNotifications, "Windows notifications from the island", Kind::Toggle),
     (Sid::NotificationTiles, "Notification preview size", Kind::Cycle),
     (Sid::NotificationOpenApp, "Click a notification to open its app", Kind::Toggle),
     (Sid::NotificationAdaptiveSize, "Size cards to fit their content", Kind::Toggle),
+    (Sid::NotificationDigest, "Summarize notifications when the island returns", Kind::Toggle),
+    (Sid::NotificationPriority, "Show calls and alarms while the island is hidden", Kind::Toggle),
+    (Sid::NotificationSounds, "Play a sound for notifications and summaries", Kind::Toggle),
     (Sid::WindowsNotificationsSettings, "Windows notification settings", Kind::Button),
     (Sid::NotifyMic, "Microphone mute", Kind::Toggle),
     (Sid::NotifyDownloads, "Finished downloads", Kind::Toggle),
@@ -209,7 +212,7 @@ pub const GROUPS: [Group; 19] = [
         name: "Notifications",
         rows: &NOTIFICATIONS,
         custom: None,
-        sections: &[(0, "System"), (11, "Clipboard and keys"), (14, "Apps and services")],
+        sections: &[(0, "System"), (14, "Clipboard and keys"), (17, "Apps and services")],
     },
     Group { glyph: '\u{E950}', name: "System", rows: &[], custom: Some(metrics_items), sections: &[] },
     Group { glyph: '\u{E823}', name: "Activity", rows: &ACTIVITY, custom: Some(activity_items), sections: &[] },
@@ -1183,7 +1186,11 @@ fn sound_items(ui: &UiState) -> Vec<Item> {
 
 fn sound_cue_items(ui: &UiState, assistant_only: bool) -> Vec<Item> {
     let mut out = Vec::new();
-    for (i, cue) in crate::platform::sounds::Cue::OPTIONS.iter().enumerate().take(if assistant_only { 3 } else { 4 }) {
+    for (i, cue) in crate::platform::sounds::Cue::OPTIONS.iter().enumerate().take(if assistant_only {
+        3
+    } else {
+        crate::platform::sounds::Cue::OPTIONS.len()
+    }) {
         out.push(Item::Section(cue.label()));
         out.push(Item::Pair(
             Act::SoundImport(i),
@@ -1213,6 +1220,7 @@ fn assistant_voice_items(ui: &UiState) -> Vec<Item> {
         Item::Heading("Voice"),
         Item::Row(Sid::AsstSpeak, "Speak answers aloud", Kind::Toggle),
         Item::Row(Sid::AsstSounds, "Sound cues", Kind::Toggle),
+        Item::Row(Sid::VoiceMusic, "My Wave during a voice conversation", Kind::Cycle),
         Item::Row(Sid::SoundPreset, "Sound preset", Kind::Cycle),
         Item::Row(Sid::AsstVolume, "Assistant volume", Kind::Slider),
         Item::Section("Voice source"),
@@ -1376,6 +1384,8 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockAutoHide, "Automatically hide the dock", Kind::Toggle),
         Item::Row(Sid::DockRunning, "Show running applications", Kind::Toggle),
         Item::Row(Sid::DockPreview, "Window previews and controls on hover", Kind::Toggle),
+        Item::Row(Sid::DockDragToWindow, "Reveal a window while dragging files", Kind::Toggle),
+        Item::Note("Hold a file over an app, choose its window and release the file inside."),
         Item::Row(Sid::DockWindowSwitcher, "Window switcher", Kind::Toggle),
         Item::Note("Middle-click the dock for all windows. Click a grouped app to choose its window."),
         Item::Row(Sid::DockAltTab, "Use Island for Alt+Tab", Kind::Toggle),

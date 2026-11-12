@@ -10,8 +10,21 @@ use crate::ui::pet_speech::VoicePhase;
 impl App {
     fn voice_phase(&mut self, phase: VoicePhase) {
         self.pet.voice_phase = phase;
+        self.sync_music_focus();
         self.pet.char_key = None;
         self.set_timer(Timer::Char, 1);
+    }
+
+    pub(in crate::island) fn sync_music_focus(&self) {
+        use crate::services::yandex::focus::{self, VoiceMusic};
+        let busy =
+            self.wake_session || self.agent.is_some() || self.pet.voice_phase != VoicePhase::Idle || speech::busy();
+        focus::set(if busy { self.settings.assistant.wave_during_voice } else { VoiceMusic::Unchanged });
+        if busy && self.settings.assistant.wave_during_voice != VoiceMusic::Unchanged {
+            self.set_timer(Timer::VoiceMusic, 120);
+        } else {
+            self.kill_timer(Timer::VoiceMusic);
+        }
     }
 
     fn cue(&self, cue: sounds::Cue) {
@@ -95,6 +108,7 @@ impl App {
     }
 
     pub(in crate::island) fn sync_wake(&mut self) {
+        self.sync_music_focus();
         let a = &self.settings.assistant;
         let want = a.perms.enabled && a.wake && wake::installed();
         if !want {

@@ -7,9 +7,23 @@ pub struct NotificationsUi {
     pub detail_scroll: f32,
     pub detail_max: std::cell::Cell<f32>,
     pub state: Snapshot,
+    pub digest: Option<Vec<Record>>,
     pub scroll: usize,
     pub hover: Option<NotificationsHit>,
     pub setup: bool,
+}
+
+impl NotificationsUi {
+    pub fn records(&self) -> &[Record] {
+        self.digest.as_deref().unwrap_or(&self.state.records)
+    }
+    pub fn visible_rows(&self, pill: Rect, scale: f32) -> usize {
+        if self.digest.is_some() {
+            ((pill.3 / scale - 110.0) / 62.0).floor().max(1.0) as usize
+        } else {
+            notifications_rows(pill, scale)
+        }
+    }
 }
 
 impl Default for NotificationsUi {
@@ -20,6 +34,7 @@ impl Default for NotificationsUi {
             detail_scroll: 0.0,
             detail_max: Default::default(),
             state: Snapshot::default(),
+            digest: None,
             scroll: 0,
             hover: None,
             setup: true,
@@ -283,6 +298,19 @@ pub fn hit_notifications(
                 (available && inside(rect, x, y)).then_some(hit)
             });
     }
+    if ui.digest.is_some() {
+        let link = digest_history_button(pill, scale);
+        if inside(link, x, y) {
+            return Some(NotificationsHit::History);
+        }
+        for row in 0..ui.visible_rows(pill, scale) {
+            let rect = row_rect(pill, scale, 108.0, row);
+            if inside(rect, x, y) && row + ui.scroll < ui.records().len() {
+                return Some(NotificationsHit::Row(row + ui.scroll));
+            }
+        }
+        return None;
+    }
     for (rect, hit) in
         notification_sections(pill, scale).into_iter().zip([NotificationsHit::Setup, NotificationsHit::History])
     {
@@ -412,6 +440,16 @@ pub fn notification_status(status: Status) -> &'static str {
     }
 }
 
+fn row_rect(pill: Rect, scale: f32, top: f32, row: usize) -> Rect {
+    let y = pill.1 + (top + row as f32 * 62.0) * scale;
+    (pill.0 + SIDE_PAD * scale, y, pill.0 + pill.2 - SIDE_PAD * scale, y + 56.0 * scale)
+}
+
+fn digest_history_button(pill: Rect, scale: f32) -> Rect {
+    let right = pill.0 + pill.2 - SIDE_PAD * scale;
+    (right - 157.0 * scale, pill.1 + 62.0 * scale, right, pill.1 + 94.0 * scale)
+}
+
 pub fn paint_notifications(
     p: &Painter,
     pill: Rect,
@@ -428,6 +466,27 @@ pub fn paint_notifications(
     let (x, y, w, _) = pill;
     let left = x + SIDE_PAD * scale;
     let right = x + w - SIDE_PAD * scale;
+    if ui.digest.is_some() {
+        let link = digest_history_button(pill, scale);
+        p.text(
+            "While the island was hidden",
+            (left, link.1, link.0 - 8.0 * scale, link.3),
+            17.0 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
+        p.fill_round_rect(link, 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.09))?;
+        p.text(
+            "All notifications",
+            link,
+            12.0 * scale,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_TEXT_ALIGNMENT_CENTER,
+            WHITE,
+        )?;
+        return paint_rows(p, pill, scale, ui, 108.0);
+    }
     p.text(
         "Windows notifications",
         (left, y + 62.0 * scale, right, y + 86.0 * scale),
@@ -514,18 +573,22 @@ pub fn paint_notifications(
         }
         return Ok(());
     }
-    if ui.state.records.is_empty() {
+    paint_rows(p, pill, scale, ui, 216.0)
+}
+
+fn paint_rows(p: &Painter, pill: Rect, scale: f32, ui: &NotificationsUi, start: f32) -> Result<()> {
+    if ui.records().is_empty() {
         return p.text(
             "New notifications will be listed here",
-            (left, y + 228.0 * scale, right, y + 298.0 * scale),
+            row_rect(pill, scale, start, 0),
             13.0 * scale,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_TEXT_ALIGNMENT_CENTER,
             rgba(1.0, 1.0, 1.0, 0.45),
         );
     }
-    for (row, record) in ui.state.records.iter().skip(ui.scroll).take(notifications_rows(pill, scale)).enumerate() {
-        let top = y + (216.0 + row as f32 * 62.0) * scale;
+    for (row, record) in ui.records().iter().skip(ui.scroll).take(ui.visible_rows(pill, scale)).enumerate() {
+        let (left, top, right, _) = row_rect(pill, scale, start, row);
         p.fill_round_rect((left, top, right, top + 56.0 * scale), 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.045))?;
         paint_notification_avatar(
             p,
@@ -567,6 +630,7 @@ mod tile_tests {
             body: "Уведомление с полным текстом".into(),
             icon: None,
             avatar: None,
+            urgent: false,
         }
     }
 

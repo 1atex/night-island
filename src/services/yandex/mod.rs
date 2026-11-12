@@ -1,5 +1,6 @@
 mod api;
 mod covers;
+pub mod focus;
 pub mod palette;
 mod player;
 

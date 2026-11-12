@@ -35,6 +35,22 @@ const BACKDROP_REFRESH: usize = 3;
 const PREVIEW_HOVER: usize = 4;
 const WINDOW_FLIGHT: usize = 5;
 const ALT_REVEAL: usize = 6;
+const FILE_HOVER: usize = 7;
+
+#[derive(Clone, PartialEq, Eq)]
+enum FileTarget {
+    App(String),
+    Window(isize),
+}
+
+#[derive(Default)]
+struct FileHover {
+    surface: isize,
+    left: Option<Instant>,
+    candidate: Option<(FileTarget, Instant)>,
+    handled: Option<FileTarget>,
+    chooser: bool,
+}
 
 #[derive(Clone)]
 pub struct Entry {
@@ -84,6 +100,8 @@ struct State {
     pressed: Option<(usize, f32)>,
     dragging: bool,
     drag_snapshot: Option<Vec<Pin>>,
+    file_hover: Option<FileHover>,
+    file_registration: Option<crate::platform::dnd::FileRegistration>,
     drop_slots: Vec<(usize, f32)>,
     leave_at: Instant,
     scanned_at: Instant,
@@ -793,6 +811,7 @@ impl State {
 
     fn update_preview(&mut self, point: POINT) {
         if self.suppressed
+            || self.file_hover.is_some()
             || self.hidden
             || self.pressed.is_some()
             || self.menu_open
@@ -849,8 +868,8 @@ impl State {
         title: String,
         placement: super::dock_switcher::Placement,
     ) -> bool {
-        if !self.config.window_switcher
-            || (self.suppressed && matches!(placement.anchor, super::dock_switcher::Anchor::Dock { .. }))
+        if (!self.config.window_switcher && !matches!(placement.anchor, super::dock_switcher::Anchor::FileDrag { .. }))
+            || (self.suppressed && !matches!(placement.anchor, super::dock_switcher::Anchor::Keyboard(_)))
         {
             return false;
         }
@@ -961,6 +980,122 @@ impl State {
         }
     }
 
+    fn end_file_hover(&mut self) {
+        if self.file_hover.take().is_some_and(|h| h.chooser) {
+            self.switcher.take();
+        }
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), FILE_HOVER);
+        }
+    }
+
+    fn file_over(&mut self, x: i32, y: i32) -> bool {
+        if self.suppressed || !self.allowed_visible {
+            return false;
+        }
+        if !self.config.drag_to_window {
+            return true;
+        }
+        let surface = unsafe { WindowFromPoint(POINT { x, y }) };
+        let over_dock = surface == self.hwnd;
+        let index = over_dock.then(|| self.hit(((x - self.origin.0) as f32, (y - self.origin.1) as f32))).flatten();
+        let entry = index.and_then(|i| self.entries.get(i)).filter(|e| !e.windows.is_empty());
+        let target = if over_dock {
+            entry.map(|e| FileTarget::App(e.pin.target.clone()))
+        } else {
+            self.switcher
+                .as_ref()
+                .filter(|s| s.hwnd() == surface)
+                .and_then(|s| s.drag_window(x, y))
+                .map(|w| FileTarget::Window(w.handle))
+        };
+        let pin = over_dock && target.is_none();
+        if self.file_hover.is_none() {
+            self.hide_preview();
+            self.file_hover = Some(FileHover::default());
+            unsafe {
+                SetTimer(Some(self.hwnd), FILE_HOVER, 45, None);
+            }
+        }
+        let hover = self.file_hover.as_mut().unwrap();
+        hover.surface = surface.0 as isize;
+        hover.left = None;
+        if hover.candidate.as_ref().map(|(key, _)| key) != target.as_ref() {
+            hover.candidate = target.map(|key| (key, Instant::now()));
+            hover.handled = None;
+        }
+        if over_dock && self.hover != index {
+            self.hover = index;
+            self.request_frame();
+        }
+        pin
+    }
+
+    fn file_hover_tick(&mut self) {
+        if self.suppressed {
+            return self.end_file_hover();
+        }
+        let Some(h) = self.file_hover.as_mut() else { return };
+        if let Some(left) = h.left {
+            if left.elapsed() >= Duration::from_millis(320) {
+                self.end_file_hover();
+            }
+            return;
+        }
+        let Some((key, since)) = h.candidate.as_ref() else { return };
+        if h.handled.as_ref() == Some(key) || since.elapsed() < Duration::from_millis(420) {
+            return;
+        }
+        let key = key.clone();
+        h.handled = Some(key.clone());
+        let mut pt = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut pt);
+        }
+        match key {
+            FileTarget::App(target) => {
+                let point = ((pt.x - self.origin.0) as f32, (pt.y - self.origin.1) as f32);
+                let Some(i) = self.hit(point) else { return };
+                let Some(entry) = self.entries.get(i).filter(|e| e.pin.target == target).cloned() else { return };
+                if entry.windows.len() == 1 {
+                    if let Some(h) = self.file_hover.as_mut()
+                        && std::mem::take(&mut h.chooser)
+                    {
+                        self.switcher.take();
+                    }
+                    desktop::switch_window(&entry.windows[0]);
+                } else if !entry.windows.is_empty() {
+                    let center = self
+                        .rects
+                        .iter()
+                        .find(|(index, _)| *index == i)
+                        .map_or(pt.x, |(_, r)| self.origin.0 + ((r.0 + r.2) * 0.5) as i32);
+                    let placement = super::dock_switcher::Placement {
+                        work: self.monitor.work,
+                        anchor: super::dock_switcher::Anchor::FileDrag {
+                            center,
+                            above: self.origin.1 + self.panel.1 as i32,
+                        },
+                        scale: self.scale,
+                        hidden: self.capture_hidden.get(),
+                    };
+                    let opened = self.open_switcher(entry.windows, entry.pin.name, placement);
+                    if let Some(h) = self.file_hover.as_mut() {
+                        h.chooser = opened;
+                    }
+                }
+            }
+            FileTarget::Window(handle) => {
+                if let Some(window) =
+                    self.switcher.as_ref().and_then(|s| s.drag_window(pt.x, pt.y)).filter(|w| w.handle == handle)
+                {
+                    self.end_file_hover();
+                    desktop::switch_window(&window);
+                }
+            }
+        }
+    }
+
     fn pulse(&mut self) {
         if self.update_suppression() {
             if self.shortcut.is_some() && (!self.fullscreen || self.config.fullscreen_alt_tab) {
@@ -989,7 +1124,9 @@ impl State {
         unsafe {
             let _ = GetCursorPos(&mut pt);
         }
-        self.update_preview(pt);
+        if self.file_hover.is_none() {
+            self.update_preview(pt);
+        }
         if let Some(switcher) = &self.switcher {
             switcher.prune();
         }
@@ -1072,6 +1209,10 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
             }
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
             WM_ERASEBKGND => LRESULT(1),
+            WM_TIMER if wparam.0 == FILE_HOVER => {
+                (*ptr).file_hover_tick();
+                LRESULT(0)
+            }
             WM_TIMER => {
                 let state = &mut *ptr;
                 if wparam.0 == ALT_REVEAL {
@@ -1250,6 +1391,31 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
                 state.render();
                 LRESULT(0)
             }
+            crate::platform::dnd::WM_FILE_OVER => {
+                LRESULT(isize::from((*ptr).file_over(wparam.0 as i32, lparam.0 as i32)))
+            }
+            crate::platform::dnd::WM_FILE_LEAVE => {
+                if let Some(h) = (*ptr).file_hover.as_mut()
+                    && h.surface == wparam.0 as isize
+                {
+                    h.left = Some(Instant::now());
+                    h.candidate = None;
+                }
+                LRESULT(0)
+            }
+            crate::platform::dnd::WM_FILE_PIN => {
+                let state = &mut *ptr;
+                let mut changed = false;
+                for path in crate::platform::dnd::take_pins() {
+                    changed |= state.config.add(Pin::from_path(&path.to_string_lossy()));
+                }
+                state.end_file_hover();
+                if changed {
+                    state.post(Request::Save);
+                    state.refresh(true);
+                }
+                LRESULT(0)
+            }
             WM_DROPFILES => {
                 let state = &mut *ptr;
                 let drop = HDROP(wparam.0 as *mut _);
@@ -1377,6 +1543,8 @@ impl Dock {
             pressed: None,
             dragging: false,
             drag_snapshot: None,
+            file_hover: None,
+            file_registration: None,
             drop_slots: Vec::new(),
             leave_at: Instant::now(),
             scanned_at: Instant::now(),
@@ -1410,7 +1578,10 @@ impl Dock {
         }
         unsafe {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&raw mut *state) as isize);
-            DragAcceptFiles(hwnd, true);
+            state.file_registration = crate::platform::dnd::FileRegistration::new(hwnd, hwnd);
+            if state.file_registration.is_none() {
+                DragAcceptFiles(hwnd, true);
+            }
             SetTimer(Some(hwnd), PULSE, if state.suppressed { 500 } else { 200 }, None);
             if visible && !state.suppressed {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -1423,6 +1594,7 @@ impl Dock {
 
     pub fn update(&mut self, config: &DockSettings) {
         let rebuild = self.state.config.pins != config.pins || self.state.config.show_running != config.show_running;
+        self.state.end_file_hover();
         self.state.hide_preview();
         self.state.switcher.take();
         self.state.finish_flight();
@@ -1578,6 +1750,7 @@ impl Dock {
 
 impl Drop for Dock {
     fn drop(&mut self) {
+        self.state.file_registration.take();
         self.state.shortcut.take();
         self.state.switcher.take();
         self.state.finish_flight();
@@ -2390,3 +2563,7 @@ pub(super) mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "dock_file_drag_tests.rs"]
+mod file_drag_tests;

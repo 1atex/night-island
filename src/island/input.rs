@@ -609,10 +609,9 @@ impl App {
             let max = self
                 .ui
                 .notifications
-                .state
-                .records
+                .records()
                 .len()
-                .saturating_sub(view::notifications_rows(self.pill_rect(true), self.scale));
+                .saturating_sub(self.ui.notifications.visible_rows(self.pill_rect(true), self.scale));
             self.ui.notifications.scroll = if delta > 0 {
                 self.ui.notifications.scroll.saturating_sub(1)
             } else {
