@@ -845,11 +845,12 @@ pub(in crate::view) fn paint_home(p: &Painter, pill: Rect, scale: f32, ui: &UiSt
     let wave = wave_active(ui);
     let colours = ui.yandex.colours();
     if wave {
+        let opacity = if crate::ui::glass::enabled() { 0.72 } else { 1.0 };
         p.fill_round_gradient(
             card,
             20.0 * scale,
-            wave_colour(colours.card, 1.0),
-            wave_colour(colours.background, 1.0),
+            wave_colour(colours.card, opacity),
+            wave_colour(colours.background, opacity),
         )?;
     } else {
         p.fill_round_rect(card, 20.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;

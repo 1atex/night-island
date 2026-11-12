@@ -324,6 +324,7 @@ impl App {
             lock_pending: Vec::new(),
             settings,
             win: Win::Small,
+            desktop_bounds: None,
             compositor,
             geometry,
             open_motion: None,
@@ -332,6 +333,7 @@ impl App {
             _visual: visual,
             glass: None,
             backdrop,
+            host_backdrop_enabled: Cell::new(None),
             tint,
             ui: {
                 let mut ui = view::UiState::new();
@@ -454,6 +456,7 @@ impl App {
             },
             clipboard: ClipboardState { clips: Vec::new(), clips_all: Vec::new(), own_clip_seq: 0, paste_tries: 0 },
         };
+        app.bind_ears()?;
         app.set_geometry_now(Win::Small, false, false)?;
         app.paint_ears();
         Ok(app)

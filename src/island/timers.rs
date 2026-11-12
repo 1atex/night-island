@@ -283,6 +283,10 @@ impl App {
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),
             Timer::Settle => {
+                if self.open_motion.as_ref().is_some_and(|motion| motion.progress.active(Instant::now())) {
+                    self.set_timer(Timer::Settle, self.frame_ms());
+                    return;
+                }
                 if self.cover_flight_until.is_some_and(|until| Instant::now() >= until) {
                     self.finish_cover_motion();
                 }

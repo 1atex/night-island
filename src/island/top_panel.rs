@@ -124,8 +124,15 @@ impl App {
                     panel.reflow();
                 }
             }
-            self.apply_layout();
-            self.update_top_panel(true);
+            let bounds = (Self::screen_size(), self.island_work_area());
+            if id == 4 {
+                self.host_backdrop_enabled.set(None);
+                self.set_blur(self.state == State::Expanded);
+            }
+            if id == 4 || self.desktop_bounds != Some(bounds) {
+                self.apply_layout();
+                self.update_top_panel(true);
+            }
             return;
         }
         while let Some(request) = self.top_panel.as_mut().and_then(|panel| panel.take_request(id)) {

@@ -1,4 +1,6 @@
 use crate::island::*;
+use windows::UI::Composition::{CompositionPropertySet, ExpressionAnimation};
+use windows::core::HSTRING;
 
 pub(in crate::island) const OPEN_BASE_MS: f32 = 420.0;
 pub(in crate::island) const CLOSE_BASE_MS: f32 = 320.0;
@@ -6,6 +8,7 @@ pub(in crate::island) const AUTOHIDE_DELAY_MS: u32 = 1500;
 
 pub(in crate::island) struct OpenMotion {
     pub(in crate::island) progress: crate::ui::reveal::Reveal,
+    clock: CompositionPropertySet,
     closed: (Vector2, Vector2, Vector2),
 }
 
@@ -59,104 +62,100 @@ impl App {
         )
     }
 
-    fn open_scalar(&self, value: impl Fn(f32) -> f32) -> Result<CompositionAnimation> {
-        let motion = self.open_motion.as_ref().unwrap();
-        let animation = self.compositor.CreateScalarKeyFrameAnimation()?;
-        let linear = self.compositor.CreateLinearEasingFunction()?;
-        for i in 0..=60 {
-            let t = i as f32 / 60.0;
-            animation.InsertKeyFrameWithEasingFunction(t, value(motion.progress.frame(t)), &linear)?;
-        }
-        animation.SetDuration(motion.progress.duration().max(Duration::from_millis(1)).into())?;
-        animation.cast()
+    fn open_expression(&self, formula: &HSTRING) -> Result<ExpressionAnimation> {
+        let animation = self.compositor.CreateExpressionAnimationWithExpression(formula)?;
+        animation.SetReferenceParameter(h!("motion"), &self.open_motion.as_ref().unwrap().clock)?;
+        Ok(animation)
     }
 
-    pub(in crate::island) fn open_vector(&self, from: Vector2, to: Vector2) -> Result<CompositionAnimation> {
-        let motion = self.open_motion.as_ref().unwrap();
-        let animation = self.compositor.CreateVector2KeyFrameAnimation()?;
-        let linear = self.compositor.CreateLinearEasingFunction()?;
-        for i in 0..=60 {
-            let t = i as f32 / 60.0;
-            let p = motion.progress.frame(t);
-            let value = Vector2 { X: from.X + (to.X - from.X) * p, Y: from.Y + (to.Y - from.Y) * p };
-            animation.InsertKeyFrameWithEasingFunction(t, value, &linear)?;
-        }
-        animation.SetDuration(motion.progress.duration().max(Duration::from_millis(1)).into())?;
-        animation.cast()
+    pub(in crate::island) fn open_vector(&self, from: Vector2, to: Vector2) -> Result<ExpressionAnimation> {
+        let anim = self.open_expression(h!("start + (end - start) * motion.Phase"))?;
+        anim.SetVector2Parameter(h!("start"), from)?;
+        anim.SetVector2Parameter(h!("end"), to)?;
+        Ok(anim)
     }
 
-    pub(in crate::island) fn open_vector3(&self, value: impl Fn(f32) -> Vector3) -> Result<CompositionAnimation> {
-        let motion = self.open_motion.as_ref().unwrap();
-        let animation = self.compositor.CreateVector3KeyFrameAnimation()?;
-        let linear = self.compositor.CreateLinearEasingFunction()?;
-        for i in 0..=60 {
-            let t = i as f32 / 60.0;
-            animation.InsertKeyFrameWithEasingFunction(t, value(motion.progress.frame(t)), &linear)?;
+    pub(in crate::island) fn open_vector3(&self, from: Vector3, to: Vector3) -> Result<ExpressionAnimation> {
+        let anim = self.open_expression(h!("start + (end - start) * motion.Phase"))?;
+        anim.SetVector3Parameter(h!("start"), from)?;
+        anim.SetVector3Parameter(h!("end"), to)?;
+        Ok(anim)
+    }
+
+    fn open_fade(&self, start: f32, end: f32, from: f32, to: f32) -> Result<ExpressionAnimation> {
+        let t = "Clamp((motion.Phase - lower) * inverse, 0.0, 1.0)";
+        let formula = HSTRING::from(format!("base + span * {t} * {t} * (3.0 - 2.0 * {t})"));
+        let anim = self.open_expression(&formula)?;
+        for (name, value) in
+            [(h!("lower"), start), (h!("inverse"), 1.0 / (end - start)), (h!("base"), from), (h!("span"), to - from)]
+        {
+            anim.SetScalarParameter(name, value)?;
         }
-        animation.SetDuration(motion.progress.duration().max(Duration::from_millis(1)).into())?;
-        animation.cast()
+        Ok(anim)
     }
 
     fn animate_open_close(&mut self, expanded: bool) -> Result<()> {
-        use crate::ui::reveal::smooth_range;
-
         let ms = if expanded { self.open_ms() } else { self.close_ms() };
         let closed = self.pill(self.win, false, false);
         let opened = self.pill(self.win, true, false);
-        let motion = self.open_motion.get_or_insert_with(|| OpenMotion {
-            progress: crate::ui::reveal::Reveal::new(f32::from(!expanded)),
-            closed: if expanded {
-                (
-                    self.geometry.Offset().unwrap_or(closed.0),
-                    self.geometry.Size().unwrap_or(closed.1),
-                    self.geometry.CornerRadius().unwrap_or(closed.2),
-                )
-            } else {
-                closed
-            },
-        });
+        if self.open_motion.is_none() {
+            let clock = self.compositor.CreatePropertySet()?;
+            clock.InsertScalar(h!("Phase"), f32::from(!expanded))?;
+            self.open_motion = Some(OpenMotion {
+                clock,
+                progress: crate::ui::reveal::Reveal::new(f32::from(!expanded)),
+                closed: if expanded {
+                    (self.geometry.Offset()?, self.geometry.Size()?, self.geometry.CornerRadius()?)
+                } else {
+                    closed
+                },
+            });
+        }
+        let motion = self.open_motion.as_mut().unwrap();
         if !expanded && motion.progress.value(Instant::now()) == 1.0 {
             motion.closed = closed;
         }
         motion.progress.retarget(expanded, ms, self.settings.anim_curve, Instant::now());
         let closed = motion.closed;
+        let phase = self.compositor.CreateScalarKeyFrameAnimation()?;
+        let linear = self.compositor.CreateLinearEasingFunction()?;
+        for i in 0..=32 {
+            let t = i as f32 / 32.0;
+            phase.InsertKeyFrameWithEasingFunction(t, motion.progress.frame(t), &linear)?;
+        }
+        phase.SetDuration(motion.progress.duration().max(Duration::from_millis(1)).into())?;
+        motion.clock.StartAnimation(h!("Phase"), &phase)?;
         self.geometry.StartAnimation(h!("Offset"), &self.open_vector(closed.0, opened.0)?)?;
         self.geometry.StartAnimation(h!("Size"), &self.open_vector(closed.1, opened.1)?)?;
         self.geometry.StartAnimation(h!("CornerRadius"), &self.open_vector(closed.2, opened.2)?)?;
-        self.tint.StartAnimation(
-            h!("Opacity"),
-            &self
-                .open_scalar(|p| self.body_opacity(false) + (self.body_opacity(true) - self.body_opacity(false)) * p)?,
-        )?;
+        let tint = self.open_expression(h!("base + span * motion.Phase"))?;
+        tint.SetScalarParameter(h!("base"), self.body_opacity(false))?;
+        tint.SetScalarParameter(h!("span"), self.body_opacity(true) - self.body_opacity(false))?;
+        self.tint.StartAnimation(h!("Opacity"), &tint)?;
+        let closed_fade = self.open_fade(0.0, 0.25, 1.0, 0.0)?;
         for layer in [&self.collapsed, &self.progress_fill, &self.pet.char_layer] {
-            layer.sprite.StartAnimation(h!("Opacity"), &self.open_scalar(|p| 1.0 - smooth_range(p, 0.0, 0.25))?)?;
+            layer.sprite.StartAnimation(h!("Opacity"), &closed_fade)?;
         }
-        self.expanded.sprite.StartAnimation(h!("Opacity"), &self.open_scalar(|p| smooth_range(p, 0.72, 0.97))?)?;
+        self.expanded.sprite.StartAnimation(h!("Opacity"), &self.open_fade(0.72, 0.97, 0.0, 1.0)?)?;
         let full = self.pill_full();
         let center = Vector3 { X: full.0 + full.2 * 0.5, Y: full.1 + full.3 * 0.5, Z: 0.0 };
         self.expanded.sprite.SetCenterPoint(center)?;
-        self.expanded.sprite.StartAnimation(
-            h!("Scale"),
-            &self.open_vector3(|p| {
-                let width = closed.1.X + (opened.1.X - closed.1.X) * p;
-                let height = closed.1.Y + (opened.1.Y - closed.1.Y) * p;
-                let scale = (width / opened.1.X).min(height / opened.1.Y).clamp(0.0, 1.0);
-                Vector3 { X: scale, Y: scale, Z: 1.0 }
-            })?,
-        )?;
+        let scale = self.open_expression(h!(
+            "Vector3(base + (1.0 - base) * motion.Phase, base + (1.0 - base) * motion.Phase, 1.0)"
+        ))?;
+        scale.SetScalarParameter(h!("base"), (closed.1.X / opened.1.X).min(closed.1.Y / opened.1.Y).clamp(0.0, 1.0))?;
+        self.expanded.sprite.StartAnimation(h!("Scale"), &scale)?;
         let dx = closed.0.X + closed.1.X * 0.5 - opened.0.X - opened.1.X * 0.5;
         let dy = closed.0.Y + closed.1.Y * 0.5 - opened.0.Y - opened.1.Y * 0.5;
-        self.expanded.sprite.StartAnimation(
-            h!("Offset"),
-            &self.open_vector3(|p| Vector3 { X: dx * (1.0 - p), Y: dy * (1.0 - p), Z: 0.0 })?,
-        )?;
+        self.expanded
+            .sprite
+            .StartAnimation(h!("Offset"), &self.open_vector3(Vector3 { X: dx, Y: dy, Z: 0.0 }, Vector3::default())?)?;
         let (_, _, opacity) = self.ear_targets(self.win, false, false);
-        self.bind_ears()?;
-        for ear in &self.ears {
-            ear.sprite.StartAnimation(
-                h!("Opacity"),
-                &self.open_scalar(|p| opacity * self.body_opacity(false) * (1.0 - smooth_range(p, 0.0, 0.3)))?,
-            )?;
+        if opacity > 0.0 {
+            let fade = self.open_fade(0.0, 0.3, self.body_opacity(false), 0.0)?;
+            for ear in &self.ears {
+                ear.sprite.StartAnimation(h!("Opacity"), &fade)?;
+            }
         }
         Ok(())
     }
@@ -210,10 +209,9 @@ impl App {
         }
 
         let (_, _, ear_opacity) = self.ear_targets(self.win, expanded, hidden);
-        self.bind_ears()?;
         for ear in &self.ears {
             let a = self.compositor.CreateScalarKeyFrameAnimation()?;
-            a.InsertKeyFrame(1.0, ear_opacity)?;
+            a.InsertKeyFrame(1.0, ear_opacity * self.body_opacity(false))?;
             a.SetDuration(Duration::from_millis(ms / 2).into())?;
             ear.sprite.StartAnimation(h!("Opacity"), &a)?;
         }
@@ -324,7 +322,7 @@ impl App {
         self.maybe_show_notification();
     }
 
-    pub(in crate::island) fn settle_layers(&self) {
+    pub(in crate::island) fn settle_layers(&mut self) {
         if self.pill_motion_busy()
             || self.open_motion.as_ref().is_some_and(|motion| motion.progress.active(Instant::now()))
         {
@@ -347,27 +345,23 @@ impl App {
         } else {
             let _ = self.pet.char_layer.sprite.SetIsVisible(self.attached_character_on());
         }
-        let tint_want = self.body_opacity(expanded);
-        let layers = [
-            ("collapsed", &self.collapsed.sprite, if expanded { 0.0 } else { 1.0 }),
-            ("progress", &self.progress_fill.sprite, if expanded { 0.0 } else { 1.0 }),
-            ("expanded", &self.expanded.sprite, if expanded { 1.0 } else { 0.0 }),
-            ("character", &self.pet.char_layer.sprite, if expanded { 0.0 } else { 1.0 }),
-        ];
-        for (name, sprite, want) in layers {
-            let have = sprite.Opacity().unwrap_or(want);
-            if (have - want).abs() > 0.02 {
-                crate::log_warn!("layer {name} stuck at opacity {have:.2}, should be {want:.2}; fixed");
-                let _ = sprite.StopAnimation(h!("Opacity"));
-                let _ = sprite.SetOpacity(want);
-            }
+        if self.open_motion.take().is_some() {
+            let _ = self.set_geometry_now(self.win, expanded, false);
         }
-        let have = self.tint.Opacity().unwrap_or(tint_want);
-        if (have - tint_want).abs() > 0.02 {
-            crate::log_warn!("tint stuck at opacity {have:.2}, should be {tint_want:.2}; fixed");
-            let _ = self.tint.StopAnimation(h!("Opacity"));
-            let _ = self.tint.SetOpacity(tint_want);
+        for (sprite, opacity) in [
+            (&self.collapsed.sprite, f32::from(!expanded)),
+            (&self.progress_fill.sprite, f32::from(!expanded)),
+            (&self.expanded.sprite, f32::from(expanded)),
+            (&self.pet.char_layer.sprite, f32::from(!expanded)),
+            (&self.tint, self.body_opacity(expanded)),
+        ] {
+            let _ = sprite.StopAnimation(h!("Opacity"));
+            let _ = sprite.SetOpacity(opacity);
         }
+        let _ = self.expanded.sprite.StopAnimation(h!("Scale"));
+        let _ = self.expanded.sprite.StopAnimation(h!("Offset"));
+        let _ = self.expanded.sprite.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
+        let _ = self.expanded.sprite.SetOffset(Vector3::default());
     }
 
     pub(in crate::island) fn schedule_autohide(&self) {

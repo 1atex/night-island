@@ -464,9 +464,13 @@ impl App {
     }
 
     pub(in crate::island) fn place(&mut self, win: Win) {
+        self.desktop_bounds = Some((Self::screen_size(), self.island_work_area()));
         self.win = win;
         let (w, h) = self.window_size(win);
         let (x, y) = self.window_origin(win);
+        if let Some(glass) = &self.glass {
+            let _ = glass.resize((w, h));
+        }
         unsafe {
             let _ =
                 SetWindowPos(self.hwnd, Some(HWND_TOPMOST), x.round() as i32, y.round() as i32, w, h, SWP_NOACTIVATE);
@@ -523,7 +527,6 @@ impl App {
         self.geometry.SetSize(size)?;
         self.geometry.SetCornerRadius(radius)?;
         let (_, _, opacity) = self.ear_targets(win, expanded, hidden);
-        self.bind_ears()?;
         for ear in &self.ears {
             ear.sprite.StopAnimation(h!("Opacity"))?;
             ear.sprite.SetOpacity(opacity * self.body_opacity(false))?;
@@ -571,6 +574,7 @@ impl App {
         }
         self.scale = self.dpi_scale * self.settings.scale_percent as f32 / 100.0;
         self.sync_glass();
+        let _ = self.bind_ears();
         let _ = self.pill_motion.cover.resize(((28.0 * self.scale).ceil() as i32, (28.0 * self.scale).ceil() as i32));
         let _ = self.pill_motion.title.resize(((240.0 * self.scale).ceil() as i32, (34.0 * self.scale).ceil() as i32));
         self.stop_idle();
@@ -606,6 +610,7 @@ impl App {
         self.paint_ears();
         self.update_offsets();
         self.repaint();
+        self.settle_layers();
         self.start_liquid();
     }
 }

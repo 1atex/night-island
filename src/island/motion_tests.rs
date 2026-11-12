@@ -34,34 +34,10 @@ fn window(ex: WINDOW_EX_STYLE) -> Result<NativeWindow> {
 }
 
 fn seek(app: &App, progress: f32) -> Result<()> {
-    for property in [h!("Offset"), h!("Size"), h!("CornerRadius")] {
-        let controller = app.geometry.TryGetAnimationController(property)?;
-        controller.Pause()?;
-        controller.SetProgress(progress)?;
-    }
-    for sprite in [&app.tint, &app.expanded.sprite, &app.collapsed.sprite, &app.pet.char_layer.sprite] {
-        let controller = sprite.TryGetAnimationController(h!("Opacity"))?;
-        controller.Pause()?;
-        controller.SetProgress(progress)?;
-    }
-    for sprite in std::iter::once(&app.progress_fill.sprite).chain(app.ears.iter().map(|ear| &ear.sprite)) {
-        if let Ok(controller) = sprite.TryGetAnimationController(h!("Opacity")) {
-            controller.Pause()?;
-            controller.SetProgress(progress)?;
-        }
-    }
-    for property in [h!("Scale"), h!("Offset")] {
-        let controller = app.expanded.sprite.TryGetAnimationController(property)?;
-        controller.Pause()?;
-        controller.SetProgress(progress)?;
-    }
-    if app.ui.cover_in_flight {
-        for property in [h!("Offset"), h!("Size")] {
-            let controller = app.cover_layer.sprite.TryGetAnimationController(property)?;
-            controller.Pause()?;
-            controller.SetProgress(progress)?;
-        }
-    }
+    let clock = &app.open_motion.as_ref().unwrap().clock;
+    let controller = clock.TryGetAnimationController(h!("Phase"))?;
+    controller.Pause()?;
+    controller.SetProgress(progress)?;
     unsafe {
         let mut message = MSG::default();
         while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
@@ -78,6 +54,10 @@ fn seek(app: &App, progress: f32) -> Result<()> {
 fn capture(app: &App, frame: usize) -> Result<()> {
     let Some(folder) = std::env::var_os("NI_OPEN_MOTION_PREVIEW") else { return Ok(()) };
     let folder = std::path::PathBuf::from(folder).join(if app.docked() { "docked" } else { "floating" });
+    capture_to(app, &folder.join(format!("island-{frame:03}.png")))
+}
+
+fn read_frame(app: &App) -> Result<Vec<u8>> {
     let size = app.window_size(Win::Big);
     let (x, y) = app.window_origin(Win::Big);
     unsafe {
@@ -100,30 +80,73 @@ fn capture(app: &App, frame: usize) -> Result<()> {
         let previous = SelectObject(dc, bitmap.into());
         let copied =
             BitBlt(dc, 0, 0, size.0, size.1, Some(screen), x.round() as i32, y.round() as i32, SRCCOPY | CAPTUREBLT);
-        let mut pixels = std::slice::from_raw_parts(bits.cast::<u8>(), (size.0 * size.1 * 4) as usize).to_vec();
+        let pixels = std::slice::from_raw_parts(bits.cast::<u8>(), (size.0 * size.1 * 4) as usize).to_vec();
         SelectObject(dc, previous);
         let _ = DeleteObject(bitmap.into());
         let _ = DeleteDC(dc);
         ReleaseDC(None, screen);
         copied?;
-        for pixel in pixels.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
-            pixel[3] = 255;
-        }
-        assert!(
-            pixels.chunks_exact(4).any(|pixel| pixel[0] < 20 && pixel[1] < 20 && pixel[2] < 20),
-            "The native island must be visible in captured frame {frame}"
-        );
-        std::fs::create_dir_all(&folder).unwrap();
-        let mut png = png::Encoder::new(
-            std::fs::File::create(folder.join(format!("island-{frame:03}.png"))).unwrap(),
-            size.0 as u32,
-            size.1 as u32,
-        );
-        png.set_color(png::ColorType::Rgba);
-        png.set_depth(png::BitDepth::Eight);
-        png.write_header().unwrap().write_image_data(&pixels).unwrap();
+        Ok(pixels)
     }
+}
+
+fn capture_to(app: &App, path: &std::path::Path) -> Result<()> {
+    let size = app.window_size(Win::Big);
+    let mut pixels = read_frame(app)?;
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+        pixel[3] = 255;
+    }
+    assert!(
+        pixels.chunks_exact(4).any(|pixel| pixel[0] < 20 && pixel[1] < 20 && pixel[2] < 20),
+        "The native island must be visible in captured frame {path:?}"
+    );
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut png = png::Encoder::new(std::fs::File::create(path).unwrap(), size.0 as u32, size.1 as u32);
+    png.set_color(png::ColorType::Rgba);
+    png.set_depth(png::BitDepth::Eight);
+    png.write_header().unwrap().write_image_data(&pixels).unwrap();
+    Ok(())
+}
+
+fn observe_transition(app: &App, opening: bool) -> Result<()> {
+    let (width, height) = app.window_size(Win::Big);
+    let (at, size, _) = app.pill(Win::Big, true, false);
+    let (small_at, small_size, _) = app.pill(Win::Big, false, false);
+    let (low, high) = (small_at.Y + small_size.Y, at.Y + size.Y);
+    let center = (at.X + size.X * 0.5).round() as usize;
+    let until = Instant::now() + Duration::from_millis(app.transition_ms(opening) + 100);
+    let mut stages = std::collections::BTreeSet::new();
+    let mut final_height = 0;
+    while Instant::now() < until {
+        unsafe {
+            let mut message = MSG::default();
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            DwmFlush()?;
+        }
+        let frame = read_frame(app)?;
+        let last = (0..height as usize)
+            .rev()
+            .find(|&y| {
+                let i = (y * width as usize + center) * 4;
+                let bg = (y * width as usize + 3) * 4;
+                (0..3).any(|channel| frame[i + channel].abs_diff(frame[bg + channel]) > 8)
+            })
+            .unwrap_or(0);
+        final_height = last;
+        if last as f32 > low + 8.0 && (last as f32) < high - 8.0 {
+            stages.insert(last);
+        }
+    }
+    let target = if opening { high } else { low };
+    assert!(
+        stages.len() >= 3 && (final_height as f32 - target).abs() < 10.0,
+        "opening={opening}, visible heights={stages:?}, final={final_height}, target={target}"
+    );
+    eprintln!("Docked live transition opening={opening}: {} distinct intermediate heights", stages.len());
     Ok(())
 }
 
@@ -149,6 +172,8 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             apartmentType: DQTAT_COM_NONE,
         })?
     };
+    let mut opening_times = Vec::new();
+    let mut closing_times = Vec::new();
     for scale in [1.0, 1.25, 1.5, 2.0] {
         for edge in Edge::ALL {
             let owner = window(WS_EX_NOREDIRECTIONBITMAP)?;
@@ -157,7 +182,7 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
                 dock_edge: edge,
                 character: Character::None,
                 music_cover: true,
-                style: Style::Flat,
+                style: Style::Liquid,
                 ..Default::default()
             };
             let mut app = App::new_visuals(owner.0, scale, settings)?;
@@ -169,28 +194,47 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             assert_eq!(app.glass.is_some(), crate::ui::glass::enabled());
             app.set_blur(false);
             assert_eq!(app.backdrop.IsVisible()?, app.glass.is_some() || app.settings.pill_blur);
-            app.state = State::Expanded;
             let start = Instant::now();
-            app.animate_to(true, false)?;
+            app.expand();
+            opening_times.push(start.elapsed());
+            let clock = app.open_motion.as_ref().unwrap().clock.clone();
+            app.top_panel_request(3);
+            assert_eq!(app.open_motion.as_ref().unwrap().clock, clock);
+            app.repaint_expanded();
+            if let Some(glass) = &app.glass {
+                let (sample_size, cards) = glass.island_metrics()?;
+                assert_eq!(sample_size, app.window_size(Win::Big));
+                assert!(cards > 0);
+            }
             assert!(start.elapsed() < Duration::from_millis(250));
             for progress in [0.0, 0.25, 0.6, 1.0] {
                 seek(&app, progress)?;
             }
-            app.state = State::Collapsing;
-            app.animate_to(false, false)?;
+            let start = Instant::now();
+            app.collapse();
+            closing_times.push(start.elapsed());
             let before = app.open_motion.as_ref().unwrap().progress.value(Instant::now());
             app.state = State::Expanded;
             app.animate_to(true, false)?;
             let after = app.open_motion.as_ref().unwrap().progress.frame(0.0);
             assert!((before - after).abs() < 0.03);
             seek(&app, 1.0)?;
+            if let Some(glass) = &app.glass {
+                assert_eq!(glass.island_metrics()?.0, app.window_size(Win::Big));
+            }
             app.kill_timer(Timer::Expand);
             app.set_timer(Timer::Expand, 100);
             app.set_timer(Timer::Expand, 5000);
             std::thread::sleep(Duration::from_millis(130));
             let mut message = MSG::default();
-            assert!(unsafe { PeekMessageW(&mut message, Some(owner.0), WM_TIMER, WM_TIMER, PM_REMOVE).as_bool() });
-            assert_eq!(message.wParam.0, Timer::Expand as usize);
+            let mut fired = false;
+            while unsafe { PeekMessageW(&mut message, Some(owner.0), WM_TIMER, WM_TIMER, PM_REMOVE).as_bool() } {
+                if message.wParam.0 == Timer::Expand as usize {
+                    fired = true;
+                    break;
+                }
+            }
+            assert!(fired);
             app.kill_timer(Timer::Expand);
             crate::ui::glass::configure(false);
             app.sync_glass();
@@ -205,13 +249,20 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             app.open_motion = None;
         }
     }
+    opening_times.sort_unstable();
+    closing_times.sort_unstable();
+    eprintln!(
+        "Docked transition setup, 16 edge/DPI combinations: open median {:?}, max {:?}; close median {:?}, max {:?}",
+        opening_times[8], opening_times[15], closing_times[8], closing_times[15]
+    );
     for placement in [Placement::Docked, Placement::Floating] {
         let background = window(WS_EX_LAYERED | WS_EX_TOPMOST)?;
         let owner = window(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST)?;
         let (screen_w, screen_h) = App::screen_size();
         let settings = Settings {
             placement,
-            float_pos: Some([(screen_w * 0.5) as i32, (screen_h * 0.25) as i32]),
+            dock_offset: 0.28,
+            float_pos: Some([(screen_w * 0.32) as i32, (screen_h * 0.25) as i32]),
             style: Style::Flat,
             character: Character::None,
             music_cover: true,
@@ -464,6 +515,66 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
         assert!(app.liquid.body_active.get());
         app.liquid_tick();
         assert!(app.liquid.body_active.get(), "The liquid timer must preserve the audio silhouette");
+        if placement == Placement::Docked {
+            crate::ui::glass::configure(true);
+        }
+        if placement == Placement::Docked && crate::ui::glass::enabled() {
+            app.sync_glass();
+            app.place(Win::Big);
+            app.state = State::Expanded;
+            app.set_geometry_now(Win::Big, true, false)?;
+            app.set_blur(true);
+            app.settle_layers();
+            app.repaint_expanded();
+            let (width, height) = app.window_size(Win::Big);
+            let scene = crate::ui::popup::PopupSurface::new((width, height))?;
+            scene.paint(&app.gpu, |p| {
+                p.fill_rect((0.0, 0.0, width as f32, height as f32), crate::ui::gfx::rgba(0.035, 0.047, 0.06, 1.0))?;
+                for x in (-height..width).step_by(184) {
+                    p.line(
+                        (x as f32, 0.0),
+                        ((x + height) as f32, height as f32),
+                        32.0,
+                        crate::ui::gfx::rgba(0.93, 0.97, 1.0, 1.0),
+                    )?;
+                }
+                Ok(())
+            })?;
+            let (x, y) = app.window_origin(Win::Big);
+            scene.present(background.0, Some(POINT { x: x as i32, y: y as i32 }), 255)?;
+            let lens = app.glass.as_ref().unwrap();
+            assert!(lens.island_metrics()?.1 > 0);
+            if let Some(folder) = std::env::var_os("NI_ISLAND_GLASS_PREVIEW") {
+                for (on, name) in [(false, "island-straight.png"), (true, "island-refracted.png")] {
+                    lens.show_refraction(on)?;
+                    let _ = app.compositor.RequestCommitAsync();
+                    let until = Instant::now() + Duration::from_millis(220);
+                    while Instant::now() < until {
+                        unsafe {
+                            let mut message = MSG::default();
+                            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                                let _ = TranslateMessage(&message);
+                                DispatchMessageW(&message);
+                            }
+                            DwmFlush()?;
+                        }
+                        std::thread::sleep(Duration::from_millis(8));
+                    }
+                    capture_to(&app, &std::path::Path::new(&folder).join(name))?;
+                }
+            }
+            scene.paint(&app.gpu, |p| {
+                p.fill_rect((0.0, 0.0, width as f32, height as f32), crate::ui::gfx::rgba(0.95, 0.84, 0.7, 1.0))
+            })?;
+            scene.present(background.0, Some(POINT { x: x as i32, y: y as i32 }), 255)?;
+            app.collapse();
+            observe_transition(&app, false)?;
+            app.shrink_window();
+            app.expand();
+            observe_transition(&app, true)?;
+            app.settle_layers();
+            crate::ui::glass::configure(false);
+        }
         app.set_decoration_through(false);
         app._target.SetRoot(None::<&windows::UI::Composition::Visual>)?;
         app.compositor.Close()?;

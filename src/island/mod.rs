@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::mem::size_of;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -133,12 +133,14 @@ struct App {
     open_motion: Option<motion::OpenMotion>,
     state: State,
     win: Win,
+    desktop_bounds: Option<((f32, f32), view::Rect)>,
     pointer: Pointer,
     settings: Settings,
     dpi_scale: f32,
     _target: DesktopWindowTarget,
     _visual: ContainerVisual,
     backdrop: SpriteVisual,
+    host_backdrop_enabled: Cell<Option<bool>>,
     glass: Option<crate::ui::glass::Lens>,
     tint: SpriteVisual,
     settings_win: Option<HWND>,

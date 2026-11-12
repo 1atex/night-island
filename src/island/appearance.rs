@@ -1,6 +1,6 @@
 use crate::island::*;
 
-pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
+pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) -> bool {
     #[repr(C)]
     struct AccentPolicy {
         state: i32,
@@ -21,9 +21,9 @@ pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
     const WCA_ACCENT_POLICY: u32 = 19;
 
     unsafe {
-        let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return };
+        let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return false };
         let Some(proc) = GetProcAddress(user32, windows::core::s!("SetWindowCompositionAttribute")) else {
-            return;
+            return false;
         };
         let set_wca: SetWca = core::mem::transmute(proc);
         let mut policy = AccentPolicy {
@@ -37,7 +37,7 @@ pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
             data: &mut policy as *mut _ as *mut _,
             size: size_of::<AccentPolicy>(),
         };
-        set_wca(hwnd, &mut data);
+        set_wca(hwnd, &mut data) != 0
     }
 }
 
@@ -82,6 +82,13 @@ impl App {
 
     pub(in crate::island) fn sync_glass(&mut self) {
         crate::ui::glass::Lens::sync(&mut self.glass, &self.gpu, &self.backdrop, &self.geometry, self.scale);
+        let size = self.window_size(self.win);
+        if let Some(glass) = &mut self.glass {
+            let _ = glass.resize(size);
+            if let Err(error) = glass.mount_island(&self.gpu, &self._visual, &self.tint, &self.expanded.sprite) {
+                crate::log_warn!("Could not position the island glass: {error}");
+            }
+        }
         let _ = self.tint.SetOpacity(self.body_opacity(self.state == State::Expanded));
         let _ = self.liquid.bump_fill.SetOpacity(self.body_opacity(false));
     }
@@ -202,9 +209,15 @@ impl App {
     pub(in crate::island) fn repaint_expanded(&self) {
         self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let e = self.pill_full();
+        let lens = self.glass.as_ref().filter(|_| self.state == State::Expanded);
+        let cards = lens.and_then(|glass| glass.begin_card_layout());
         let _ = self.expanded.paint(&self.gpu, |p| {
-            let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
+            let p = p.with_cards(cards);
+            let _ = view::paint_expanded(&p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
+        if let (Some(glass), Some(cards)) = (lens, cards) {
+            let _ = glass.update_cards(&cards.borrow());
+        }
         if self.state == State::Expanded
             && (self.ui.feedback.active()
                 || self.ui.home.track_transition.active()
@@ -265,7 +278,9 @@ impl App {
             (glass || self.settings.pill_blur) && self.state != State::Hidden && self.state != State::Hiding
         };
         let _ = self.backdrop.SetIsVisible(on);
-        set_host_backdrop(self.hwnd, on);
+        if self.host_backdrop_enabled.get() != Some(on) && set_host_backdrop(self.hwnd, on) {
+            self.host_backdrop_enabled.set(Some(on));
+        }
         let _ = self.liquid.bump_blur.SetIsVisible(self.settings.pill_blur || glass);
         if self.settings.pill_blur && !open && !self.spikes_active() {
             let amp = if self.liquid.idle_running { IDLE_AMP * self.scale } else { self.liquid.bump_amp };

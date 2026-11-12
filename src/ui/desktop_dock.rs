@@ -476,6 +476,9 @@ impl State {
             ((count as f32 * (icon + 12.0) + 40.0 + icon * (self.config.zoom - 1.0) * 3.0) * self.scale).ceil() as i32;
         let height = ((icon * self.config.zoom + 64.0 + self.config.margin as f32) * self.scale).ceil() as i32;
         self.size = (width.min(area.right - area.left).max(1), height);
+        if let Some(glass) = &self.glass {
+            let _ = glass.resize(self.size);
+        }
         self.origin = (area.left + (area.right - area.left - self.size.0) / 2, area.bottom - height);
         unsafe {
             let _ = SetWindowPos(
@@ -2175,6 +2178,7 @@ pub(super) mod tests {
         }
         let mut energies = Vec::new();
         let mut top_chroma = Vec::new();
+        let mut diagonal_peaks = Vec::new();
         let tail_pinned = dock.state.entries.last().is_some_and(|entry| entry.pinned);
         for (blur, glass, name) in [
             (false, false, "blur-off"),
@@ -2184,6 +2188,8 @@ pub(super) mod tests {
             (true, false, "classic-restored"),
             (true, false, "dock-classic"),
             (true, true, "dock-glass"),
+            (true, true, "line-straight"),
+            (true, true, "line-refracted"),
         ] {
             dock.state.glass.take();
             if glass {
@@ -2192,7 +2198,8 @@ pub(super) mod tests {
                     Some(super::super::glass::Lens::attach(&dock.state.gpu, parent, contour, dock.state.scale)?);
             }
             if let Some(glass) = &dock.state.glass {
-                glass.show_refraction(name != "light-only")?;
+                glass.resize(dock.state.size)?;
+                glass.show_refraction(!matches!(name, "light-only" | "line-straight"))?;
             }
             dock.state.config.blur = blur;
             dock.state.config.opacity = 0.0;
@@ -2263,6 +2270,35 @@ pub(super) mod tests {
                 }
                 dock.state.refresh_backdrop();
             }
+            if name.starts_with("line-") {
+                dock.state.config.blur_opacity = DockSettings::default().blur_opacity;
+                if name == "line-straight" {
+                    unsafe {
+                        let dc = GetDC(Some(backdrop));
+                        let dark = CreateSolidBrush(COLORREF(0x000c0c0c));
+                        let white = CreateSolidBrush(COLORREF(0x00ffffff));
+                        FillRect(dc, &RECT { left: 0, top: 0, right: width, bottom: height }, dark);
+                        let center = width / 2;
+                        let top = dock.state.panel.1.round() as i32;
+                        for y in 0..height {
+                            for (x, half_width) in
+                                [(center + y - top, 15), (center / 2 + top - y, 4), (center + center / 2 + top - y, 24)]
+                            {
+                                FillRect(
+                                    dc,
+                                    &RECT { left: x - half_width, top: y, right: x + half_width + 1, bottom: y + 1 },
+                                    white,
+                                );
+                            }
+                        }
+                        let _ = DeleteObject(dark.into());
+                        let _ = DeleteObject(white.into());
+                        ReleaseDC(Some(backdrop), dc);
+                        let _ = ValidateRect(Some(backdrop), None);
+                    }
+                }
+                dock.state.refresh_backdrop();
+            }
             dock.state.render();
             let until = Instant::now() + Duration::from_millis(250);
             while Instant::now() < until {
@@ -2320,6 +2356,24 @@ pub(super) mod tests {
                 .sum::<f32>()
                 / (x1 - x0) as f32;
             top_chroma.push(chroma);
+            if name.starts_with("line-") {
+                let row = (dock.state.panel.1 + 2.0 * dock.state.scale).round() as usize;
+                let center = width as usize / 2;
+                let strip = center.saturating_sub(66)..(center + 67).min(width as usize);
+                let sample = |x| pixels[(row * width as usize + x) * 4] as f32;
+                let low = strip.clone().map(sample).fold(f32::MAX, f32::min);
+                let high = strip.clone().map(sample).fold(f32::MIN, f32::max);
+                assert!(high - low >= 20.0, "The diagonal must remain visible with {name}: {low}..{high}");
+                let threshold = (low + high) * 0.5;
+                let mut mass = 0.0;
+                let mut moment = 0.0;
+                for x in strip {
+                    let weight = (sample(x) - threshold).max(0.0);
+                    mass += weight;
+                    moment += x as f32 * weight;
+                }
+                diagonal_peaks.push((moment / mass).round() as usize);
+            }
             for px in pixels.chunks_exact_mut(4) {
                 px.swap(0, 2);
                 px[3] = 255;
@@ -2451,6 +2505,10 @@ pub(super) mod tests {
         assert!(
             (top_chroma[1] - top_chroma[4]).abs() < 1.0,
             "Disabling glass should restore the original backdrop: {top_chroma:?}"
+        );
+        assert!(
+            diagonal_peaks[1] >= diagonal_peaks[0] + 5,
+            "A diagonal must move at the rim, peaks {diagonal_peaks:?}"
         );
         assert!(energies[0] > 15.0, "Backdrop fixture must be visible: {energies:?}");
         assert!(energies[1] < energies[0] * 0.6, "Host backdrop must reduce stripe detail: {energies:?}");

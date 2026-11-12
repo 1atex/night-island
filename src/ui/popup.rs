@@ -226,6 +226,9 @@ impl PopupBackdrop {
         let margin = POPUP_MARGIN * scale;
         let panel = windows_numerics::Vector2 { X: size.0 as f32 - 2.0 * margin, Y: size.1 as f32 - 2.0 * margin };
         let _ = self.sprite.SetOffset(windows_numerics::Vector3 { X: margin, Y: margin, Z: 0.0 });
+        if let Some(glass) = &self.glass {
+            let _ = glass.resize(size);
+        }
         let _ = self.sprite.SetSize(panel);
         let _ = self.geometry.SetSize(panel);
         let radius = if self.glass_active() { self.radius } else { 28.0 } * scale;

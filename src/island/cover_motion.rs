@@ -44,11 +44,10 @@ impl App {
             if self.open_motion.is_some() {
                 self.cover_layer.sprite.StartAnimation(
                     h!("Offset"),
-                    &self.open_vector3(|p| Vector3 {
-                        X: small.0 + (large.0 - small.0) * p,
-                        Y: small.1 + (large.1 - small.1) * p,
-                        Z: 0.0,
-                    })?,
+                    &self.open_vector3(
+                        Vector3 { X: small.0, Y: small.1, Z: 0.0 },
+                        Vector3 { X: large.0, Y: large.1, Z: 0.0 },
+                    )?,
                 )?;
                 self.cover_layer.sprite.StartAnimation(
                     h!("Size"),

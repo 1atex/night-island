@@ -92,6 +92,7 @@ fn capsule_progress_fills_the_width_without_painting_outside_its_corners() -> Re
         let weather = std::cell::RefCell::default();
         let vector_icons = RefCell::default();
         let painter = Painter {
+            cards: None,
             dc: &rt,
             dwrite: &dwrite,
             icons: w!("Segoe UI Symbol"),
