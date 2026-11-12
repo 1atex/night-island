@@ -576,8 +576,8 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             scene.present(background.0, Some(POINT { x: x as i32, y: y as i32 }), 255)?;
             let (origin, size, _) = app.pill(Win::Big, true, false);
             let mid = (origin.Y + size.Y * 0.5).round() as usize;
-            let left = (origin.X + 1.0).round() as usize;
-            let right = (origin.X + size.X - 2.0).round() as usize;
+            let left = origin.X.round() as usize;
+            let right = (origin.X + size.X - 1.0).round() as usize;
             let mut reflections = Vec::new();
             for x in [left, right] {
                 lens.point(Some((x as f32, mid as f32)));
@@ -613,6 +613,36 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
                 "The rim highlight must move to the cursor: {reflections:?}"
             );
             lens.point(None);
+            let saved_opacity = app.tint.Opacity()?;
+            app.tint.StopAnimation(h!("Opacity"))?;
+            app.tint.SetOpacity(1.0)?;
+            let _ = app.compositor.RequestCommitAsync();
+            for _ in 0..8 {
+                unsafe {
+                    let mut msg = MSG::default();
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    DwmFlush()?;
+                }
+            }
+            let frame = read_frame(&app)?;
+            let pixel = |x: usize| &frame[(mid * width as usize + x) * 4..][..3];
+            let ink = app.tint.Brush()?.cast::<windows::UI::Composition::CompositionColorBrush>()?.Color()?;
+            for inset in 2..=8 {
+                for x in [left + inset, right - inset] {
+                    assert!(
+                        pixel(x)
+                            .iter()
+                            .zip([ink.B, ink.G, ink.R])
+                            .all(|(actual, expected)| actual.abs_diff(expected) <= 4),
+                        "The island tint must cover the optical edge at {x}: {:?}",
+                        pixel(x)
+                    );
+                }
+            }
+            app.tint.SetOpacity(saved_opacity)?;
             app.collapse();
             observe_transition(&app, false)?;
             app.shrink_window();

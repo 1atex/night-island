@@ -2183,9 +2183,39 @@ pub(super) mod tests {
             let _ = ShowWindow(dock.state.hwnd, SW_SHOWNOACTIVATE);
             let _ = KillTimer(Some(dock.state.hwnd), PULSE);
         }
+        let read_pixels = || -> Result<Vec<u8>> {
+            let mut pixels = vec![0u8; (width * height * 4) as usize];
+            unsafe {
+                let screen = GetDC(None);
+                let mem = CreateCompatibleDC(Some(screen));
+                let mut bitmap = BITMAPINFO {
+                    bmiHeader: BITMAPINFOHEADER {
+                        biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: width,
+                        biHeight: -height,
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB.0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let mut bits = std::ptr::null_mut();
+                let image = CreateDIBSection(Some(mem), &bitmap, DIB_RGB_COLORS, &mut bits, None, 0)?;
+                let previous = SelectObject(mem, image.into());
+                BitBlt(mem, 0, 0, width, height, Some(screen), origin.0, origin.1, SRCCOPY | CAPTUREBLT)?;
+                SelectObject(mem, previous);
+                GetDIBits(mem, image, 0, height as u32, Some(pixels.as_mut_ptr().cast()), &mut bitmap, DIB_RGB_COLORS);
+                let _ = DeleteObject(image.into());
+                let _ = DeleteDC(mem);
+                ReleaseDC(None, screen);
+            }
+            Ok(pixels)
+        };
         let mut energies = Vec::new();
         let mut top_chroma = Vec::new();
         let mut diagonal_peaks = Vec::new();
+        let fixture_scale = dock.state.scale;
         let tail_pinned = dock.state.entries.last().is_some_and(|entry| entry.pinned);
         for (blur, glass, name) in [
             (false, false, "blur-off"),
@@ -2318,32 +2348,7 @@ pub(super) mod tests {
                 }
                 std::thread::sleep(Duration::from_millis(15));
             }
-            let mut pixels = vec![0u8; (width * height * 4) as usize];
-            unsafe {
-                let screen = GetDC(None);
-                let mem = CreateCompatibleDC(Some(screen));
-                let mut bitmap = BITMAPINFO {
-                    bmiHeader: BITMAPINFOHEADER {
-                        biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                        biWidth: width,
-                        biHeight: -height,
-                        biPlanes: 1,
-                        biBitCount: 32,
-                        biCompression: BI_RGB.0,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
-                let mut bits = std::ptr::null_mut();
-                let image = CreateDIBSection(Some(mem), &bitmap, DIB_RGB_COLORS, &mut bits, None, 0)?;
-                let previous = SelectObject(mem, image.into());
-                BitBlt(mem, 0, 0, width, height, Some(screen), origin.0, origin.1, SRCCOPY | CAPTUREBLT)?;
-                SelectObject(mem, previous);
-                GetDIBits(mem, image, 0, height as u32, Some(pixels.as_mut_ptr().cast()), &mut bitmap, DIB_RGB_COLORS);
-                let _ = DeleteObject(image.into());
-                let _ = DeleteDC(mem);
-                ReleaseDC(None, screen);
-            }
+            let mut pixels = read_pixels()?;
             let y = (dock.state.panel.3 - 8.0 * dock.state.scale) as usize;
             let x0 = (dock.state.panel.0 + 26.0 * dock.state.scale) as usize;
             let x1 = (dock.state.panel.2 - 26.0 * dock.state.scale) as usize;
@@ -2353,7 +2358,7 @@ pub(super) mod tests {
             };
             let energy: f32 = (x0 + 1..x1).map(|x| (lum(x) - lum(x - 1)).abs()).sum::<f32>() / (x1 - x0 - 1) as f32;
             energies.push(energy);
-            let y = (dock.state.panel.1 + 4.0 * dock.state.scale).round() as usize;
+            let y = (dock.state.panel.1 + dock.state.scale).round() as usize;
             let chroma = (x0..x1)
                 .map(|x| {
                     let i = (y * width as usize + x) * 4;
@@ -2363,7 +2368,7 @@ pub(super) mod tests {
                 / (x1 - x0) as f32;
             top_chroma.push(chroma);
             if name.starts_with("line-") {
-                let row = (dock.state.panel.1 + 2.0 * dock.state.scale).round() as usize;
+                let row = y;
                 let center = width as usize / 2;
                 let strip = center.saturating_sub(66)..(center + 67).min(width as usize);
                 let sample = |x| pixels[(row * width as usize + x) * 4] as f32;
@@ -2378,7 +2383,7 @@ pub(super) mod tests {
                     mass += weight;
                     moment += x as f32 * weight;
                 }
-                diagonal_peaks.push((moment / mass).round() as usize);
+                diagonal_peaks.push(moment / mass);
             }
             for px in pixels.chunks_exact_mut(4) {
                 px.swap(0, 2);
@@ -2403,7 +2408,6 @@ pub(super) mod tests {
         if let Some(entry) = dock.state.entries.last_mut() {
             entry.pinned = tail_pinned;
         }
-        dock.state.glass.take();
         dock.state.config.blur_opacity = 0.0;
         dock.state.render();
         let foreground = unsafe {
@@ -2461,6 +2465,38 @@ pub(super) mod tests {
             let _ = KillTimer(Some(dock.state.hwnd), FRAME);
         }
         settle();
+        let mut light_levels = Vec::new();
+        assert!(dock.state.glass.is_some());
+        for tone in [32_u32, 224, 32, 224, 32, 224] {
+            unsafe {
+                let dc = GetDC(Some(foreground));
+                let brush = CreateSolidBrush(COLORREF(tone * 0x010101));
+                FillRect(dc, &RECT { left: 0, top: 0, right: width, bottom: height }, brush);
+                let _ = DeleteObject(brush.into());
+                ReleaseDC(Some(foreground), dc);
+                let _ = ValidateRect(Some(foreground), None);
+            }
+            for _ in 0..5 {
+                unsafe { DwmFlush()? };
+                let frame = read_pixels()?;
+                let (left, top, right, bottom) = dock.state.panel;
+                let y = ((top + bottom) * 0.5) as usize;
+                let pixel = |x: f32| frame[(y * width as usize + x.floor() as usize) * 4 + 1];
+                let s = dock.state.scale;
+                let edge = pixel(left + 2.0 * s);
+                let face = pixel(left + 6.0 * s);
+                let other = pixel(right - 2.0 * s);
+                assert!(
+                    edge.abs_diff(face) < 16 && edge.abs_diff(other) < 16,
+                    "Glass lighting must match across a single frame: {edge}, {face}, {other} on {tone}"
+                );
+                light_levels.push(face);
+            }
+        }
+        assert!(light_levels.iter().max().unwrap().abs_diff(*light_levels.iter().min().unwrap()) > 100);
+        dock.state.glass.take();
+        dock.state.render();
+        settle();
         for color in [0x000000ff, 0x00ff0000] {
             unsafe {
                 let dc = GetDC(Some(foreground));
@@ -2513,7 +2549,7 @@ pub(super) mod tests {
             "Disabling glass should restore the original backdrop: {top_chroma:?}"
         );
         assert!(
-            diagonal_peaks[1] >= diagonal_peaks[0] + 5,
+            diagonal_peaks[1] > diagonal_peaks[0] + fixture_scale,
             "A diagonal must move at the rim, peaks {diagonal_peaks:?}"
         );
         assert!(energies[0] > 15.0, "Backdrop fixture must be visible: {energies:?}");

@@ -39,18 +39,21 @@ pub struct Lens {
     parent: SpriteVisual,
     root: ContainerVisual,
     frost: ContainerVisual,
-    edge: ContainerVisual,
+    highlights: ContainerVisual,
     owner: Option<ContainerVisual>,
-    scene: CompositionVisualSurface,
     silhouette: ShapeVisual,
     silhouette_surface: CompositionVisualSurface,
     contours: [CompositionSpriteShape; 3],
     scene_size: Cell<(i32, i32)>,
     material: CompositionPropertySet,
     heights: Option<(f32, f32)>,
+    scene: CompositionVisualSurface,
     sample: SpriteVisual,
-    base: SpriteVisual,
-    detail: Option<CompositionEffectBrush>,
+    face: SpriteVisual,
+    sampling_brush: CompositionEffectBrush,
+    refracted_layer: ContainerVisual,
+    refracted_surface: CompositionVisualSurface,
+    matched_edges: CompositionEffectBrush,
     #[cfg(test)]
     bends: Vec<SpriteVisual>,
     pointer: ShapeVisual,
@@ -87,42 +90,28 @@ impl Lens {
         let c = parent.Compositor()?;
         let root = c.CreateContainerVisual()?;
         root.SetRelativeSizeAdjustment(FULL)?;
-        let edge = c.CreateContainerVisual()?;
-        edge.SetRelativeSizeAdjustment(FULL)?;
-        let material = c.CreatePropertySet()?;
-        material.InsertScalar(h!("Open"), 1.0)?;
-        material.InsertVector2(h!("Cursor"), Vector2::default())?;
-        let sample = c.CreateSpriteVisual()?;
-        sample.SetSize(Vector2 { X: 1.0, Y: 1.0 })?;
-        let scene = parent.Brush()?;
-        let detail = detail::detail_brush(&c, &scene, scale).ok();
-        if let Some(brush) = &detail {
-            let blur = c.CreateExpressionAnimationWithExpression(h!("dpi * (1.6 + 1.2 * material.Open)"))?;
-            blur.SetReferenceParameter(h!("material"), &material)?;
-            blur.SetScalarParameter(h!("dpi"), scale)?;
-            brush.StartAnimation(h!("frost.BlurAmount"), &blur)?;
-            sample.SetBrush(brush)?;
-        } else {
-            sample.SetBrush(&scene)?;
-        }
         let frost = c.CreateContainerVisual()?;
         frost.SetRelativeSizeAdjustment(FULL)?;
         frost.SetOpacity(0.69)?;
-        frost.Children()?.InsertAtBottom(&sample)?;
-        let base = if detail.is_some() {
-            let base = c.CreateSpriteVisual()?;
-            base.SetRelativeSizeAdjustment(FULL)?;
-            base.SetBrush(&scene)?;
-            frost.Children()?.InsertAbove(&base, &sample)?;
-            base
-        } else {
-            sample.clone()
-        };
         root.Children()?.InsertAtBottom(&frost)?;
-        root.Children()?.InsertAtTop(&edge)?;
-        let scene_surface = c.CreateVisualSurface()?;
-        scene_surface.SetSourceVisual(&sample)?;
-        scene_surface.SetSourceSize(Vector2 { X: 1.0, Y: 1.0 })?;
+        let highlights = c.CreateContainerVisual()?;
+        highlights.SetRelativeSizeAdjustment(FULL)?;
+        let material = c.CreatePropertySet()?;
+        material.InsertScalar(h!("Open"), 1.0)?;
+        material.InsertVector2(h!("Cursor"), Vector2::default())?;
+        let backdrop = parent.Brush()?;
+        let sampling_brush = detail::sampling_brush(&c, &backdrop, scale)?;
+        let sample = c.CreateSpriteVisual()?;
+        sample.SetSize(FULL)?;
+        sample.SetBrush(&sampling_brush)?;
+        frost.Children()?.InsertAtBottom(&sample)?;
+        let scene = c.CreateVisualSurface()?;
+        scene.SetSourceVisual(&sample)?;
+        scene.SetSourceSize(FULL)?;
+        let face = c.CreateSpriteVisual()?;
+        face.SetRelativeSizeAdjustment(FULL)?;
+        face.SetBrush(&backdrop)?;
+        frost.Children()?.InsertAtTop(&face)?;
 
         let silhouette = c.CreateShapeVisual()?;
         let outline = c.CreateSpriteShapeWithGeometry(contour)?;
@@ -131,17 +120,20 @@ impl Lens {
         let silhouette_surface = c.CreateVisualSurface()?;
         silhouette_surface.SetSourceVisual(&silhouette)?;
         let body = surface_brush(&c, &silhouette_surface)?;
+        let sampled = surface_brush(&c, &scene)?;
+        let refracted_layer = c.CreateContainerVisual()?;
         let factory = detail::refraction_factory(&c, scale)?;
         #[cfg(test)]
         let mut bends = Vec::new();
         for (x, y) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
             let shifted = surface_brush(&c, &silhouette_surface)?;
-            shifted.SetOffset(Vector2 { X: x * 6.0 * scale, Y: y * 6.0 * scale })?;
+            shifted.SetOffset(Vector2 { X: x * 2.75 * scale, Y: y * 2.75 * scale })?;
             let bend = factory.CreateBrush()?;
+            bend.SetSourceParameter(h!("sampled"), &sampled)?;
             bend.SetSourceParameter(h!("body"), &body)?;
             bend.SetSourceParameter(h!("shifted"), &shifted)?;
-            let refracted = surface_brush(&c, &scene_surface)?;
-            let offset = c.CreateExpressionAnimationWithExpression(h!("direction * (9.0 + 5.0 * material.Open)"))?;
+            let refracted = surface_brush(&c, &scene)?;
+            let offset = c.CreateExpressionAnimationWithExpression(h!("direction * (10.0 + 8.0 * material.Open)"))?;
             offset.SetVector2Parameter(h!("direction"), Vector2 { X: -x * scale, Y: -y * scale })?;
             offset.SetReferenceParameter(h!("material"), &material)?;
             refracted.StartAnimation(h!("Offset"), &offset)?;
@@ -149,32 +141,36 @@ impl Lens {
             let sprite = c.CreateSpriteVisual()?;
             sprite.SetRelativeSizeAdjustment(FULL)?;
             sprite.SetBrush(&bend)?;
-            edge.Children()?.InsertAtTop(&sprite)?;
+            refracted_layer.Children()?.InsertAtTop(&sprite)?;
             #[cfg(test)]
             bends.push(sprite);
         }
 
-        let light = c.CreateLinearGradientBrush()?;
-        light.SetStartPoint(Vector2 { X: 0.1, Y: 0.0 })?;
-        light.SetEndPoint(Vector2 { X: 0.8, Y: 1.0 })?;
-        for (at, alpha) in [(0.0, 90), (0.42, 18), (0.75, 6), (1.0, 38)] {
-            light.ColorStops()?.Append(
-                &c.CreateColorGradientStopWithOffsetAndColor(at, Color { A: alpha, R: 234, G: 243, B: 250 })?,
-            )?;
-        }
+        let refracted_surface = c.CreateVisualSurface()?;
+        refracted_surface.SetSourceVisual(&refracted_layer)?;
+        let matched_edges = detail::light_matched_edges(&c)?;
+        matched_edges.SetSourceParameter(h!("live"), &backdrop)?;
+        matched_edges.SetSourceParameter(h!("edge"), &surface_brush(&c, &refracted_surface)?)?;
+        let refraction = c.CreateSpriteVisual()?;
+        refraction.SetRelativeSizeAdjustment(FULL)?;
+        refraction.SetBrush(&matched_edges)?;
+        refraction.SetOpacity(0.73)?;
+        frost.Children()?.InsertAtTop(&refraction)?;
+
+        let light = c.CreateColorBrushWithColor(Color { A: 28, R: 234, G: 243, B: 250 })?;
         let rim = c.CreateSpriteShapeWithGeometry(contour)?;
-        rim.SetStrokeThickness(1.6 * scale)?;
+        rim.SetStrokeThickness(scale)?;
         rim.SetStrokeBrush(&light)?;
         rim.SetStrokeLineJoin(CompositionStrokeLineJoin::Round)?;
         let reflection = c.CreateShapeVisual()?;
         reflection.SetRelativeSizeAdjustment(FULL)?;
         reflection.Shapes()?.Append(&rim)?;
-        edge.Children()?.InsertAtTop(&reflection)?;
+        highlights.Children()?.InsertAtTop(&reflection)?;
 
         let glow = c.CreateRadialGradientBrush()?;
         glow.SetMappingMode(CompositionMappingMode::Absolute)?;
         glow.SetEllipseRadius(Vector2 { X: 94.0 * scale, Y: 94.0 * scale })?;
-        for (at, alpha) in [(0.0, 198), (0.55, 65), (1.0, 0)] {
+        for (at, alpha) in [(0.0, 86), (0.55, 26), (1.0, 0)] {
             glow.ColorStops()?.Append(
                 &c.CreateColorGradientStopWithOffsetAndColor(at, Color { A: alpha, R: 235, G: 246, B: 255 })?,
             )?;
@@ -183,14 +179,15 @@ impl Lens {
         center.SetReferenceParameter(h!("material"), &material)?;
         glow.StartAnimation(h!("EllipseCenter"), &center)?;
         let glint = c.CreateSpriteShapeWithGeometry(contour)?;
-        glint.SetStrokeThickness(4.0 * scale)?;
+        glint.SetStrokeThickness(2.0 * scale)?;
         glint.SetStrokeLineJoin(CompositionStrokeLineJoin::Round)?;
         glint.SetStrokeBrush(&glow)?;
         let pointer = c.CreateShapeVisual()?;
         pointer.SetRelativeSizeAdjustment(FULL)?;
         pointer.Shapes()?.Append(&glint)?;
         pointer.SetOpacity(0.0)?;
-        edge.Children()?.InsertAtTop(&pointer)?;
+        highlights.Children()?.InsertAtTop(&pointer)?;
+        root.Children()?.InsertAtTop(&highlights)?;
         let hover = c.CreateSpringScalarAnimation()?;
         hover.SetDampingRatio(1.0)?;
         hover.SetPeriod(std::time::Duration::from_secs_f32(std::f32::consts::TAU / 18.0).into())?;
@@ -203,18 +200,21 @@ impl Lens {
             parent: parent.clone(),
             root,
             frost,
-            edge,
+            highlights,
             owner: None,
-            scene: scene_surface,
             silhouette,
             silhouette_surface,
             contours: [outline, rim, glint],
             scene_size: Cell::new((0, 0)),
             material,
             heights: None,
+            scene,
             sample,
-            base,
-            detail,
+            face,
+            sampling_brush,
+            refracted_layer,
+            refracted_surface,
+            matched_edges,
             #[cfg(test)]
             bends,
             pointer,
@@ -248,7 +248,7 @@ impl Lens {
     ) -> Result<()> {
         if self.heights != Some(heights) {
             let progress = self
-                .edge
+                .root
                 .Compositor()?
                 .CreateExpressionAnimationWithExpression(h!("Clamp((contour.Size.Y - closed) * inverse, 0.0, 1.0)"))?;
             progress.SetReferenceParameter(h!("contour"), contour)?;
@@ -262,12 +262,12 @@ impl Lens {
             return Ok(());
         }
         self.frost.SetOpacity(1.0)?;
-        let visible = self.edge.Compositor()?.CreateExpressionAnimationWithExpression(h!("layer.IsVisible"))?;
+        let visible = self.highlights.Compositor()?.CreateExpressionAnimationWithExpression(h!("layer.IsVisible"))?;
         visible.SetReferenceParameter(h!("layer"), &self.parent)?;
-        self.edge.StartAnimation(h!("IsVisible"), &visible)?;
-        self.root.Children()?.Remove(&self.edge)?;
-        if let Err(error) = owner.Children()?.InsertAbove(&self.edge, tint) {
-            let _ = self.root.Children()?.InsertAtTop(&self.edge);
+        self.highlights.StartAnimation(h!("IsVisible"), &visible)?;
+        self.root.Children()?.Remove(&self.highlights)?;
+        if let Err(error) = owner.Children()?.InsertAbove(&self.highlights, tint) {
+            let _ = self.root.Children()?.InsertAtTop(&self.highlights);
             return Err(error);
         }
         self.owner = Some(owner.clone());
@@ -280,6 +280,8 @@ impl Lens {
             let pixels = Vector2 { X: size.0 as f32, Y: size.1 as f32 };
             self.sample.SetSize(pixels)?;
             self.scene.SetSourceSize(pixels)?;
+            self.refracted_layer.SetSize(pixels)?;
+            self.refracted_surface.SetSourceSize(pixels)?;
             self.silhouette.SetSize(pixels)?;
             self.silhouette_surface.SetSourceSize(pixels)?;
             self.scene_size.set(size);
@@ -290,8 +292,8 @@ impl Lens {
     #[cfg(test)]
     pub(crate) fn verify_contour(&self, geometry: &CompositionGeometry, size: (i32, i32)) -> Result<()> {
         let pixels = Vector2 { X: size.0 as f32, Y: size.1 as f32 };
-        assert_eq!(self.scene.SourceSize()?, pixels);
         assert_eq!(self.silhouette_surface.SourceSize()?, pixels);
+        assert_eq!(self.scene.SourceSize()?, pixels);
         for shape in &self.contours {
             assert_eq!(shape.Geometry()?, *geometry);
         }
@@ -300,11 +302,9 @@ impl Lens {
 
     pub fn refresh(&self) -> Result<()> {
         let backdrop = self.parent.Compositor()?.CreateHostBackdropBrush()?;
-        self.base.SetBrush(&backdrop)?;
-        if let Some(brush) = &self.detail {
-            brush.SetSourceParameter(h!("scene"), &backdrop)?;
-        }
-        Ok(())
+        self.sampling_brush.SetSourceParameter(h!("scene"), &backdrop)?;
+        self.matched_edges.SetSourceParameter(h!("live"), &backdrop)?;
+        self.face.SetBrush(&backdrop)
     }
 
     pub fn point(&self, local: Option<(f32, f32)>) {
@@ -337,9 +337,9 @@ impl Drop for Lens {
         if let Some(owner) = &self.owner
             && let Ok(children) = owner.Children()
         {
-            let _ = children.Remove(&self.edge);
+            let _ = children.Remove(&self.highlights);
         }
-        if let Ok(scene) = self.base.Brush() {
+        if let Ok(scene) = self.face.Brush() {
             let _ = self.parent.SetBrush(&scene);
         }
         if let Ok(children) = self.parent.Children() {

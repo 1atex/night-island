@@ -8,7 +8,10 @@ use windows::UI::Composition::{
     CompositionBrush, CompositionEffectBrush, CompositionEffectFactory, CompositionEffectSourceParameter, Compositor,
 };
 use windows::Win32::Foundation::{E_BOUNDS, E_INVALIDARG, E_POINTER};
-use windows::Win32::Graphics::Direct2D::{CLSID_D2D1ArithmeticComposite, CLSID_D2D1GaussianBlur};
+use windows::Win32::Graphics::Direct2D::Common::D2D1_BLEND_MODE_LINEAR_LIGHT;
+use windows::Win32::Graphics::Direct2D::{
+    CLSID_D2D1ArithmeticComposite, CLSID_D2D1Blend, CLSID_D2D1GaussianBlur, CLSID_D2D1Invert,
+};
 use windows::Win32::System::WinRT::Graphics::Direct2D::{
     GRAPHICS_EFFECT_PROPERTY_MAPPING, GRAPHICS_EFFECT_PROPERTY_MAPPING_DIRECT, IGraphicsEffectD2D1Interop,
     IGraphicsEffectD2D1Interop_Impl,
@@ -77,42 +80,24 @@ impl IGraphicsEffectD2D1Interop_Impl for Effect_Impl {
     }
 }
 
-pub(super) fn detail_brush(c: &Compositor, backdrop: &CompositionBrush, scale: f32) -> Result<CompositionEffectBrush> {
+pub(super) fn sampling_brush(
+    c: &Compositor,
+    backdrop: &CompositionBrush,
+    scale: f32,
+) -> Result<CompositionEffectBrush> {
     let scene = CompositionEffectSourceParameter::Create(h!("scene"))?.cast::<IGraphicsEffectSource>()?;
-    let low_pass: IGraphicsEffectSource = Effect {
-        class: CLSID_D2D1GaussianBlur,
-        name: Default::default(),
-        properties: vec![
-            PropertyValue::CreateSingle(27.0 * scale)?.cast()?,
-            PropertyValue::CreateUInt32(0)?.cast()?,
-            PropertyValue::CreateUInt32(1)?.cast()?,
-        ],
-        sources: vec![scene.clone()],
-    }
-    .into();
-    let sharpen: IGraphicsEffectSource = Effect {
-        class: CLSID_D2D1ArithmeticComposite,
-        name: Default::default(),
-        properties: vec![
-            PropertyValue::CreateSingleArray(&[0.0, 5.5, -4.5, 0.0])?.cast()?,
-            PropertyValue::CreateBoolean(true)?.cast()?,
-        ],
-        sources: vec![scene, low_pass],
-    }
-    .into();
     let frost: IGraphicsEffect = Effect {
         class: CLSID_D2D1GaussianBlur,
-        name: Mutex::new(HSTRING::from("frost")),
+        name: Default::default(),
         properties: vec![
-            PropertyValue::CreateSingle(2.8 * scale)?.cast()?,
+            PropertyValue::CreateSingle(1.2 * scale)?.cast()?,
             PropertyValue::CreateUInt32(0)?.cast()?,
             PropertyValue::CreateUInt32(1)?.cast()?,
         ],
-        sources: vec![sharpen],
+        sources: vec![scene],
     }
     .into();
-    let properties: windows_collections::IIterable<HSTRING> = vec![HSTRING::from("frost.BlurAmount")].into();
-    let brush = c.CreateEffectFactoryWithProperties(&frost, &properties)?.CreateBrush()?;
+    let brush = c.CreateEffectFactory(&frost)?.CreateBrush()?;
     brush.SetSourceParameter(h!("scene"), backdrop)?;
     Ok(brush)
 }
@@ -134,7 +119,7 @@ pub(super) fn refraction_factory(c: &Compositor, scale: f32) -> Result<Compositi
         class: CLSID_D2D1GaussianBlur,
         name: Default::default(),
         properties: vec![
-            PropertyValue::CreateSingle(1.8 * scale)?.cast()?,
+            PropertyValue::CreateSingle(0.85 * scale)?.cast()?,
             PropertyValue::CreateUInt32(0)?.cast()?,
             PropertyValue::CreateUInt32(0)?.cast()?,
         ],
@@ -142,6 +127,19 @@ pub(super) fn refraction_factory(c: &Compositor, scale: f32) -> Result<Compositi
     }
     .into();
     let scene = CompositionEffectSourceParameter::Create(h!("refracted"))?.cast::<IGraphicsEffectSource>()?;
+    let sampled = CompositionEffectSourceParameter::Create(h!("sampled"))?.cast::<IGraphicsEffectSource>()?;
+    let inverse: IGraphicsEffectSource =
+        Effect { class: CLSID_D2D1Invert, name: Default::default(), properties: vec![], sources: vec![sampled] }.into();
+    let displacement: IGraphicsEffectSource = Effect {
+        class: CLSID_D2D1ArithmeticComposite,
+        name: Default::default(),
+        properties: vec![
+            PropertyValue::CreateSingleArray(&[0.0, 0.5, 0.5, 0.0])?.cast()?,
+            PropertyValue::CreateBoolean(true)?.cast()?,
+        ],
+        sources: vec![scene, inverse],
+    }
+    .into();
     let refraction: IGraphicsEffect = Effect {
         class: CLSID_D2D1ArithmeticComposite,
         name: Default::default(),
@@ -149,8 +147,21 @@ pub(super) fn refraction_factory(c: &Compositor, scale: f32) -> Result<Compositi
             PropertyValue::CreateSingleArray(&[1.0, 0.0, 0.0, 0.0])?.cast()?,
             PropertyValue::CreateBoolean(true)?.cast()?,
         ],
-        sources: vec![scene, feather],
+        sources: vec![displacement, feather],
     }
     .into();
     c.CreateEffectFactory(&refraction)
+}
+
+pub(super) fn light_matched_edges(c: &Compositor) -> Result<CompositionEffectBrush> {
+    let live = CompositionEffectSourceParameter::Create(h!("live"))?.cast::<IGraphicsEffectSource>()?;
+    let edge = CompositionEffectSourceParameter::Create(h!("edge"))?.cast::<IGraphicsEffectSource>()?;
+    let refraction: IGraphicsEffect = Effect {
+        class: CLSID_D2D1Blend,
+        name: Default::default(),
+        properties: vec![PropertyValue::CreateUInt32(D2D1_BLEND_MODE_LINEAR_LIGHT.0 as u32)?.cast()?],
+        sources: vec![live, edge],
+    }
+    .into();
+    c.CreateEffectFactory(&refraction)?.CreateBrush()
 }
