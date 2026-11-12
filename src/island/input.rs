@@ -752,8 +752,7 @@ impl App {
 
     pub(in crate::island) fn on_mouse_move(&mut self, x: i32, y: i32) {
         if let Some(lens) = &self.glass {
-            let (l, t, _, _) = self.pill_rect(self.state == State::Expanded);
-            lens.point(Some((x as f32 - l, y as f32 - t)));
+            lens.point(Some((x as f32, y as f32)));
         }
         if self.character_interacting() {
             self.kill_timer(Timer::Expand);

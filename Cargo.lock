@@ -620,6 +620,7 @@ dependencies = [
  "tar",
  "toml_edit",
  "windows",
+ "windows-collections",
  "windows-core",
  "windows-future",
  "windows-numerics",

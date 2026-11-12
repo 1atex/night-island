@@ -94,6 +94,7 @@ struct State {
     region_shapes: Vec<[i32; 6]>,
     feedback: Feedback,
     frame_pending: bool,
+    frame_timers: crate::platform::frame_timers::FrameTimers,
     hint_label: Option<(usize, String)>,
     hint_alpha: f32,
     pointer: Option<(f32, f32)>,
@@ -421,6 +422,7 @@ impl State {
             self.pressed = None;
             self.dragging = false;
             self.frame_pending = false;
+            self.frame_timers.update(FRAME, false);
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
                 if suppressed {
@@ -509,16 +511,16 @@ impl State {
 
     fn request_frame(&mut self) {
         if !self.frame_pending && !self.suppressed {
-            self.frame_pending = true;
-            unsafe {
-                SetTimer(Some(self.hwnd), FRAME, if self.config.economy { 33 } else { 10 }, None);
-            }
+            self.frame_pending =
+                unsafe { SetTimer(Some(self.hwnd), FRAME, if self.config.economy { 33 } else { 10 }, None) } != 0;
+            self.frame_timers.update(FRAME, self.frame_pending && !self.config.economy);
         }
     }
 
     fn render(&mut self) {
         if self.suppressed {
             self.frame_pending = false;
+            self.frame_timers.update(FRAME, false);
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
             }
@@ -659,6 +661,7 @@ impl State {
             self.request_frame();
         } else {
             self.frame_pending = false;
+            self.frame_timers.update(FRAME, false);
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
             }
@@ -1039,6 +1042,7 @@ impl State {
     }
 
     fn finish_flight(&mut self) {
+        self.frame_timers.update(WINDOW_FLIGHT, false);
         unsafe {
             let _ = KillTimer(Some(self.hwnd), WINDOW_FLIGHT);
         }
@@ -1604,6 +1608,7 @@ impl Dock {
             region_shapes: Vec::new(),
             feedback: Feedback::with_capacity(512),
             frame_pending: false,
+            frame_timers: Default::default(),
             hint_label: None,
             hint_alpha: 0.0,
             pointer: None,
@@ -1765,6 +1770,8 @@ impl Dock {
         unsafe {
             if SetTimer(Some(state.hwnd), WINDOW_FLIGHT, if state.config.economy { 33 } else { 15 }, None) == 0 {
                 state.finish_flight();
+            } else {
+                state.frame_timers.update(WINDOW_FLIGHT, !state.config.economy);
             }
         }
         true

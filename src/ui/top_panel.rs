@@ -155,6 +155,7 @@ struct State {
     visible: bool,
     opening: bool,
     frame_timer: Cell<bool>,
+    frame_timers: crate::platform::frame_timers::FrameTimers,
     reveal: RefCell<Option<panel_reveal::Reveal>>,
     revealing: Cell<bool>,
     travel: motion::Travel,
@@ -333,11 +334,13 @@ impl State {
     fn start_frames(&self) {
         if !self.frame_timer.get() {
             self.frame_timer.set(unsafe { SetTimer(Some(self.hwnd), FRAME, 16, None) } != 0);
+            self.frame_timers.update(FRAME, self.frame_timer.get());
         }
     }
 
     fn stop_frames(&self) {
         if self.frame_timer.replace(false) {
+            self.frame_timers.update(FRAME, false);
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), FRAME);
             }
@@ -458,7 +461,7 @@ impl State {
         self.tray_from = self.tray_width;
         self.tray_started = Instant::now();
         unsafe {
-            SetTimer(Some(self.hwnd), TRAY_ANIMATION, 16, None);
+            self.frame_timers.update(TRAY_ANIMATION, SetTimer(Some(self.hwnd), TRAY_ANIMATION, 16, None) != 0);
         }
     }
 
@@ -480,6 +483,7 @@ impl State {
         unsafe {
             if t >= 1.0 {
                 let _ = KillTimer(Some(self.hwnd), TRAY_ANIMATION);
+                self.frame_timers.update(TRAY_ANIMATION, false);
             }
         }
         self.render();
@@ -1077,6 +1081,7 @@ impl State {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), DISMISS);
             let _ = KillTimer(Some(self.hwnd), TRAY_ANIMATION);
+            self.frame_timers.update(TRAY_ANIMATION, false);
             let _ = PostMessageW(Some(self.hwnd), WM_APP + 93, WPARAM(0), LPARAM(0));
             let _ = ShowWindow(self.hwnd, SW_HIDE);
         }
@@ -1408,6 +1413,7 @@ impl Wing {
             relocation: Default::default(),
             displacement: (0.0, 0.0),
             frame_timer: Cell::new(false),
+            frame_timers: Default::default(),
             reveal: RefCell::new(None),
             revealing: Cell::new(false),
             destination: (0, 0),

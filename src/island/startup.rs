@@ -195,7 +195,6 @@ impl App {
     }
 
     pub(in crate::island) fn new_visuals(hwnd: HWND, dpi_scale: f32, settings: Settings) -> Result<Self> {
-        crate::island::timers::raise_timer_resolution();
         let compositor = Compositor::new()?;
         let target = unsafe { compositor.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, true)? };
 
@@ -334,6 +333,7 @@ impl App {
             glass: None,
             backdrop,
             host_backdrop_enabled: Cell::new(None),
+            frame_timers: Default::default(),
             tint,
             ui: {
                 let mut ui = view::UiState::new();

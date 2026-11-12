@@ -31,7 +31,7 @@ const RADIUS: f32 = 32.0;
 const SIDE: u32 = 68;
 const DIRECTIONS: [(bool, bool); 4] = [(true, false), (true, true), (false, false), (false, true)];
 
-fn optics(x: f32, y: f32) -> [u8; 6] {
+fn optics(x: f32, y: f32) -> [u8; 7] {
     let half = SIDE as f32 * 0.5;
     let (x, y) = (x - half, y - half);
     let (qx, qy) = (x.abs() - half + RADIUS, y.abs() - half + RADIUS);
@@ -57,14 +57,15 @@ fn optics(x: f32, y: f32) -> [u8; 6] {
         bend * ny.max(0.0),
         reflection,
         cover * (1.0 + d / 25.0).clamp(0.0, 1.0),
+        cover * rim,
     ]
     .map(|a| (255.0 * a).round() as u8)
 }
 
-fn optical_maps() -> &'static [Vec<u8>; 6] {
-    static MAPS: std::sync::OnceLock<[Vec<u8>; 6]> = std::sync::OnceLock::new();
+fn optical_maps() -> &'static [Vec<u8>; 7] {
+    static MAPS: std::sync::OnceLock<[Vec<u8>; 7]> = std::sync::OnceLock::new();
     MAPS.get_or_init(|| {
-        let mut maps: [Vec<u8>; 6] = std::array::from_fn(|_| Vec::with_capacity((SIDE * SIDE * 4) as usize));
+        let mut maps: [Vec<u8>; 7] = std::array::from_fn(|_| Vec::with_capacity((SIDE * SIDE * 4) as usize));
         for y in 0..SIDE {
             for x in 0..SIDE {
                 for (map, alpha) in maps.iter_mut().zip(optics(x as f32 + 0.5, y as f32 + 0.5)) {
@@ -105,12 +106,15 @@ pub struct Lens {
     island: Option<IslandEdges>,
     surface: CompositionVisualSurface,
     scene_size: Cell<(i32, i32)>,
+    material: CompositionPropertySet,
+    heights: Option<(f32, f32)>,
     sample: SpriteVisual,
     base: SpriteVisual,
     detail: Option<CompositionEffectBrush>,
     #[cfg(test)]
     bends: Vec<SpriteVisual>,
     pointer: SpriteVisual,
+    hover: SpringScalarNaturalMotionAnimation,
     last_pointer: Cell<Option<(i32, i32)>>,
     scale: f32,
 }
@@ -157,11 +161,18 @@ impl Lens {
         }
         let inset = c.CreateExpressionAnimationWithExpression(h!("Max(0.02, contour.CornerRadius.X / 32.0)"))?;
         inset.SetReferenceParameter(h!("contour"), contour)?;
+        let material = c.CreatePropertySet()?;
+        material.InsertScalar(h!("Open"), 1.0)?;
+        material.InsertVector2(h!("Cursor"), Vector2::default())?;
         let sample = c.CreateSpriteVisual()?;
         sample.SetSize(Vector2 { X: 1.0, Y: 1.0 })?;
         let scene = parent.Brush()?;
         let detail = detail::detail_brush(&c, &scene, scale).ok();
         if let Some(brush) = &detail {
+            let blur = c.CreateExpressionAnimationWithExpression(h!("dpi * (1.6 + 1.2 * material.Open)"))?;
+            blur.SetReferenceParameter(h!("material"), &material)?;
+            blur.SetScalarParameter(h!("dpi"), scale)?;
+            brush.StartAnimation(h!("frost.BlurAmount"), &blur)?;
             sample.SetBrush(brush)?;
         } else {
             sample.SetBrush(&scene)?;
@@ -206,19 +217,26 @@ impl Lens {
                 let (sx, sy) = if horizontal { (magnification, 1.0) } else { (1.0, magnification) };
                 translated.SetScale(Vector2 { X: sx, Y: sy })?;
                 let anchor = match (horizontal, far) {
-                    (true, false) => h!("Vector2(-contour.Offset.X * zoom + (1.0 - zoom) * width, -contour.Offset.Y)"),
-                    (true, true) => h!(
-                        "Vector2(-contour.Offset.X * zoom + (1.0 - zoom) * (contour.Size.X - width), -contour.Offset.Y)"
+                    (true, false) => h!(
+                        "Vector2(-contour.Offset.X * zoom + (1.0 - zoom) * (width + extra * material.Open), -contour.Offset.Y)"
                     ),
-                    (false, false) => h!("Vector2(-contour.Offset.X, -contour.Offset.Y * zoom + (1.0 - zoom) * width)"),
+                    (true, true) => h!(
+                        "Vector2(-contour.Offset.X * zoom + (1.0 - zoom) * (contour.Size.X - width - extra * material.Open), -contour.Offset.Y)"
+                    ),
+                    (false, false) => h!(
+                        "Vector2(-contour.Offset.X, -contour.Offset.Y * zoom + (1.0 - zoom) * (width + extra * material.Open))"
+                    ),
                     (false, true) => h!(
-                        "Vector2(-contour.Offset.X, -contour.Offset.Y * zoom + (1.0 - zoom) * (contour.Size.Y - width))"
+                        "Vector2(-contour.Offset.X, -contour.Offset.Y * zoom + (1.0 - zoom) * (contour.Size.Y - width - extra * material.Open))"
                     ),
                 };
                 let offset = c.CreateExpressionAnimationWithExpression(anchor)?;
                 offset.SetReferenceParameter(h!("contour"), contour)?;
                 offset.SetScalarParameter(h!("zoom"), magnification)?;
-                offset.SetScalarParameter(h!("width"), 28.0 * scale)?;
+                let displacement_scale = scale / (1.0 - 1.0 / magnification);
+                offset.SetScalarParameter(h!("width"), 12.0 * displacement_scale)?;
+                offset.SetScalarParameter(h!("extra"), 4.0 * displacement_scale)?;
+                offset.SetReferenceParameter(h!("material"), &material)?;
                 translated.StartAnimation(h!("Offset"), &offset)?;
                 #[cfg(test)]
                 bends.push(sprite.clone());
@@ -240,7 +258,46 @@ impl Lens {
         pointer.SetSize(Vector2 { X: 156.0 * scale, Y: 156.0 * scale })?;
         pointer.SetBrush(&glow)?;
         pointer.SetOpacity(0.0)?;
+        let hover = c.CreateSpringScalarAnimation()?;
+        hover.SetDampingRatio(1.0)?;
+        hover.SetPeriod(std::time::Duration::from_secs_f32(std::f32::consts::TAU / 18.0).into())?;
+        let position = c.CreateExpressionAnimationWithExpression(h!(
+            "Vector3(material.Cursor.X - contour.Offset.X - half, material.Cursor.Y - contour.Offset.Y - half, 0.0)"
+        ))?;
+        position.SetReferenceParameter(h!("material"), &material)?;
+        position.SetReferenceParameter(h!("contour"), contour)?;
+        position.SetScalarParameter(h!("half"), 78.0 * scale)?;
+        pointer.StartAnimation(h!("Offset"), &position)?;
         edge.Children()?.InsertAtTop(&pointer)?;
+        let rim = c.CreateNineGridBrush()?;
+        rim.SetSource(&Self::atlas(gpu, &c, &optical_maps()[6])?)?;
+        rim.SetInsets(RADIUS + 1.0)?;
+        rim.SetIsCenterHollow(true)?;
+        for property in [h!("LeftInsetScale"), h!("RightInsetScale"), h!("TopInsetScale"), h!("BottomInsetScale")] {
+            rim.StartAnimation(property, &inset)?;
+        }
+        let light = c.CreateRadialGradientBrush()?;
+        light.SetMappingMode(CompositionMappingMode::Absolute)?;
+        light.SetEllipseRadius(Vector2 { X: 130.0 * scale, Y: 130.0 * scale })?;
+        for (at, a) in [(0.0, 200), (0.46, 110), (1.0, 0)] {
+            light
+                .ColorStops()?
+                .Append(&c.CreateColorGradientStopWithOffsetAndColor(at, Color { A: a, R: 235, G: 246, B: 255 })?)?;
+        }
+        let center = c.CreateExpressionAnimationWithExpression(h!("material.Cursor - contour.Offset"))?;
+        center.SetReferenceParameter(h!("material"), &material)?;
+        center.SetReferenceParameter(h!("contour"), contour)?;
+        light.StartAnimation(h!("EllipseCenter"), &center)?;
+        let highlight = c.CreateMaskBrush()?;
+        highlight.SetMask(&rim)?;
+        highlight.SetSource(&light)?;
+        let specular = c.CreateSpriteVisual()?;
+        specular.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+        specular.SetBrush(&highlight)?;
+        let illumination = c.CreateExpressionAnimationWithExpression(h!("pointer.Opacity"))?;
+        illumination.SetReferenceParameter(h!("pointer"), &pointer)?;
+        specular.StartAnimation(h!("Opacity"), &illumination)?;
+        edge.Children()?.InsertAtTop(&specular)?;
         parent.Children()?.InsertAtTop(&root)?;
         if let Err(error) = parent.SetBrush(None::<&CompositionBrush>) {
             let _ = parent.Children()?.Remove(&root);
@@ -253,12 +310,15 @@ impl Lens {
             island: None,
             surface,
             scene_size: Cell::new((1, 1)),
+            material,
+            heights: None,
             sample,
             base,
             detail,
             #[cfg(test)]
             bends,
             pointer,
+            hover,
             last_pointer: Cell::new(None),
             scale,
         })
@@ -292,7 +352,20 @@ impl Lens {
         owner: &ContainerVisual,
         tint: &SpriteVisual,
         content: &SpriteVisual,
+        contour: &CompositionRoundedRectangleGeometry,
+        heights: (f32, f32),
     ) -> Result<()> {
+        if self.heights != Some(heights) {
+            let progress = self
+                .edge
+                .Compositor()?
+                .CreateExpressionAnimationWithExpression(h!("Clamp((contour.Size.Y - closed) * inverse, 0.0, 1.0)"))?;
+            progress.SetReferenceParameter(h!("contour"), contour)?;
+            progress.SetScalarParameter(h!("closed"), heights.0)?;
+            progress.SetScalarParameter(h!("inverse"), 1.0 / (heights.1 - heights.0).max(1.0))?;
+            self.material.StartAnimation(h!("Open"), &progress)?;
+            self.heights = Some(heights);
+        }
         if self.island.is_some() {
             return Ok(());
         }
@@ -401,6 +474,7 @@ impl Lens {
         let size = self.surface.SourceSize()?;
         let offset = self.surface.SourceOffset()?;
         assert_eq!(offset, Vector2::default());
+        assert!(self.detail.is_some(), "The Windows compositor must compile the optical material");
         Ok(((size.X as i32, size.Y as i32), self.island.as_ref().unwrap().pool.borrow().len()))
     }
 
@@ -419,20 +493,20 @@ impl Lens {
             return;
         }
         if let Some((x, y)) = point {
-            let half = 78.0 * self.scale;
-            let _ = self.pointer.SetOffset(Vector3 { X: x as f32 - half, Y: y as f32 - half, Z: 0.0 });
+            let _ = self.material.InsertVector2(h!("Cursor"), Vector2 { X: x as f32, Y: y as f32 });
         }
         if previous.is_some() != point.is_some() {
             let target = f32::from(point.is_some());
             if super::feedback::motion_allowed()
-                && let Ok(fade) = self.pointer.Compositor().and_then(|c| c.CreateScalarKeyFrameAnimation())
+                && let Ok(value) = windows::Foundation::PropertyValue::CreateSingle(target)
+                    .and_then(|v| v.cast::<windows::Foundation::IReference<f32>>())
+                && self.hover.SetFinalValue(&value).is_ok()
+                && self.pointer.StartAnimation(h!("Opacity"), &self.hover).is_ok()
             {
-                let _ = fade.InsertKeyFrame(1.0, target);
-                let _ = fade.SetDuration(std::time::Duration::from_millis(120).into());
-                let _ = self.pointer.StartAnimation(h!("Opacity"), &fade);
-            } else {
-                let _ = self.pointer.SetOpacity(target);
+                return;
             }
+            let _ = self.pointer.StopAnimation(h!("Opacity"));
+            let _ = self.pointer.SetOpacity(target);
         }
     }
 }

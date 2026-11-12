@@ -567,6 +567,41 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
                 p.fill_rect((0.0, 0.0, width as f32, height as f32), crate::ui::gfx::rgba(0.95, 0.84, 0.7, 1.0))
             })?;
             scene.present(background.0, Some(POINT { x: x as i32, y: y as i32 }), 255)?;
+            let (origin, size, _) = app.pill(Win::Big, true, false);
+            let mid = (origin.Y + size.Y * 0.5).round() as usize;
+            let left = (origin.X + 2.0).round() as usize;
+            let right = (origin.X + size.X - 3.0).round() as usize;
+            let mut reflections = Vec::new();
+            for x in [left, right] {
+                lens.point(Some((x as f32, mid as f32)));
+                let until = Instant::now() + Duration::from_millis(400);
+                while Instant::now() < until {
+                    unsafe {
+                        let mut message = MSG::default();
+                        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                            let _ = TranslateMessage(&message);
+                            DispatchMessageW(&message);
+                        }
+                        DwmFlush()?;
+                    }
+                }
+                let frame = read_frame(&app)?;
+                let luminance = |column: usize| {
+                    (mid - 5..=mid + 5)
+                        .map(|y| {
+                            let i = (y * width as usize + column) * 4;
+                            (u32::from(frame[i]) + u32::from(frame[i + 1]) + u32::from(frame[i + 2])) / 3
+                        })
+                        .sum::<u32>()
+                        / 11
+                };
+                reflections.push((luminance(left), luminance(right)));
+            }
+            assert!(
+                reflections[0].0 > reflections[1].0 + 4 && reflections[1].1 > reflections[0].1 + 4,
+                "The rim highlight must move to the cursor: {reflections:?}"
+            );
+            lens.point(None);
             app.collapse();
             observe_transition(&app, false)?;
             app.shrink_window();

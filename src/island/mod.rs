@@ -141,6 +141,7 @@ struct App {
     _visual: ContainerVisual,
     backdrop: SpriteVisual,
     host_backdrop_enabled: Cell<Option<bool>>,
+    frame_timers: crate::platform::frame_timers::FrameTimers,
     glass: Option<crate::ui::glass::Lens>,
     tint: SpriteVisual,
     settings_win: Option<HWND>,

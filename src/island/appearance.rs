@@ -83,9 +83,12 @@ impl App {
     pub(in crate::island) fn sync_glass(&mut self) {
         crate::ui::glass::Lens::sync(&mut self.glass, &self.gpu, &self.backdrop, &self.geometry, self.scale);
         let size = self.window_size(self.win);
+        let heights = (self.pill(self.win, false, false).1.Y, self.pill(self.win, true, false).1.Y);
         if let Some(glass) = &mut self.glass {
             let _ = glass.resize(size);
-            if let Err(error) = glass.mount_island(&self.gpu, &self._visual, &self.tint, &self.expanded.sprite) {
+            if let Err(error) =
+                glass.mount_island(&self.gpu, &self._visual, &self.tint, &self.expanded.sprite, &self.geometry, heights)
+            {
                 crate::log_warn!("Could not position the island glass: {error}");
             }
         }

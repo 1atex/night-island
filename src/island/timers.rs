@@ -7,11 +7,6 @@ thread_local! {
     static FRAME_COST: Cell<f32> = const { Cell::new(0.0) };
 }
 
-#[link(name = "winmm")]
-unsafe extern "system" {
-    fn timeBeginPeriod(period: u32) -> u32;
-}
-
 const TRIM_EVERY: Duration = Duration::from_secs(180);
 
 thread_local! {
@@ -41,12 +36,6 @@ impl App {
                 after.private_mb()
             );
         }
-    }
-}
-
-pub(in crate::island) fn raise_timer_resolution() {
-    unsafe {
-        timeBeginPeriod(1);
     }
 }
 
@@ -165,14 +154,17 @@ impl App {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), timer as usize);
         }
+        self.frame_timers.update(timer as usize, false);
     }
 
     pub(in crate::island) fn set_timer(&self, timer: Timer, ms: u32) {
         if matches!(timer, Timer::Expand) && self.pointer.expand_pending.replace(true) {
             return;
         }
-        unsafe {
-            SetTimer(Some(self.hwnd), timer as usize, ms, None);
+        if unsafe { SetTimer(Some(self.hwnd), timer as usize, ms, None) } != 0 {
+            self.frame_timers.update(timer as usize, ms <= 17);
+        } else if matches!(timer, Timer::Expand) {
+            self.pointer.expand_pending.set(false);
         }
     }
 
@@ -235,7 +227,9 @@ impl App {
                     | Timer::Progress
             )
         );
+        let nested = self.frame_timers.begin_dispatch();
         self.on_timer_inner(id);
+        self.frame_timers.end_dispatch(nested);
         if frame {
             FRAME_COST.set(FRAME_COST.get() * 0.8 + started.elapsed().as_secs_f32() * 1000.0 * 0.2);
         }

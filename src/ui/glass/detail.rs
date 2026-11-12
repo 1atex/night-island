@@ -7,10 +7,11 @@ use windows::Graphics::Effects::{
 use windows::UI::Composition::{
     CompositionBrush, CompositionEffectBrush, CompositionEffectSourceParameter, Compositor,
 };
-use windows::Win32::Foundation::{E_BOUNDS, E_INVALIDARG};
+use windows::Win32::Foundation::{E_BOUNDS, E_INVALIDARG, E_POINTER};
 use windows::Win32::Graphics::Direct2D::{CLSID_D2D1ArithmeticComposite, CLSID_D2D1GaussianBlur};
 use windows::Win32::System::WinRT::Graphics::Direct2D::{
-    GRAPHICS_EFFECT_PROPERTY_MAPPING, IGraphicsEffectD2D1Interop, IGraphicsEffectD2D1Interop_Impl,
+    GRAPHICS_EFFECT_PROPERTY_MAPPING, GRAPHICS_EFFECT_PROPERTY_MAPPING_DIRECT, IGraphicsEffectD2D1Interop,
+    IGraphicsEffectD2D1Interop_Impl,
 };
 use windows::core::{Error, GUID, HSTRING, Interface, PCWSTR, Result, h, implement};
 
@@ -40,8 +41,23 @@ impl IGraphicsEffectD2D1Interop_Impl for Effect_Impl {
         Ok(self.class)
     }
 
-    fn GetNamedPropertyMapping(&self, _: &PCWSTR, _: *mut u32, _: *mut GRAPHICS_EFFECT_PROPERTY_MAPPING) -> Result<()> {
-        Err(Error::from_hresult(E_INVALIDARG))
+    fn GetNamedPropertyMapping(
+        &self,
+        name: &PCWSTR,
+        index: *mut u32,
+        mapping: *mut GRAPHICS_EFFECT_PROPERTY_MAPPING,
+    ) -> Result<()> {
+        if name.is_null() || index.is_null() || mapping.is_null() {
+            return Err(Error::from_hresult(E_POINTER));
+        }
+        if self.class != CLSID_D2D1GaussianBlur || unsafe { name.to_string()? } != "BlurAmount" {
+            return Err(Error::from_hresult(E_INVALIDARG));
+        }
+        unsafe {
+            *index = 0;
+            *mapping = GRAPHICS_EFFECT_PROPERTY_MAPPING_DIRECT;
+        }
+        Ok(())
     }
 
     fn GetPropertyCount(&self) -> Result<u32> {
@@ -74,7 +90,7 @@ pub(super) fn detail_brush(c: &Compositor, backdrop: &CompositionBrush, scale: f
         sources: vec![scene.clone()],
     }
     .into();
-    let sharpen: IGraphicsEffect = Effect {
+    let sharpen: IGraphicsEffectSource = Effect {
         class: CLSID_D2D1ArithmeticComposite,
         name: Default::default(),
         properties: vec![
@@ -84,7 +100,19 @@ pub(super) fn detail_brush(c: &Compositor, backdrop: &CompositionBrush, scale: f
         sources: vec![scene, low_pass],
     }
     .into();
-    let brush = c.CreateEffectFactory(&sharpen)?.CreateBrush()?;
+    let frost: IGraphicsEffect = Effect {
+        class: CLSID_D2D1GaussianBlur,
+        name: Mutex::new(HSTRING::from("frost")),
+        properties: vec![
+            PropertyValue::CreateSingle(2.8 * scale)?.cast()?,
+            PropertyValue::CreateUInt32(0)?.cast()?,
+            PropertyValue::CreateUInt32(1)?.cast()?,
+        ],
+        sources: vec![sharpen],
+    }
+    .into();
+    let properties: windows_collections::IIterable<HSTRING> = vec![HSTRING::from("frost.BlurAmount")].into();
+    let brush = c.CreateEffectFactoryWithProperties(&frost, &properties)?.CreateBrush()?;
     brush.SetSourceParameter(h!("scene"), backdrop)?;
     Ok(brush)
 }
