@@ -40,6 +40,7 @@ pub enum Sid {
     DockPreview,
     DockWindowSwitcher,
     DockAltTab,
+    DockFullscreenAltTab,
     DockSwitcherStyle,
     DockWindowMotion,
     DockFullscreen,
@@ -105,6 +106,7 @@ pub enum Sid {
     CoverMode,
     FrameRate,
     EqStyle,
+    EqSources,
     EqResponse,
     EqStrength,
     EqGradient,
@@ -193,6 +195,7 @@ pub enum Sid {
     CaptureSelf,
     GameMode,
     GameAi,
+    HideFullscreenYoutube,
     GameWindowed,
     AiCheckOnSave,
     HidePillSecs,
@@ -543,6 +546,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::DockPreview => c.desktop_dock.hover_preview,
         Sid::DockWindowSwitcher => c.desktop_dock.window_switcher,
         Sid::DockAltTab => c.desktop_dock.alt_tab,
+        Sid::DockFullscreenAltTab => c.desktop_dock.fullscreen_alt_tab,
         Sid::DockWindowMotion => c.desktop_dock.window_motion,
         Sid::DockBlur => c.desktop_dock.blur,
         Sid::DockEnabled => c.desktop_dock.enabled,
@@ -562,6 +566,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::CaptureSelf => c.capture_self_hidden,
         Sid::GameMode => c.game_mode,
         Sid::GameAi => c.game_ai,
+        Sid::HideFullscreenYoutube => c.hide_fullscreen_youtube,
         Sid::GameWindowed => c.game_windowed,
         Sid::AiCheckOnSave => c.ai_check_on_save,
         Sid::GhostMode => c.ghost_mode,
@@ -684,6 +689,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::DockPreview => c.desktop_dock.hover_preview = on,
         Sid::DockWindowSwitcher => c.desktop_dock.window_switcher = on,
         Sid::DockAltTab => c.desktop_dock.alt_tab = on,
+        Sid::DockFullscreenAltTab => c.desktop_dock.fullscreen_alt_tab = on,
         Sid::DockWindowMotion => c.desktop_dock.window_motion = on,
         Sid::DockBlur => c.desktop_dock.blur = on,
         Sid::DockEnabled => c.desktop_dock.enabled = on,
@@ -703,6 +709,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::CaptureSelf => c.capture_self_hidden = on,
         Sid::GameMode => c.game_mode = on,
         Sid::GameAi => c.game_ai = on,
+        Sid::HideFullscreenYoutube => c.hide_fullscreen_youtube = on,
         Sid::GameWindowed => c.game_windowed = on,
         Sid::AiCheckOnSave => c.ai_check_on_save = on,
         Sid::GhostMode => c.ghost_mode = on,
@@ -844,6 +851,7 @@ pub fn cycle_set(id: Sid, c: &mut Settings, forward: bool) {
                 crate::data::sounds::SoundPreset::Classic
             }
         }
+        Sid::EqSources => c.eq_sources = c.eq_sources.step(forward),
         Sid::EqResponse => c.eq_response = c.eq_response.step(forward),
         Sid::EqGradient => c.eq_gradient = c.eq_gradient.step(forward),
         Sid::BumpTint => c.bump_tint = c.bump_tint.step(forward),
@@ -884,6 +892,7 @@ pub(in crate::view) fn cycle_name(id: Sid, c: &Settings) -> &'static str {
         Sid::FrameRate => c.frame_rate.name(),
         Sid::EqStyle => c.eq_style.name(),
         Sid::SoundPreset => c.sounds.preset.name(),
+        Sid::EqSources => c.eq_sources.name(),
         Sid::EqResponse => c.eq_response.name(),
         Sid::EqGradient => c.eq_gradient.name(),
         Sid::BumpTint => c.bump_tint.name(),
@@ -928,6 +937,7 @@ pub fn cycle_options(id: Sid, c: &Settings) -> (Vec<&'static str>, usize) {
         Sid::FrameRate => all(&FrameRate::ALL, c.frame_rate, |v| v.name()),
         Sid::EqStyle => all(&EqStyle::ALL, c.eq_style, |v| v.name()),
         Sid::SoundPreset => all(&crate::data::sounds::SoundPreset::ALL, c.sounds.preset, |v| v.name()),
+        Sid::EqSources => all(&EqSources::ALL, c.eq_sources, |v| v.name()),
         Sid::EqResponse => all(&EqResponse::ALL, c.eq_response, |v| v.name()),
         Sid::EqGradient => all(&EqGradient::ALL, c.eq_gradient, |v| v.name()),
         Sid::BumpTint => all(&BumpTint::ALL, c.bump_tint, |v| v.name()),
@@ -959,7 +969,8 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
         Sid::PetPerformance => c.pet_performance = crate::ui::pet_motion::PetPerformance::ALL[k.min(3)],
         Sid::TopEntrance => c.top_panel.entrance = crate::data::top_panel::PanelEntrance::ALL[k.min(2)],
         Sid::DockSwitcherStyle => {
-            c.desktop_dock.switcher_style = crate::data::desktop_dock::SwitcherStyle::ALL[k.min(2)]
+            c.desktop_dock.switcher_style = crate::data::desktop_dock::SwitcherStyle::ALL
+                [k.min(crate::data::desktop_dock::SwitcherStyle::ALL.len() - 1)]
         }
         Sid::AiProvider => c.ai.provider = AiProvider::ALL[k.min(2)],
         Sid::PillBattery => c.pill_battery = BatteryStyle::ALL[k.min(2)],
@@ -972,6 +983,7 @@ pub fn cycle_pick(id: Sid, c: &mut Settings, k: usize) {
         Sid::FrameRate => c.frame_rate = FrameRate::ALL[k.min(3)],
         Sid::EqStyle => c.eq_style = EqStyle::ALL[k.min(4)],
         Sid::SoundPreset => c.sounds.preset = crate::data::sounds::SoundPreset::ALL[k.min(1)],
+        Sid::EqSources => c.eq_sources = EqSources::ALL[k.min(EqSources::ALL.len() - 1)],
         Sid::EqResponse => c.eq_response = EqResponse::ALL[k.min(EqResponse::ALL.len() - 1)],
         Sid::EqGradient => c.eq_gradient = EqGradient::ALL[k.min(2)],
         Sid::BumpTint => c.bump_tint = BumpTint::ALL[k.min(2)],

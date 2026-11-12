@@ -55,7 +55,7 @@ impl App {
             }
         }
         let visible = (!self.pill_hidden || self.ghosted)
-            && !self.gaming
+            && !self.foreground_hidden()
             && (self.state == State::Collapsed || (self.state == State::Expanded && self.ui.tab == view::Tab::Home));
         if visible && self.ui.live.iter().any(|v| matches!(v.kind, view::LiveKind::Reminder(_))) {
             self.set_timer(Timer::LiveActivity, 1000 - (chrono::Local::now().timestamp_subsec_millis() % 1000));

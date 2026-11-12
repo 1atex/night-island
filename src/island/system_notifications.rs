@@ -254,7 +254,7 @@ impl App {
             || (self.system_notices.compact_reply && self.ui.notice.is_some())
             || self.system_notices.locked
             || self.system_notices.failed
-            || self.gaming
+            || self.foreground_hidden()
             || (pet.is_none() && (!matches!(self.state, State::Collapsed | State::Expanded) || self.pill_hidden))
             || self.character_interacting()
             || self.pill_motion_busy()
@@ -514,7 +514,7 @@ impl App {
         }
         let _ = self.root.StopAnimation(h!("Opacity"));
         let _ = self.root.SetOpacity(1.0);
-        if self.system_notices.main_hidden && !self.gaming && !self.pill_hidden {
+        if self.system_notices.main_hidden && !self.foreground_hidden() && !self.pill_hidden {
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
             }

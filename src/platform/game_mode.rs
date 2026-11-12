@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant, SystemTime};
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
@@ -20,6 +19,7 @@ pub struct Probe {
     pub path: String,
     pub name: String,
     pub fullscreen: bool,
+    pub youtube: bool,
     pub stamp: (u64, u64),
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -154,7 +154,7 @@ fn known_game(path: &str) -> bool {
             | "robloxplayerbeta.exe"
     )
 }
-pub fn foreground() -> Option<Probe> {
+pub fn foreground(check_version: bool) -> Option<Probe> {
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_invalid()
@@ -186,7 +186,7 @@ pub fn foreground() -> Option<Probe> {
         result.ok()?;
         let path = String::from_utf16_lossy(&text[..length as usize]).to_lowercase();
         let name = basename(&path);
-        let metadata = std::fs::metadata(&path).ok();
+        let metadata = check_version.then(|| std::fs::metadata(&path).ok()).flatten();
         let stamp = metadata.as_ref().map_or((0, 0), |m| {
             (
                 m.len(),
@@ -196,23 +196,20 @@ pub fn foreground() -> Option<Probe> {
                     .map_or(0, |t| t.as_secs()),
             )
         });
-        let mut rect = RECT::default();
-        let mut monitor = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-        let mut fullscreen = false;
-        if GetWindowRect(hwnd, &mut rect).is_ok()
-            && GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool()
-        {
-            let m = monitor.rcMonitor;
-            let caption = GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_CAPTION.0 == WS_CAPTION.0;
-            let exclusive = windows::Win32::UI::Shell::SHQueryUserNotificationState()
-                .is_ok_and(|s| s == windows::Win32::UI::Shell::QUNS_RUNNING_D3D_FULL_SCREEN);
-            fullscreen = (!caption || exclusive)
-                && rect.left <= m.left + 2
-                && rect.top <= m.top + 2
-                && rect.right >= m.right - 2
-                && rect.bottom >= m.bottom - 2;
-        }
-        Some(Probe { path, name, fullscreen, stamp })
+        let fullscreen = super::desktop_dock::fullscreen_monitor(hwnd).is_some();
+        let youtube = fullscreen && crate::platform::media::context::browser_exe(&name).is_some() && {
+            let mut title = [0u16; 1024];
+            let n = GetWindowTextW(hwnd, &mut title).max(0) as usize;
+            crate::platform::media::context::youtube_window(&String::from_utf16_lossy(&title[..n]))
+        };
+        Some(Probe { path, name, fullscreen, youtube, stamp })
+    }
+}
+impl Probe {
+    pub fn excluded(&self, settings: &crate::data::settings::Settings) -> bool {
+        use crate::data::settings::HideInApp;
+        (settings.hide_fullscreen_youtube && self.fullscreen && self.youtube)
+            || settings.hide_in_apps.get(&self.path).is_some_and(|mode| *mode == HideInApp::Always || self.fullscreen)
     }
 }
 fn description(path: &str) -> String {
@@ -410,6 +407,34 @@ pub fn remove_rule(path: &str) {
 mod tests {
     use super::*;
     #[test]
+    fn visibility_rules_apply_independently_of_game_detection() {
+        use crate::data::settings::{HideInApp, Settings};
+        let mut settings = Settings { game_mode: false, ..Default::default() };
+        let mut probe = Probe {
+            path: r"c:\apps\browser.exe".into(),
+            name: "browser.exe".into(),
+            fullscreen: true,
+            youtube: true,
+            stamp: (0, 0),
+        };
+        assert!(probe.excluded(&settings));
+        probe.fullscreen = false;
+        assert!(!probe.excluded(&settings));
+        probe.fullscreen = true;
+        settings.hide_fullscreen_youtube = false;
+        assert!(!probe.excluded(&settings));
+        settings.hide_in_apps.insert(probe.path.clone(), HideInApp::Fullscreen);
+        assert!(probe.excluded(&settings));
+        probe.fullscreen = false;
+        assert!(!probe.excluded(&settings));
+        settings.hide_in_apps.insert(probe.path.clone(), HideInApp::Always);
+        assert!(probe.excluded(&settings));
+        let restored: Settings = serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert_eq!(restored.hide_in_apps, settings.hide_in_apps);
+        probe.path = "different.exe".into();
+        assert!(!probe.excluded(&restored));
+    }
+    #[test]
     #[ignore = "Classifies two executable names using the configured AI; does not save rules or inspect windows"]
     fn configured_ai_tells_a_game_from_a_desktop_utility() {
         let settings = crate::data::settings::Settings::load().ai;
@@ -418,6 +443,7 @@ mod tests {
             path: format!("C:\\fixture\\{name}"),
             name: name.into(),
             fullscreen: false,
+            youtube: false,
             stamp: (0, 0),
         };
         assert_eq!(classify(&probe("Stardew Valley.exe")), Some(true));
@@ -430,6 +456,7 @@ mod tests {
             path: "c:\\apps\\mystery.exe".into(),
             name: "mystery.exe".into(),
             fullscreen: true,
+            youtube: false,
             stamp: (100, 1),
         };
         saved
@@ -454,7 +481,7 @@ mod tests {
     fn native_game_probe_ignores_shell_and_reads_product_metadata() {
         let path = PathBuf::from(std::env::var_os("WINDIR").unwrap()).join("explorer.exe");
         assert!(!description(&path.to_string_lossy()).is_empty());
-        if let Some(probe) = foreground() {
+        if let Some(probe) = foreground(true) {
             assert!(!probe.path.is_empty());
             assert!(!matches!(probe.name.as_str(), "dwm.exe" | "night-island.exe"));
         }

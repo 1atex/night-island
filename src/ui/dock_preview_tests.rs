@@ -730,7 +730,10 @@ fn native_switcher_and_window_flight() -> Result<()> {
         "Windows".into(),
         Placement {
             work,
-            anchor: crate::ui::dock_switcher::Anchor::Dock(work.bottom - 100),
+            anchor: crate::ui::dock_switcher::Anchor::Dock {
+                above: work.bottom - 100,
+                center: (work.left + work.right) / 2,
+            },
             scale: 1.0,
             hidden: false,
         },
@@ -753,6 +756,7 @@ fn native_switcher_and_window_flight() -> Result<()> {
         assert_eq!(pixel.0, color, "Switcher preview {i}");
     }
     unsafe {
+        SendMessageW(popup.hwnd(), WM_KEYDOWN, Some(WPARAM(36)), None);
         SendMessageW(popup.hwnd(), WM_KEYDOWN, Some(WPARAM(39)), None);
         SendMessageW(popup.hwnd(), WM_KEYDOWN, Some(WPARAM(13)), None);
     }

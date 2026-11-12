@@ -369,6 +369,7 @@ impl App {
             },
             pending_high_surrogate: None,
             gaming: false,
+            excluded_foreground: false,
             pill_hidden: false,
             ghost_stage: 0,
             metrics_on: None,

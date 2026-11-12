@@ -225,7 +225,10 @@ pub fn cover_visible(ui: &UiState) -> bool {
 pub fn music_pill(ui: &UiState) -> bool {
     ui.media.playing
         && !ui.media.title.is_empty()
-        && (ui.cfg.music_eq || ui.cfg.music_title || cover_visible(ui) || lyric_visible(ui))
+        && ((ui.cfg.music_eq && ui.media.equalizer(&ui.cfg))
+            || ui.cfg.music_title
+            || cover_visible(ui)
+            || lyric_visible(ui))
         && ui.notice.is_none()
         && ui.volume.is_none()
         && legacy_download(ui).is_none()
@@ -344,7 +347,7 @@ pub fn music_slots(ui: &UiState, scale: f32, pill_w: f32) -> MusicSlots {
     let weather = (ui.cfg.pill_weather && ui.weather.is_some()).then_some(weather_slot_width(ui));
     let music = music_pill(ui);
     let cover = (music && cover_visible(ui)).then_some(cover_size(ui) * cover_aspect(ui));
-    let bars = (music && ui.cfg.music_eq).then_some(BARS_SLOT);
+    let bars = (music && ui.cfg.music_eq && ui.media.equalizer(&ui.cfg)).then_some(BARS_SLOT);
     let title = (music && ui.cfg.music_title).then(|| {
         (crate::ui::fonts::width(
             ui.cfg.interface_font,

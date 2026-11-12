@@ -15,6 +15,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
+pub mod context;
+
 pub const WM_MEDIA: u32 = WM_APP + 7;
 
 const POLL: Duration = Duration::from_millis(1000);
@@ -45,6 +47,8 @@ pub struct Media {
     pub accent: Option<(u8, u8, u8)>,
     pub cover: Option<Arc<Cover>>,
     pub source: String,
+    pub context: context::SourceKind,
+    pub recording_key: String,
     pub players: u8,
 }
 
@@ -269,9 +273,12 @@ fn fetch(manager: &Manager) -> External {
     let players =
         manager.GetSessions().map_or(0, |s| s.into_iter().filter(|s| !own_session(&app_id(s))).count()).min(255) as u8;
     let (mut title, mut artist) = (String::new(), String::new());
+    let (mut subtitle, mut album) = (String::new(), String::new());
     if let Ok(props) = session.TryGetMediaPropertiesAsync().and_then(|op| op.join()) {
         title = props.Title().map(clip).unwrap_or_default();
         artist = props.Artist().map(clip).unwrap_or_default();
+        subtitle = props.Subtitle().map(clip).unwrap_or_default();
+        album = props.AlbumTitle().map(clip).unwrap_or_default();
     }
     let playing = is_playing(&session);
 
@@ -314,7 +321,9 @@ fn fetch(manager: &Manager) -> External {
     } else {
         clear_timeline();
     }
-    External { id: app_id(&session), media: Media { title, artist, playing, accent, cover, source, players } }
+    let id = app_id(&session);
+    let (context, recording_key) = context::recording(&id, &title, &artist, &subtitle, &album);
+    External { id, media: Media { title, artist, playing, accent, cover, source, players, context, recording_key } }
 }
 
 fn clear_timeline() {

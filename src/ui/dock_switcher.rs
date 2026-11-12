@@ -35,7 +35,7 @@ use windows::core::{Result, w};
 
 #[derive(Clone)]
 pub(super) enum Anchor {
-    Dock(i32),
+    Dock { above: i32, center: i32 },
     Keyboard(super::dock_alt_tab::Cycle),
 }
 
@@ -70,28 +70,55 @@ struct Layout {
     scale: f32,
     overview: bool,
     strip: Option<Strip>,
-    spans: Vec<(f32, f32)>,
+    columns: usize,
+    rows: usize,
+    first_row: usize,
 }
 
 impl Layout {
     fn new(work: RECT, scale: f32, windows: usize) -> Self {
-        let room = ((work.right - work.left) as f32 / scale - 12.0).max(1.0);
-        let height = ((work.bottom - work.top) as f32 / scale - 12.0).clamp(1.0, 210.0);
-        let count = (((room - 30.0) / 208.0).floor() as usize).clamp(1, 5).min(windows.max(1));
-        let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 244.0);
-        let size =
-            (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
-        Self { size, count, tile, scale, overview: false, strip: None, spans: Vec::new() }
+        Self::grid(work, scale, windows, false)
     }
     fn overview(work: RECT, scale: f32, windows: usize) -> Self {
-        let room = (((work.right - work.left) as f32 / scale) * 0.94).max(1.0);
-        let height = (((work.bottom - work.top) as f32 / scale) * 0.48).clamp(1.0, 490.0);
-        let count = (((room - 30.0) / 450.0) as usize).clamp(1, 4).min(windows.max(1));
-        let tile = ((room - 30.0) / count as f32 - 8.0).clamp(1.0, 680.0);
-        let size =
-            (((30.0 + (tile + 8.0) * count as f32).min(room) * scale).round() as i32, (height * scale).round() as i32);
-        Self { size, count, tile, scale, overview: true, strip: None, spans: Vec::new() }
+        Self::grid(work, scale, windows, true)
     }
+    fn grid(work: RECT, scale: f32, windows: usize, overview: bool) -> Self {
+        let width = (work.right - work.left) as f32 / scale;
+        let height = (work.bottom - work.top) as f32 / scale;
+        let room = (width * if overview { 0.94 } else { 0.96 }).max(1.0);
+        let n = windows.max(1);
+        let max_columns = (((room - 30.0) / 152.0) as usize).clamp(1, 4);
+        let columns = n.div_ceil(n.div_ceil(max_columns));
+        let total_rows = n.div_ceil(columns);
+        let max_h = (height * if overview { 0.80 } else { 0.74 }).max(1.0);
+        let rows = (((max_h - 59.0) / 106.0) as usize).max(1).min(total_rows);
+        let tile_limit = if total_rows == 1 {
+            if overview { 540.0 } else { 244.0 }
+        } else {
+            let full_row = (room - 30.0) / max_columns as f32 - 8.0;
+            (full_row * 0.92).min(if overview { 335.0 } else { 202.0 }).max(1.0)
+        };
+        let tile = ((room - 30.0) / columns as f32 - 8.0).clamp(1.0, tile_limit);
+        let row_height = if overview {
+            (tile * 0.59 + 32.0).min(345.0)
+        } else if rows == 1 {
+            143.0
+        } else {
+            tile * 0.55 + 32.0
+        };
+        let h = (59.0 + (row_height + 8.0) * rows as f32).min(max_h);
+        let size =
+            (((30.0 + (tile + 8.0) * columns as f32).min(room) * scale).round() as i32, (h * scale).round() as i32);
+        Self { size, count: rows * columns, tile, scale, overview, strip: None, columns, rows, first_row: 0 }
+    }
+    fn reveal_row(&mut self, index: usize, len: usize) {
+        let row = index / self.columns;
+        self.first_row = self
+            .first_row
+            .clamp((row + 1).saturating_sub(self.rows), row)
+            .min(len.div_ceil(self.columns).saturating_sub(self.rows));
+    }
+
     fn keyboard(work: RECT, scale: f32, windows: usize, style: SwitcherStyle) -> Self {
         if style == SwitcherStyle::Overview {
             return Self::overview(work, scale, windows);
@@ -104,34 +131,17 @@ impl Layout {
             scale,
             overview: true,
             strip: Some(strip),
-            spans: Vec::new(),
+            columns: 1,
+            rows: 1,
+            first_row: 0,
         }
-    }
-    fn arrange_page(&mut self, aspects: &[f32]) {
-        if !self.overview || aspects.is_empty() {
-            return;
-        }
-        let image_height = (self.size.1 as f32 / self.scale - 108.0).max(1.0);
-        let widths: Vec<_> = aspects.iter().map(|a| (a * image_height + 12.0).clamp(134.0, 700.0)).collect();
-        let total = widths.iter().sum::<f32>();
-        let gaps = (widths.len() - 1) as f32 * 8.0;
-        let room = (self.size.0 as f32 / self.scale - 38.0 - gaps).max(1.0);
-        let factor = (room / total).min(1.0);
-        let mut x = (self.size.0 as f32 / self.scale - total * factor - gaps) / 2.0;
-        self.spans = widths
-            .into_iter()
-            .map(|width| {
-                let left = x;
-                x += width * factor + 8.0;
-                (left, width * factor)
-            })
-            .collect();
     }
     fn card(&self, slot: usize) -> Rect {
         let s = self.scale;
-        let (left, width) =
-            self.spans.get(slot).copied().unwrap_or((19.0 + (self.tile + 8.0) * slot as f32, self.tile));
-        ((left * s).round(), (48.0 * s).round(), ((left + width) * s).round(), (self.size.1 as f32 - 19.0 * s).round())
+        let left = 19.0 + (self.tile + 8.0) * (slot % self.columns) as f32;
+        let pitch = (self.size.1 as f32 / s - 59.0) / self.rows as f32;
+        let top = 48.0 + pitch * (slot / self.columns) as f32;
+        ((left * s).round(), (top * s).round(), ((left + self.tile) * s).round(), ((top + pitch - 8.0) * s).round())
     }
     fn image(&self, slot: usize) -> Rect {
         let (l, t, r, b) = self.card(slot);
@@ -155,14 +165,9 @@ impl Layout {
         let s = self.scale;
         (r - 28.0 * s, t + 3.0 * s, r - 4.0 * s, t + 29.0 * s)
     }
-    fn actual_size_button(&self, multiple_pages: bool) -> Rect {
-        let right = self.size.0 as f32 - (if multiple_pages { 90.0 } else { 21.0 }) * self.scale;
+    fn actual_size_button(&self) -> Rect {
+        let right = self.size.0 as f32 - 21.0 * self.scale;
         (right - 44.0 * self.scale, 13.0 * self.scale, right, 43.0 * self.scale)
-    }
-    fn page_button(&self, next: bool) -> Rect {
-        let s = self.scale;
-        let r = self.size.0 as f32 - (if next { 18.0 } else { 49.0 }) * s;
-        (r - 29.0 * s, 13.0 * s, r, 43.0 * s)
     }
 }
 
@@ -196,6 +201,7 @@ struct State {
     previous_preview: Option<Thumbnail>,
     preview_mix: Reveal,
     strip_offset: Cell<f32>,
+    wheel_delta: i32,
     strip_target: f32,
     pointer: Option<(i32, i32)>,
     selected: usize,
@@ -209,24 +215,14 @@ struct State {
 }
 impl State {
     fn start(&self) -> usize {
-        self.selected / self.layout.count * self.layout.count
-    }
-    fn pages(&self) -> usize {
-        self.items.len().div_ceil(self.layout.count)
+        self.layout.first_row * self.layout.columns
     }
     fn hit(&self, p: (f32, f32)) -> Option<Hit> {
         if let Some(strip) = self.layout.strip {
             return strip.hit(p, self.strip_offset.get(), self.items.len(), self.selected);
         }
-        if self.layout.overview && contains(self.layout.actual_size_button(self.pages() > 1), p) {
+        if self.layout.overview && contains(self.layout.actual_size_button(), p) {
             return Some(Hit::ActualSize);
-        }
-        if self.pages() > 1 {
-            for (next, hit) in [(false, Hit::Prev), (true, Hit::Next)] {
-                if contains(self.layout.page_button(next), p) {
-                    return Some(hit);
-                }
-            }
         }
         for (slot, i) in (self.start()..self.items.len()).take(self.layout.count).enumerate() {
             if contains(self.layout.close(slot), p) {
@@ -251,11 +247,6 @@ impl State {
             let thumbnail = Thumbnail::new(self.hwnd, &item.window);
             self.sizes.push(thumbnail.as_ref().and_then(Thumbnail::source_size));
             self.thumbnails.push(thumbnail);
-        }
-        if self.layout.overview && self.layout.strip.is_none() {
-            self.layout.arrange_page(
-                &self.sizes.iter().map(|s| s.map_or(1.6, |s| s.cx as f32 / s.cy as f32)).collect::<Vec<_>>(),
-            );
         }
         for (slot, (thumb, size)) in self.thumbnails.iter_mut().zip(&self.sizes).enumerate() {
             if let (Some(t), Some(size)) = (thumb.as_mut(), size)
@@ -292,19 +283,9 @@ impl State {
             if let Some(strip) = self.layout.strip {
                 return self.paint_strip(p, strip);
             }
-            let pages = self.pages();
-            let label = if pages > 1 {
-                format!("{}   ·   {} / {}", self.title, self.selected / self.layout.count + 1, pages)
-            } else {
-                self.title.clone()
-            };
-            let right = if self.layout.overview {
-                self.layout.actual_size_button(pages > 1).0 - 8.0 * s
-            } else {
-                w - if pages > 1 { 84.0 } else { 20.0 } * s
-            };
+            let right = if self.layout.overview { self.layout.actual_size_button().0 - 8.0 * s } else { w - 20.0 * s };
             p.text(
-                &label,
+                &self.title,
                 (22.0 * s, 14.0 * s, right, 43.0 * s),
                 14.0 * s,
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
@@ -312,7 +293,7 @@ impl State {
                 rgba(1.0, 1.0, 1.0, 0.92),
             )?;
             if self.layout.overview {
-                let button = self.layout.actual_size_button(pages > 1);
+                let button = self.layout.actual_size_button();
                 p.fill_round_rect(button, 9.0 * s, rgba(1.0, 1.0, 1.0, if self.actual_size { 0.24 } else { 0.095 }))?;
                 p.text(
                     "1:1",
@@ -333,16 +314,12 @@ impl State {
                     rgba(1.0, 1.0, 1.0, 0.68),
                 )?;
             }
-            if pages > 1 {
-                for (next, hit, glyph) in [(false, Hit::Prev, '\u{E76B}'), (true, Hit::Next, '\u{E76C}')] {
-                    let r = self.layout.page_button(next);
-                    p.fill_round_rect(
-                        r,
-                        10.0 * s,
-                        rgba(1.0, 1.0, 1.0, if self.hover == Some(hit) { 0.18 } else { 0.08 }),
-                    )?;
-                    p.glyph(glyph, r, 12.0 * s, rgba(1.0, 1.0, 1.0, 0.85))?;
-                }
+            let total_rows = self.items.len().div_ceil(self.layout.columns);
+            if total_rows > self.layout.rows {
+                let track = h - 67.0 * s;
+                let top = 48.0 * s + track * self.layout.first_row as f32 / total_rows as f32;
+                let bottom = top + track * self.layout.rows as f32 / total_rows as f32;
+                p.fill_round_rect((w - 17.0 * s, top, w - 14.0 * s, bottom), 1.5 * s, rgba(1.0, 1.0, 1.0, 0.42))?;
             }
             if self.items.is_empty() {
                 p.text(
@@ -407,7 +384,7 @@ impl State {
                 }
             }
             if !self.items.is_empty() {
-                let slot = self.selected % self.layout.count;
+                let slot = self.selected - self.start();
                 let x = self.focus_motion.follow(1, slot as f32, slot as f32, 130);
                 let x = x.clamp(0.0, (self.items.len() - self.start() - 1).min(self.layout.count - 1) as f32);
                 let (l, t, r, b) = self.layout.card(x.floor() as usize);
@@ -530,9 +507,14 @@ impl State {
                     self.preview_mix.retarget(true, 120, AnimCurve::Smooth, Instant::now());
                 }
             }
-        } else if self.start() != page {
-            self.reset_focus_motion();
-            self.bind();
+        } else {
+            self.layout.reveal_row(self.selected, self.items.len());
+            if previous / self.layout.columns != self.selected / self.layout.columns {
+                self.reset_focus_motion();
+            }
+            if self.start() != page {
+                self.bind();
+            }
         }
         let _ = self.paint();
     }
@@ -551,16 +533,22 @@ impl State {
             );
         }
     }
-    fn page(&mut self, next: bool) {
-        if self.layout.strip.is_some() {
+    fn scroll(&mut self, next: bool) {
+        let len = self.items.len();
+        if self.layout.strip.is_some() || len <= self.layout.count {
             self.step(if next { 1 } else { -1 });
             return;
         }
-        let pages = self.pages();
-        if pages > 1 {
+        let first = self.layout.first_row;
+        let last = len.div_ceil(self.layout.columns) - self.layout.rows;
+        let row = if next { (first + 1).min(last) } else { first.saturating_sub(1) };
+        if first != row {
+            let slot = self.selected - self.start();
+            self.layout.first_row = row;
             self.hover = None;
-            let page = self.selected / self.layout.count;
-            self.select_from_pointer((page + if next { 1 } else { pages - 1 }) % pages * self.layout.count, true);
+            self.reset_focus_motion();
+            self.bind();
+            self.select_from_pointer((self.start() + slot).min(len - 1), true);
         }
     }
     fn select_from_pointer(&mut self, index: usize, scroll: bool) {
@@ -630,20 +618,29 @@ impl State {
                         }
                         let _ = self.paint();
                     }
-                    Some(Hit::Prev) => self.page(false),
-                    Some(Hit::Next) => self.page(true),
+                    Some(Hit::Prev) => self.scroll(false),
+                    Some(Hit::Next) => self.scroll(true),
                     None => {}
                 }
             }
-            WM_MOUSEWHEEL => self.page(((w.0 >> 16) as i16) < 0),
+            WM_MOUSEWHEEL => {
+                self.wheel_delta += i32::from((w.0 >> 16) as i16);
+                let steps = self.wheel_delta / 120;
+                self.wheel_delta %= 120;
+                for _ in 0..steps.unsigned_abs() {
+                    self.scroll(steps < 0);
+                }
+            }
             WM_KEYDOWN => match w.0 {
                 27 => self.finish(None),
                 13 => self.choose(),
+                36 => self.select_from_pointer(0, true),
+                35 => self.select_from_pointer(self.items.len().saturating_sub(1), true),
                 37 => self.step(-1),
                 39 => self.step(1),
                 9 => self.step(if unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0 { -1 } else { 1 }),
-                33 => self.page(false),
-                34 => self.page(true),
+                33 => self.scroll(false),
+                34 => self.scroll(true),
                 _ => {}
             },
             WM_ACTIVATE if !self.layout.overview && w.0 & 0xffff == WA_INACTIVE as usize => self.finish(None),
@@ -701,16 +698,27 @@ impl Switcher {
     ) -> Result<Self> {
         let Placement { work, anchor, scale, hidden } = placement;
         let overview = matches!(anchor, Anchor::Keyboard(_));
-        let layout = if overview {
+        let mut layout = if overview {
             Layout::keyboard(work, scale, items.len(), config.switcher_style)
         } else {
             Layout::new(work, scale, items.len())
         };
         let surface = PopupSurface::new(layout.size)?;
         let origin = (
-            work.left + (work.right - work.left - layout.size.0) / 2,
+            match &anchor {
+                Anchor::Dock { center, .. } => {
+                    (*center - layout.size.0 / 2).clamp(work.left, (work.right - layout.size.0).max(work.left))
+                }
+                Anchor::Keyboard(_) if config.switcher_style == SwitcherStyle::SideLeft => {
+                    work.left + (10.0 * scale) as i32
+                }
+                Anchor::Keyboard(_) if config.switcher_style == SwitcherStyle::SideRight => {
+                    work.right - layout.size.0 - (10.0 * scale) as i32
+                }
+                _ => work.left + (work.right - work.left - layout.size.0) / 2,
+            },
             match anchor {
-                Anchor::Dock(above) => {
+                Anchor::Dock { above, .. } => {
                     (above - layout.size.1).clamp(work.top, (work.bottom - layout.size.1).max(work.top))
                 }
                 Anchor::Keyboard(_) => work.top + (work.bottom - work.top - layout.size.1) / 2,
@@ -740,7 +748,7 @@ impl Switcher {
                 origin.1,
                 layout.size.0,
                 layout.size.1,
-                Some(dock),
+                if overview { None } else { Some(dock) },
                 None,
                 Some(instance.into()),
                 None,
@@ -748,8 +756,11 @@ impl Switcher {
         };
         let selected = match &anchor {
             Anchor::Keyboard(cycle) => cycle.selected().unwrap_or(0),
-            Anchor::Dock(_) => items.iter().position(|item| item.window.active).unwrap_or(0),
+            Anchor::Dock { .. } => items.iter().position(|item| item.window.active).unwrap_or(0),
         };
+        if layout.strip.is_none() {
+            layout.reveal_row(selected, items.len());
+        }
         let strip_target = layout.strip.map_or(0.0, |strip| strip.target(selected, items.len()));
         let backdrop =
             if config.blur { gpu.compositor().ok().and_then(|c| PopupBackdrop::new(hwnd, &c).ok()) } else { None };
@@ -771,6 +782,7 @@ impl Switcher {
             previous_preview: None,
             preview_mix: Reveal::new(1.0),
             strip_offset: Cell::new(strip_target),
+            wheel_delta: 0,
             strip_target,
             pointer: {
                 let mut pt = POINT::default();
@@ -785,7 +797,7 @@ impl Switcher {
             choice: None,
             cycle: match anchor {
                 Anchor::Keyboard(cycle) => Some(cycle),
-                Anchor::Dock(_) => None,
+                Anchor::Dock { .. } => None,
             },
         }));
         unsafe {
@@ -868,7 +880,7 @@ impl Switcher {
         let index = state.items.iter().position(|item| item.window.handle == handle).unwrap();
         let (l, t, r, b) = match state.layout.strip {
             Some(strip) => strip.tile(index as f32, state.strip_offset.get()),
-            None => state.layout.image(index % state.layout.count),
+            None => state.layout.image(index - state.start()),
         };
         (((l + r) / 2.0) as i32, ((t + b) / 2.0) as i32)
     }
@@ -898,6 +910,9 @@ impl Switcher {
             if let Some(strip) = s.layout.strip {
                 s.strip_target = strip.target(s.selected, s.items.len());
                 s.reset_focus_motion();
+            } else {
+                let (selected, len) = (s.selected, s.items.len());
+                s.layout.reveal_row(selected, len);
             }
             if let Some(cycle) = &s.cycle
                 && let Some(item) = s.items.get(s.selected)
@@ -942,8 +957,7 @@ mod tests {
     #[test]
     fn actual_size_preserves_one_source_pixel_per_display_pixel_and_reaches_every_edge() {
         for scale in [1.0, 1.25, 1.5, 2.0] {
-            let mut layout = Layout::overview(RECT { left: 0, top: 0, right: 1920, bottom: 1080 }, scale, 3);
-            layout.arrange_page(&[16.0 / 9.0, 1.6, 0.6]);
+            let layout = Layout::overview(RECT { left: 0, top: 0, right: 1920, bottom: 1080 }, scale, 3);
             let size = (2560, 1440);
             let dest = layout.thumbnail(0, size);
             for edge in [0.0, 0.5, 1.0] {
@@ -971,8 +985,7 @@ mod tests {
     fn overview_previews_never_enlarge_the_source_bitmap() {
         let work = RECT { left: 0, top: 0, right: 2560, bottom: 1440 };
         for scale in [1.0, 1.25, 1.5, 2.0] {
-            let mut layout = Layout::overview(work, scale, 2);
-            layout.arrange_page(&[1.5, 16.0 / 9.0]);
+            let layout = Layout::overview(work, scale, 2);
             for (slot, size) in [(150, 100), (1920, 1080)].into_iter().enumerate() {
                 let r = layout.thumbnail(slot, size);
                 assert!(r.right - r.left <= size.0 && r.bottom - r.top <= size.1);
@@ -985,12 +998,34 @@ mod tests {
     }
 
     #[test]
-    fn pages_fit_the_work_area_at_each_monitor_scale() {
+    fn fifth_window_starts_a_second_row_and_overflow_scrolls_one_row() {
+        for overview in [false, true] {
+            let work = RECT { left: -1920, top: 0, right: 0, bottom: 1080 };
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                let few = Layout::grid(work, scale, 4, overview);
+                assert_eq!(few.rows, 1);
+                for len in 5..=8 {
+                    let layout = Layout::grid(work, scale, len, overview);
+                    assert_eq!(layout.rows, 2);
+                    assert!(layout.count >= len && layout.tile <= few.tile);
+                    assert!(layout.card(layout.columns).1 > layout.card(0).3);
+                }
+                let mut large = Layout::grid(work, scale, 128, overview);
+                large.reveal_row(large.count, 128);
+                assert_eq!(large.first_row, 1);
+                large.reveal_row(127, 128);
+                assert_eq!(large.first_row + large.rows, 128usize.div_ceil(large.columns));
+            }
+        }
+    }
+
+    #[test]
+    fn grid_fits_the_work_area_at_each_monitor_scale() {
         for (width, height, scale) in [(1920, 1080, 1.0), (3840, 2160, 2.0), (1280, 720, 1.5), (720, 1080, 2.0)] {
             let work = RECT { left: -width, top: -height, right: 0, bottom: 0 };
             for windows in [0, 1, 3, 25] {
                 let layout = Layout::new(work, scale, windows);
-                assert!((1..=windows.clamp(1, 5)).contains(&layout.count));
+                assert!((1..=4).contains(&layout.columns));
                 assert!(layout.size.0 <= width && layout.size.1 <= height);
                 let last = layout.image(layout.count - 1);
                 assert!(last.0 >= 0.0 && last.0 < last.2 && last.2 < layout.size.0 as f32);

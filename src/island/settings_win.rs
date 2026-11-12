@@ -177,7 +177,12 @@ impl App {
             self.apply_character();
             self.sync_pet_studio();
         }
-        if previous.game_mode != self.settings.game_mode {
+        if previous.game_mode != self.settings.game_mode
+            || previous.game_ai != self.settings.game_ai
+            || previous.game_windowed != self.settings.game_windowed
+            || previous.hide_fullscreen_youtube != self.settings.hide_fullscreen_youtube
+            || previous.hide_in_apps != self.settings.hide_in_apps
+        {
             self.start_game_watch();
         }
         if previous.system_notifications != self.settings.system_notifications {
@@ -1003,6 +1008,62 @@ impl App {
                     self.render_settings_win();
                 }
             }
+            view::Act::VisibilityPicker => {
+                if self.ui.sw.visibility_apps.take().is_none() {
+                    let mut paths: Vec<_> = crate::platform::desktop_dock::windows()
+                        .into_iter()
+                        .filter(|window| !window.island_settings && !window.path.is_empty())
+                        .map(|window| window.path.to_lowercase())
+                        .filter(|path| !self.settings.hide_in_apps.contains_key(path))
+                        .collect();
+                    paths.sort();
+                    paths.dedup();
+                    self.ui.sw.visibility_apps = Some(paths);
+                }
+                self.render_settings_win();
+            }
+            view::Act::VisibilityAdd(index) => {
+                if let Some(path) = self.ui.sw.visibility_apps.take().and_then(|paths| paths.get(index).cloned()) {
+                    self.settings.hide_in_apps.insert(path, crate::data::settings::HideInApp::Fullscreen);
+                    self.visibility_rules_changed();
+                }
+            }
+            view::Act::VisibilityChange(index) => {
+                use crate::data::settings::HideInApp;
+                if let Some(mode) = self.settings.hide_in_apps.values_mut().nth(index) {
+                    *mode = match *mode {
+                        HideInApp::Fullscreen => HideInApp::Always,
+                        HideInApp::Always => HideInApp::Fullscreen,
+                    };
+                    self.visibility_rules_changed();
+                }
+            }
+            view::Act::VisibilityRemove(index) => {
+                if let Some(path) = self.settings.hide_in_apps.keys().nth(index).cloned() {
+                    self.settings.hide_in_apps.remove(&path);
+                    self.visibility_rules_changed();
+                }
+            }
+            view::Act::EqRecording => {
+                let key = &self.ui.media.recording_key;
+                if !key.is_empty() && self.settings.eq_sources == crate::data::settings::EqSources::Music {
+                    match self.settings.eq_recordings.get(key) {
+                        None => {
+                            self.settings.eq_recordings.insert(key.clone(), true);
+                        }
+                        Some(true) => {
+                            self.settings.eq_recordings.insert(key.clone(), false);
+                        }
+                        Some(false) => {
+                            self.settings.eq_recordings.remove(key);
+                        }
+                    }
+                    self.settings.save();
+                    self.ui.cfg = self.settings.clone();
+                    self.refresh_eq_shape();
+                    self.render_settings_win();
+                }
+            }
             view::Act::GameAlwaysShow => {
                 crate::platform::game_mode::set_rule(Some(false));
                 self.on_game_timer();
@@ -1068,6 +1129,13 @@ impl App {
                 }
             }
         }
+    }
+
+    fn visibility_rules_changed(&mut self) {
+        self.settings.save();
+        self.ui.cfg = self.settings.clone();
+        self.start_game_watch();
+        self.render_settings_win();
     }
 
     fn metrics_changed(&mut self) {

@@ -256,7 +256,7 @@ impl App {
             again |= moving || self.ui.activity.animating();
         }
         self.repaint_expanded();
-        let preview = if !self.gaming && !self.pill_hidden && self.ui.tab == view::Tab::Chat {
+        let preview = if !self.foreground_hidden() && !self.pill_hidden && self.ui.tab == view::Tab::Chat {
             self.ui.chat.pet.preview_interval()
         } else {
             None

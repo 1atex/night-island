@@ -305,7 +305,14 @@ impl App {
                     && crate::ui::feedback::motion_allowed(),
             );
         }
+        let recording_changed = now.recording_key != self.ui.media.recording_key;
         self.ui.media = now;
+        if recording_changed
+            && self.settings_win.is_some()
+            && view::GROUPS.get(self.ui.sw.group).is_some_and(|g| g.name == "Pill and music")
+        {
+            self.render_settings_win();
+        }
         if self.ui.home.vol_track {
             match volume::app_volume(&self.ui.media.source) {
                 Some(level) => self.ui.home.app_vol = level,

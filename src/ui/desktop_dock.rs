@@ -89,6 +89,7 @@ struct State {
     scanned_at: Instant,
     hidden: bool,
     suppressed: bool,
+    fullscreen: bool,
     offset: usize,
     request: Option<Request>,
     menu_open: bool,
@@ -332,7 +333,16 @@ impl State {
     }
 
     fn update_suppression(&mut self) -> bool {
-        let suppressed = (self.config.hide_fullscreen && desktop::fullscreen(&self.monitor))
+        let screen = if self.config.hide_fullscreen || !self.config.fullscreen_alt_tab {
+            desktop::foreground_fullscreen()
+        } else {
+            None
+        };
+        if self.fullscreen != screen.is_some() {
+            self.fullscreen = screen.is_some();
+            self.enable_shortcut();
+        }
+        let suppressed = (self.config.hide_fullscreen && screen == Some(self.monitor.bounds))
             || desktop::foreground_app_hidden(&self.monitor, &self.config.hidden_apps);
         self.set_suppressed(suppressed);
         suppressed
@@ -343,8 +353,9 @@ impl State {
             self.suppressed = suppressed;
             self.enable_shortcut();
             if suppressed {
-                self.pending_switch = None;
-                self.switcher.take();
+                if self.switcher.as_ref().is_some_and(|s| !s.keyboard()) {
+                    self.switcher.take();
+                }
                 self.finish_flight();
             }
             self.hide_preview();
@@ -838,7 +849,9 @@ impl State {
         title: String,
         placement: super::dock_switcher::Placement,
     ) -> bool {
-        if !self.config.window_switcher || self.suppressed {
+        if !self.config.window_switcher
+            || (self.suppressed && matches!(placement.anchor, super::dock_switcher::Anchor::Dock { .. }))
+        {
             return false;
         }
         self.hide_preview();
@@ -880,7 +893,9 @@ impl State {
     fn enable_shortcut(&self) {
         if let Some(shortcut) = &self.shortcut {
             shortcut.update(&self.scan);
-            shortcut.enable(!self.suppressed && !self.menu_open && !self.scan.is_empty());
+            shortcut.enable(
+                (!self.fullscreen || self.config.fullscreen_alt_tab) && !self.menu_open && !self.scan.is_empty(),
+            );
         }
     }
 
@@ -948,6 +963,15 @@ impl State {
 
     fn pulse(&mut self) {
         if self.update_suppression() {
+            if self.shortcut.is_some() && (!self.fullscreen || self.config.fullscreen_alt_tab) {
+                self.scan = desktop::cached_windows();
+                self.enable_shortcut();
+                if let Some(popup) = &self.switcher {
+                    self.icons.poll();
+                    popup.load_icons(&mut self.icons);
+                    popup.prune();
+                }
+            }
             return;
         }
         self.feedback.set_enabled(self.config.animations && motion_allowed());
@@ -1358,6 +1382,7 @@ impl Dock {
             scanned_at: Instant::now(),
             hidden: false,
             suppressed: false,
+            fullscreen: false,
             offset: 0,
             request: None,
             menu_open: false,
@@ -1434,11 +1459,15 @@ impl Dock {
         }
     }
 
-    pub fn show_windows(&mut self, windows: Vec<desktop::Window>, title: String) -> bool {
+    pub fn show_windows(&mut self, windows: Vec<desktop::Window>, title: String, target: Option<&str>) -> bool {
         let state = &mut self.state;
+        let center = target
+            .and_then(|target| state.entries.iter().position(|e| e.pin.target == target))
+            .and_then(|i| state.rects.iter().find(|(index, _)| *index == i))
+            .map_or(state.origin.0 + state.size.0 / 2, |(_, r)| state.origin.0 + ((r.0 + r.2) * 0.5) as i32);
         let placement = super::dock_switcher::Placement {
             work: state.monitor.work,
-            anchor: super::dock_switcher::Anchor::Dock(state.origin.1 + state.panel.1 as i32),
+            anchor: super::dock_switcher::Anchor::Dock { above: state.origin.1 + state.panel.1 as i32, center },
             scale: state.scale,
             hidden: state.capture_hidden.get(),
         };
@@ -1676,6 +1705,38 @@ pub(super) mod tests {
                 "Release the modifiers before running the desktop fixture"
             );
         }
+        let fullscreen_test = switcher_style == crate::data::desktop_dock::SwitcherStyle::SideRight;
+        if fullscreen_test {
+            let hwnd = HWND(windows[1].handle as _);
+            let bounds = dock.state.monitor.bounds;
+            let mut visibility = crate::data::settings::Settings { game_mode: false, ..Default::default() };
+            let before = crate::platform::game_mode::foreground(false).unwrap();
+            visibility.hide_in_apps.insert(before.path.clone(), crate::data::settings::HideInApp::Fullscreen);
+            assert!(!before.excluded(&visibility));
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+                SetWindowLongPtrW(hwnd, GWL_STYLE, (WS_POPUP | WS_VISIBLE).0 as isize);
+                SetWindowPos(
+                    hwnd,
+                    None,
+                    bounds.left,
+                    bounds.top,
+                    bounds.right - bounds.left,
+                    bounds.bottom - bounds.top,
+                    SWP_NOZORDER | SWP_FRAMECHANGED,
+                )
+                .unwrap();
+                windows::Win32::Graphics::Dwm::DwmFlush().unwrap();
+            }
+            let during = crate::platform::game_mode::foreground(false).unwrap();
+            assert!(during.excluded(&visibility));
+            dock.state.config.hide_fullscreen = true;
+            assert!(dock.state.update_suppression());
+            assert!(dock.state.fullscreen);
+            unsafe {
+                let _ = KillTimer(Some(dock.state.hwnd), PULSE);
+            }
+        }
         let alt = chord();
         pump_for(220);
         let popup = dock.state.switcher.as_ref().expect("Keyboard overview");
@@ -1691,6 +1752,23 @@ pub(super) mod tests {
             GetWindowRect(popup.hwnd(), &mut rect).unwrap();
         }
         assert!((rect.top + rect.bottom - dock.state.monitor.work.top - dock.state.monitor.work.bottom).abs() < 4);
+        if fullscreen_test {
+            assert!(unsafe { IsWindowVisible(popup.hwnd()).as_bool() });
+            assert!(!unsafe { IsWindowVisible(dock.state.hwnd).as_bool() });
+            assert!(rect.right > dock.state.monitor.work.right - 28);
+            let pos = POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
+            assert_eq!(unsafe { WindowFromPoint(pos) }, popup.hwnd());
+            let original = popup.selected().unwrap().handle;
+            let half = WPARAM((u32::from((-60i16) as u16) as usize) << 16);
+            unsafe {
+                SendMessageW(popup.hwnd(), WM_MOUSEWHEEL, Some(half), None);
+            }
+            assert_eq!(popup.selected().unwrap().handle, original);
+            unsafe {
+                SendMessageW(popup.hwnd(), WM_MOUSEWHEEL, Some(half), None);
+            }
+            assert_ne!(popup.selected().unwrap().handle, original);
+        }
         send(VK_ESCAPE, false);
         send(VK_ESCAPE, true);
         drop(alt);

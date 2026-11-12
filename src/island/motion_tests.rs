@@ -219,6 +219,7 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             artist: "M83".into(),
             playing: true,
             source: "Motion preview".into(),
+            context: crate::platform::media::context::SourceKind::Yandex,
             cover: media::debug_cover(16, &[72, 140, 230, 255].repeat(256)),
             ..Default::default()
         };
@@ -505,6 +506,7 @@ fn native_live_activities_preserve_music_and_open_equalizer_is_smoothed() -> Res
             ];
             app.ui.media.playing = true;
             app.ui.media.title = "New track".into();
+            app.ui.media.context = crate::platform::media::context::SourceKind::Yandex;
             app.ui.media.artist = "Preview".into();
             app.ui.media.accent = Some((110, 150, 230));
             app.sync_live_activities();
@@ -577,7 +579,17 @@ fn native_live_activities_preserve_music_and_open_equalizer_is_smoothed() -> Res
                     encoder.write_header().unwrap().write_image_data(&bytes).unwrap();
                 }
             }
-            app.music.spectrum_running = false;
+            for state in [State::Expanded, State::Collapsed] {
+                app.state = state;
+                app.ui.media.context = crate::platform::media::context::SourceKind::YoutubeVideo;
+                app.update_eq();
+                assert!(!app.music.spectrum_running);
+                app.ui.media.context = crate::platform::media::context::SourceKind::YoutubeMusic;
+                app.update_eq();
+                assert!(app.music.spectrum_running);
+            }
+            app.ui.media.playing = false;
+            app.update_eq();
             audio::debug_levels([0.0; audio::BANDS]);
         }
     }
@@ -860,6 +872,7 @@ fn native_tool_widgets_and_assistant_settings_preview() -> Result<()> {
             path: "C:\\Apps\\ChatGPT.exe".into(),
             name: "ChatGPT.exe".into(),
             fullscreen: true,
+            youtube: false,
             stamp: (0, 0),
         },
         false,
@@ -869,5 +882,66 @@ fn native_tool_widgets_and_assistant_settings_preview() -> Result<()> {
     if let Some(path) = std::env::var_os("NI_GAME_MODE_PREVIEW") {
         save(&settings, path, 940, 820);
     }
+    Ok(())
+}
+
+#[test]
+#[ignore = "Toggles island visibility against an isolated foreground window"]
+fn native_foreground_rules_restore_visibility_without_game_mode() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    struct Runtime;
+    impl Drop for Runtime {
+        fn drop(&mut self) {
+            unsafe {
+                RoUninitialize();
+            }
+        }
+    }
+    let _runtime = Runtime;
+    let _queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    use crate::data::settings::HideInApp;
+    use crate::platform::desktop_dock;
+    let owner = window(WS_EX_NOREDIRECTIONBITMAP)?;
+    let settings = Settings { game_mode: false, character: Character::None, ..Settings::default() };
+    let mut app = App::new_visuals(owner.0, 1.0, settings)?;
+    let (_fixture, windows) = desktop_dock::tests::window_fixture(true);
+    let target = &windows[0];
+    let hwnd = HWND(target.handle as _);
+    unsafe {
+        let _ = ShowWindow(owner.0, SW_SHOWNOACTIVATE);
+        if !SetForegroundWindow(hwnd).as_bool() {
+            SwitchToThisWindow(hwnd, false);
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while unsafe { GetForegroundWindow() } != hwnd && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(unsafe { GetForegroundWindow() }, hwnd);
+    let visible = || unsafe { IsWindowVisible(owner.0).as_bool() };
+    let path = target.path.to_lowercase();
+    app.settings.hide_in_apps.insert(path.clone(), HideInApp::Fullscreen);
+    app.on_game_timer();
+    assert!(visible());
+    app.settings.hide_in_apps.insert(path.clone(), HideInApp::Always);
+    app.on_game_timer();
+    assert!(!visible() && !app.gaming);
+    app.settings.hide_in_apps.remove(&path);
+    app.on_game_timer();
+    assert!(visible());
+    app.settings.hide_in_apps.insert(path.clone(), HideInApp::Always);
+    app.on_game_timer();
+    app.pill_hidden = true;
+    app.settings.hide_in_apps.remove(&path);
+    app.on_game_timer();
+    assert!(!visible());
     Ok(())
 }

@@ -208,7 +208,7 @@ impl App {
             && !self.notification_card_visible()
             && self.settings.weather
             && self.ui.weather.is_some()
-            && !self.gaming
+            && !self.foreground_hidden()
             && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
             && crate::ui::weather_icons::animations_enabled()
             && unsafe { IsWindowVisible(self.hwnd).as_bool() }

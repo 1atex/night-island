@@ -56,7 +56,7 @@ impl App {
     }
 
     fn companion_over_island(&self) -> bool {
-        if self.gaming
+        if self.foreground_hidden()
             || (self.pill_hidden && !self.ghosted)
             || !matches!(self.state, State::Collapsed | State::Expanded)
         {
@@ -165,7 +165,7 @@ impl App {
     }
 
     pub(in crate::island) fn start_char(&self) {
-        if !self.gaming
+        if !self.foreground_hidden()
             && self.settings.character != Character::None
             && (self.state == State::Collapsed || self.pet.desktop.is_some())
         {
@@ -211,7 +211,7 @@ impl App {
             || self.settings.pet_performance == crate::ui::pet_motion::PetPerformance::Still
             || !crate::ui::feedback::motion_allowed()
             || self.pill_hidden
-            || self.gaming
+            || self.foreground_hidden()
         {
             self.set_character_detached(false);
             return;
@@ -230,7 +230,7 @@ impl App {
         let Some(returning) = self.pet.returning else { return };
         let p = (returning.start.elapsed().as_secs_f32() / 0.52).clamp(0.0, 1.0);
         let _ = self._visual.SetScale(Vector3 { X: 1.0, Y: 1.0, Z: 1.0 });
-        if self.gaming || self.pill_hidden || !matches!(self.state, State::Collapsed | State::Expanded) {
+        if self.foreground_hidden() || self.pill_hidden || !matches!(self.state, State::Collapsed | State::Expanded) {
             self.pet.returning = None;
             if let Some(desktop) = &mut self.pet.desktop {
                 desktop.cancel_return();
@@ -372,7 +372,7 @@ impl App {
     pub(in crate::island) fn char_tick(&mut self) {
         self.pet_return_step();
         let character = self.settings.character;
-        if self.gaming {
+        if self.foreground_hidden() {
             self.pet.behavior.suspend();
             self.pet.char_key = None;
             if let Some(desktop) = &mut self.pet.desktop {

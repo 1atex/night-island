@@ -49,6 +49,9 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Alt+Tab layout" => "Вид Alt+Tab",
         "Window overview" => "Обзор окон",
         "Window carousel" => "Карусель",
+        "Left carousel" => "Карусель слева",
+        "Right carousel" => "Карусель справа",
+        "Use Island Alt+Tab in fullscreen apps" => "Меню Island в полноэкранных приложениях",
         "Icon strip" => "Иконки",
         "Release Alt to switch" => "Отпустите Alt для перехода",
         "Middle-click the dock for all windows. Click a grouped app to choose its window." => {
@@ -175,6 +178,23 @@ fn phrase(s: &str) -> Option<&'static str> {
         }
         "Balanced pill layout" => "Единые размеры и отступы в пилюле",
         "Smooth liquid equalizer" => "Плавная жидкая форма эквалайзера",
+        "Hide the island" => "Когда скрывать остров",
+        "Hide on fullscreen YouTube" => "Скрывать при полноэкранном просмотре YouTube",
+        "Choose a running app…" => "Выбрать запущенное приложение…",
+        "Close app list" => "Закрыть список приложений",
+        "Open an app to add a rule for it." => "Запусти приложение, чтобы добавить для него правило.",
+        "Only in fullscreen" => "Только на весь экран",
+        "Whenever active" => "Пока приложение активно",
+        "Show the equalizer for" => "Когда показывать эквалайзер",
+        "Yandex and music on YouTube" => "Яндекс Музыка и музыка на YouTube",
+        "Yandex Music only" => "Только Яндекс Музыка",
+        "All players and videos" => "Все плееры и видео",
+        "Click the recording to cycle between automatic, always show and always hide." => {
+            "Нажми на запись, чтобы выбрать режим эквалайзера для неё."
+        }
+        "Always show" => "Всегда показывать",
+        "Always hide" => "Всегда скрывать",
+        "Automatic" => "Автоматически",
         "Liquid equalizer response" => "Реакция жидкого эквалайзера",
         "Calm" => "Спокойная",
         "Responsive" => "Отзывчивая",
@@ -391,8 +411,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Windows…" => "Окна…",
         "Night Island · Settings" => "Night Island · Настройки",
 
-        "Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back." => {
-            "Полноэкранные приложения скрывают док на своём мониторе. Alt+Tab вернёт его."
+        "Fullscreen apps hide the dock on their monitor. The Alt+Tab setting controls the window switcher separately." => {
+            "Док скрывается на мониторе полноэкранного приложения. Его меню Alt+Tab можно включить отдельно."
         }
         "Games and application rules" => "Игры и правила приложений",
         "For a windowed game, right-click its dock icon and choose Hide dock in this app." => {

@@ -644,7 +644,7 @@ impl App {
         let visible = self.state == State::Collapsed
             && self.pill_motion.intro.is_none()
             && !self.notification_card_visible()
-            && !self.gaming
+            && !self.foreground_hidden()
             && (!self.pill_hidden || self.ghosted)
             && self.ui.media.playing
             && self.ui.volume.is_none()
@@ -654,19 +654,20 @@ impl App {
         let open = self.state == State::Expanded
             && self.settings.eq_when_open
             && self.settings.edge_spikes
-            && !self.gaming
+            && !self.foreground_hidden()
             && (!self.pill_hidden || self.ghosted)
             && self.ui.media.playing;
+        let allowed = self.ui.media.equalizer(&self.settings);
         let analysing = self.ui.media.playing
-            && !self.gaming
+            && !self.foreground_hidden()
             && ((self.pet.desktop.is_some())
-                || ((!self.pill_hidden || self.ghosted) && (self.settings.music_eq || spikes || open)));
+                || (allowed && (!self.pill_hidden || self.ghosted) && (self.settings.music_eq || spikes || open)));
         if analysing {
             audio::start();
         } else {
             audio::stop();
         }
-        self.update_spectrum((visible && (self.settings.music_eq || spikes)) || open);
+        self.update_spectrum(allowed && ((visible && (self.settings.music_eq || spikes)) || open));
         self.update_lyrics(visible);
         self.start_progress_timer();
     }
@@ -1052,6 +1053,7 @@ mod tests {
         ui.cfg.music_eq = true;
         ui.media.playing = true;
         ui.media.title = "Test track".into();
+        ui.media.context = crate::platform::media::context::SourceKind::Yandex;
         assert!(view::music_slots(&ui, 1.0, 400.0).bars.is_some());
         ui.cfg.music_eq = false;
         assert!(view::music_slots(&ui, 1.0, 400.0).bars.is_none());

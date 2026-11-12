@@ -382,9 +382,9 @@ fn dock_context(entry: Option<&crate::ui::desktop_dock::Entry>) -> Option<usize>
     }
 }
 
-fn show_windows(windows: Vec<desktop::Window>, title: String) -> bool {
+fn show_windows(windows: Vec<desktop::Window>, title: String, target: Option<&str>) -> bool {
     let mut shown = false;
-    with_app(|a| shown = a.desktop_dock.as_mut().is_some_and(|dock| dock.show_windows(windows, title)));
+    with_app(|a| shown = a.desktop_dock.as_mut().is_some_and(|dock| dock.show_windows(windows, title, target)));
     shown
 }
 
@@ -467,7 +467,7 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
             a.save_desktop_dock();
         }),
         Some(Request::AllWindows) => {
-            show_windows(desktop::windows(), tr("All windows").into_owned());
+            show_windows(desktop::windows(), tr("All windows").into_owned(), None);
         }
         Some(Request::Activate(window)) => activate_window(&window, false),
         Some(Request::Add) => add_file(hwnd),
@@ -481,7 +481,7 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                     cmd::shell_open(&entry.pin.target, None);
                 }
             } else {
-                if live.len() > 1 && show_windows(live.clone(), entry.pin.name.clone()) {
+                if live.len() > 1 && show_windows(live.clone(), entry.pin.name.clone(), Some(&entry.pin.target)) {
                     return;
                 }
                 let index = live.iter().position(|w| w.active).map_or(0, |i| (i + 1) % live.len());
@@ -650,7 +650,7 @@ pub(in crate::island) fn handle_request(hwnd: HWND, command: usize) {
                     }
                 }
                 Some(ALL_WINDOWS) => {
-                    show_windows(desktop::windows(), tr("All windows").into_owned());
+                    show_windows(desktop::windows(), tr("All windows").into_owned(), None);
                 }
                 Some(22) => import_dock(hwnd),
                 Some(IMPORT_TASKBAR) => crate::platform::taskbar_pins::start(hwnd, true),

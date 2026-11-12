@@ -378,7 +378,7 @@ impl App {
         self.pill_motion.intro.is_none()
             && !self.notification_card_visible()
             && self.state == State::Collapsed
-            && !self.gaming
+            && !self.foreground_hidden()
             && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
             && unsafe { IsWindowVisible(self.hwnd).as_bool() }
     }

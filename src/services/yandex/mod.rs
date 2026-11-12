@@ -1163,6 +1163,7 @@ impl Worker {
             title: track.title.clone(),
             artist: track.artist.clone(),
             source: SOURCE.into(),
+            context: crate::platform::media::context::SourceKind::Yandex,
             players: 1,
             ..Default::default()
         };

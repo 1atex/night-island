@@ -287,7 +287,7 @@ fn foreground_app() -> Option<HWND> {
     }
 }
 
-fn on_monitor(hwnd: HWND, monitor: &Monitor) -> bool {
+fn window_monitor_bounds(hwnd: HWND) -> Option<RECT> {
     unsafe {
         let handle = windows::Win32::Graphics::Gdi::MonitorFromWindow(
             hwnd,
@@ -297,7 +297,7 @@ fn on_monitor(hwnd: HWND, monitor: &Monitor) -> bool {
             cbSize: size_of::<windows::Win32::Graphics::Gdi::MONITORINFO>() as u32,
             ..Default::default()
         };
-        GetMonitorInfoW(handle, &mut info).as_bool() && info.rcMonitor == monitor.bounds
+        GetMonitorInfoW(handle, &mut info).as_bool().then_some(info.rcMonitor)
     }
 }
 
@@ -345,19 +345,27 @@ pub fn file_properties(owner: HWND, target: &str) {
 }
 
 pub fn fullscreen(monitor: &Monitor) -> bool {
-    use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
-    let Some(hwnd) = foreground_app() else { return false };
-    let exclusive = unsafe { SHQueryUserNotificationState() }.is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN);
-    fullscreen_window(hwnd, monitor, exclusive)
+    foreground_fullscreen() == Some(monitor.bounds)
 }
 
-fn fullscreen_window(hwnd: HWND, monitor: &Monitor, exclusive: bool) -> bool {
+pub fn foreground_fullscreen() -> Option<RECT> {
+    fullscreen_monitor(foreground_app()?)
+}
+
+pub(super) fn fullscreen_monitor(hwnd: HWND) -> Option<RECT> {
+    use windows::Win32::UI::Shell::{QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
+    let bounds = window_monitor_bounds(hwnd)?;
+    let exclusive = unsafe { SHQueryUserNotificationState() }.is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN);
+    fullscreen_window(hwnd, bounds, exclusive).then_some(bounds)
+}
+
+fn fullscreen_window(hwnd: HWND, bounds: RECT, exclusive: bool) -> bool {
     use windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS;
     unsafe {
         if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
             return false;
         }
-        if exclusive && on_monitor(hwnd, monitor) {
+        if exclusive && window_monitor_bounds(hwnd) == Some(bounds) {
             return true;
         }
         let captioned = GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_CAPTION.0 == WS_CAPTION.0;
@@ -368,7 +376,7 @@ fn fullscreen_window(hwnd: HWND, monitor: &Monitor, exclusive: bool) -> bool {
         {
             return false;
         }
-        fullscreen_bounds(rect, monitor.bounds, captioned)
+        fullscreen_bounds(rect, bounds, captioned)
     }
 }
 
@@ -377,7 +385,7 @@ pub fn foreground_app_hidden(monitor: &Monitor, hidden_apps: &[String]) -> bool 
         return false;
     }
     let Some(hwnd) = foreground_app() else { return false };
-    if !on_monitor(hwnd, monitor) {
+    if window_monitor_bounds(hwnd) != Some(monitor.bounds) {
         return false;
     }
     let mut pid = 0;
@@ -464,28 +472,28 @@ pub(crate) mod tests {
                 Ok(())
             };
             place(monitor.bounds)?;
-            assert!(fullscreen_window(hwnd, &monitor, false));
+            assert!(fullscreen_window(hwnd, monitor.bounds, false));
             let caption = WS_VISIBLE | WS_OVERLAPPEDWINDOW;
             SetWindowLongW(hwnd, GWL_STYLE, caption.0 as i32);
             place(monitor.bounds)?;
-            assert!(!fullscreen_window(hwnd, &monitor, false));
+            assert!(!fullscreen_window(hwnd, monitor.bounds, false));
             SetWindowLongW(hwnd, GWL_STYLE, (WS_VISIBLE | WS_POPUP).0 as i32);
             let inset = RECT { right: monitor.bounds.right - 80, bottom: monitor.bounds.bottom - 80, ..monitor.bounds };
             place(inset)?;
-            assert!(!fullscreen_window(hwnd, &monitor, false));
-            assert!(fullscreen_window(hwnd, &monitor, true));
+            assert!(!fullscreen_window(hwnd, monitor.bounds, false));
+            assert!(fullscreen_window(hwnd, monitor.bounds, true));
             let elsewhere = Monitor {
                 device: "Disconnected".into(),
                 bounds: RECT { left: -30000, top: -30000, right: -28080, bottom: -28920 },
                 work: RECT::default(),
                 primary: false,
             };
-            assert!(!fullscreen_window(hwnd, &elsewhere, false));
-            assert!(!fullscreen_window(hwnd, &elsewhere, true));
+            assert!(!fullscreen_window(hwnd, elsewhere.bounds, false));
+            assert!(!fullscreen_window(hwnd, elsewhere.bounds, true));
             place(monitor.bounds)?;
-            assert!(fullscreen_window(hwnd, &monitor, false));
+            assert!(fullscreen_window(hwnd, monitor.bounds, false));
             let _ = ShowWindow(hwnd, SW_HIDE);
-            assert!(!fullscreen_window(hwnd, &monitor, false));
+            assert!(!fullscreen_window(hwnd, monitor.bounds, false));
         }
         Ok(())
     }

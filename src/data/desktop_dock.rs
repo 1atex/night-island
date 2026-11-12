@@ -27,22 +27,26 @@ pub enum SwitcherStyle {
     Overview,
     Carousel,
     Icons,
+    SideLeft,
+    SideRight,
 }
 
 impl SwitcherStyle {
-    pub const ALL: [Self; 3] = [Self::Overview, Self::Carousel, Self::Icons];
+    pub const ALL: [Self; 5] = [Self::Overview, Self::Carousel, Self::Icons, Self::SideLeft, Self::SideRight];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Overview => "Window overview",
             Self::Carousel => "Window carousel",
             Self::Icons => "Icon strip",
+            Self::SideLeft => "Left carousel",
+            Self::SideRight => "Right carousel",
         }
     }
 
     pub fn step(self, forward: bool) -> Self {
         let index = self as usize;
-        Self::ALL[(index + if forward { 1 } else { 2 }) % Self::ALL.len()]
+        Self::ALL[(index + if forward { 1 } else { Self::ALL.len() - 1 }) % Self::ALL.len()]
     }
 }
 
@@ -59,6 +63,7 @@ pub struct DockSettings {
     pub hover_preview: bool,
     pub window_switcher: bool,
     pub alt_tab: bool,
+    pub fullscreen_alt_tab: bool,
     pub switcher_style: SwitcherStyle,
     pub window_motion: bool,
     pub hide_fullscreen: bool,
@@ -94,6 +99,7 @@ impl Default for DockSettings {
             hover_preview: true,
             window_switcher: true,
             alt_tab: true,
+            fullscreen_alt_tab: true,
             switcher_style: SwitcherStyle::default(),
             window_motion: true,
             hide_fullscreen: true,

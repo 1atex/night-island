@@ -307,7 +307,7 @@ impl App {
             && self.settings.island_animations
             && crate::ui::feedback::motion_allowed()
             && !self.pill_hidden
-            && !self.gaming
+            && !self.foreground_hidden()
             && !self.notification_card_visible();
         let normal = view::collapsed_width(&self.ui, COLLAPSED.0);
         let want = if self.pill_motion.intro.is_some() { self.pill_motion.intro_width } else { normal };

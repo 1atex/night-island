@@ -127,6 +127,7 @@ impl App {
                 | DockAutoHide
                 | DockRunning
                 | DockWindowSwitcher
+                | DockFullscreenAltTab
                 | DockSwitcherStyle
                 | DockAltTab
                 | DockWindowMotion
@@ -218,7 +219,7 @@ impl App {
                 PillBlur => self.set_blur(self.state == State::Expanded),
                 Capture => self.apply_capture(),
                 CaptureSelf => capture::set_hide_self(self.settings.capture_self_hidden),
-                GameMode | GameAi | GameWindowed => self.start_game_watch(),
+                GameMode | GameAi | GameWindowed | HideFullscreenYoutube => self.start_game_watch(),
                 Weather => weather::set_enabled(self.settings.weather),
                 Language => {
                     crate::ui::i18n::set_ru(self.settings.language == crate::data::settings::Language::Ru);
@@ -255,7 +256,7 @@ impl App {
                     self.stop_idle();
                     self.liquid_tick();
                 }
-                EqStrength | EqGradient | EqResponse => self.refresh_eq_shape(),
+                EqSources | EqStrength | EqGradient | EqResponse => self.refresh_eq_shape(),
                 PreferPlayingMedia => {
                     media::configure_priority(self.settings.prefer_playing_media);
                     self.on_media();

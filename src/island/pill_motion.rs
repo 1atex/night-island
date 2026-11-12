@@ -171,7 +171,7 @@ impl App {
         let visible = !self.notification_card_visible()
             && self.state == State::Collapsed
             && !self.pill_hidden
-            && !self.gaming
+            && !self.foreground_hidden()
             && !self.character_interacting()
             && (!self.settings.live_music_priority || self.ui.live.is_empty())
             && self.ui.notice.is_none()

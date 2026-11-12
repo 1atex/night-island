@@ -175,6 +175,7 @@ struct App {
     pending_high_surrogate: Option<u16>,
     music: MusicBars,
     gaming: bool,
+    excluded_foreground: bool,
     pill_hidden: bool,
     ghost_stage: u8,
     metrics_on: Option<u32>,

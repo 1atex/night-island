@@ -326,6 +326,39 @@ impl EqResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EqSources {
+    #[default]
+    Music,
+    Yandex,
+    All,
+}
+
+impl EqSources {
+    pub const ALL: [Self; 3] = [Self::Music, Self::Yandex, Self::All];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Music => "Yandex and music on YouTube",
+            Self::Yandex => "Yandex Music only",
+            Self::All => "All players and videos",
+        }
+    }
+
+    pub fn step(self, forward: bool) -> Self {
+        let index = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[(index + if forward { 1 } else { 2 }) % Self::ALL.len()]
+    }
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum HideInApp {
+    Fullscreen,
+    Always,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum EqGradient {
     #[default]
@@ -515,6 +548,8 @@ pub struct Settings {
     pub frame_rate: FrameRate,
     pub eq_style: EqStyle,
     pub eq_response: EqResponse,
+    pub eq_sources: EqSources,
+    pub eq_recordings: BTreeMap<String, bool>,
     pub eq_strength: f32,
     pub eq_gradient: EqGradient,
     pub eq_when_open: bool,
@@ -551,6 +586,8 @@ pub struct Settings {
     pub game_mode: bool,
     pub game_ai: bool,
     pub game_windowed: bool,
+    pub hide_fullscreen_youtube: bool,
+    pub hide_in_apps: BTreeMap<String, HideInApp>,
     pub ai_check_on_save: bool,
     pub auto_hide: bool,
     pub lock_drag: bool,
@@ -669,6 +706,8 @@ impl Default for Settings {
             frame_rate: FrameRate::Adaptive,
             eq_style: EqStyle::Bars,
             eq_response: EqResponse::Responsive,
+            eq_sources: EqSources::default(),
+            eq_recordings: BTreeMap::new(),
             eq_strength: 1.5,
             eq_gradient: EqGradient::Horizontal,
             eq_when_open: true,
@@ -701,6 +740,8 @@ impl Default for Settings {
             game_mode: true,
             game_ai: true,
             game_windowed: false,
+            hide_fullscreen_youtube: true,
+            hide_in_apps: BTreeMap::new(),
             ai_check_on_save: true,
             auto_hide: false,
             lock_drag: true,
@@ -1134,6 +1175,12 @@ impl Settings {
 
     pub fn sanitize(&mut self) {
         self.sounds.sanitize();
+        self.hide_in_apps = std::mem::take(&mut self.hide_in_apps)
+            .into_iter()
+            .filter(|(path, _)| !path.is_empty() && path.len() <= 8192)
+            .map(|(path, mode)| (path.to_lowercase(), mode))
+            .collect();
+        self.eq_recordings.retain(|key, _| !key.is_empty() && key.len() <= 8192);
         self.home_widget_sizes.retain(|id, _| usize::from(*id) < HOME_ACTION_COUNT);
         self.desktop_dock.sanitize();
         self.top_panel.sanitize();

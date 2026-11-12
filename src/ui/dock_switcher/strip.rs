@@ -9,24 +9,39 @@ pub(super) struct Strip {
     pub size: (i32, i32),
     pub capacity: usize,
     pub carousel: bool,
+    pub vertical: bool,
     scale: f32,
     pitch: f32,
 }
 
 impl Strip {
     pub fn new(work: RECT, scale: f32, count: usize, style: SwitcherStyle) -> Self {
-        let carousel = style == SwitcherStyle::Carousel;
+        let vertical = matches!(style, SwitcherStyle::SideLeft | SwitcherStyle::SideRight);
+        let carousel = style == SwitcherStyle::Carousel || vertical;
         let room = (work.right - work.left) as f32 * 0.92 / scale;
-        let pitch = if carousel { 56.0 } else { 68.0 };
-        let width = if carousel { 648.0 } else { (count.min(10) as f32 * pitch + 68.0).max(236.0) }.min(room);
-        let available = (((width - 68.0) / pitch).floor() as usize).max(1);
-        let capacity = if carousel { (available.min(9) - 1) / 2 * 2 + 1 } else { available.min(count.max(1)) };
         let avail_h = (work.bottom - work.top) as f32 / scale;
-        let height = if carousel { (avail_h * 0.61).min(470.0) } else { 144.0_f32.min(avail_h * 0.92) };
+        let (width, height, capacity, pitch) = if vertical {
+            let width = (room * 0.48).clamp(232.0, 350.0).min(room);
+            let max_h = (avail_h * 0.90).min(610.0);
+            let pitch = 42.0;
+            let header = (width * 0.48 + 118.0).min(max_h - 3.0 * pitch).max(104.0);
+            let available = ((max_h - header) / pitch).floor().max(1.0) as usize;
+            let desired = (count.max(1) / 2 * 2 + 1).min(7);
+            let capacity = (desired.min(available) - 1) / 2 * 2 + 1;
+            (width, (header + capacity as f32 * pitch).min(max_h), capacity, pitch)
+        } else {
+            let pitch = if carousel { 56.0 } else { 68.0 };
+            let width = if carousel { 648.0 } else { (count.min(10) as f32 * pitch + 68.0).max(236.0) }.min(room);
+            let available = (((width - 68.0) / pitch).floor() as usize).max(1);
+            let capacity = if carousel { (available.min(9) - 1) / 2 * 2 + 1 } else { available.min(count.max(1)) };
+            let height = if carousel { (avail_h * 0.61).min(470.0) } else { 144.0_f32.min(avail_h * 0.92) };
+            (width, height, capacity, pitch)
+        };
         Self {
             size: ((width * scale).round() as i32, (height * scale).round() as i32),
             capacity,
             carousel,
+            vertical,
             scale,
             pitch: pitch * scale,
         }
@@ -47,13 +62,26 @@ impl Strip {
 
     fn viewport(self) -> Rect {
         let s = self.scale;
+        if self.vertical {
+            let bottom = self.size.1 as f32 - 32.0 * s;
+            return (18.0 * s, bottom - self.pitch * self.capacity as f32, self.size.0 as f32 - 18.0 * s, bottom);
+        }
         let left = (self.size.0 as f32 - self.capacity as f32 * self.pitch) * 0.5;
         let top = if self.carousel { self.size.1 as f32 - 76.0 * s } else { 17.0 * s };
         (left, top, left + self.capacity as f32 * self.pitch, top + self.pitch)
     }
 
     pub(super) fn tile(self, index: f32, offset: f32) -> Rect {
-        let (l, t, _, b) = self.viewport();
+        let (l, t, r, b) = self.viewport();
+        if self.vertical {
+            let y = t + (index - offset) * self.pitch;
+            return (
+                l + 2.0 * self.scale,
+                y + 2.0 * self.scale,
+                r - 2.0 * self.scale,
+                y + self.pitch - 2.0 * self.scale,
+            );
+        }
         let x = l + (index - offset) * self.pitch;
         let inset = 3.0 * self.scale;
         (x + inset, t + inset, x + self.pitch - inset, b - inset)
@@ -61,7 +89,8 @@ impl Strip {
 
     pub fn preview(self) -> Rect {
         let s = self.scale;
-        (20.0 * s, 20.0 * s, self.size.0 as f32 - 20.0 * s, self.size.1 as f32 - 122.0 * s)
+        let bottom = if self.vertical { self.viewport().1 - 60.0 * s } else { self.size.1 as f32 - 122.0 * s };
+        (20.0 * s, 20.0 * s, self.size.0 as f32 - 20.0 * s, bottom)
     }
 
     fn caption(self) -> Rect {
@@ -82,6 +111,10 @@ impl Strip {
 
     fn arrow(self, next: bool) -> Rect {
         let (l, t, r, b) = self.viewport();
+        if self.vertical {
+            let y = if next { b } else { t - 21.0 * self.scale };
+            return (l, y, r, y + 21.0 * self.scale);
+        }
         let x = if next { r } else { l - 26.0 * self.scale };
         (x, t, x + 26.0 * self.scale, b)
     }
@@ -178,9 +211,13 @@ impl State {
                 let (left, top, right, bottom) = strip.tile(i as f32, offset);
                 let distance = (i as f32 - focus).abs().min(1.0);
                 let side = (strip.pitch * (0.71 - 0.12 * distance)).round();
-                let x = ((left + right - side) * 0.5).round();
+                let x = if strip.vertical { left + 10.0 * s } else { (left + right - side) * 0.5 }.round();
                 let y = ((top + bottom - side) * 0.5).round();
                 let image = (x, y, x + side, y + side);
+                if strip.vertical {
+                    let title = ((left + strip.pitch + 8.0 * s).round(), top, right - 8.0 * s, bottom);
+                    p.text_raw(&self.items[i].window.title, title, 13.0 * s)?;
+                }
                 if let Some(icon) = &self.items[i].icon {
                     p.image(image, 3.0 * s, icon.side, &icon.bgra)?;
                 } else {
@@ -192,7 +229,8 @@ impl State {
         p.pop_clip();
         draw?;
         if len > strip.capacity {
-            for (next, glyph) in [(false, '\u{E76B}'), (true, '\u{E76C}')] {
+            let arrows = if strip.vertical { ['\u{E70E}', '\u{E70D}'] } else { ['\u{E76B}', '\u{E76C}'] };
+            for (next, glyph) in [false, true].into_iter().zip(arrows) {
                 p.glyph(glyph, strip.arrow(next), 11.0 * s, rgba(1.0, 1.0, 1.0, 0.76))?;
             }
         }
@@ -210,7 +248,9 @@ mod tests {
             [(1920, 1080, 1.0), (1920, 1080, 1.25), (1280, 720, 1.5), (1080, 1920, 2.0), (3840, 2160, 2.0)]
         {
             let work = RECT { left: -w, top: -h, right: 0, bottom: 0 };
-            for style in [SwitcherStyle::Carousel, SwitcherStyle::Icons] {
+            for style in
+                [SwitcherStyle::Carousel, SwitcherStyle::Icons, SwitcherStyle::SideLeft, SwitcherStyle::SideRight]
+            {
                 for len in [1, 2, 9, 37] {
                     let strip = Strip::new(work, dpi, len, style);
                     assert!(strip.size.0 <= w && strip.size.1 <= h);
@@ -218,7 +258,9 @@ mod tests {
                         let offset = strip.target(selected, len);
                         assert!(strip.range(offset, len).contains(&selected));
                         let (l, t, r, b) = strip.tile(selected as f32, offset);
-                        if strip.carousel {
+                        if strip.vertical {
+                            assert!((t + b - strip.viewport().1 - strip.viewport().3).abs() < 1.0);
+                        } else if strip.carousel {
                             assert!((l + r - strip.size.0 as f32).abs() < 1.0);
                         }
                         assert!(l >= 0.0 && t >= 0.0 && r <= strip.size.0 as f32 && b <= strip.size.1 as f32);

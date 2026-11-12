@@ -24,7 +24,7 @@ impl App {
         crate::platform::audio_mixer::visible(
             self.hwnd,
             self.state == State::Expanded
-                && !self.gaming
+                && !self.foreground_hidden()
                 && (self.ui.tab == view::Tab::Mixer || (self.ui.tab == view::Tab::Home && self.ui.home.mixer_open)),
         );
     }

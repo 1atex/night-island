@@ -91,6 +91,7 @@ impl IslandPreview {
             title: crate::ui::i18n::tr(title).into_owned(),
             artist: crate::ui::i18n::tr("Sample track · no audio").into_owned(),
             source: "Night Island".into(),
+            context: crate::platform::media::context::SourceKind::Yandex,
             playing: false,
             accent: Some(accent),
             ..Default::default()

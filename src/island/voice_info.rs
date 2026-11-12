@@ -265,10 +265,9 @@ mod tests {
             title: "Song".into(),
             artist: "Band".into(),
             playing: true,
-            accent: None,
-            cover: None,
             source: "Spotify".into(),
             players: 1,
+            ..Default::default()
         };
         assert_eq!(
             music_text(&m, Some((30.0, 200.0))),

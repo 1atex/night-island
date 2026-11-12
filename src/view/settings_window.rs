@@ -77,13 +77,14 @@ const APPEARANCE: [(Sid, &str, Kind); 11] = [
     (Sid::TextLayout, "Text tools", Kind::Cycle),
 ];
 
-const PILL: [(Sid, &str, Kind); 23] = [
+const PILL: [(Sid, &str, Kind); 24] = [
     (Sid::PillUnifiedLayout, "Balanced pill layout", Kind::Toggle),
     (Sid::VpnPill, "VPN shield and button", Kind::Toggle),
     (Sid::PillWeather, "Weather on the pill", Kind::Toggle),
     (Sid::PillWeatherSide, "Weather position", Kind::Cycle),
     (Sid::PillBattery, "Battery on the pill", Kind::Cycle),
     (Sid::MusicEq, "Equalizer", Kind::Toggle),
+    (Sid::EqSources, "Show the equalizer for", Kind::Cycle),
     (Sid::MusicTitle, "Track title", Kind::Toggle),
     (Sid::MusicCover, "Cover art on the pill", Kind::Toggle),
     (Sid::PreferPlayingMedia, "Prefer the player that is playing", Kind::Toggle),
@@ -200,7 +201,7 @@ pub const GROUPS: [Group; 19] = [
         name: "Pill and music",
         rows: &PILL,
         custom: Some(pill_items),
-        sections: &[(0, "Pill"), (5, "Music"), (14, "Edges")],
+        sections: &[(0, "Pill"), (5, "Music"), (15, "Edges")],
     },
     Group { glyph: '\u{E767}', name: "Sounds", rows: &[], custom: Some(sound_items), sections: &[] },
     Group {
@@ -305,6 +306,11 @@ pub enum Act {
     SpotifySaveId,
     AiSave,
     AiCheck,
+    VisibilityPicker,
+    VisibilityAdd(usize),
+    VisibilityChange(usize),
+    VisibilityRemove(usize),
+    EqRecording,
     GameAlwaysShow,
     GameTreatAsGame,
     GameAutomatic,
@@ -337,6 +343,7 @@ pub struct SwUi {
     pub transfer_status: Option<(Scope, String, bool)>,
     pub has_settings_backup: bool,
     pub dock_status: String,
+    pub visibility_apps: Option<Vec<String>>,
     pub font_status: String,
     pub sound_status: String,
     pub sound_busy: bool,
@@ -450,13 +457,41 @@ fn spotify_status_text(s: &spotify::State) -> (String, bool) {
 fn game_mode_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![
         Item::Heading("Game mode"),
+        Item::Section("Hide the island"),
+        Item::Row(Sid::HideFullscreenYoutube, "Hide on fullscreen YouTube", Kind::Toggle),
+        Item::Button(
+            Act::VisibilityPicker,
+            if ui.sw.visibility_apps.is_some() { "Close app list" } else { "Choose a running app…" }.into(),
+            true,
+        ),
+    ];
+    if let Some(paths) = &ui.sw.visibility_apps {
+        if paths.is_empty() {
+            out.push(Item::Note("Open an app to add a rule for it."));
+        }
+        for (i, path) in paths.iter().enumerate() {
+            let name = std::path::Path::new(path).file_name().and_then(|part| part.to_str()).unwrap_or(path);
+            out.push(Item::Pair(Act::VisibilityAdd(i), format!("{name} · {path}"), "Add".into(), true));
+        }
+    }
+    for (i, (path, mode)) in ui.cfg.hide_in_apps.iter().enumerate() {
+        let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
+        let label = match mode {
+            crate::data::settings::HideInApp::Fullscreen => "Only in fullscreen",
+            crate::data::settings::HideInApp::Always => "Whenever active",
+        };
+        out.push(Item::Pair(Act::VisibilityChange(i), name.into(), label.into(), true));
+        out.push(Item::Pair(Act::VisibilityRemove(i), name.into(), "Remove rule".into(), false));
+    }
+    out.extend([
+        Item::Section("Games"),
         Item::Row(Sid::GameMode, "Game mode", Kind::Toggle),
         Item::Row(Sid::GameAi, "Learn unknown apps with AI", Kind::Toggle),
         Item::Row(Sid::GameWindowed, "Hide in windowed games too", Kind::Toggle),
         Item::Note("AI sees only the executable name and product description."),
         Item::Note("No window titles, screenshots or full paths are sent."),
         Item::Note("Unknown apps stay visible until classified. Desktop and Island windows are never games."),
-    ];
+    ]);
     if ui.cfg.game_ai && !crate::services::ai::has_key(ui.cfg.ai.provider) {
         out.push(Item::Note("Without an AI key, built-in rules and your own rules still work."));
         out.push(Item::Button(Act::GameAiSettings, "Set up the AI model".into(), true));
@@ -812,6 +847,22 @@ fn pill_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![Item::Heading("Pill and music")];
     if let Some(group) = GROUPS.iter().find(|g| g.name == "Pill and music") {
         out.extend(rows_with_sections(group));
+    }
+    if ui.cfg.eq_sources == crate::data::settings::EqSources::Music && !ui.media.recording_key.is_empty() {
+        let index = out
+            .iter()
+            .position(|row| matches!(row, Item::Row(Sid::EqSources, ..)))
+            .map_or(out.len(), |index| index + 1);
+        let label = match ui.cfg.eq_recordings.get(&ui.media.recording_key) {
+            Some(true) => "Always show",
+            Some(false) => "Always hide",
+            None => "Automatic",
+        };
+        out.insert(index, Item::Pair(Act::EqRecording, ui.media.title.clone(), label.into(), true));
+        out.insert(
+            index + 1,
+            Item::Note("Click the recording to cycle between automatic, always show and always hide."),
+        );
     }
     out.push(Item::Note(
         "Calm keeps the previous liquid response. Responsive follows beats faster; Energetic adds more movement.",
@@ -1328,10 +1379,11 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockWindowSwitcher, "Window switcher", Kind::Toggle),
         Item::Note("Middle-click the dock for all windows. Click a grouped app to choose its window."),
         Item::Row(Sid::DockAltTab, "Use Island for Alt+Tab", Kind::Toggle),
+        Item::Row(Sid::DockFullscreenAltTab, "Use Island Alt+Tab in fullscreen apps", Kind::Toggle),
         Item::Row(Sid::DockSwitcherStyle, "Alt+Tab layout", Kind::Cycle),
         Item::Row(Sid::DockWindowMotion, "Animate windows to and from the dock", Kind::Toggle),
         Item::Row(Sid::DockFullscreen, "Hide over fullscreen applications", Kind::Toggle),
-        Item::Note("Fullscreen apps hide the dock only on their monitor. Alt+Tab brings it back."),
+        Item::Note("Fullscreen apps hide the dock on their monitor. The Alt+Tab setting controls the window switcher separately."),
         Item::Row(Sid::DockAnimations, "Animate dock interactions", Kind::Toggle),
         Item::Row(Sid::DockSeparator, "Separate pinned and running applications", Kind::Toggle),
         Item::Row(Sid::DockLockPins, "Lock dock icon positions", Kind::Toggle),
@@ -1376,7 +1428,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Note("The Windows taskbar returns when the dock or Island closes."),
     ];
     if !ui.cfg.desktop_dock.alt_tab || !ui.cfg.desktop_dock.window_switcher {
-        out.retain(|item| !matches!(item, Item::Row(Sid::DockSwitcherStyle, ..)));
+        out.retain(|item| !matches!(item, Item::Row(Sid::DockSwitcherStyle | Sid::DockFullscreenAltTab, ..)));
     }
     if !ui.sw.dock_status.is_empty() {
         let index = out.iter().position(|item| matches!(item, Item::Row(Sid::DockImport, ..))).unwrap_or(0);

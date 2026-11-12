@@ -33,20 +33,28 @@ pub(in crate::island) fn unregister_hotkeys(hwnd: HWND) {
 }
 
 impl App {
+    pub(in crate::island) fn foreground_hidden(&self) -> bool {
+        self.gaming || self.excluded_foreground
+    }
+
+    fn watch_foreground(&self) -> bool {
+        self.settings.game_mode || self.settings.hide_fullscreen_youtube || !self.settings.hide_in_apps.is_empty()
+    }
+
     pub(in crate::island) fn start_game_watch(&mut self) {
         crate::platform::game_mode::configure(self.settings.game_mode && self.settings.game_ai);
-        if self.settings.game_mode {
+        if self.watch_foreground() {
             winevent::start(self.hwnd);
-            self.set_timer(Timer::Game, GAME_POLL_MS);
+            self.on_game_timer();
         } else {
             winevent::stop();
             self.kill_timer(Timer::Game);
-            self.set_gaming(false);
+            self.set_foreground_mode(false, false);
         }
     }
 
     pub(in crate::island) fn on_foreground_changed(&mut self) {
-        if !self.settings.game_mode {
+        if !self.watch_foreground() {
             return;
         }
         SETTLE_LOOKS.store(4, std::sync::atomic::Ordering::Relaxed);
@@ -54,14 +62,17 @@ impl App {
     }
 
     pub(in crate::island) fn on_game_timer(&mut self) {
-        if !self.settings.game_mode {
+        if !self.watch_foreground() {
             return;
         }
-        let gaming = crate::platform::game_mode::foreground().is_some_and(|probe| {
-            let game = crate::platform::game_mode::is_game(&probe, self.settings.game_ai, self.hwnd);
-            self.state != State::Expanded && game && (probe.fullscreen || self.settings.game_windowed)
-        });
-        self.set_gaming(gaming);
+        let probe = crate::platform::game_mode::foreground(self.settings.game_mode);
+        let gaming = self.settings.game_mode
+            && probe.as_ref().is_some_and(|probe| {
+                let game = crate::platform::game_mode::is_game(probe, self.settings.game_ai, self.hwnd);
+                self.state != State::Expanded && game && (probe.fullscreen || self.settings.game_windowed)
+            });
+        let excluded = probe.is_some_and(|probe| probe.excluded(&self.settings));
+        self.set_foreground_mode(gaming, excluded);
         let looks = SETTLE_LOOKS.load(std::sync::atomic::Ordering::Relaxed);
         if looks > 0 {
             SETTLE_LOOKS.store(looks - 1, std::sync::atomic::Ordering::Relaxed);
@@ -71,23 +82,30 @@ impl App {
         }
     }
 
-    pub(in crate::island) fn set_gaming(&mut self, on: bool) {
-        if on == self.gaming {
+    fn set_foreground_mode(&mut self, game: bool, excluded: bool) {
+        let previously_hidden = self.foreground_hidden();
+        if game != self.gaming {
+            self.gaming = game;
+            if game {
+                unregister_hotkeys(self.hwnd);
+            } else if self.ui.sw.capturing.is_none() {
+                register_hotkeys(self.hwnd, &self.settings);
+            }
+        }
+        self.excluded_foreground = excluded;
+        if previously_hidden == self.foreground_hidden() {
             return;
         }
-        self.gaming = on;
         self.pet.behavior.suspend();
         self.pet.char_key = None;
         self.sync_mixer();
-        if on {
-            unregister_hotkeys(self.hwnd);
+        if self.foreground_hidden() {
             if let Some(desktop) = &mut self.pet.desktop {
                 desktop.hide();
             }
             self.kill_timer(Timer::Char);
             self.hide_window();
         } else {
-            register_hotkeys(self.hwnd, &self.settings);
             if !self.pill_hidden || self.ghosted {
                 self.show_window();
             }
@@ -98,7 +116,7 @@ impl App {
     fn hide_window(&mut self) {
         self.finish_cover_motion();
         self.ui.home.track_transition.finish();
-        if self.gaming || !self.pet_notification_visible() {
+        if self.foreground_hidden() || !self.pet_notification_visible() {
             self.hide_notification_card();
         }
         self.cancel_pill_motion();
@@ -115,6 +133,9 @@ impl App {
     }
 
     fn show_window(&mut self) {
+        if self.foreground_hidden() {
+            return;
+        }
         if self.ui.tab == view::Tab::Chat && self.ui.chat.pet.enabled {
             self.sync_pet_studio();
         }
@@ -149,7 +170,7 @@ impl App {
     }
 
     pub(in crate::island) fn hide_pill_for_a_while(&mut self) {
-        if self.gaming {
+        if self.foreground_hidden() {
             return;
         }
         if self.pill_hidden {
@@ -188,7 +209,7 @@ impl App {
             self.ghosted = false;
             return self.apply_ghost(false);
         }
-        if !self.gaming {
+        if !self.foreground_hidden() {
             self.show_window();
         }
     }
