@@ -59,7 +59,7 @@ pub fn icon_for_path(path: &str) -> Option<Arc<Icon>> {
     loaded
 }
 
-type DockIconKey = (String, u32);
+type DockIconKey = (String, u32, bool);
 type DockIconResult = (DockIconKey, Option<Arc<Icon>>);
 
 pub struct DockIconCache {
@@ -78,7 +78,7 @@ impl DockIconCache {
             if unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_err() {
                 return;
             }
-            while let Ok((path, side)) = queue.recv() {
+            while let Ok((path, side, tile)) = queue.recv() {
                 let picture = std::path::Path::new(&path).extension().is_some_and(|e| {
                     ["png", "jpg", "jpeg", "webp", "bmp"].iter().any(|ext| e.eq_ignore_ascii_case(ext))
                 });
@@ -87,8 +87,10 @@ impl DockIconCache {
                 } else {
                     SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK
                 };
-                let icon = shell_image(&path, side as i32, flags).map(normalize_dock_icon).map(Arc::new);
-                if finished.send(((path, side), icon)).is_err() {
+                let icon = shell_image(&path, side as i32, flags)
+                    .map(normalize_dock_icon)
+                    .map(|icon| Arc::new(if tile { rounded_dock_icon(icon) } else { icon }));
+                if finished.send(((path, side, tile), icon)).is_err() {
                     break;
                 }
             }
@@ -106,7 +108,11 @@ impl DockIconCache {
     }
 
     pub fn get(&mut self, path: &str, pixels: u32) -> Option<Arc<Icon>> {
-        let key = (path.to_string(), icon_bucket(pixels));
+        self.get_variant(path, pixels, false)
+    }
+
+    pub fn get_variant(&mut self, path: &str, pixels: u32, tile: bool) -> Option<Arc<Icon>> {
+        let key = (path.to_string(), icon_bucket(pixels), tile);
         if let Some(icon) = self.ready.get(&key) {
             self.order.retain(|old| *old != key);
             self.order.push_back(key);
@@ -213,6 +219,75 @@ pub fn normalize_dock_icon(icon: Icon) -> Icon {
         }
     }
     Icon { side: output_side as u32, bgra: pixels }
+}
+
+fn tile_color(icon: &Icon) -> ([f32; 3], bool) {
+    let side = icon.side as usize;
+    let mut bins = [[0u32; 4]; 512];
+    let mut samples = 0;
+    for (index, px) in icon.bgra.chunks_exact(4).enumerate() {
+        let x = (index % side) as f32 / side as f32 - 0.5;
+        let y = (index / side) as f32 / side as f32 - 0.5;
+        if px[3] < 225 || !(0.09..0.187).contains(&(x * x + y * y)) {
+            continue;
+        }
+        let key = ((px[0] as usize >> 5) * 8 + (px[1] as usize >> 5)) * 8 + (px[2] as usize >> 5);
+        let bin = &mut bins[key];
+        bin[3] += 1;
+        for (sum, channel) in bin[..3].iter_mut().zip(px) {
+            *sum += *channel as u32;
+        }
+        samples += 1;
+    }
+    let bin = bins.iter().max_by_key(|bin| bin[3]).unwrap();
+    if samples > 0 {
+        let dominant: [i32; 3] = std::array::from_fn(|i| (bin[i] / bin[3]) as i32);
+        let mut tone = [0u32; 4];
+        for group in bins.iter().filter(|group| group[3] > 0) {
+            let similar = (0..3).all(|i| ((group[i] / group[3]) as i32 - dominant[i]).abs() <= 60);
+            if similar {
+                for (sum, value) in tone.iter_mut().zip(group) {
+                    *sum += *value;
+                }
+            }
+        }
+        if tone[3] * 2 >= samples {
+            return (std::array::from_fn(|i| tone[i] as f32 / tone[3] as f32), true);
+        }
+    }
+    ([244.0, 242.0, 241.0], false)
+}
+
+fn rounded_dock_icon(icon: Icon) -> Icon {
+    let (color, solid_edge) = tile_color(&icon);
+    let side = (icon.side as f32 / if solid_edge { 0.90 } else { 0.76 }).ceil() as usize;
+    let half = side as f32 * 0.5;
+    let extent = side as f32 * 0.42;
+    let radius = extent * 0.46;
+    let offset = (side - icon.side as usize) / 2;
+    let mut bgra = vec![0; side * side * 4];
+    for (i, out) in bgra.chunks_exact_mut(4).enumerate() {
+        let (x, y) = (i % side, i / side);
+        let qx = (x as f32 + 0.5 - half).abs() - extent + radius;
+        let qy = (y as f32 + 0.5 - half).abs() - extent + radius;
+        let distance = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius;
+        let coverage = (0.5 - distance).clamp(0.0, 1.0);
+        if coverage == 0.0 {
+            continue;
+        }
+        let mut src = [0u8; 4];
+        if (offset..offset + icon.side as usize).contains(&x) && (offset..offset + icon.side as usize).contains(&y) {
+            let index = ((y - offset) * icon.side as usize + x - offset) * 4;
+            src.copy_from_slice(&icon.bgra[index..index + 4]);
+        }
+        let light = (half - y as f32) / half * 7.0;
+        let remaining = 1.0 - src[3] as f32 / 255.0;
+        for c in 0..3 {
+            out[c] = (coverage * (src[c] as f32 + (color[c] + light).clamp(0.0, 255.0) * remaining)).round() as u8;
+        }
+        out[3] = (255.0 * coverage).round() as u8;
+    }
+    Icon { side: side as u32, bgra }
 }
 
 pub fn thumbnail(path: &str) -> Option<Arc<Icon>> {
@@ -525,6 +600,19 @@ mod dock_icon_tests {
     }
 
     #[test]
+    fn rounded_dock_tile_keeps_logo_color_and_transparent_corners() {
+        let mut source = Icon { side: 64, bgra: [188, 106, 36, 255].repeat(64 * 64) };
+        let center = (32 * 64 + 32) * 4;
+        source.bgra[center..center + 4].copy_from_slice(&[240, 234, 232, 255]);
+        let tile = rounded_dock_icon(source);
+        let side = tile.side as usize;
+        let center = (side / 2 * side + side / 2) * 4;
+        assert_eq!(tile.bgra[center..center + 4], [240, 234, 232, 255]);
+        assert_eq!(tile.bgra[..4], [0; 4]);
+        assert!(tile.bgra.chunks_exact(4).all(|px| px[..3].iter().all(|channel| *channel <= px[3])));
+    }
+
+    #[test]
     fn already_premultiplied_icons_are_not_darkened_twice() {
         let mut icon = Icon { side: 2, bgra: [40, 20, 10, 100].repeat(4) };
         icon.bgra[..4].copy_from_slice(&[255, 255, 255, 0]);
@@ -562,18 +650,18 @@ mod dock_icon_tests {
             pending: HashSet::new(),
             order: VecDeque::new(),
         };
-        cache.pending.insert(("removed.exe".into(), 128));
+        cache.pending.insert(("removed.exe".into(), 128, false));
         cache.retain(&[]);
-        finished.send((("removed.exe".into(), 128), None)).unwrap();
+        finished.send((("removed.exe".into(), 128, false), None)).unwrap();
         assert!(!cache.poll());
         for i in 0..120 {
-            let key = (format!("{i}.exe"), 128);
+            let key = (format!("{i}.exe"), 128, false);
             cache.pending.insert(key.clone());
             finished.send((key, None)).unwrap();
         }
         assert!(cache.poll());
         assert_eq!(cache.ready.len(), 96);
         assert!(!cache.pending());
-        assert!(!cache.ready.contains_key(&("0.exe".into(), 128)));
+        assert!(!cache.ready.contains_key(&("0.exe".into(), 128, false)));
     }
 }

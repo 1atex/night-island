@@ -1404,6 +1404,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockIconSize, "Dock icon size", Kind::Slider),
         Item::Row(Sid::DockZoom, "Magnification on hover", Kind::Slider),
         Item::Row(Sid::LiquidGlass, "Liquid Glass for the island and dock", Kind::Toggle),
+        Item::Row(Sid::DockIconTiles, "Rounded app icons in Liquid Glass", Kind::Toggle),
         Item::Row(Sid::DockBlur, "Blur behind the dock", Kind::Toggle),
         Item::Row(Sid::DockOpacity, "Dock opacity", Kind::Slider),
         Item::Row(Sid::DockTintHue, "Dock tint", Kind::Slider),

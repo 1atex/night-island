@@ -435,6 +435,7 @@ fn phrase(s: &str) -> Option<&'static str> {
             "Для игры в окне: ПКМ по значку → «Скрывать док в этом приложении»."
         }
         "Remove rule" => "Убрать правило",
+        "Rounded app icons in Liquid Glass" => "Скруглённые плитки значков в Liquid Glass",
         "Blur behind the dock" => "Размытие фона за доком",
         "Dock tint" => "Оттенок панели",
         "Dock tint saturation" => "Насыщенность оттенка",

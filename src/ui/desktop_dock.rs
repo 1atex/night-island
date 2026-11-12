@@ -200,12 +200,13 @@ pub(super) fn paint_material(
     let opacity = if config.blur { config.blur_opacity } else { config.opacity };
     match material {
         Material::ClearGlass => {
-            let alpha = 0.10 + 0.21 * opacity;
+            let alpha = 0.15 + 0.18 * opacity;
+            p.card_shadow(panel, radius, s)?;
             return p.fill_round_gradient(
                 panel,
                 radius,
-                rgba(0.73 + r * 0.23, 0.75 + g * 0.22, 0.79 + b * 0.19, alpha),
-                rgba(0.16 + r * 0.70, 0.19 + g * 0.66, 0.24 + b * 0.60, alpha * 0.82),
+                rgba(0.78 + r * 0.22, 0.79 + g * 0.21, 0.82 + b * 0.18, alpha),
+                rgba(0.58 + r * 0.42, 0.60 + g * 0.40, 0.65 + b * 0.35, alpha * 0.88),
             );
         }
         Material::SmokedGlass => {
@@ -369,11 +370,16 @@ impl State {
             switcher.retain_icon_paths(&mut targets);
         }
         self.icons.retain(&targets);
+        let tile = self.glass.is_some() && self.config.glass_icon_tiles;
         for (i, entry) in self.entries.iter_mut().enumerate() {
             entry.icon = if i >= self.offset && i < self.offset + slots {
-                self.icons
-                    .get(if entry.pin.icon.is_empty() { &entry.pin.target } else { &entry.pin.icon }, requested)
-                    .or_else(|| self.icons.get(&entry.pin.target, requested))
+                if entry.pin.icon.is_empty() {
+                    self.icons.get_variant(&entry.pin.target, requested, tile)
+                } else {
+                    self.icons
+                        .get(&entry.pin.icon, requested)
+                        .or_else(|| self.icons.get_variant(&entry.pin.target, requested, tile))
+                }
             } else {
                 None
             };
@@ -439,7 +445,15 @@ impl State {
     }
 
     fn panel_radius(&self) -> f32 {
-        (if self.glass.is_some() { 15.0 } else { 22.0 }) * self.scale
+        (if self.glass.is_some() { (self.config.icon_size as f32 * 0.35).clamp(8.0, 20.0) } else { 22.0 }) * self.scale
+    }
+
+    fn icon_spacing(&self) -> f32 {
+        (if self.glass.is_some() { (self.config.icon_size as f32 * 0.095).clamp(3.0, 7.0) } else { 10.0 }) * self.scale
+    }
+
+    fn divider_gap(&self) -> f32 {
+        (if self.glass.is_some() { 12.0 } else { 20.0 }) * self.scale
     }
 
     fn layout(&mut self) {
@@ -478,16 +492,12 @@ impl State {
     }
 
     fn hit(&self, point: (f32, f32)) -> Option<usize> {
+        let padding = (self.icon_spacing() * 0.5).min(4.0 * self.scale);
         self.rects
             .iter()
             .find(|(_, rect)| {
                 inside(
-                    (
-                        rect.0 - 4.0 * self.scale,
-                        rect.1 - 3.0 * self.scale,
-                        rect.2 + 4.0 * self.scale,
-                        rect.3 + 6.0 * self.scale,
-                    ),
+                    (rect.0 - padding, rect.1 - 3.0 * self.scale, rect.2 + padding, rect.3 + 6.0 * self.scale),
                     point,
                 )
             })
@@ -523,13 +533,14 @@ impl State {
         )
         .saturating_sub(usize::from(self.config.show_add));
         let count = self.entries.len().saturating_sub(self.offset).min(slots);
-        let pitch = icon + 10.0 * s;
+        let spacing = self.icon_spacing();
+        let pitch = icon + spacing;
         let shown = count + usize::from(self.config.show_add || self.entries.is_empty());
         let boundary = (0..count).find(|n| {
             let i = self.offset + n;
             i > 0 && self.entries[i - 1].pinned && !self.entries[i].pinned
         });
-        let gap = if self.config.separator && boundary.is_some() { 20.0 * s } else { 0.0 };
+        let gap = if self.config.separator && boundary.is_some() { self.divider_gap() } else { 0.0 };
         let base_left = (width - shown as f32 * pitch - gap) / 2.0;
         let hide = self.feedback.follow(10_000, if self.hidden { 1.0 } else { 0.0 }, 0.0, 280).clamp(0.0, 1.0);
         let bottom = height - (self.config.margin as f32 + 12.0) * s;
@@ -550,13 +561,18 @@ impl State {
             let zoom = self.feedback.follow(id, strength, 0.0, 180).clamp(0.0, 1.0);
             sizes.push(icon * (1.0 + (self.config.zoom - 1.0) * zoom));
         }
-        let total = sizes.iter().sum::<f32>() + (shown as f32 + 1.0) * 10.0 * s + gap;
+        let (side_pad, vertical_pad) = if self.glass.is_some() {
+            let inset = (icon * 0.17).clamp(4.0 * s, 9.0 * s);
+            (inset, inset)
+        } else {
+            (14.0 * s, 10.0 * s)
+        };
+        let total = sizes.iter().sum::<f32>() + shown.saturating_sub(1) as f32 * spacing + gap + 2.0 * side_pad;
         let left = (width - total) / 2.0;
-        self.panel =
-            (left - 4.0 * s, bottom - icon - 10.0 * s + shift, left + total + 4.0 * s, bottom + 10.0 * s + shift);
+        self.panel = (left, bottom - icon - vertical_pad + shift, left + total, bottom + vertical_pad + shift);
         self.rects.clear();
         self.drop_slots.clear();
-        let mut x = left + 10.0 * s;
+        let mut x = left + side_pad;
         for (n, side) in sizes.iter().enumerate() {
             let i = if n == count { self.entries.len() } else { self.offset + n };
             if boundary == Some(n) {
@@ -575,7 +591,7 @@ impl State {
                 (animated_x, bottom - side + shift, animated_x + side, bottom + shift)
             };
             self.rects.push((i, rect));
-            x += side + 10.0 * s;
+            x += side + spacing;
         }
         let hint = self.hover.map(|i| {
             self.entries.get(i).map_or_else(
@@ -754,21 +770,24 @@ impl State {
                 );
                 if running > 0.001 {
                     let cx = (rect.0 + rect.2) / 2.0;
+                    let (offset, radius) = if self.glass.is_some() { (2.7, 1.35) } else { (6.0, 2.0) };
                     let _ = p.fill_ellipse(
                         cx,
-                        bottom + shift + 6.0 * s,
-                        if active { 3.0 } else { 2.0 } * s,
-                        2.0 * s,
+                        bottom + shift + offset * s,
+                        if active { radius * 1.5 } else { radius } * s,
+                        radius * s,
                         rgba(1.0, 1.0, 1.0, (if active { 0.95 } else { 0.5 }) * running),
                     );
                 }
                 if self.config.separator && i > 0 && !entry.pinned && self.entries[i - 1].pinned {
-                    let _ = p.line(
-                        (rect.0 - 15.0 * s, bottom - icon * 0.85 + shift),
-                        (rect.0 - 15.0 * s, bottom - icon * 0.15 + shift),
-                        s,
-                        rgba(1.0, 1.0, 1.0, 0.2),
-                    );
+                    let x = rect.0 - (self.divider_gap() + self.icon_spacing()) * 0.5;
+                    let (inset, ink) = if self.glass.is_some() {
+                        (0.05, rgba(0.08, 0.09, 0.12, 0.42))
+                    } else {
+                        (0.15, rgba(1.0, 1.0, 1.0, 0.2))
+                    };
+                    let _ =
+                        p.line((x, bottom - icon * (1.0 - inset) + shift), (x, bottom - icon * inset + shift), s, ink);
                 }
             } else {
                 let _ = p.glyph(
@@ -2103,6 +2122,7 @@ pub(super) mod tests {
         std::fs::create_dir_all(folder).unwrap();
         let old_config = dock.state.config.clone();
         let old_scale = dock.state.scale;
+        dock.state.config.icon_size = 32;
         let old_dpi = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
         dock.state.scale = unsafe { GetDpiForWindow(dock.state.hwnd) } as f32 / 96.0;
         dock.state.feedback.set_enabled(false);
@@ -2110,7 +2130,9 @@ pub(super) mod tests {
         dock.state.hover = None;
         dock.state.layout();
         let (width, height) = dock.state.size;
-        let origin = dock.state.origin;
+        let work = dock.state.monitor.work;
+        let origin = (dock.state.origin.0, work.top + (work.bottom - work.top - height) / 2);
+        dock.state.origin = origin;
         let backdrop = unsafe {
             CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -2153,6 +2175,7 @@ pub(super) mod tests {
         }
         let mut energies = Vec::new();
         let mut top_chroma = Vec::new();
+        let tail_pinned = dock.state.entries.last().is_some_and(|entry| entry.pinned);
         for (blur, glass, name) in [
             (false, false, "blur-off"),
             (true, false, "blur-on"),
@@ -2175,6 +2198,16 @@ pub(super) mod tests {
             dock.state.config.opacity = 0.0;
             dock.state.config.blur_opacity = 0.0;
             if name.starts_with("dock-") {
+                if let Some(entry) = dock.state.entries.last_mut() {
+                    entry.pinned = false;
+                }
+                dock.state.load_icons();
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while dock.state.icons.pending() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                    dock.state.icons.poll();
+                }
+                dock.state.load_icons();
                 dock.state.config.blur_opacity = DockSettings::default().blur_opacity;
                 if name == "dock-classic" {
                     let mut wallpaper = Vec::with_capacity((width * height) as usize * 4);
@@ -2182,11 +2215,15 @@ pub(super) mod tests {
                         for x in 0..width {
                             let u = x as f32 / width as f32;
                             let v = y as f32 / height as f32;
-                            let d = u - 0.67 + 0.36 * v - 0.11 * (v * 3.0).cos();
-                            let mix = (0.5 + d * 55.0).clamp(0.0, 1.0);
-                            let rim = (-d.abs() * 120.0).exp() * 0.30;
-                            let sand = [0.62 + v * 0.21, 0.49 + v * 0.22, 0.40 + v * 0.20];
-                            let blue = [0.13 + u * 0.18, 0.16 + v * 0.19, 0.25 + u * 0.23];
+                            let d = u - 0.32 + 0.075 * v;
+                            let fold = u - 0.74 + 0.025 * v;
+                            let mix = (0.5 + d * width as f32 * 0.48).clamp(0.0, 1.0);
+                            let rim = (-d.abs() * width as f32 * 0.66).exp() * 0.21
+                                + (-fold.abs() * width as f32 * 0.46).exp() * 0.17;
+                            let warm = (0.48 + 0.16 * (u * 8.0).sin()) - v * 0.07;
+                            let sand = [warm + 0.055, warm, warm - 0.035];
+                            let cool = if fold < 0.0 { (u - 0.24).max(0.0) } else { 0.20 + (u - 0.74) * 1.2 };
+                            let blue = [0.18 + 0.63 * cool, 0.17 + 0.80 * cool, 0.25 + 0.85 * cool];
                             for i in [2, 1, 0] {
                                 wallpaper.push(((sand[i] * (1.0 - mix) + blue[i] * mix + rim).min(1.0) * 255.0) as u8);
                             }
@@ -2302,6 +2339,9 @@ pub(super) mod tests {
             FillRect(dc, &RECT { left: 0, top: 0, right: width, bottom: height }, brush);
             let _ = DeleteObject(brush.into());
             ReleaseDC(Some(backdrop), dc);
+        }
+        if let Some(entry) = dock.state.entries.last_mut() {
+            entry.pinned = tail_pinned;
         }
         dock.state.glass.take();
         dock.state.config.blur_opacity = 0.0;
@@ -2675,7 +2715,10 @@ pub(super) mod tests {
             dock.state.pointer = Some((x, dock.state.panel.3 - 20.0));
             dock.state.render();
             for pair in dock.state.rects.windows(2) {
-                assert!(pair[1].1.0 - pair[0].1.2 >= 9.0, "Magnification must not overlap neighboring icons");
+                assert!(
+                    pair[1].1.0 - pair[0].1.2 >= dock.state.icon_spacing() - 1.0,
+                    "Magnification must not overlap neighboring icons"
+                );
             }
             std::thread::sleep(Duration::from_millis(8));
         }

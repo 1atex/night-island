@@ -46,7 +46,7 @@ fn optics(x: f32, y: f32) -> [u8; 5] {
     let bend = (1.0 + d / 22.0).clamp(0.0, 1.0).powf(2.4) * cover;
     let light = -0.543 * nx - 0.840 * ny;
     let rim = (-(d + 1.0).abs() / 1.1).exp();
-    let reflection = cover * rim * (0.10 + 0.58 * light.max(0.0).powi(5) + 0.28 * (-light).max(0.0).powi(8));
+    let reflection = cover * rim * (0.14 + 0.68 * light.max(0.0).powi(4) + 0.41 * (-light).max(0.0).powi(5));
     [bend * (-nx).max(0.0), bend * nx.max(0.0), bend * (-ny).max(0.0), bend * ny.max(0.0), reflection]
         .map(|a| (255.0 * a).round() as u8)
 }
@@ -124,7 +124,7 @@ impl Lens {
         sample.SetBrush(&parent.Brush()?)?;
         let frost = c.CreateContainerVisual()?;
         frost.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
-        frost.SetOpacity(0.27)?;
+        frost.SetOpacity(0.69)?;
         frost.Children()?.InsertAtTop(&sample)?;
         root.Children()?.InsertAtBottom(&frost)?;
         root.Children()?.InsertAtTop(&edge)?;

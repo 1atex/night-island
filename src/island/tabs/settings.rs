@@ -140,6 +140,7 @@ impl App {
                 | DockSeparator
                 | DockShowAdd
                 | DockLockPins
+                | DockIconTiles
                 | DockIconSize
                 | DockZoom
                 | DockOpacity
