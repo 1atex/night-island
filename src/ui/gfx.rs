@@ -214,7 +214,6 @@ impl Gpu {
             icons: self.icons(),
             vector_icons: &self.vector_icons,
             weather: &self.weather,
-            cards: None,
         }
     }
 }
@@ -314,7 +313,6 @@ impl IconBitmapCache {
 }
 
 pub struct Painter<'a> {
-    cards: Option<&'a RefCell<Vec<super::glass::CardBounds>>>,
     dc: &'a ID2D1RenderTarget,
     dwrite: &'a IDWriteFactory,
     icons: PCWSTR,
@@ -323,10 +321,6 @@ pub struct Painter<'a> {
 }
 
 impl Painter<'_> {
-    pub fn with_cards<'a>(&'a self, cards: Option<&'a RefCell<Vec<super::glass::CardBounds>>>) -> Painter<'a> {
-        Painter { cards, ..*self }
-    }
-
     pub fn weather_svg(&self, name: &'static str, rect: (f32, f32, f32, f32), animated: bool) -> Result<()> {
         self.weather.borrow_mut().draw(self.dc, name, rect, animated)
     }
@@ -644,7 +638,6 @@ impl Painter<'_> {
                 icons: self.icons,
                 vector_icons: self.vector_icons,
                 weather: self.weather,
-                cards: None,
             });
             rt.EndDraw(None, None)?;
             painted?;
@@ -1290,9 +1283,6 @@ impl Painter<'_> {
         let face = (l + scale * 0.5, t + scale * 0.5, r - scale * 0.5, b - scale * 0.5);
         if face.2 <= face.0 || face.3 <= face.1 {
             return Ok(());
-        }
-        if let Some(cards) = self.cards {
-            cards.borrow_mut().push(super::glass::CardBounds { rect, radius });
         }
         self.fill_round_gradient(face, radius, rgba(0.70, 0.82, 0.98, 0.085), rgba(0.14, 0.19, 0.28, 0.04))?;
         let brush = self.linear_brush(

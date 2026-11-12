@@ -5,7 +5,7 @@ use windows::Graphics::Effects::{
     IGraphicsEffect, IGraphicsEffect_Impl, IGraphicsEffectSource, IGraphicsEffectSource_Impl,
 };
 use windows::UI::Composition::{
-    CompositionBrush, CompositionEffectBrush, CompositionEffectSourceParameter, Compositor,
+    CompositionBrush, CompositionEffectBrush, CompositionEffectFactory, CompositionEffectSourceParameter, Compositor,
 };
 use windows::Win32::Foundation::{E_BOUNDS, E_INVALIDARG, E_POINTER};
 use windows::Win32::Graphics::Direct2D::{CLSID_D2D1ArithmeticComposite, CLSID_D2D1GaussianBlur};
@@ -115,4 +115,42 @@ pub(super) fn detail_brush(c: &Compositor, backdrop: &CompositionBrush, scale: f
     let brush = c.CreateEffectFactoryWithProperties(&frost, &properties)?.CreateBrush()?;
     brush.SetSourceParameter(h!("scene"), backdrop)?;
     Ok(brush)
+}
+
+pub(super) fn refraction_factory(c: &Compositor, scale: f32) -> Result<CompositionEffectFactory> {
+    let body = CompositionEffectSourceParameter::Create(h!("body"))?.cast::<IGraphicsEffectSource>()?;
+    let shifted = CompositionEffectSourceParameter::Create(h!("shifted"))?.cast::<IGraphicsEffectSource>()?;
+    let band: IGraphicsEffectSource = Effect {
+        class: CLSID_D2D1ArithmeticComposite,
+        name: Default::default(),
+        properties: vec![
+            PropertyValue::CreateSingleArray(&[0.0, 1.0, -1.0, 0.0])?.cast()?,
+            PropertyValue::CreateBoolean(true)?.cast()?,
+        ],
+        sources: vec![body, shifted],
+    }
+    .into();
+    let feather: IGraphicsEffectSource = Effect {
+        class: CLSID_D2D1GaussianBlur,
+        name: Default::default(),
+        properties: vec![
+            PropertyValue::CreateSingle(1.8 * scale)?.cast()?,
+            PropertyValue::CreateUInt32(0)?.cast()?,
+            PropertyValue::CreateUInt32(0)?.cast()?,
+        ],
+        sources: vec![band],
+    }
+    .into();
+    let scene = CompositionEffectSourceParameter::Create(h!("refracted"))?.cast::<IGraphicsEffectSource>()?;
+    let refraction: IGraphicsEffect = Effect {
+        class: CLSID_D2D1ArithmeticComposite,
+        name: Default::default(),
+        properties: vec![
+            PropertyValue::CreateSingleArray(&[1.0, 0.0, 0.0, 0.0])?.cast()?,
+            PropertyValue::CreateBoolean(true)?.cast()?,
+        ],
+        sources: vec![scene, feather],
+    }
+    .into();
+    c.CreateEffectFactory(&refraction)
 }

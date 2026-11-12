@@ -479,7 +479,7 @@ pub struct Settings {
     pub top_panel: crate::data::top_panel::TopPanelSettings,
     pub desktop_dock: crate::data::desktop_dock::DockSettings,
     pub language: Language,
-    pub liquid_glass: bool,
+    pub liquid_glass_beta: bool,
     pub card_shadows: bool,
     pub legacy_icons: bool,
     pub live_activities: bool,
@@ -637,7 +637,7 @@ impl Default for Settings {
             top_panel: Default::default(),
             desktop_dock: Default::default(),
             language: Language::Ru,
-            liquid_glass: true,
+            liquid_glass_beta: false,
             card_shadows: true,
             legacy_icons: false,
             live_activities: true,
@@ -1341,6 +1341,21 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn glass_beta_requires_explicit_opt_in() {
+        for profile in ["{}", r#"{"liquid_glass":true}"#, r#"{"liquid_glass":false}"#] {
+            assert!(!serde_json::from_str::<Settings>(profile).unwrap().liquid_glass_beta);
+        }
+        let mut settings: Settings = serde_json::from_str(r#"{"liquid_glass":true,"scale_percent":125}"#).unwrap();
+        for enabled in [true, false] {
+            settings.liquid_glass_beta = enabled;
+            let saved = serde_json::to_vec(&settings).unwrap();
+            settings = serde_json::from_slice(&saved).unwrap();
+            assert_eq!(settings.liquid_glass_beta, enabled);
+            assert_eq!(settings.scale_percent, 125);
+        }
+    }
 
     #[test]
     fn the_current_tour_opens_for_new_and_existing_profiles_once() {

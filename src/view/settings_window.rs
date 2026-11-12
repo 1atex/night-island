@@ -69,7 +69,7 @@ const APPEARANCE: [(Sid, &str, Kind); 12] = [
     (Sid::HeaderIcons, "Icons beside tab names", Kind::Toggle),
     (Sid::HeaderIconColors, "Colored header icons", Kind::Toggle),
     (Sid::HeaderActiveAccent, "Expressive active tab", Kind::Toggle),
-    (Sid::LiquidGlass, "Liquid Glass for the island and dock", Kind::Toggle),
+    (Sid::LiquidGlass, "Liquid Glass for the island and dock (beta)", Kind::Toggle),
     (Sid::CardShadows, "Card shadows in the open island", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
@@ -1403,7 +1403,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Section("Appearance"),
         Item::Row(Sid::DockIconSize, "Dock icon size", Kind::Slider),
         Item::Row(Sid::DockZoom, "Magnification on hover", Kind::Slider),
-        Item::Row(Sid::LiquidGlass, "Liquid Glass for the island and dock", Kind::Toggle),
+        Item::Row(Sid::LiquidGlass, "Liquid Glass for the island and dock (beta)", Kind::Toggle),
         Item::Row(Sid::DockIconTiles, "Rounded app icons in Liquid Glass", Kind::Toggle),
         Item::Row(Sid::DockBlur, "Blur behind the dock", Kind::Toggle),
         Item::Row(Sid::DockOpacity, "Dock opacity", Kind::Slider),
@@ -1440,6 +1440,9 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Row(Sid::DockReplaceTaskbar, "Replace Windows taskbar while dock is enabled", Kind::Toggle),
         Item::Note("The Windows taskbar returns when the dock or Island closes."),
     ];
+    if !ui.cfg.liquid_glass_beta {
+        out.retain(|item| !matches!(item, Item::Row(Sid::DockIconTiles, _, _)));
+    }
     if !ui.cfg.desktop_dock.alt_tab || !ui.cfg.desktop_dock.window_switcher {
         out.retain(|item| !matches!(item, Item::Row(Sid::DockSwitcherStyle | Sid::DockFullscreenAltTab, ..)));
     }

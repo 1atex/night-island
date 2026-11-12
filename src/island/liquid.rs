@@ -115,10 +115,22 @@ impl App {
 
     pub(in crate::island) fn restore_liquid_body(&self) {
         let _ = self.liquid.highlight.sprite.SetIsVisible(false);
-        if self.liquid.body_active.replace(false) {
+        if self.liquid.body_active.get() {
             let _ = self.liquid.body_shape.StopAnimation(h!("Path"));
-            let _ = self._visual.SetClip(&self.liquid.round_clip);
+            let _ = self.set_liquid_clip(false);
         }
+    }
+
+    fn set_liquid_clip(&self, active: bool) -> Result<()> {
+        if self.liquid.body_active.get() != active {
+            let clip = if active { &self.liquid.body_clip } else { &self.liquid.round_clip };
+            self._visual.SetClip(clip)?;
+            if let Some(glass) = &self.glass {
+                glass.set_contour(&clip.Geometry()?)?;
+            }
+            self.liquid.body_active.set(active);
+        }
+        Ok(())
     }
 
     pub(in crate::island) fn reset_liquid_pull(&mut self) {
@@ -276,8 +288,7 @@ impl App {
             && let Ok(path) = crate::ui::gfx::composition_path(&outline)
         {
             let _ = self.liquid.body_shape.SetPath(&path);
-            let _ = self._visual.SetClip(&self.liquid.body_clip);
-            self.liquid.body_active.set(true);
+            let _ = self.set_liquid_clip(true);
         }
         let colors = self
             .bump_look()
@@ -359,8 +370,7 @@ impl App {
                     && let Ok(path) = crate::ui::gfx::composition_path(&joined)
                 {
                     let _ = self.liquid.body_shape.SetPath(&path);
-                    let _ = self._visual.SetClip(&self.liquid.body_clip);
-                    self.liquid.body_active.set(true);
+                    let _ = self.set_liquid_clip(true);
                 }
             }
         });
@@ -760,8 +770,7 @@ impl App {
             && let Ok(path) = crate::ui::gfx::composition_path(&shape)
         {
             let _ = self.liquid.body_shape.SetPath(&path);
-            let _ = self._visual.SetClip(&self.liquid.body_clip);
-            self.liquid.body_active.set(true);
+            let _ = self.set_liquid_clip(true);
         }
         if !self.spikes_active() {
             self.set_bump_visible(false);
@@ -864,8 +873,7 @@ impl App {
             }
             animation.SetIterationBehavior(AnimationIterationBehavior::Forever)?;
             self.liquid.body_shape.StartAnimation(h!("Path"), &animation.cast::<CompositionAnimation>()?)?;
-            self._visual.SetClip(&self.liquid.body_clip)?;
-            self.liquid.body_active.set(true);
+            self.set_liquid_clip(true)?;
             Ok(())
         })();
         if let Err(error) = result {

@@ -202,9 +202,7 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             assert_eq!(app.open_motion.as_ref().unwrap().clock, clock);
             app.repaint_expanded();
             if let Some(glass) = &app.glass {
-                let (sample_size, cards) = glass.island_metrics()?;
-                assert_eq!(sample_size, app.window_size(Win::Big));
-                assert!(cards > 0);
+                glass.verify_contour(&app.liquid.round_clip.Geometry()?, app.window_size(Win::Big))?;
             }
             assert!(start.elapsed() < Duration::from_millis(250));
             for progress in [0.0, 0.25, 0.6, 1.0] {
@@ -220,7 +218,7 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             assert!((before - after).abs() < 0.03);
             seek(&app, 1.0)?;
             if let Some(glass) = &app.glass {
-                assert_eq!(glass.island_metrics()?.0, app.window_size(Win::Big));
+                glass.verify_contour(&app.liquid.round_clip.Geometry()?, app.window_size(Win::Big))?;
             }
             app.kill_timer(Timer::Expand);
             app.set_timer(Timer::Expand, 100);
@@ -398,6 +396,9 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             );
         })?;
         app.pet.char_layer.sprite.SetIsVisible(true)?;
+        crate::ui::glass::configure(true);
+        app.sync_glass();
+        app.set_blur(false);
         let body = app.pill_rect(false);
         app.liquid.pull_ready = true;
         app.liquid.bump_amp = 24.0;
@@ -462,6 +463,15 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
                 std::thread::sleep(Duration::from_millis(30));
                 DwmFlush()?;
             }
+            if let Some(glass) = &app.glass {
+                glass.verify_contour(&app.liquid.body_clip.Geometry()?, app.window_size(app.win))?;
+                if index == 0
+                    && let Some(folder) = std::env::var_os("NI_ISLAND_GLASS_PREVIEW")
+                {
+                    let name = if app.docked() { "docked-pull.png" } else { "floating-pull.png" };
+                    capture_to(&app, &std::path::Path::new(&folder).join(name))?;
+                }
+            }
             capture(&app, 80 + index)?;
         }
         app.ui.cfg.music_progress = false;
@@ -515,11 +525,8 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
         assert!(app.liquid.body_active.get());
         app.liquid_tick();
         assert!(app.liquid.body_active.get(), "The liquid timer must preserve the audio silhouette");
-        if placement == Placement::Docked {
-            crate::ui::glass::configure(true);
-        }
         if placement == Placement::Docked && crate::ui::glass::enabled() {
-            app.sync_glass();
+            app.restore_liquid_body();
             app.place(Win::Big);
             app.state = State::Expanded;
             app.set_geometry_now(Win::Big, true, false)?;
@@ -543,7 +550,7 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             let (x, y) = app.window_origin(Win::Big);
             scene.present(background.0, Some(POINT { x: x as i32, y: y as i32 }), 255)?;
             let lens = app.glass.as_ref().unwrap();
-            assert!(lens.island_metrics()?.1 > 0);
+            lens.verify_contour(&app.liquid.round_clip.Geometry()?, app.window_size(Win::Big))?;
             if let Some(folder) = std::env::var_os("NI_ISLAND_GLASS_PREVIEW") {
                 for (on, name) in [(false, "island-straight.png"), (true, "island-refracted.png")] {
                     lens.show_refraction(on)?;
@@ -569,8 +576,8 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             scene.present(background.0, Some(POINT { x: x as i32, y: y as i32 }), 255)?;
             let (origin, size, _) = app.pill(Win::Big, true, false);
             let mid = (origin.Y + size.Y * 0.5).round() as usize;
-            let left = (origin.X + 2.0).round() as usize;
-            let right = (origin.X + size.X - 3.0).round() as usize;
+            let left = (origin.X + 1.0).round() as usize;
+            let right = (origin.X + size.X - 2.0).round() as usize;
             let mut reflections = Vec::new();
             for x in [left, right] {
                 lens.point(Some((x as f32, mid as f32)));
@@ -584,6 +591,10 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
                         }
                         DwmFlush()?;
                     }
+                }
+                if let Some(folder) = std::env::var_os("NI_ISLAND_GLASS_PREVIEW") {
+                    let name = if x == left { "rim-left.png" } else { "rim-right.png" };
+                    capture_to(&app, &std::path::Path::new(&folder).join(name))?;
                 }
                 let frame = read_frame(&app)?;
                 let luminance = |column: usize| {
@@ -608,8 +619,9 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             app.expand();
             observe_transition(&app, true)?;
             app.settle_layers();
-            crate::ui::glass::configure(false);
         }
+        crate::ui::glass::configure(false);
+        app.sync_glass();
         app.set_decoration_through(false);
         app._target.SetRoot(None::<&windows::UI::Composition::Visual>)?;
         app.compositor.Close()?;

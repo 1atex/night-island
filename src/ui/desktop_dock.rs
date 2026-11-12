@@ -460,7 +460,7 @@ impl State {
 
     fn layout(&mut self) {
         if let Some((sprite, geometry)) = &self.backdrop {
-            super::glass::Lens::sync(&mut self.glass, &self.gpu, sprite, geometry, self.scale);
+            super::glass::Lens::sync(&mut self.glass, sprite, geometry, self.scale);
         }
         let monitors = desktop::monitors();
         if let Some(monitor) = monitors.iter().find(|m| m.device == self.config.monitor).or_else(|| monitors.first()) {
@@ -2201,8 +2201,7 @@ pub(super) mod tests {
             dock.state.glass.take();
             if glass {
                 let (parent, contour) = dock.state.backdrop.as_ref().unwrap();
-                dock.state.glass =
-                    Some(super::super::glass::Lens::attach(&dock.state.gpu, parent, contour, dock.state.scale)?);
+                dock.state.glass = Some(super::super::glass::Lens::attach(parent, contour, dock.state.scale)?);
             }
             if let Some(glass) = &dock.state.glass {
                 glass.resize(dock.state.size)?;

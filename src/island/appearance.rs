@@ -81,15 +81,19 @@ impl App {
     }
 
     pub(in crate::island) fn sync_glass(&mut self) {
-        crate::ui::glass::Lens::sync(&mut self.glass, &self.gpu, &self.backdrop, &self.geometry, self.scale);
+        crate::ui::glass::Lens::sync(&mut self.glass, &self.backdrop, &self.geometry, self.scale);
         let size = self.window_size(self.win);
         let heights = (self.pill(self.win, false, false).1.Y, self.pill(self.win, true, false).1.Y);
         if let Some(glass) = &mut self.glass {
-            let _ = glass.resize(size);
-            if let Err(error) =
-                glass.mount_island(&self.gpu, &self._visual, &self.tint, &self.expanded.sprite, &self.geometry, heights)
-            {
+            let mut setup = || -> Result<()> {
+                glass.resize(size)?;
+                glass.mount_island(&self._visual, &self.tint, &self.geometry, heights)?;
+                let clip = if self.liquid.body_active.get() { &self.liquid.body_clip } else { &self.liquid.round_clip };
+                glass.set_contour(&clip.Geometry()?)
+            };
+            if let Err(error) = setup() {
                 crate::log_warn!("Could not position the island glass: {error}");
+                self.glass = None;
             }
         }
         let _ = self.tint.SetOpacity(self.body_opacity(self.state == State::Expanded));
@@ -109,7 +113,7 @@ impl App {
     }
 
     pub(in crate::island) fn refresh_glass(&mut self) {
-        if crate::ui::glass::configure(self.settings.liquid_glass) {
+        if crate::ui::glass::configure(self.settings.liquid_glass_beta) {
             self.sync_glass();
             if self.open_motion.is_none() {
                 self.apply_pill_opacity();
@@ -212,15 +216,9 @@ impl App {
     pub(in crate::island) fn repaint_expanded(&self) {
         self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let e = self.pill_full();
-        let lens = self.glass.as_ref().filter(|_| self.state == State::Expanded);
-        let cards = lens.and_then(|glass| glass.begin_card_layout());
         let _ = self.expanded.paint(&self.gpu, |p| {
-            let p = p.with_cards(cards);
-            let _ = view::paint_expanded(&p, e, self.scale, &self.ui, &self.clipboard.clips);
+            let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
-        if let (Some(glass), Some(cards)) = (lens, cards) {
-            let _ = glass.update_cards(&cards.borrow());
-        }
         if self.state == State::Expanded
             && (self.ui.feedback.active()
                 || self.ui.home.track_transition.active()

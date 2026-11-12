@@ -1001,7 +1001,7 @@ impl Preview {
         self.state.work = work;
         self.state.scale = scale;
         if let Some(backdrop) = &mut self.state.backdrop {
-            backdrop.update_glass(&self.state.gpu, scale);
+            backdrop.update_glass(scale);
         }
         if let Some(bg) = &self.state.backdrop {
             bg.point(None, scale);

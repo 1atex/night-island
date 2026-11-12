@@ -208,7 +208,7 @@ impl PopupBackdrop {
                 crate::ui::desktop_dock::create_backdrop(hwnd, compositor, &root).ok_or_else(Error::empty)?;
             target.SetRoot(&root)?;
             let mut glass = None;
-            super::glass::Lens::sync(&mut glass, gpu, &sprite, &geometry, scale);
+            super::glass::Lens::sync(&mut glass, &sprite, &geometry, scale);
             Ok(Self { hwnd, owner, _target: target, _root: root, sprite, geometry, glass, radius })
         };
         let result = create();
@@ -257,8 +257,8 @@ impl PopupBackdrop {
         }
     }
 
-    pub fn update_glass(&mut self, gpu: &Gpu, scale: f32) {
-        super::glass::Lens::sync(&mut self.glass, gpu, &self.sprite, &self.geometry, scale);
+    pub fn update_glass(&mut self, scale: f32) {
+        super::glass::Lens::sync(&mut self.glass, &self.sprite, &self.geometry, scale);
     }
 
     pub fn glass_active(&self) -> bool {

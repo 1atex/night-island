@@ -91,7 +91,7 @@ pub fn run() -> Result<()> {
         ai::configure(&settings.ai);
         update::configure(settings.update_check, settings.update_beta);
         let mut app = App::new(hwnd, dpi_scale, settings)?;
-        crate::ui::glass::configure(app.settings.liquid_glass);
+        crate::ui::glass::configure(app.settings.liquid_glass_beta);
         app.sync_glass();
         app.place(Win::Small);
         app.apply_capture();

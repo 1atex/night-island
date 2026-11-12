@@ -133,6 +133,7 @@ impl Import {
         match self.0 {
             Content::Island(mut full) => {
                 full.tour_revision = current.tour_revision;
+                full.liquid_glass_beta = current.liquid_glass_beta;
                 full.sanitize();
                 *full
             }
@@ -163,7 +164,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("night-island-profile-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("profile.json");
-        let mut source = Settings::default();
+        let mut source = Settings { liquid_glass_beta: true, ..Settings::default() };
         source.desktop_dock.icon_size = 66;
         source.top_panel.volume = false;
         source.vpn_provider = super::super::settings::VpnProvider::Svoi;
@@ -173,6 +174,7 @@ mod tests {
         for scope in [Scope::Dock, Scope::Top, Scope::Island] {
             export(&path, &source, scope).unwrap();
             let restored = Import::read(&path, scope).unwrap().apply(&current);
+            assert!(!restored.liquid_glass_beta);
             assert_eq!(
                 restored.desktop_dock,
                 if scope == Scope::Top { current.desktop_dock.clone() } else { source.desktop_dock.clone() }

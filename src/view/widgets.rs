@@ -4,9 +4,6 @@ pub(in crate::view) fn card_depth(p: &Painter, rect: Rect, radius: f32, scale: f
     if ui.cfg.card_shadows {
         p.card_shadow(rect, radius, scale)?;
     }
-    if crate::ui::glass::enabled() {
-        p.glass_face(rect, radius, scale)?;
-    }
     Ok(())
 }
 
