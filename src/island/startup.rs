@@ -91,6 +91,8 @@ pub fn run() -> Result<()> {
         ai::configure(&settings.ai);
         update::configure(settings.update_check, settings.update_beta);
         let mut app = App::new(hwnd, dpi_scale, settings)?;
+        crate::ui::glass::configure(app.settings.liquid_glass);
+        app.sync_glass();
         app.place(Win::Small);
         app.apply_capture();
         capture::set_hide_self(app.settings.capture_self_hidden);
@@ -328,6 +330,7 @@ impl App {
             state: State::Collapsed,
             _target: target,
             _visual: visual,
+            glass: None,
             backdrop,
             tint,
             ui: {

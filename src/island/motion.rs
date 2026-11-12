@@ -125,9 +125,8 @@ impl App {
         self.geometry.StartAnimation(h!("CornerRadius"), &self.open_vector(closed.2, opened.2)?)?;
         self.tint.StartAnimation(
             h!("Opacity"),
-            &self.open_scalar(|p| {
-                self.settings.pill_opacity + (self.settings.tint_open - self.settings.pill_opacity) * p
-            })?,
+            &self
+                .open_scalar(|p| self.body_opacity(false) + (self.body_opacity(true) - self.body_opacity(false)) * p)?,
         )?;
         for layer in [&self.collapsed, &self.progress_fill, &self.pet.char_layer] {
             layer.sprite.StartAnimation(h!("Opacity"), &self.open_scalar(|p| 1.0 - smooth_range(p, 0.0, 0.25))?)?;
@@ -156,7 +155,7 @@ impl App {
         for ear in &self.ears {
             ear.sprite.StartAnimation(
                 h!("Opacity"),
-                &self.open_scalar(|p| opacity * self.settings.pill_opacity * (1.0 - smooth_range(p, 0.0, 0.3)))?,
+                &self.open_scalar(|p| opacity * self.body_opacity(false) * (1.0 - smooth_range(p, 0.0, 0.3)))?,
             )?;
         }
         Ok(())
@@ -193,7 +192,7 @@ impl App {
         self.geometry.StartAnimation(h!("CornerRadius"), &self.spring(radius, ms)?)?;
 
         let fade = self.compositor.CreateScalarKeyFrameAnimation()?;
-        fade.InsertKeyFrame(1.0, if expanded { self.settings.tint_open } else { self.settings.pill_opacity })?;
+        fade.InsertKeyFrame(1.0, self.body_opacity(expanded))?;
         fade.SetDuration(Duration::from_millis(ms * 7 / 10).into())?;
         self.tint.StartAnimation(h!("Opacity"), &fade)?;
 
@@ -348,7 +347,7 @@ impl App {
         } else {
             let _ = self.pet.char_layer.sprite.SetIsVisible(self.attached_character_on());
         }
-        let tint_want = if expanded { self.settings.tint_open } else { self.settings.pill_opacity };
+        let tint_want = self.body_opacity(expanded);
         let layers = [
             ("collapsed", &self.collapsed.sprite, if expanded { 0.0 } else { 1.0 }),
             ("progress", &self.progress_fill.sprite, if expanded { 0.0 } else { 1.0 }),

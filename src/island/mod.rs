@@ -139,6 +139,7 @@ struct App {
     _target: DesktopWindowTarget,
     _visual: ContainerVisual,
     backdrop: SpriteVisual,
+    glass: Option<crate::ui::glass::Lens>,
     tint: SpriteVisual,
     settings_win: Option<HWND>,
     windows_taskbar: Option<crate::platform::taskbar::TaskbarGuard>,

@@ -164,6 +164,11 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             app.ui.cfg = app.settings.clone();
             app.place(Win::Big);
             app.set_geometry_now(Win::Big, false, false)?;
+            crate::ui::glass::configure(true);
+            app.sync_glass();
+            assert_eq!(app.glass.is_some(), crate::ui::glass::enabled());
+            app.set_blur(false);
+            assert_eq!(app.backdrop.IsVisible()?, app.glass.is_some() || app.settings.pill_blur);
             app.state = State::Expanded;
             let start = Instant::now();
             app.animate_to(true, false)?;
@@ -187,6 +192,10 @@ fn native_island_open_close_retarget_dpi_and_content() -> Result<()> {
             assert!(unsafe { PeekMessageW(&mut message, Some(owner.0), WM_TIMER, WM_TIMER, PM_REMOVE).as_bool() });
             assert_eq!(message.wParam.0, Timer::Expand as usize);
             app.kill_timer(Timer::Expand);
+            crate::ui::glass::configure(false);
+            app.sync_glass();
+            assert!(app.glass.is_none());
+            assert_eq!(app.body_opacity(true), app.settings.tint_open);
             app.settings.island_animations = false;
             app.animate_to(false, false)?;
             assert_eq!(app.transition_ms(false), 1);

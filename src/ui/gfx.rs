@@ -1173,6 +1173,39 @@ impl Painter<'_> {
     }
 
     pub fn fill_curves(&self, start: (f32, f32), curves: &[[(f32, f32); 3]], color: D2D1_COLOR_F) -> Result<()> {
+        let path = self.curves_geometry(start, curves)?;
+        unsafe {
+            self.dc.FillGeometry(&path, &self.dc.CreateSolidColorBrush(&color, None)?, None);
+        }
+        Ok(())
+    }
+
+    pub fn glass_curves(
+        &self,
+        start: (f32, f32),
+        curves: &[[(f32, f32); 3]],
+        rect: (f32, f32, f32, f32),
+        scale: f32,
+    ) -> Result<()> {
+        let path = self.curves_geometry(start, curves)?;
+        let (r, g, b) = crate::ui::theme::panel();
+        let direction = ((rect.0, rect.1), (rect.2, rect.3));
+        let body = self.linear_brush(
+            direction.0,
+            direction.1,
+            rgba(r * 0.88 + 0.075, g * 0.88 + 0.09, b * 0.88 + 0.11, 0.82),
+            rgba(r, g, b, 0.71),
+        )?;
+        let rim =
+            self.linear_brush(direction.0, direction.1, rgba(0.90, 0.95, 1.0, 0.42), rgba(0.84, 0.89, 1.0, 0.10))?;
+        unsafe {
+            self.dc.FillGeometry(&path, &body, None);
+            self.dc.DrawGeometry(&path, &rim, scale, None);
+        }
+        Ok(())
+    }
+
+    fn curves_geometry(&self, start: (f32, f32), curves: &[[(f32, f32); 3]]) -> Result<ID2D1PathGeometry> {
         unsafe {
             let factory: ID2D1Factory = self.dc.GetFactory()?;
             let path = factory.CreatePathGeometry()?;
@@ -1188,9 +1221,8 @@ impl Painter<'_> {
             }
             sink.EndFigure(D2D1_FIGURE_END_CLOSED);
             sink.Close()?;
-            self.dc.FillGeometry(&path, &self.dc.CreateSolidColorBrush(&color, None)?, None);
+            Ok(path)
         }
-        Ok(())
     }
 
     pub fn line(&self, from: (f32, f32), to: (f32, f32), width: f32, color: D2D1_COLOR_F) -> Result<()> {
@@ -1242,6 +1274,25 @@ impl Painter<'_> {
         let brush = self.linear_brush((rect.0, rect.1), (rect.2, rect.3), from, to)?;
         unsafe {
             self.dc.FillRoundedRectangle(&rounded(rect, radius), &brush);
+        }
+        Ok(())
+    }
+
+    pub fn glass_face(&self, rect: (f32, f32, f32, f32), radius: f32, scale: f32) -> Result<()> {
+        let (l, t, r, b) = rect;
+        let face = (l + scale * 0.5, t + scale * 0.5, r - scale * 0.5, b - scale * 0.5);
+        if face.2 <= face.0 || face.3 <= face.1 {
+            return Ok(());
+        }
+        self.fill_round_gradient(face, radius, rgba(0.70, 0.82, 0.98, 0.085), rgba(0.14, 0.19, 0.28, 0.04))?;
+        let brush = self.linear_brush(
+            (l + radius, t),
+            (r - radius, b),
+            rgba(0.90, 0.96, 1.0, 0.34),
+            rgba(0.75, 0.87, 1.0, 0.045),
+        )?;
+        unsafe {
+            self.dc.DrawRoundedRectangle(&rounded(face, radius), &brush, scale, None);
         }
         Ok(())
     }

@@ -307,24 +307,26 @@ fn liquid_panel(
     bend: f32,
     focus: f32,
     color: windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F,
+    glass_scale: Option<f32>,
 ) -> Result<()> {
     let (l, t, r, b) = bounds;
-    let radius = (b - t) / 2.0;
+    let radius = (b - t).min(r - l).max(0.0) / 2.0;
     let mid = (t + b) / 2.0;
-    let x = (l + (r - l) * focus).clamp(l + radius, r - radius);
+    let x = l + radius + (r - l - 2.0 * radius).max(0.0) * focus.clamp(0.0, 1.0);
     let k = radius * 0.5523;
-    p.fill_curves(
-        (l + radius, t),
-        &[
-            [(x, t - bend), (x, t - bend), (r - radius, t)],
-            [(r - radius + k, t), (r + bend * 0.3, mid - k), (r + bend * 0.3, mid)],
-            [(r + bend * 0.3, mid + k), (r - radius + k, b), (r - radius, b)],
-            [(x, b + bend), (x, b + bend), (l + radius, b)],
-            [(l + radius - k, b), (l - bend * 0.3, mid + k), (l - bend * 0.3, mid)],
-            [(l - bend * 0.3, mid - k), (l + radius - k, t), (l + radius, t)],
-        ],
-        color,
-    )
+    let curves = [
+        [(x, t - bend), (x, t - bend), (r - radius, t)],
+        [(r - radius + k, t), (r + bend * 0.3, mid - k), (r + bend * 0.3, mid)],
+        [(r + bend * 0.3, mid + k), (r - radius + k, b), (r - radius, b)],
+        [(x, b + bend), (x, b + bend), (l + radius, b)],
+        [(l + radius - k, b), (l - bend * 0.3, mid + k), (l - bend * 0.3, mid)],
+        [(l - bend * 0.3, mid - k), (l + radius - k, t), (l + radius, t)],
+    ];
+    if let Some(scale) = glass_scale {
+        p.glass_curves((l + radius, t), &curves, bounds, scale)
+    } else {
+        p.fill_curves((l + radius, t), &curves, color)
+    }
 }
 
 impl State {
@@ -646,14 +648,21 @@ impl State {
                     let focus = self.feedback.sample(u64::MAX - 1, focus, 0.5, 200);
                     let progress = self.travel.value(Instant::now());
                     let bend = (hover * 2.0 + (progress * std::f32::consts::PI).sin() * 3.0) * s;
-                    liquid_panel(p, panel, bend, focus, rgba(1.0, 1.0, 1.0, 0.12))?;
-                    liquid_panel(
-                        p,
-                        (panel.0 + s, panel.1 + s, panel.2 - s, panel.3 - s),
-                        bend,
-                        focus,
-                        rgba(r, g, b, 1.0),
-                    )?;
+                    if super::glass::enabled() {
+                        liquid_panel(p, panel, bend, focus, rgba(r, g, b, 1.0), Some(s))?;
+                    } else {
+                        liquid_panel(p, panel, bend, focus, rgba(1.0, 1.0, 1.0, 0.12), None)?;
+                        liquid_panel(
+                            p,
+                            (panel.0 + s, panel.1 + s, panel.2 - s, panel.3 - s),
+                            bend,
+                            focus,
+                            rgba(r, g, b, 1.0),
+                            None,
+                        )?;
+                    }
+                } else if super::glass::enabled() {
+                    liquid_panel(p, panel, 0.0, 0.5, rgba(r, g, b, 1.0), Some(s))?;
                 } else {
                     p.fill_round_rect(panel, 17.0 * s, rgba(r, g, b, 0.98))?;
                     p.stroke_round_rect(panel, 17.0 * s, s, rgba(1.0, 1.0, 1.0, 0.09))?;

@@ -281,7 +281,16 @@ impl State {
         let (w, h) = (self.layout.size.0 as f32, self.layout.size.1 as f32);
         self.surface.paint(&self.gpu, |p| {
             crate::view::paint_popup_shadow(p, (w, h), s)?;
-            paint_material(p, (9.0 * s, 9.0 * s, w - 9.0 * s, h - 9.0 * s), 24.0 * s, s, &self.config)?;
+            let glass = self.backdrop.as_ref().is_some_and(|bg| bg.glass_active());
+            let m = if glass { crate::ui::popup::POPUP_MARGIN } else { 9.0 } * s;
+            paint_material(
+                p,
+                (m, m, w - m, h - m),
+                24.0 * s,
+                s,
+                &self.config,
+                if glass { super::desktop_dock::Material::SmokedGlass } else { super::desktop_dock::Material::Classic },
+            )?;
             if let Some(strip) = self.layout.strip {
                 return self.paint_strip(p, strip);
             }
@@ -576,6 +585,9 @@ impl State {
         match msg {
             WM_MOUSEMOVE => {
                 let position = (l.0 as i16 as i32, (l.0 >> 16) as i16 as i32);
+                if let Some(bg) = &self.backdrop {
+                    bg.point(Some((position.0 as f32, position.1 as f32)), self.layout.scale);
+                }
                 if self.pointer.replace(position) == Some(position) {
                     return;
                 }
@@ -771,8 +783,11 @@ impl Switcher {
             layout.reveal_row(selected, items.len());
         }
         let strip_target = layout.strip.map_or(0.0, |strip| strip.target(selected, items.len()));
-        let backdrop =
-            if config.blur { gpu.compositor().ok().and_then(|c| PopupBackdrop::new(hwnd, &c).ok()) } else { None };
+        let backdrop = if config.blur || super::glass::enabled() {
+            PopupBackdrop::new(hwnd, gpu, layout.scale, 24.0).ok()
+        } else {
+            None
+        };
         let state = Box::new(RefCell::new(State {
             hwnd,
             dock,

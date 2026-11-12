@@ -63,12 +63,13 @@ const ANIMATIONS: [(Sid, &str, Kind); 10] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 11] = [
+const APPEARANCE: [(Sid, &str, Kind); 12] = [
     (Sid::InterfaceFont, "Interface font", Kind::Cycle),
     (Sid::LegacyIcons, "Classic interface icons", Kind::Toggle),
     (Sid::HeaderIcons, "Icons beside tab names", Kind::Toggle),
     (Sid::HeaderIconColors, "Colored header icons", Kind::Toggle),
     (Sid::HeaderActiveAccent, "Expressive active tab", Kind::Toggle),
+    (Sid::LiquidGlass, "Liquid Glass for the island and dock", Kind::Toggle),
     (Sid::CardShadows, "Card shadows in the open island", Kind::Toggle),
     (Sid::LiquidReach, "Liquid reach", Kind::Slider),
     (Sid::LiquidStrength, "Liquid depth", Kind::Slider),
@@ -1402,6 +1403,7 @@ fn desktop_dock_items(ui: &UiState) -> Vec<Item> {
         Item::Section("Appearance"),
         Item::Row(Sid::DockIconSize, "Dock icon size", Kind::Slider),
         Item::Row(Sid::DockZoom, "Magnification on hover", Kind::Slider),
+        Item::Row(Sid::LiquidGlass, "Liquid Glass for the island and dock", Kind::Toggle),
         Item::Row(Sid::DockBlur, "Blur behind the dock", Kind::Toggle),
         Item::Row(Sid::DockOpacity, "Dock opacity", Kind::Slider),
         Item::Row(Sid::DockTintHue, "Dock tint", Kind::Slider),

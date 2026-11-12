@@ -3,6 +3,7 @@ use crate::view::*;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sid {
     InterfaceFont,
+    LiquidGlass,
     CardShadows,
     LegacyIcons,
     HeaderIcons,
@@ -518,6 +519,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         return !c.tab_hidden(name);
     }
     match id {
+        Sid::LiquidGlass => c.liquid_glass,
         Sid::CardShadows => c.card_shadows,
         Sid::LegacyIcons => c.legacy_icons,
         Sid::HeaderIcons => c.header_icons,
@@ -665,6 +667,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         return c.set_tab_hidden(name, !on);
     }
     match id {
+        Sid::LiquidGlass => c.liquid_glass = on,
         Sid::CardShadows => c.card_shadows = on,
         Sid::LegacyIcons => c.legacy_icons = on,
         Sid::HeaderIcons => c.header_icons = on,

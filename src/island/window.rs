@@ -776,7 +776,12 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             LRESULT(0)
         }
         WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
-            with_app(|a| a.top_panel_request(3));
+            with_app(|a| {
+                if msg == WM_SETTINGCHANGE {
+                    a.refresh_glass();
+                }
+                a.top_panel_request(3);
+            });
             LRESULT(0)
         }
         crate::platform::app_capture::WM_APP_CAPTURE => {

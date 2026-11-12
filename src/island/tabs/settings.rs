@@ -85,6 +85,7 @@ impl App {
                     self.stop_idle();
                     self.start_liquid();
                 }
+                LiquidGlass => self.refresh_glass(),
                 CardShadows => self.repaint_expanded(),
                 LegacyIcons => {
                     crate::ui::icons::set_legacy(self.settings.legacy_icons);
@@ -113,7 +114,7 @@ impl App {
                 Style => self.apply_style(),
                 Tint => {
                     if self.state == State::Expanded {
-                        let _ = self.tint.SetOpacity(self.settings.tint_open);
+                        let _ = self.tint.SetOpacity(self.body_opacity(true));
                     }
                 }
                 TopAutoHide | TopTray | TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume

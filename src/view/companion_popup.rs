@@ -24,6 +24,10 @@ pub fn paint_popup_panel(p: &Painter, size: (f32, f32), scale: f32) -> Result<()
     let m = POPUP_MARGIN * scale;
     let rect = (m, m, size.0 - m, size.1 - m);
     let (r, g, b) = crate::ui::theme::panel();
+    if crate::ui::glass::enabled() {
+        p.fill_round_rect(rect, 28.0 * scale, rgba(r, g, b, 0.82))?;
+        return p.glass_face(rect, 28.0 * scale, scale);
+    }
     p.fill_round_rect(rect, 28.0 * scale, rgba(r, g, b, 0.98))?;
     p.stroke_round_rect(rect, 28.0 * scale, scale, rgba(1.0, 1.0, 1.0, 0.07))
 }

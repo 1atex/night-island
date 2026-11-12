@@ -751,6 +751,10 @@ impl App {
     }
 
     pub(in crate::island) fn on_mouse_move(&mut self, x: i32, y: i32) {
+        if let Some(lens) = &self.glass {
+            let (l, t, _, _) = self.pill_rect(self.state == State::Expanded);
+            lens.point(Some((x as f32 - l, y as f32 - t)));
+        }
         if self.character_interacting() {
             self.kill_timer(Timer::Expand);
             return;
@@ -809,6 +813,9 @@ impl App {
     }
 
     pub(in crate::island) fn on_mouse_leave(&mut self) {
+        if let Some(lens) = &self.glass {
+            lens.point(None);
+        }
         self.ui.pressed_action = None;
         self.pointer.tracking = false;
         let had_hover = self.ui.hover_tab.take().is_some()

@@ -69,7 +69,7 @@ impl App {
     }
 
     pub(in crate::island) fn apply_pill_opacity(&mut self) {
-        let alpha = self.settings.pill_opacity;
+        let alpha = self.body_opacity(false);
         if self.state != State::Expanded {
             let _ = self.tint.SetOpacity(alpha);
         }
@@ -80,13 +80,40 @@ impl App {
         let _ = self.set_geometry_now(self.win, expanded, hidden);
     }
 
-    pub(in crate::island) fn apply_theme(&mut self) {
-        let (panel, accent) = crate::ui::theme::colors(&self.settings);
-        crate::ui::theme::set(panel, accent);
+    pub(in crate::island) fn sync_glass(&mut self) {
+        crate::ui::glass::Lens::sync(&mut self.glass, &self.gpu, &self.backdrop, &self.geometry, self.scale);
+        let _ = self.tint.SetOpacity(self.body_opacity(self.state == State::Expanded));
+        let _ = self.liquid.bump_fill.SetOpacity(self.body_opacity(false));
+    }
+
+    pub(super) fn body_opacity(&self, open: bool) -> f32 {
+        let configured = if open { self.settings.tint_open } else { self.settings.pill_opacity };
+        if self.glass.is_some() { 0.77 * configured.clamp(0.0, 1.0).sqrt() } else { configured }
+    }
+
+    fn tint_panel(&self) {
         let (r, g, b) = crate::ui::theme::panel_u8();
         if let Ok(brush) = self.compositor.CreateColorBrushWithColor(Color { A: 255, R: r, G: g, B: b }) {
             let _ = self.tint.SetBrush(&brush);
         }
+    }
+
+    pub(in crate::island) fn refresh_glass(&mut self) {
+        if crate::ui::glass::configure(self.settings.liquid_glass) {
+            self.sync_glass();
+            if self.open_motion.is_none() {
+                self.apply_pill_opacity();
+            }
+            self.set_blur(self.state == State::Expanded);
+            self.configure_desktop_dock();
+            self.repaint_themed_surfaces();
+        }
+    }
+
+    pub(in crate::island) fn apply_theme(&mut self) {
+        let (panel, accent) = crate::ui::theme::colors(&self.settings);
+        crate::ui::theme::set(panel, accent);
+        self.tint_panel();
         self.paint_ears();
         self.paint_liquid_body(0.0);
         self.apply_accent();
@@ -231,14 +258,15 @@ impl App {
     }
 
     pub(in crate::island) fn set_blur(&self, open: bool) {
+        let glass = self.glass.is_some();
         let on = if open {
-            self.settings.acrylic
+            self.settings.acrylic || glass
         } else {
-            self.settings.pill_blur && self.state != State::Hidden && self.state != State::Hiding
+            (glass || self.settings.pill_blur) && self.state != State::Hidden && self.state != State::Hiding
         };
         let _ = self.backdrop.SetIsVisible(on);
         set_host_backdrop(self.hwnd, on);
-        let _ = self.liquid.bump_blur.SetIsVisible(self.settings.pill_blur);
+        let _ = self.liquid.bump_blur.SetIsVisible(self.settings.pill_blur || glass);
         if self.settings.pill_blur && !open && !self.spikes_active() {
             let amp = if self.liquid.idle_running { IDLE_AMP * self.scale } else { self.liquid.bump_amp };
             self.paint_liquid_body(amp);

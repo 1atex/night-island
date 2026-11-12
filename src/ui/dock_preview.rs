@@ -384,7 +384,12 @@ impl State {
             );
         }
         if let Some(backdrop) = &self.backdrop {
-            backdrop.show(self.origin, size, self.scale, self.visible && self.settings.blur);
+            backdrop.show(
+                self.origin,
+                size,
+                self.scale,
+                self.visible && (self.settings.blur || super::glass::enabled()),
+            );
         }
         self.update_thumbnail();
         if let Some(backdrop) = &self.backdrop {
@@ -436,6 +441,11 @@ impl State {
             28.0 * s,
             s,
             &self.settings,
+            if self.backdrop.as_ref().is_some_and(|bg| bg.glass_active()) {
+                super::desktop_dock::Material::SmokedGlass
+            } else {
+                super::desktop_dock::Material::Classic
+            },
         )?;
         if let Some(icon) = &self.entry.icon {
             p.image(scaled((24.0, 21.0, 44.0, 41.0), s), 0.0, icon.side, &icon.bgra)?;
@@ -845,6 +855,9 @@ extern "system" fn proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESU
             WM_MOUSEMOVE => {
                 let state = &mut *ptr;
                 let point = (l.0 as i16 as f32 / state.scale, (l.0 >> 16) as i16 as f32 / state.scale);
+                if let Some(bg) = &state.backdrop {
+                    bg.point(Some((point.0 * state.scale, point.1 * state.scale)), state.scale);
+                }
                 if state.pressed.and_then(|i| state.buttons.get(i)).is_some_and(|b| b.action == Action::Volume) {
                     state.set_volume_from_point(point.0);
                 }
@@ -937,8 +950,7 @@ impl Preview {
                 None,
             )?
         };
-        let backdrop =
-            gpu.compositor().ok().and_then(|compositor| crate::ui::popup::PopupBackdrop::new(hwnd, &compositor).ok());
+        let backdrop = crate::ui::popup::PopupBackdrop::new(hwnd, gpu, scale, 28.0).ok();
         let state = Box::new(State {
             hwnd,
             parent,
@@ -988,6 +1000,12 @@ impl Preview {
         self.state.anchor = anchor;
         self.state.work = work;
         self.state.scale = scale;
+        if let Some(backdrop) = &mut self.state.backdrop {
+            backdrop.update_glass(&self.state.gpu, scale);
+        }
+        if let Some(bg) = &self.state.backdrop {
+            bg.point(None, scale);
+        }
         self.state.visible = true;
         self.state.dismissed = false;
         self.state.last_inside = Instant::now();
@@ -1017,7 +1035,7 @@ impl Preview {
 
     pub fn refresh_backdrop(&self) {
         if self.state.visible
-            && self.state.settings.blur
+            && (self.state.settings.blur || super::glass::enabled())
             && let Some(backdrop) = &self.state.backdrop
         {
             backdrop.refresh();

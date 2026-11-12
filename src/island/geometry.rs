@@ -526,7 +526,7 @@ impl App {
         self.bind_ears()?;
         for ear in &self.ears {
             ear.sprite.StopAnimation(h!("Opacity"))?;
-            ear.sprite.SetOpacity(opacity * self.settings.pill_opacity)?;
+            ear.sprite.SetOpacity(opacity * self.body_opacity(false))?;
         }
         Ok(())
     }
@@ -570,6 +570,7 @@ impl App {
             self.cw = view::collapsed_width(&self.ui, COLLAPSED.0);
         }
         self.scale = self.dpi_scale * self.settings.scale_percent as f32 / 100.0;
+        self.sync_glass();
         let _ = self.pill_motion.cover.resize(((28.0 * self.scale).ceil() as i32, (28.0 * self.scale).ceil() as i32));
         let _ = self.pill_motion.title.resize(((240.0 * self.scale).ceil() as i32, (34.0 * self.scale).ceil() as i32));
         self.stop_idle();

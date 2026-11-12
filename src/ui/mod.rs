@@ -5,6 +5,7 @@ mod companion_controls;
 pub mod feedback;
 pub mod fonts;
 pub mod gfx;
+pub mod glass;
 pub mod i18n;
 pub mod icons;
 pub mod markup;

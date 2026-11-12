@@ -143,6 +143,8 @@ pub struct PopupBackdrop {
     owner: HWND,
     _target: windows::UI::Composition::Desktop::DesktopWindowTarget,
     _root: windows::UI::Composition::ContainerVisual,
+    glass: Option<super::glass::Lens>,
+    radius: f32,
     sprite: windows::UI::Composition::SpriteVisual,
     geometry: windows::UI::Composition::CompositionRoundedRectangleGeometry,
 }
@@ -153,7 +155,8 @@ impl PopupBackdrop {
         self.hwnd
     }
 
-    pub fn new(owner: HWND, compositor: &windows::UI::Composition::Compositor) -> Result<Self> {
+    pub fn new(owner: HWND, gpu: &Gpu, scale: f32, radius: f32) -> Result<Self> {
+        let compositor = &gpu.compositor()?;
         use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
         use windows::Win32::UI::WindowsAndMessaging::*;
         use windows::core::{Interface, w};
@@ -204,7 +207,9 @@ impl PopupBackdrop {
             let (sprite, geometry) =
                 crate::ui::desktop_dock::create_backdrop(hwnd, compositor, &root).ok_or_else(Error::empty)?;
             target.SetRoot(&root)?;
-            Ok(Self { hwnd, owner, _target: target, _root: root, sprite, geometry })
+            let mut glass = None;
+            super::glass::Lens::sync(&mut glass, gpu, &sprite, &geometry, scale);
+            Ok(Self { hwnd, owner, _target: target, _root: root, sprite, geometry, glass, radius })
         };
         let result = create();
         if result.is_err() {
@@ -223,15 +228,16 @@ impl PopupBackdrop {
         let _ = self.sprite.SetOffset(windows_numerics::Vector3 { X: margin, Y: margin, Z: 0.0 });
         let _ = self.sprite.SetSize(panel);
         let _ = self.geometry.SetSize(panel);
-        let _ = self.geometry.SetCornerRadius(windows_numerics::Vector2 { X: 28.0 * scale, Y: 28.0 * scale });
+        let radius = if self.glass_active() { self.radius } else { 28.0 } * scale;
+        let _ = self.geometry.SetCornerRadius(windows_numerics::Vector2 { X: radius, Y: radius });
         unsafe {
             let region = CreateRoundRectRgn(
                 (margin - 2.0).floor() as i32,
                 (margin - 2.0).floor() as i32,
                 (size.0 as f32 - margin + 3.0).ceil() as i32,
                 (size.1 as f32 - margin + 3.0).ceil() as i32,
-                (56.0 * scale + 4.0).ceil() as i32,
-                (56.0 * scale + 4.0).ceil() as i32,
+                (2.0 * radius + 4.0).ceil() as i32,
+                (2.0 * radius + 4.0).ceil() as i32,
             );
             if SetWindowRgn(self.hwnd, Some(region), true) == 0 {
                 let _ = DeleteObject(region.into());
@@ -248,7 +254,26 @@ impl PopupBackdrop {
         }
     }
 
+    pub fn update_glass(&mut self, gpu: &Gpu, scale: f32) {
+        super::glass::Lens::sync(&mut self.glass, gpu, &self.sprite, &self.geometry, scale);
+    }
+
+    pub fn glass_active(&self) -> bool {
+        self.glass.is_some()
+    }
+
+    pub fn point(&self, point: Option<(f32, f32)>, scale: f32) {
+        if let Some(glass) = &self.glass {
+            let margin = POPUP_MARGIN * scale;
+            glass.point(point.map(|(x, y)| (x - margin, y - margin)));
+        }
+    }
+
     pub fn refresh(&self) {
+        if let Some(glass) = &self.glass {
+            let _ = glass.refresh();
+            return;
+        }
         let _ = self
             .sprite
             .Compositor()

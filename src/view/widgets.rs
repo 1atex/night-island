@@ -1,10 +1,13 @@
 use crate::view::*;
 
 pub(in crate::view) fn card_depth(p: &Painter, rect: Rect, radius: f32, scale: f32, ui: &UiState) -> Result<()> {
-    if !ui.cfg.card_shadows {
-        return Ok(());
+    if ui.cfg.card_shadows {
+        p.card_shadow(rect, radius, scale)?;
     }
-    p.card_shadow(rect, radius, scale)
+    if crate::ui::glass::enabled() {
+        p.glass_face(rect, radius, scale)?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

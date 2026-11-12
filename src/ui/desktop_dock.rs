@@ -77,6 +77,7 @@ struct State {
     gpu: Gpu,
     content: Layer,
     backdrop: Option<(SpriteVisual, CompositionRoundedRectangleGeometry)>,
+    glass: Option<super::glass::Lens>,
     icon_bitmaps: RefCell<crate::ui::gfx::IconBitmapCache>,
     icons: apps::DockIconCache,
     _target: DesktopWindowTarget,
@@ -180,15 +181,45 @@ pub(super) fn create_backdrop(
     Some((sprite, geometry))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Material {
+    Classic,
+    ClearGlass,
+    SmokedGlass,
+}
+
 pub(super) fn paint_material(
     p: &crate::ui::gfx::Painter,
     panel: Rect,
     radius: f32,
     s: f32,
     config: &DockSettings,
+    material: Material,
 ) -> Result<()> {
     let (r, g, b) = crate::ui::theme::hsv(config.tint_hue, config.tint_saturation, config.tint_brightness);
-    let alpha = if config.blur { config.blur_opacity } else { config.opacity };
+    let opacity = if config.blur { config.blur_opacity } else { config.opacity };
+    match material {
+        Material::ClearGlass => {
+            let alpha = 0.10 + 0.21 * opacity;
+            return p.fill_round_gradient(
+                panel,
+                radius,
+                rgba(0.73 + r * 0.23, 0.75 + g * 0.22, 0.79 + b * 0.19, alpha),
+                rgba(0.16 + r * 0.70, 0.19 + g * 0.66, 0.24 + b * 0.60, alpha * 0.82),
+            );
+        }
+        Material::SmokedGlass => {
+            let alpha = 0.55 + 0.27 * opacity;
+            return p.fill_round_gradient(
+                panel,
+                radius,
+                rgba(r + 0.045, g + 0.05, b + 0.065, alpha),
+                rgba(r, g, b, alpha),
+            );
+        }
+        Material::Classic => {}
+    }
+    let alpha = opacity;
     p.fill_round_gradient(
         panel,
         radius,
@@ -215,7 +246,7 @@ impl State {
     }
 
     fn schedule_backdrop_refresh(&self) {
-        if self.config.blur && !self.suppressed && self.backdrop.is_some() {
+        if (self.config.blur || self.glass.is_some()) && !self.suppressed && self.backdrop.is_some() {
             unsafe {
                 SetTimer(Some(self.hwnd), BACKDROP_REFRESH, 120, None);
             }
@@ -226,10 +257,12 @@ impl State {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), BACKDROP_REFRESH);
         }
-        if !self.config.blur || self.suppressed {
+        if !(self.config.blur || self.glass.is_some()) || self.suppressed {
             return;
         }
-        if let Some((backdrop, _)) = &self.backdrop {
+        if let Some(glass) = &self.glass {
+            let _ = glass.refresh();
+        } else if let Some((backdrop, _)) = &self.backdrop {
             let _ = backdrop
                 .Compositor()
                 .and_then(|compositor| compositor.CreateHostBackdropBrush())
@@ -394,7 +427,7 @@ impl State {
                 }
             }
             if let Some((backdrop, _)) = &self.backdrop {
-                let _ = backdrop.SetIsVisible(!suppressed && self.config.blur);
+                let _ = backdrop.SetIsVisible(!suppressed && (self.config.blur || self.glass.is_some()));
             }
             if !suppressed {
                 self.schedule_backdrop_refresh();
@@ -405,7 +438,14 @@ impl State {
         }
     }
 
+    fn panel_radius(&self) -> f32 {
+        (if self.glass.is_some() { 15.0 } else { 22.0 }) * self.scale
+    }
+
     fn layout(&mut self) {
+        if let Some((sprite, geometry)) = &self.backdrop {
+            super::glass::Lens::sync(&mut self.glass, &self.gpu, sprite, geometry, self.scale);
+        }
         let monitors = desktop::monitors();
         if let Some(monitor) = monitors.iter().find(|m| m.device == self.config.monitor).or_else(|| monitors.first()) {
             self.monitor = monitor.clone();
@@ -551,19 +591,23 @@ impl State {
         self.hint_alpha = self.feedback.follow(10_001, f32::from(show_hint), 0.0, 160).clamp(0.0, 1.0);
         let label = self.label_rect();
         if let Some((backdrop, geometry)) = &self.backdrop {
-            let _ = backdrop.SetIsVisible(self.config.blur && hide < 0.99);
+            let _ = backdrop.SetIsVisible((self.config.blur || self.glass.is_some()) && hide < 0.99);
             let _ = backdrop.SetOffset(Vector3 { X: self.panel.0, Y: self.panel.1, Z: 0.0 });
             let size = Vector2 { X: self.panel.2 - self.panel.0, Y: self.panel.3 - self.panel.1 };
             let _ = backdrop.SetSize(size);
             let _ = geometry.SetSize(size);
-            let _ = geometry.SetCornerRadius(Vector2 { X: 22.0 * s, Y: 22.0 * s });
+            let radius = self.panel_radius();
+            let _ = geometry.SetCornerRadius(Vector2 { X: radius, Y: radius });
+        }
+        if let Some(lens) = &self.glass {
+            lens.point(self.pointer.map(|(x, y)| (x - self.panel.0, y - self.panel.1)));
         }
         let _ = self.content.paint(&self.gpu, |p| self.paint_content(p, hide));
         let padding = 1.0 + s * 0.5;
         let mut shapes = vec![if hide > 0.99 {
             region_shape((0.0, height - 4.0 * s, width, height), 0.0, 0.0)
         } else {
-            region_shape(self.panel, 22.0 * s, padding)
+            region_shape(self.panel, self.panel_radius(), padding)
         }];
         if hide <= 0.99 {
             for (_, rect) in &self.rects {
@@ -637,7 +681,8 @@ impl State {
             );
             return;
         }
-        let _ = paint_material(p, self.panel, 22.0 * s, s, &self.config);
+        let material = if self.glass.is_some() { Material::ClearGlass } else { Material::Classic };
+        let _ = paint_material(p, self.panel, self.panel_radius(), s, &self.config, material);
         let mut draw_order = self.rects.clone();
         if self.dragging {
             draw_order.sort_by_key(|(i, _)| self.pressed.is_some_and(|(pressed, _)| pressed == *i));
@@ -1520,6 +1565,7 @@ impl Dock {
             gpu: gpu.popup(),
             content,
             backdrop,
+            glass: None,
             icon_bitmaps: RefCell::default(),
             icons: apps::DockIconCache::new(),
             _target: target,
@@ -2086,10 +2132,17 @@ pub(super) mod tests {
             let _ = ShowWindow(backdrop, SW_SHOWNOACTIVATE);
             let _ = SetWindowPos(backdrop, Some(HWND_TOPMOST), origin.0, origin.1, width, height, SWP_NOACTIVATE);
             let dc = GetDC(Some(backdrop));
-            for x in (0..width).step_by(6) {
-                let brush = CreateSolidBrush(COLORREF(if (x / 6) % 2 == 0 { 0x00ffffff } else { 0x00000000 }));
-                FillRect(dc, &RECT { left: x, top: 0, right: (x + 6).min(width), bottom: height }, brush);
-                let _ = DeleteObject(brush.into());
+            let panel_top = (height as f32
+                - (dock.state.config.margin as f32 + 22.0 + dock.state.config.icon_size as f32) * dock.state.scale)
+                as i32;
+            for y in 0..height {
+                let tone = (70 + (y - panel_top) * 3).clamp(0, 140) as u32;
+                for x in (0..width).step_by(6) {
+                    let c = if (x / 6) % 2 == 0 { 112 } else { 0 };
+                    let brush = CreateSolidBrush(COLORREF((tone + c) | (c << 8) | ((140 - tone + c) << 16)));
+                    FillRect(dc, &RECT { left: x, top: y, right: (x + 6).min(width), bottom: y + 1 }, brush);
+                    let _ = DeleteObject(brush.into());
+                }
             }
             ReleaseDC(Some(backdrop), dc);
             let _ = ValidateRect(Some(backdrop), None);
@@ -2099,10 +2152,80 @@ pub(super) mod tests {
             let _ = KillTimer(Some(dock.state.hwnd), PULSE);
         }
         let mut energies = Vec::new();
-        for blur in [false, true] {
+        let mut top_chroma = Vec::new();
+        for (blur, glass, name) in [
+            (false, false, "blur-off"),
+            (true, false, "blur-on"),
+            (true, true, "liquid-glass"),
+            (true, true, "light-only"),
+            (true, false, "classic-restored"),
+            (true, false, "dock-classic"),
+            (true, true, "dock-glass"),
+        ] {
+            dock.state.glass.take();
+            if glass {
+                let (parent, contour) = dock.state.backdrop.as_ref().unwrap();
+                dock.state.glass =
+                    Some(super::super::glass::Lens::attach(&dock.state.gpu, parent, contour, dock.state.scale)?);
+            }
+            if let Some(glass) = &dock.state.glass {
+                glass.show_refraction(name != "light-only")?;
+            }
             dock.state.config.blur = blur;
             dock.state.config.opacity = 0.0;
             dock.state.config.blur_opacity = 0.0;
+            if name.starts_with("dock-") {
+                dock.state.config.blur_opacity = DockSettings::default().blur_opacity;
+                if name == "dock-classic" {
+                    let mut wallpaper = Vec::with_capacity((width * height) as usize * 4);
+                    for y in 0..height {
+                        for x in 0..width {
+                            let u = x as f32 / width as f32;
+                            let v = y as f32 / height as f32;
+                            let d = u - 0.67 + 0.36 * v - 0.11 * (v * 3.0).cos();
+                            let mix = (0.5 + d * 55.0).clamp(0.0, 1.0);
+                            let rim = (-d.abs() * 120.0).exp() * 0.30;
+                            let sand = [0.62 + v * 0.21, 0.49 + v * 0.22, 0.40 + v * 0.20];
+                            let blue = [0.13 + u * 0.18, 0.16 + v * 0.19, 0.25 + u * 0.23];
+                            for i in [2, 1, 0] {
+                                wallpaper.push(((sand[i] * (1.0 - mix) + blue[i] * mix + rim).min(1.0) * 255.0) as u8);
+                            }
+                            wallpaper.push(255);
+                        }
+                    }
+                    let info = BITMAPINFO {
+                        bmiHeader: BITMAPINFOHEADER {
+                            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                            biWidth: width,
+                            biHeight: -height,
+                            biPlanes: 1,
+                            biBitCount: 32,
+                            biCompression: BI_RGB.0,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
+                    unsafe {
+                        let dc = GetDC(Some(backdrop));
+                        SetDIBitsToDevice(
+                            dc,
+                            0,
+                            0,
+                            width as u32,
+                            height as u32,
+                            0,
+                            0,
+                            0,
+                            height as u32,
+                            wallpaper.as_ptr().cast(),
+                            &info,
+                            DIB_RGB_COLORS,
+                        );
+                        ReleaseDC(Some(backdrop), dc);
+                    }
+                }
+                dock.state.refresh_backdrop();
+            }
             dock.state.render();
             let until = Instant::now() + Duration::from_millis(250);
             while Instant::now() < until {
@@ -2151,12 +2274,21 @@ pub(super) mod tests {
             };
             let energy: f32 = (x0 + 1..x1).map(|x| (lum(x) - lum(x - 1)).abs()).sum::<f32>() / (x1 - x0 - 1) as f32;
             energies.push(energy);
+            let y = (dock.state.panel.1 + 4.0 * dock.state.scale).round() as usize;
+            let chroma = (x0..x1)
+                .map(|x| {
+                    let i = (y * width as usize + x) * 4;
+                    pixels[i + 2] as f32 - pixels[i] as f32
+                })
+                .sum::<f32>()
+                / (x1 - x0) as f32;
+            top_chroma.push(chroma);
             for px in pixels.chunks_exact_mut(4) {
                 px.swap(0, 2);
                 px[3] = 255;
             }
             let mut encoder = png::Encoder::new(
-                std::fs::File::create(folder.join(if blur { "blur-on.png" } else { "blur-off.png" })).unwrap(),
+                std::fs::File::create(folder.join(format!("{name}.png"))).unwrap(),
                 width as u32,
                 height as u32,
             );
@@ -2164,6 +2296,16 @@ pub(super) mod tests {
             encoder.set_depth(png::BitDepth::Eight);
             encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
         }
+        unsafe {
+            let dc = GetDC(Some(backdrop));
+            let brush = CreateSolidBrush(COLORREF(0x00808080));
+            FillRect(dc, &RECT { left: 0, top: 0, right: width, bottom: height }, brush);
+            let _ = DeleteObject(brush.into());
+            ReleaseDC(Some(backdrop), dc);
+        }
+        dock.state.glass.take();
+        dock.state.config.blur_opacity = 0.0;
+        dock.state.render();
         let foreground = unsafe {
             CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -2218,6 +2360,7 @@ pub(super) mod tests {
                 SetWindowPos(dock.state.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
             let _ = KillTimer(Some(dock.state.hwnd), FRAME);
         }
+        settle();
         for color in [0x000000ff, 0x00ff0000] {
             unsafe {
                 let dc = GetDC(Some(foreground));
@@ -2261,6 +2404,14 @@ pub(super) mod tests {
         assert!(colors[0][0] > colors[0][2] + 80, "Red scene must reach live backdrop: {colors:?}");
         assert!(colors[1][2] > colors[1][0] + 80, "Changed blue scene must refresh without dock drawing: {colors:?}");
         assert!(colors[2][0].abs_diff(colors[2][2]) < 30, "Minimized scene must reveal neutral background: {colors:?}");
+        assert!(
+            top_chroma[2] > top_chroma[3] + 1.0,
+            "Refraction should bring the warmer background into the top edge: {top_chroma:?}"
+        );
+        assert!(
+            (top_chroma[1] - top_chroma[4]).abs() < 1.0,
+            "Disabling glass should restore the original backdrop: {top_chroma:?}"
+        );
         assert!(energies[0] > 15.0, "Backdrop fixture must be visible: {energies:?}");
         assert!(energies[1] < energies[0] * 0.6, "Host backdrop must reduce stripe detail: {energies:?}");
         Ok(())

@@ -42,6 +42,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "SVOI is closed" => "SVOI закрыт",
         "VPN shield and button" => "Щит и кнопка VPN",
         "VPN provider" => "VPN-клиент",
+        "Liquid Glass for the island and dock" => "Liquid Glass для острова и дока",
         "Card shadows in the open island" => "Тени карточек в раскрытом острове",
         "Window switcher" => "Переключатель окон",
         "All windows" => "Все окна",
