@@ -28,6 +28,7 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Working…" => "Выполняется…",
         "Night Browser downloads" => "Загрузки Night Browser",
         "Enable Island in the browser integration settings. Private downloads stay private." => {
             "Включи Island в настройках интеграций браузера. Приватные загрузки не передаются."

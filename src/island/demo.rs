@@ -64,7 +64,9 @@ pub(in crate::island) fn apply(hwnd: HWND) {
             a.repaint_expanded();
         });
     }
-    if let Some(n) = std::env::var("NI_DEBUG_TAB").ok().and_then(|v| v.parse::<usize>().ok()) {
+    if let Some(n) = std::env::var("NI_DEBUG_TAB").ok().and_then(|v| {
+        view::TABS.iter().position(|tab| tab.2.eq_ignore_ascii_case(&v)).or_else(|| v.parse::<usize>().ok())
+    }) {
         with_app(|a| {
             a.select_tab(view::TABS[n.min(view::TABS.len() - 1)].0);
             a.ui.pinned = true;

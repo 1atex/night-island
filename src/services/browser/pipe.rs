@@ -1,9 +1,9 @@
 use super::{
-    Command, SHARED, Snapshot,
+    Command, SHARED, Snapshot, change,
     model::{Frame, MAX_FRAME, parse},
     update,
 };
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, HLOCAL, HWND, INVALID_HANDLE_VALUE,
     LocalFree,
@@ -106,10 +106,10 @@ pub(super) fn start(hwnd: HWND) {
             if run(port.0, owner).is_none() {
                 update(owner, Snapshot { error: true, ..Default::default() });
             }
-            if let Ok(mut shared) = SHARED.lock() {
-                if shared.port == raw {
-                    shared.port = 0;
-                }
+            if let Ok(mut shared) = SHARED.lock()
+                && shared.port == raw
+            {
+                shared.port = 0;
             }
         }));
     }
@@ -285,11 +285,17 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
     }
     let mut hello = false;
     let mut input = Vec::new();
-    let mut requests = HashSet::new();
+    let mut requests = HashMap::<String, (String, std::time::Instant)>::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         let timeout = if hello {
-            u32::MAX
+            requests
+                .values()
+                .map(|(_, until)| {
+                    until.saturating_duration_since(std::time::Instant::now()).as_millis().min(30000) as u32
+                })
+                .min()
+                .unwrap_or(u32::MAX)
         } else {
             deadline.saturating_duration_since(std::time::Instant::now()).as_millis().min(5000) as u32
         };
@@ -312,7 +318,10 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
                 if !hello || requests.len() >= 16 {
                     continue;
                 }
-                requests.insert(request.clone());
+                requests.insert(
+                    request.clone(),
+                    (id.clone(), std::time::Instant::now() + std::time::Duration::from_secs(30)),
+                );
                 if !c.send(serde_json::json!({"v":1,"type":"command","id":id,"action":action,"request":request})) {
                     return false;
                 }
@@ -338,13 +347,16 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
                         update(hwnd, Snapshot { connected: true, ..Default::default() });
                     }
                     Some(Frame::Downloads { items, .. }) if hello => {
-                        update(hwnd, Snapshot { connected: true, items, error: false })
+                        change(hwnd, |state| {
+                            state.items = items;
+                        });
                     }
                     Some(Frame::Result { request, ok, .. }) if hello => {
-                        if requests.remove(&request) && !ok {
-                            let mut state = super::snapshot();
-                            state.error = true;
-                            update(hwnd, state);
+                        if let Some((id, _)) = requests.remove(&request) {
+                            change(hwnd, |state| {
+                                state.pending.retain(|pending| pending != &id);
+                                state.error = !ok;
+                            });
                         }
                     }
                     _ => return false,

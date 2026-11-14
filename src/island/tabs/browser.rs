@@ -34,6 +34,8 @@ impl App {
             if !browser::command(&id, action) {
                 self.ui.browser.error = true;
                 self.repaint_expanded();
+            } else {
+                self.on_browser();
             }
         }
     }

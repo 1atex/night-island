@@ -104,6 +104,10 @@ impl App {
         {
             return self.toggle_vpn();
         }
+        if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_active(&self.ui).is_some() {
+            self.open_tab(view::Tab::Downloads);
+            return;
+        }
         if self.ui.notice.is_none() && self.ui.volume.is_none() && !self.ui.live.is_empty() {
             let pill = self.pill_rect(false);
             let slot = if self.settings.vertical() {

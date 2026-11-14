@@ -44,6 +44,9 @@ pub fn hit_browser(pill: Rect, scale: f32, x: f32, y: f32, ui: &UiState) -> Opti
         ui.browser.items.iter().rev().skip(ui.browser_scroll).take(browser_rows(pill, scale)).enumerate()
     {
         let index = ui.browser.items.len() - 1 - ui.browser_scroll - offset;
+        if !ui.browser.connected || ui.browser.pending.contains(&item.id) {
+            continue;
+        }
         for (i, action) in item.actions.iter().enumerate() {
             if inside(browser_button(browser_row(pill, scale, offset), scale, i, *action), x, y) {
                 return Some((index, *action));
@@ -98,15 +101,20 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
             p.fill_round_rect(bar, scale, rgba(1.0, 1.0, 1.0, 0.12))?;
             p.fill_round_rect((bar.0, bar.1, bar.0 + (bar.2 - bar.0) * progress, bar.3), scale, WHITE)?;
         }
-        let label = match item.state {
-            State::Active => item
-                .progress()
-                .map(|f| format!("{}%", (f * 100.0) as u32))
-                .unwrap_or_else(|| format!("{} MB", item.current / 1048576)),
-            State::Paused => "Paused".into(),
-            State::Complete => "Complete".into(),
-            State::Failed => "Failed".into(),
-            State::Cancelled => "Cancelled".into(),
+        let pending = ui.browser.pending.contains(&item.id);
+        let label = if pending {
+            "Working…".into()
+        } else {
+            match item.state {
+                State::Active => item
+                    .progress()
+                    .map(|f| format!("{}%", (f * 100.0) as u32))
+                    .unwrap_or_else(|| format!("{} MB", item.current / 1048576)),
+                State::Paused => "Paused".into(),
+                State::Complete => "Complete".into(),
+                State::Failed => "Failed".into(),
+                State::Cancelled => "Cancelled".into(),
+            }
         };
         p.text(
             &label,
@@ -118,9 +126,18 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
         )?;
         for (i, action) in item.actions.iter().enumerate() {
             let rect = browser_button(r, scale, i, *action);
-            let hovered = ui.browser_hover.as_ref().is_some_and(|(id, selected)| id == &item.id && selected == action);
+            let enabled = ui.browser.connected && !pending;
+            let hovered =
+                enabled && ui.browser_hover.as_ref().is_some_and(|(id, selected)| id == &item.id && selected == action);
             p.fill_round_rect(rect, 13.0 * scale, rgba(1.0, 1.0, 1.0, if hovered { 0.18 } else { 0.08 }))?;
-            p.text(action.label(), rect, 11.0 * scale, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
+            p.text(
+                action.label(),
+                rect,
+                11.0 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_CENTER,
+                rgba(1.0, 1.0, 1.0, if enabled { 1.0 } else { 0.35 }),
+            )?;
         }
     }
     Ok(())

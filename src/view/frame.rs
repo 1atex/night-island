@@ -2,7 +2,7 @@ use crate::view::*;
 
 pub fn tab_in_bar(cfg: &Settings, tab: Tab, name: &str) -> bool {
     match tab {
-        Tab::Downloads => cfg.browser_downloads,
+        Tab::Downloads => cfg.browser_downloads && !cfg.tab_hidden(name),
         Tab::Home | Tab::Settings => true,
         Tab::Agy | Tab::Chat => false,
         Tab::Steam => crate::platform::steam::client_installed() && !cfg.tab_hidden(name),
