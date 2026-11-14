@@ -354,7 +354,6 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             LRESULT(0)
         }
         WM_DESTROY => {
-            crate::services::browser::configure(hwnd, false);
             with_app(|a| a.save_note());
             dnd::unregister(hwnd);
             clips::sys::unlisten(hwnd);

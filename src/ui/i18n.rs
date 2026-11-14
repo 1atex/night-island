@@ -23,6 +23,8 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Cancel download" => "Отменить",
         "Show in folder" => "В папке",
         "Paused" => "На паузе",
+        "Pause" => "Пауза",
+        "Resume" => "Продолжить",
         "Complete" => "Готово",
         "Cancelled" => "Отменено",
         "Home" => "Главная",

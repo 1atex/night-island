@@ -21,11 +21,11 @@ pub(in crate::view) fn browser_progress(item: &Download) -> String {
 }
 
 pub fn browser_rows(pill: Rect, scale: f32) -> usize {
-    (((pill.3 - 64.0 * scale) / (76.0 * scale)).floor() as usize).max(1)
+    (((pill.3 - 112.0 * scale) / (76.0 * scale)).floor() as usize).max(1)
 }
 
 pub(crate) fn browser_row(pill: Rect, scale: f32, index: usize) -> Rect {
-    let y = pill.1 + (60.0 + index as f32 * 76.0) * scale;
+    let y = pill.1 + (108.0 + index as f32 * 76.0) * scale;
     (pill.0 + 16.0 * scale, y, pill.0 + pill.2 - 16.0 * scale, y + 68.0 * scale)
 }
 
@@ -53,8 +53,8 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
     let (x, y, w, _) = pill;
     p.text(
         "Downloads",
-        (x + 18.0 * scale, y + 10.0 * scale, x + w - 18.0 * scale, y + 35.0 * scale),
-        20.0 * scale,
+        (x + 18.0 * scale, y + 58.0 * scale, x + w - 18.0 * scale, y + 79.0 * scale),
+        14.0 * scale,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_TEXT_ALIGNMENT_LEADING,
         WHITE,
@@ -70,7 +70,7 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
     };
     p.text(
         caption,
-        (x + 18.0 * scale, y + 36.0 * scale, x + w - 18.0 * scale, y + 55.0 * scale),
+        (x + 18.0 * scale, y + 80.0 * scale, x + w - 18.0 * scale, y + 100.0 * scale),
         12.0 * scale,
         DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_TEXT_ALIGNMENT_LEADING,
