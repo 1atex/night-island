@@ -175,6 +175,10 @@ pub(in crate::island) fn browser_snapshot(app: &App) {
             buttons.push(serde_json::json!({"id":item.id,"action":action,"rect":view::browser_button(rect,app.scale,index,*action)}));
         }
     }
-    let report = serde_json::json!({"state":app.ui.browser,"buttons":buttons,"hwnd":app.hwnd.0 as usize});
+    let collapsed = app.pill_rect(false);
+    let report = serde_json::json!({"state":app.ui.browser,"buttons":buttons,"hwnd":app.hwnd.0 as usize,
+        "expanded":app.state == State::Expanded,"tab":view::tab_name(app.ui.tab),
+        "pin":view::pin_rect(pill, app.scale),
+        "collapsed":[collapsed.0,collapsed.1,collapsed.0+collapsed.2,collapsed.1+collapsed.3]});
     let _ = std::fs::write(path, report.to_string());
 }

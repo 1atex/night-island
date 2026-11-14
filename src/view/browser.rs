@@ -103,7 +103,7 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
         }
         let pending = ui.browser.pending.contains(&item.id);
         let label = if pending {
-            "Working…".into()
+            "Applying action…".into()
         } else {
             match item.state {
                 State::Active => item
