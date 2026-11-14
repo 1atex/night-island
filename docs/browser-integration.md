@@ -17,3 +17,5 @@ Preview для совместной работы с Night Browser 0.9.1. Зак�
 Изменения интерфейса используют существующие отрисовку, шрифты и анимации Island. Поддерживается горизонтальное и боковое расположение. Запуск исполняемого файла после загрузки не выполняется: действие «Показать в папке» открывает проводник.
 
 Сборка: `cargo test --locked --features demo`, затем `cargo build --locked --release --bin night-island` на Windows. Выпускаемый EXE собран без `demo`. Этот preview не подписан; автоматическая доставка через механизм обновлений Island не настроена.
+
+Проверенная сборка [v0.3.2-browser-preview.1](https://github.com/1atex/night-island/releases/tag/v0.3.2-browser-preview.1) выпущена из `55afc0f34a6f3e161f4e9358e1a06a0154991dd2` после [Windows-прогона 43638024187](https://github.com/1atex/night-island/actions/runs/43638024187). Форматирование, Clippy и 554 Rust-теста прошли; 119 существующих тестов остаются отмеченными ignored. В публичном BUILD.json проверены ревизия сборки и основа `7d9bc80`. SHA-256 скачанного EXE: `bb798eadeb88890c0bcd83c3c025da8459390944de60a67ea069025d08e9b0c0`.
