@@ -476,7 +476,9 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                 if a.settings.browser_downloads && crate::services::browser::snapshot().connected {
                     a.select_tab(view::Tab::Downloads);
                     a.expand();
-                    let _ = SetForegroundWindow(a.hwnd);
+                    unsafe {
+                        let _ = SetForegroundWindow(a.hwnd);
+                    }
                     a.on_browser();
                 }
             });
