@@ -471,6 +471,17 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_privacy());
             LRESULT(0)
         }
+        crate::services::browser::WM_BROWSER_SHOW => {
+            with_app(|a| {
+                if a.settings.browser_downloads && crate::services::browser::snapshot().connected {
+                    a.select_tab(view::Tab::Downloads);
+                    a.expand();
+                    let _ = SetForegroundWindow(a.hwnd);
+                    a.on_browser();
+                }
+            });
+            LRESULT(0)
+        }
         crate::services::browser::WM_BROWSER => {
             with_app(|a| a.on_browser());
             LRESULT(0)

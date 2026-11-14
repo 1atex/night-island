@@ -7,6 +7,32 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 pub const WM_BROWSER: u32 = WM_APP + 39;
+pub const WM_BROWSER_SHOW: u32 = WM_APP + 114;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Appearance {
+    pub panel: [u8; 3],
+    pub accent: [u8; 3],
+    pub motion: bool,
+}
+
+pub fn set_appearance(settings: &crate::data::settings::Settings) {
+    let to_bytes = |(r, g, b): (f32, f32, f32)| [r, g, b].map(|n| (n * 255.0).round().clamp(0.0, 255.0) as u8);
+    let (panel, accent) = crate::ui::theme::colors(settings);
+    let appearance =
+        Appearance { panel: to_bytes(panel), accent: to_bytes(accent), motion: settings.island_animations };
+    if let Ok(mut shared) = SHARED.lock()
+        && shared.appearance != appearance
+    {
+        shared.appearance = appearance;
+        pipe::signal(shared.port, 2);
+    }
+}
+
+fn appearance_frame() -> serde_json::Value {
+    let value = SHARED.lock().map(|shared| shared.appearance).unwrap_or_default();
+    serde_json::json!({"v":1,"type":"appearance","panel":value.panel,"accent":value.accent,"motion":value.motion})
+}
 
 #[derive(Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Snapshot {
@@ -25,6 +51,7 @@ struct Command {
 
 struct Shared {
     state: Snapshot,
+    appearance: Appearance,
     commands: VecDeque<Command>,
     port: usize,
     sequence: u64,
@@ -32,6 +59,7 @@ struct Shared {
 }
 
 static SHARED: Mutex<Shared> = Mutex::new(Shared {
+    appearance: Appearance { panel: [0; 3], accent: [166, 179, 255], motion: true },
     state: Snapshot { connected: false, items: Vec::new(), error: false, pending: Vec::new() },
     commands: VecDeque::new(),
     port: 0,

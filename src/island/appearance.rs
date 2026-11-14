@@ -127,6 +127,7 @@ impl App {
     pub(in crate::island) fn apply_theme(&mut self) {
         let (panel, accent) = crate::ui::theme::colors(&self.settings);
         crate::ui::theme::set(panel, accent);
+        crate::services::browser::set_appearance(&self.settings);
         self.tint_panel();
         self.paint_ears();
         self.paint_liquid_body(0.0);

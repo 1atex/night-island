@@ -73,6 +73,7 @@ pub enum Frame {
     Hello { v: u8, capabilities: Vec<String> },
     Downloads { v: u8, items: Vec<Download> },
     Result { v: u8, request: String, ok: bool },
+    Show { v: u8, panel: String },
 }
 
 pub fn parse(bytes: &[u8]) -> Option<Frame> {
@@ -95,6 +96,7 @@ pub fn parse(bytes: &[u8]) -> Option<Frame> {
             Some(frame)
         }
         Frame::Result { v, request, .. } if *v == 1 && request.len() <= 64 => Some(frame),
+        Frame::Show { v, panel } if *v == 1 && panel == "downloads" => Some(frame),
         _ => None,
     }
 }
@@ -108,6 +110,17 @@ mod tests {
         assert!(parse(br#"{"v":2,"type":"hello","capabilities":["downloads"]}"#).is_none());
         assert!(parse(&vec![b' '; MAX_FRAME]).is_none());
         assert!(parse(br#"{"v":1,"type":"downloads","items":[],"url":"secret"}"#).is_none());
+    }
+    #[test]
+    fn show_requests_only_open_downloads() {
+        assert!(parse(br#"{"v":1,"type":"show","panel":"downloads"}"#).is_some());
+        for frame in [
+            br#"{"v":2,"type":"show","panel":"downloads"}"#.as_slice(),
+            br#"{"v":1,"type":"show","panel":"settings"}"#.as_slice(),
+            br#"{"v":1,"type":"show","panel":"downloads","path":"file.exe"}"#.as_slice(),
+        ] {
+            assert!(parse(frame).is_none());
+        }
     }
     #[test]
     fn commands_only_match_download_state() {

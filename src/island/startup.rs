@@ -121,6 +121,7 @@ pub fn run() -> Result<()> {
         media::start(hwnd);
         crate::services::yandex::start(hwnd);
         downloads::start(hwnd);
+        with_app(|a| crate::services::browser::set_appearance(&a.settings));
         crate::services::browser::configure(hwnd, with_app_value(|a| a.settings.browser_downloads).unwrap_or(false));
         privacy::start(hwnd);
         update::start_background(hwnd);

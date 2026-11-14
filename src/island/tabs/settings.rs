@@ -62,6 +62,7 @@ impl App {
         crate::platform::sounds::configure(&self.settings.sounds);
         crate::island::geometry::SNAP_FIT.store(true, std::sync::atomic::Ordering::Relaxed);
         self.apply_setting(id, apply);
+        crate::services::browser::set_appearance(&self.settings);
         if self.state == State::Collapsed {
             self.update_eq();
             self.repaint_collapsed();

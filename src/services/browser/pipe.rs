@@ -1,5 +1,5 @@
 use super::{
-    Command, SHARED, Snapshot, change,
+    Command, SHARED, Snapshot, WM_BROWSER_SHOW, appearance_frame, change,
     model::{Frame, MAX_FRAME, parse},
     update,
 };
@@ -284,6 +284,9 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
         return false;
     }
     let mut hello = false;
+    let mut appearance_enabled = false;
+    let mut show_enabled = false;
+    let mut last_show = None::<std::time::Instant>;
     let mut input = Vec::new();
     let mut requests = HashMap::<String, (String, std::time::Instant)>::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -312,7 +315,11 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
         if !ok {
             return false;
         }
-        if key == 1 {
+        if key == 2 {
+            if hello && appearance_enabled && !c.send(appearance_frame()) {
+                return false;
+            }
+        } else if key == 1 {
             let commands = SHARED.lock().map(|mut shared| std::mem::take(&mut shared.commands)).unwrap_or_default();
             for Command { id, action, request } in commands {
                 if !hello || requests.len() >= 16 {
@@ -339,12 +346,31 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
                 let frame = parse(&input[..end]);
                 input.drain(..=end);
                 match frame {
-                    Some(Frame::Hello { .. }) if !hello => {
+                    Some(Frame::Hello { capabilities, .. }) if !hello => {
                         hello = true;
-                        if !c.send(serde_json::json!({"v":1,"type":"hello","capabilities":["downloads"]})) {
+                        appearance_enabled = capabilities.iter().any(|cap| cap == "appearance");
+                        show_enabled = capabilities.iter().any(|cap| cap == "show-downloads");
+                        if !c.send(serde_json::json!({"v":1,"type":"hello","capabilities":["downloads","show-downloads","appearance"]})) {
                             return false;
                         }
                         update(hwnd, Snapshot { connected: true, ..Default::default() });
+                        if appearance_enabled && !c.send(appearance_frame()) {
+                            return false;
+                        }
+                    }
+                    Some(Frame::Show { .. }) if hello && show_enabled => {
+                        let now = std::time::Instant::now();
+                        if last_show.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_millis(500)) {
+                            last_show = Some(now);
+                            unsafe {
+                                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                                    Some(HWND(hwnd as _)),
+                                    WM_BROWSER_SHOW,
+                                    windows::Win32::Foundation::WPARAM(0),
+                                    windows::Win32::Foundation::LPARAM(0),
+                                );
+                            }
+                        }
                     }
                     Some(Frame::Downloads { items, .. }) if hello => {
                         change(hwnd, |state| {
