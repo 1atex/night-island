@@ -250,7 +250,12 @@ impl App {
             Timer::MusicIntro => self.music_intro_step(),
             Timer::Expand if self.character_interacting() => {}
             Timer::Expand if matches!(self.state, State::Hidden | State::Hiding) => self.reveal(),
-            Timer::Expand => self.expand(),
+            Timer::Expand => {
+                if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_active(&self.ui).is_some() {
+                    self.select_tab(view::Tab::Downloads);
+                }
+                self.expand();
+            }
             Timer::Collapse => {
                 if self.interacting_with_top_panel() || self.ui.home.widgets.interacting() {
                     self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(80));
