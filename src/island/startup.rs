@@ -102,6 +102,7 @@ pub fn run() -> Result<()> {
         apps::start_indexing();
         media::start(hwnd);
         downloads::start(hwnd);
+        crate::services::browser::configure(hwnd, with_app_value(|a| a.settings.browser_downloads).unwrap_or(false));
         privacy::start(hwnd);
         update::start_background(hwnd);
         if with_app_value(|a| a.settings.notify.lock_keys).unwrap_or(false) {

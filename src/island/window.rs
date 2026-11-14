@@ -156,6 +156,10 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             with_app(|a| a.on_privacy());
             LRESULT(0)
         }
+        crate::services::browser::WM_BROWSER => {
+            with_app(|a| a.on_browser());
+            LRESULT(0)
+        }
         downloads::WM_DOWNLOAD => {
             with_app(|a| a.on_downloads());
             LRESULT(0)
@@ -350,6 +354,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
             LRESULT(0)
         }
         WM_DESTROY => {
+            crate::services::browser::configure(hwnd, false);
             with_app(|a| a.save_note());
             dnd::unregister(hwnd);
             clips::sys::unlisten(hwnd);

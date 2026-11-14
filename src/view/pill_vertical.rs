@@ -113,6 +113,9 @@ pub fn vertical_length(ui: &UiState) -> f32 {
     if ui.volume.is_some() {
         return V_MIN + 20.0;
     }
+    if let Some(item) = browser_active(ui) {
+        return (top_reserved(ui) + 64.0 + item.name.chars().count() as f32 * 6.9).clamp(V_MIN, 420.0);
+    }
     if let Some(name) = &ui.downloading {
         return (top_reserved(ui) + 40.0 + chars(&downloading_label(name)) * 6.9 + 16.0).clamp(V_MIN, 420.0);
     }
@@ -155,6 +158,34 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_CENTER,
             WHITE,
+        );
+    }
+    if let Some(item) = browser_active(ui) {
+        let start = y + top_reserved(ui) * scale;
+        p.glyph('\u{E896}', (x, start, x + w, start + 28.0 * scale), 15.0 * scale, acc(1.0))?;
+        along(
+            &item.name,
+            (x, start + 34.0 * scale, x + w, bottom - 40.0 * scale),
+            12.5,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
+        if let Some(progress) = item.progress() {
+            let track = x + w - 3.0 * scale;
+            p.fill_round_rect(
+                (track, start, track + 2.0 * scale, start + (bottom - start) * progress),
+                scale,
+                rgba(1.0, 1.0, 1.0, 0.65),
+            )?;
+        }
+        return along(
+            &browser_progress(item),
+            (x, bottom - 36.0 * scale, x + w, bottom),
+            11.0,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_TEXT_ALIGNMENT_CENTER,
+            rgba(1.0, 1.0, 1.0, 0.6),
         );
     }
     if let Some(name) = &ui.downloading {

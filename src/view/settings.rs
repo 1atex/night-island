@@ -2,6 +2,7 @@ use crate::view::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sid {
+    BrowserDownloads,
     PillBlur,
     Autostart,
     PillOpacity,
@@ -287,6 +288,7 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::Acrylic => c.acrylic,
         Sid::Capture => c.capture_hidden,
         Sid::CaptureSelf => c.capture_self_hidden,
+        Sid::BrowserDownloads => c.browser_downloads,
         Sid::GameMode => c.game_mode,
         Sid::GhostMode => c.ghost_mode,
         Sid::GhostThrough => c.ghost_click_through,
@@ -345,6 +347,7 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::Acrylic => c.acrylic = on,
         Sid::Capture => c.capture_hidden = on,
         Sid::CaptureSelf => c.capture_self_hidden = on,
+        Sid::BrowserDownloads => c.browser_downloads = on,
         Sid::GameMode => c.game_mode = on,
         Sid::GhostMode => c.ghost_mode = on,
         Sid::GhostThrough => c.ghost_click_through = on,

@@ -1,6 +1,7 @@
 use crate::island::*;
 
 mod activity;
+mod browser;
 mod agents;
 mod agy;
 mod chat;

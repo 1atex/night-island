@@ -434,6 +434,7 @@ impl App {
             && self.ui.media.playing
             && self.ui.volume.is_none()
             && self.ui.downloading.is_none()
+            && view::browser_active(&self.ui).is_none()
             && self.ui.notice.is_none();
         let spikes = self.settings.edge_spikes && (self.liquid_on() || self.settings.eq_style.around());
         let open = self.state == State::Expanded

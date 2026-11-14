@@ -1,7 +1,7 @@
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegDeleteValueW, RegOpenKeyExW,
-    RegQueryValueExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
+    RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::core::HSTRING;
 
@@ -13,7 +13,25 @@ fn command() -> Option<String> {
 
 fn open(access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> Option<HKEY> {
     let mut key = HKEY::default();
-    unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, &HSTRING::from(KEY), None, access, &mut key).ok().ok()? };
+    unsafe {
+        if access == KEY_SET_VALUE {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                &HSTRING::from(KEY),
+                None,
+                None,
+                REG_OPTION_NON_VOLATILE,
+                access,
+                None,
+                &mut key,
+                None,
+            )
+            .ok()
+            .ok()?;
+        } else {
+            RegOpenKeyExW(HKEY_CURRENT_USER, &HSTRING::from(KEY), None, access, &mut key).ok().ok()?;
+        }
+    }
     Some(key)
 }
 

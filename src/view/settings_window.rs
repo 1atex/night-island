@@ -193,7 +193,7 @@ pub fn tab_settings_group(tab: crate::view::Tab) -> Option<usize> {
         Tab::Controls => "System",
         Tab::Chat | Tab::Ai => "AI",
         Tab::Agy => "Agents",
-        Tab::Steam => "Integrations",
+        Tab::Steam | Tab::Downloads => "Integrations",
         _ => return None,
     };
     GROUPS.iter().position(|g| g.name == name)
@@ -359,7 +359,10 @@ fn spotify_status_text(s: &spotify::State) -> (String, bool) {
 
 fn integration_items(ui: &UiState) -> Vec<Item> {
     use discord::Status as D;
-    let mut out = vec![Item::Heading("Integrations")];
+    let mut out = vec![Item::Heading("Integrations"),
+        Item::Row(Sid::BrowserDownloads, "Night Browser downloads", Kind::Toggle),
+        Item::Note("Enable Island in the browser integration settings. Private downloads stay private."),
+        Item::Service {name: "Night Browser", glyph: '\u{E896}', status: if ui.browser.connected { "Connected" } else { "Waiting for Night Browser" }.into(), live: ui.browser.connected}];
 
     let (status, live) = discord_status_text(&ui.discord);
     out.push(Item::Service { name: "Discord", glyph: '\u{E8F2}', status, live });
