@@ -18,8 +18,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
 };
 use windows::Win32::System::IO::{
-    CancelIoEx, CreateIoCompletionPort, GetOverlappedResult, GetQueuedCompletionStatus, OVERLAPPED,
-    PostQueuedCompletionStatus,
+    CancelIoEx, CreateIoCompletionPort, GetQueuedCompletionStatus, OVERLAPPED, PostQueuedCompletionStatus,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
@@ -166,23 +165,25 @@ impl Connection {
     fn finish(&mut self, port: HANDLE) -> bool {
         unsafe {
             let _ = CancelIoEx(self.pipe.0, None);
-            let mut count = 0;
-            for (active, ptr) in
-                [(self.accepting, &*self.accept), (self.reading, &*self.read), (self.writing, &*self.write)]
-            {
-                if active {
-                    let _ = GetOverlappedResult(self.pipe.0, ptr, &mut count, true);
-                }
-            }
         }
         let mut quit = false;
         loop {
-            let (ok, _, key, ptr) = completion(port, 0);
-            if key == 0 {
-                quit = true;
+            let pending = self.accepting || self.reading || self.writing;
+            let (ok, _, key, ptr) = completion(port, if pending { u32::MAX } else { 0 });
+            if ptr == &mut *self.accept {
+                self.accepting = false;
+            }
+            if ptr == &mut *self.read {
+                self.reading = false;
+            }
+            if ptr == &mut *self.write {
+                self.writing = false;
             }
             if !ok && ptr.is_null() {
                 break;
+            }
+            if key == 0 {
+                quit = true;
             }
         }
         quit
@@ -293,6 +294,12 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
             deadline.saturating_duration_since(std::time::Instant::now()).as_millis().min(5000) as u32
         };
         let (ok, count, key, ptr) = completion(port, timeout);
+        if ptr == &mut *c.read {
+            c.reading = false;
+        }
+        if ptr == &mut *c.write {
+            c.writing = false;
+        }
         if key == 0 {
             return true;
         }
