@@ -569,12 +569,35 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
     if let Some(item) = browser_active(ui) {
         let shift = indicators_width(ui, scale) + inset;
         p.glyph('\u{E896}', (x + 10.0 * scale + shift, y, x + 38.0 * scale + shift, y + h), 15.0 * scale, acc(1.0))?;
-        let suffix = if item.state == crate::services::browser::State::Paused { crate::ui::i18n::tr("Paused").into_owned() } else { item.progress().map(|f| format!("{}%", (f * 100.0) as u32)).unwrap_or_else(|| format!("{} MB", item.current / 1048576)) };
-        p.text(&item.name, (x + 40.0 * scale + shift, y, x + w - 68.0 * scale, y + h), 12.5 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING, WHITE)?;
+        let suffix = browser_progress(item);
+        p.text(
+            &item.name,
+            (x + 40.0 * scale + shift, y, x + w - 68.0 * scale, y + h),
+            12.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
         if let Some(progress) = item.progress() {
-            p.fill_round_rect((x + 16.0 * scale, y + h - 3.0 * scale, x + 16.0 * scale + (w - 32.0 * scale) * progress, y + h - scale), scale, rgba(1.0,1.0,1.0,0.65))?;
+            p.fill_round_rect(
+                (
+                    x + 16.0 * scale,
+                    y + h - 3.0 * scale,
+                    x + 16.0 * scale + (w - 32.0 * scale) * progress,
+                    y + h - scale,
+                ),
+                scale,
+                rgba(1.0, 1.0, 1.0, 0.65),
+            )?;
         }
-        return p.text(&suffix, (x + w - 65.0 * scale, y, x + w - 12.0 * scale, y + h), 11.0 * scale, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING, rgba(1.0,1.0,1.0,0.6));
+        return p.text(
+            &suffix,
+            (x + w - 65.0 * scale, y, x + w - 12.0 * scale, y + h),
+            11.0 * scale,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_TEXT_ALIGNMENT_TRAILING,
+            rgba(1.0, 1.0, 1.0, 0.6),
+        );
     }
     if let Some(name) = &ui.downloading {
         let shift = indicators_width(ui, scale) + inset;

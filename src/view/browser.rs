@@ -2,7 +2,22 @@ use crate::services::browser::{Action, Download, State};
 use crate::view::*;
 
 pub fn browser_active(ui: &UiState) -> Option<&Download> {
-    ui.browser.items.iter().rev().find(|item| matches!(item.state, State::Active | State::Paused))
+    ui.browser
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.state == State::Active)
+        .or_else(|| ui.browser.items.iter().rev().find(|item| item.state == State::Paused))
+}
+
+pub(in crate::view) fn browser_progress(item: &Download) -> String {
+    if item.state == State::Paused {
+        crate::ui::i18n::tr("Paused").into_owned()
+    } else {
+        item.progress()
+            .map(|f| format!("{}%", (f * 100.0) as u32))
+            .unwrap_or_else(|| format!("{} MB", item.current / 1048576))
+    }
 }
 
 pub fn browser_rows(pill: Rect, scale: f32) -> usize {

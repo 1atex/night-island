@@ -155,7 +155,20 @@ impl App {
                 }
                 downloads::Event::Done(path) => {
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    if self.settings.notify.on(Notice::Download) && !self.ui.browser_done.iter().any(|(recent, at)| recent == &name && at.elapsed().as_secs() < 10) {
+                    if self.settings.notify.on(Notice::Download)
+                        && !self
+                            .ui
+                            .browser_done
+                            .iter()
+                            .any(|(recent, at)| recent == &name && at.elapsed().as_secs() < 10)
+                        && !self.ui.browser.items.iter().any(|item| {
+                            item.name == name
+                                && matches!(
+                                    item.state,
+                                    crate::services::browser::State::Active | crate::services::browser::State::Paused
+                                )
+                        })
+                    {
                         self.show_notice_for('\u{E73E}', &format!("Downloaded {name}"), 7000);
                         self.notice_link = Some(path);
                     }

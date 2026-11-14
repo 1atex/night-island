@@ -242,6 +242,9 @@ fn run(port: HANDLE, hwnd: isize) -> Option<()> {
         let accepted = unsafe { ConnectNamedPipe(pipe, Some(&mut *connection.accept)) };
         let ready = accepted.is_err() && unsafe { GetLastError() == ERROR_PIPE_CONNECTED };
         connection.accepting = !ready && pending(accepted);
+        if !ready && !connection.accepting {
+            return None;
+        }
         let mut quit = false;
         let mut connected = ready;
         if connection.accepting {
