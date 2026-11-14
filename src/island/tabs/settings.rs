@@ -87,7 +87,9 @@ impl App {
                 BrowserDownloads => {
                     crate::services::browser::configure(self.hwnd, self.settings.browser_downloads);
                     self.on_browser();
-                    if !self.settings.browser_downloads && self.ui.tab == view::Tab::Downloads { self.select_tab(view::Tab::Home); }
+                    if !self.settings.browser_downloads && self.ui.tab == view::Tab::Downloads {
+                        self.select_tab(view::Tab::Home);
+                    }
                 }
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),

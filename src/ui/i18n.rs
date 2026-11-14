@@ -13,9 +13,10 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
-        "Downloads" => "Загрузки",
         "Night Browser downloads" => "Загрузки Night Browser",
-        "Enable Island in the browser integration settings. Private downloads stay private." => "Включи Island в настройках интеграций браузера. Приватные загрузки не передаются.",
+        "Enable Island in the browser integration settings. Private downloads stay private." => {
+            "Включи Island в настройках интеграций браузера. Приватные загрузки не передаются."
+        }
         "Waiting for Night Browser" => "Ожидаем Night Browser",
         "New downloads will appear here" => "Новые загрузки появятся здесь",
         "The action is no longer available" => "Действие больше недоступно",
