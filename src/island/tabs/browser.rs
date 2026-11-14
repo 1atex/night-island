@@ -16,7 +16,13 @@ impl App {
         self.ui.browser_done.truncate(32);
         self.ui.browser = snapshot;
         self.ui.browser_scroll = self.ui.browser_scroll.min(self.ui.browser.items.len().saturating_sub(1));
-        self.ui.browser_hover = None;
+        if !self.ui.browser_hover.as_ref().is_some_and(|(id, action)| {
+            self.ui.browser.connected
+                && !self.ui.browser.pending.contains(id)
+                && self.ui.browser.items.iter().any(|item| &item.id == id && item.actions.contains(action))
+        }) {
+            self.ui.browser_hover = None;
+        }
         self.update_eq();
         self.repaint_collapsed();
         if self.ui.tab == view::Tab::Downloads {
