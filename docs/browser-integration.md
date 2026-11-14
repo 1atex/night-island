@@ -1,6 +1,6 @@
 # Night Browser downloads
 
-Preview для совместной работы с Night Browser 0.9.2. Закрой предыдущую копию Island и запусти `night-island.exe`. Настройки существующего профиля сохраняются.
+Preview для совместной работы с Night Browser 0.9.2. Закрой предыдущую копию Island и запусти `night-island.exe`. Настройки существующего профиля сохраняются. Номер повторного скачивания в имени, например `night-island (1).exe`, поддерживается Browser 0.9.2.
 
 Основа этой версии — указанный коммит [`7d9bc80`](https://github.com/1atex/night-island/commit/7d9bc801af2e41627ad7d15a6d2400bbda150aca), включая стекло, док и новые настройки. Он объединён с интеграцией отдельным merge-коммитом; история исходной ветки сохранена.
 
@@ -20,4 +20,6 @@ Preview для совместной работы с Night Browser 0.9.2. Зак�
 
 Сборка: `cargo test --locked --features demo`, затем `cargo build --locked --release --bin night-island` на Windows. Выпускаемый EXE собран без `demo`. Этот preview не подписан; автоматическая доставка через механизм обновлений Island не настроена.
 
-Проверенная сборка [v0.3.2-browser-preview.1](https://github.com/1atex/night-island/releases/tag/v0.3.2-browser-preview.1) выпущена из `55afc0f34a6f3e161f4e9358e1a06a0154991dd2` после [Windows-прогона 43638024187](https://github.com/1atex/night-island/actions/runs/43638024187). Форматирование, Clippy и 554 Rust-теста прошли; 119 существующих тестов остаются отмеченными ignored. В публичном BUILD.json проверены ревизия сборки и основа `7d9bc80`. SHA-256 скачанного EXE: `bb798eadeb88890c0bcd83c3c025da8459390944de60a67ea069025d08e9b0c0`.
+Проверенная сборка [v0.3.3-browser-preview.1](https://github.com/1atex/night-island/releases/tag/v0.3.3-browser-preview.1) выпущена из `62882637a8a6e09f874e1737cf9c9a016dc7b13e` после [Windows-прогона 43644604774](https://github.com/1atex/night-island/actions/runs/43644604774). Форматирование, Clippy и 555 Rust-тестов прошли; 119 существующих тестов остаются отмеченными ignored. В скачанном BUILD.json проверены ревизия сборки и основа `7d9bc80`. SHA-256 публичного EXE: `5a2198b3419828b12b155bbcecf52701aebaf2933a9cea2501f28a4370c28b06`.
+
+[Совместный Windows-тест 43644211103](https://github.com/1atex/night-browser/actions/runs/43644211103) проверяет подключение к нумерованному EXE, открытие настоящего острова нажатием на капсулу браузера, передачу оформления и отключение этой настройки. Проверки приватных загрузок, паузы, продолжения, отмены, повторных команд, переподключения и показа готового файла также прошли.
