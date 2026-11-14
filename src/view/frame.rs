@@ -2,6 +2,7 @@ use crate::view::*;
 
 pub fn tab_in_bar(cfg: &Settings, tab: Tab, name: &str) -> bool {
     match tab {
+        Tab::Downloads => cfg.browser_downloads,
         Tab::Home | Tab::Settings => true,
         Tab::Agy | Tab::Chat => false,
         Tab::Steam => crate::platform::steam::client_installed() && !cfg.tab_hidden(name),
@@ -408,6 +409,7 @@ fn paint_tab(p: &Painter, tab: Tab, pill: Rect, scale: f32, ui: &UiState, clips:
         }
         Tab::Note => paint_note(p, pill, scale, ui)?,
         Tab::Text => paint_text(p, pill, scale, ui)?,
+        Tab::Downloads => paint_browser(p, pill, scale, ui)?,
         Tab::Settings => {}
         Tab::Record => paint_record(p, pill, scale, ui)?,
     }

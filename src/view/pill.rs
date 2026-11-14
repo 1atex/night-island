@@ -198,7 +198,7 @@ pub fn music_pill(ui: &UiState) -> bool {
         && (ui.cfg.music_eq || ui.cfg.music_title || cover_visible(ui) || lyric_visible(ui))
         && ui.notice.is_none()
         && ui.volume.is_none()
-        && ui.downloading.is_none()
+        && (ui.downloading.is_none() && browser_active(ui).is_none())
 }
 
 pub fn row_pill(ui: &UiState) -> bool {
@@ -206,7 +206,7 @@ pub fn row_pill(ui: &UiState) -> bool {
         || ((ui.recording_secs.is_some() || pill_metrics_on(&ui.cfg) || agents_active(ui))
             && ui.notice.is_none()
             && ui.volume.is_none()
-            && ui.downloading.is_none())
+            && (ui.downloading.is_none() && browser_active(ui).is_none()))
 }
 
 pub(in crate::view) fn rec_slot(secs: u32) -> f32 {
@@ -336,6 +336,9 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     }
     if ui.volume.is_some() {
         return base;
+    }
+    if let Some(item) = browser_active(ui) {
+        return (ui.char_inset + 78.0 + item.name.chars().count() as f32 * 6.9).clamp(base, 420.0);
     }
     if let Some(name) = &ui.downloading {
         let shift = ui.char_inset + indicators_width(ui, 1.0);
@@ -491,7 +494,7 @@ pub fn pill_weather_visible(ui: &UiState) -> bool {
         && ui.weather.is_some()
         && ui.notice.is_none()
         && ui.volume.is_none()
-        && ui.downloading.is_none()
+        && (ui.downloading.is_none() && browser_active(ui).is_none())
 }
 
 pub fn pill_weather_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
@@ -562,6 +565,16 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
             DWRITE_TEXT_ALIGNMENT_TRAILING,
             WHITE,
         );
+    }
+    if let Some(item) = browser_active(ui) {
+        let shift = indicators_width(ui, scale) + inset;
+        p.glyph('\u{E896}', (x + 10.0 * scale + shift, y, x + 38.0 * scale + shift, y + h), 15.0 * scale, acc(1.0))?;
+        let suffix = if item.state == crate::services::browser::State::Paused { crate::ui::i18n::tr("Paused").into_owned() } else { item.progress().map(|f| format!("{}%", (f * 100.0) as u32)).unwrap_or_else(|| format!("{} MB", item.current / 1048576)) };
+        p.text(&item.name, (x + 40.0 * scale + shift, y, x + w - 68.0 * scale, y + h), 12.5 * scale, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING, WHITE)?;
+        if let Some(progress) = item.progress() {
+            p.fill_round_rect((x + 16.0 * scale, y + h - 3.0 * scale, x + 16.0 * scale + (w - 32.0 * scale) * progress, y + h - scale), scale, rgba(1.0,1.0,1.0,0.65))?;
+        }
+        return p.text(&suffix, (x + w - 65.0 * scale, y, x + w - 12.0 * scale, y + h), 11.0 * scale, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING, rgba(1.0,1.0,1.0,0.6));
     }
     if let Some(name) = &ui.downloading {
         let shift = indicators_width(ui, scale) + inset;

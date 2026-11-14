@@ -1,0 +1,24 @@
+name: Browser integration
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/browser-downloads]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test Island
+        run: cargo test --locked
+      - name: Build Island
+        run: cargo build --locked --release --bin night-island
+      - uses: actions/upload-artifact@v4
+        with:
+          name: night-island-browser-preview
+          path: target/release/night-island.exe
+          if-no-files-found: error

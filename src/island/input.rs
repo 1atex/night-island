@@ -275,6 +275,10 @@ impl App {
                 Some(i) => Some(910 + i),
                 None => view::hit_city(pill, self.scale, fx, fy, self.ui.weather.is_some()).then_some(900),
             }
+        } else if self.ui.tab == view::Tab::Downloads {
+            let hit = view::hit_browser(pill, self.scale, fx, fy, &self.ui);
+            self.ui.browser_hover = hit.map(|(index, action)| (self.ui.browser.items[index].id.clone(), action));
+            hit.map(|(index, _)| 900 + index)
         } else if self.ui.tab == view::Tab::Home {
             match view::hit_home(pill, self.scale, fx, fy, &self.ui) {
                 Some(view::HomeHit::Action(i)) => Some(i),
@@ -485,6 +489,7 @@ impl App {
             view::Tab::Privacy => self.click_privacy(x, y),
             view::Tab::Activity => self.click_activity(x, y),
             view::Tab::Steam => self.click_steam(x, y),
+            view::Tab::Downloads => self.click_browser(x, y),
             view::Tab::Settings => {}
         }
     }
@@ -534,7 +539,9 @@ impl App {
             self.ui.chat.hist = (self.ui.chat.hist + step).clamp(0.0, self.ui.chat.max.get());
             return self.repaint_expanded();
         }
-        let rows = if self.ui.tab == view::Tab::Agy {
+        let rows = if self.ui.tab == view::Tab::Downloads {
+            view::browser_rows(self.pill_rect(true), self.scale)
+        } else if self.ui.tab == view::Tab::Agy {
             view::agy_rows()
         } else if self.ui.tab == view::Tab::Privacy {
             view::privacy_rows(self.pill_rect(true), self.scale)
@@ -574,6 +581,7 @@ impl App {
             view::Tab::Clipboard => (self.clipboard.clips.len(), &mut self.ui.clip.scroll),
             view::Tab::Agy => (self.ui.agy.chats.len(), &mut self.ui.agy.scroll),
             view::Tab::Privacy => (self.ui.privacy_log.rows.len(), &mut self.ui.privacy_log.scroll),
+            view::Tab::Downloads => (self.ui.browser.items.len(), &mut self.ui.browser_scroll),
             _ => return,
         };
         let max = len.saturating_sub(rows);

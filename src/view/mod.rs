@@ -18,6 +18,7 @@ use crate::tools::texttools::ops;
 use crate::ui::gfx::{Painter, WHITE, rgba};
 
 mod activity;
+mod browser;
 mod agy;
 mod chat;
 mod clipboard;
@@ -46,7 +47,7 @@ mod widgets;
 pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
 pub use self::{
-    activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
+    browser::*, activity::*, agy::*, chat::*, clipboard::*, command::*, controls::*, discord::*, frame::*, home::*,
     integrations::*, metrics::*, note::*, pill::*, pill_vertical::*, privacy::*, record::*, remind::*, settings::*,
     settings_window::*, steam::*, text::*, weather::*, widgets::*,
 };
@@ -69,9 +70,10 @@ pub enum Tab {
     Steam,
     Controls,
     Settings,
+    Downloads,
 }
 
-pub const TABS: [(Tab, char, &str); 14] = [
+pub const TABS: [(Tab, char, &str); 15] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Text, '\u{E8E9}', "Text"),
@@ -86,6 +88,7 @@ pub const TABS: [(Tab, char, &str); 14] = [
     (Tab::Steam, '\u{E7FC}', "Steam"),
     (Tab::Controls, '\u{E9E9}', "Controls"),
     (Tab::Settings, '\u{E713}', "Settings"),
+    (Tab::Downloads, '\u{E896}', "Downloads"),
 ];
 
 pub type SubTabs = [(Tab, char, &'static str); 2];
@@ -156,6 +159,10 @@ pub struct UiState {
     pub volume: Option<f32>,
     pub recording_secs: Option<u32>,
     pub downloading: Option<String>,
+    pub browser: crate::services::browser::Snapshot,
+    pub browser_scroll: usize,
+    pub browser_done: Vec<(String, std::time::Instant)>,
+    pub browser_hover: Option<(String, crate::services::browser::Action)>,
     pub char_inset: f32,
     pub cmd: CommandUi,
     pub radios: Radios,
@@ -221,6 +228,10 @@ impl UiState {
             volume: None,
             recording_secs: None,
             downloading: None,
+            browser: Default::default(),
+            browser_scroll: 0,
+            browser_done: Vec::new(),
+            browser_hover: None,
             char_inset: 0.0,
             radios: Radios::default(),
             dark: true,

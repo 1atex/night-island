@@ -362,6 +362,7 @@ impl ProgressStyle {
 pub struct Settings {
     pub language: Language,
     pub weather: bool,
+    pub browser_downloads: bool,
     pub weather_city: String,
     pub weather_lat: Option<f64>,
     pub weather_lon: Option<f64>,
@@ -456,6 +457,7 @@ impl Default for Settings {
         Self {
             language: Language::Ru,
             weather: true,
+            browser_downloads: false,
             weather_city: String::new(),
             weather_lat: None,
             weather_lon: None,
