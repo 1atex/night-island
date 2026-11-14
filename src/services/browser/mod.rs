@@ -25,7 +25,7 @@ pub fn set_appearance(settings: &crate::data::settings::Settings) {
         && shared.appearance != appearance
     {
         shared.appearance = appearance;
-        pipe::signal(shared.port, 2);
+        pipe::signal(shared.port, pipe::APPEARANCE_CHANGED);
     }
 }
 

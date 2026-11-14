@@ -87,6 +87,8 @@ fn peer(pipe: HANDLE, owner: &str) -> bool {
     }
 }
 
+pub(super) const APPEARANCE_CHANGED: usize = 3;
+
 pub(super) fn signal(port: usize, key: usize) {
     if port != 0 {
         unsafe {
@@ -315,7 +317,7 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
         if !ok {
             return false;
         }
-        if key == 2 {
+        if key == APPEARANCE_CHANGED {
             if hello && appearance_enabled && !c.send(appearance_frame()) {
                 return false;
             }
