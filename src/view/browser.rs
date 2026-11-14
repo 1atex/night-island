@@ -142,3 +142,34 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_or_disconnected_downloads_cannot_be_clicked_again() {
+        let mut ui = UiState::new();
+        ui.browser.connected = true;
+        ui.browser.items.push(Download {
+            id: "download-1".into(),
+            name: "archive.zip".into(),
+            state: State::Active,
+            current: 25,
+            total: Some(100),
+            actions: vec![Action::Pause, Action::Cancel],
+        });
+        for scale in [0.75, 1.0, 1.25, 1.5, 2.0] {
+            let pill = (12.0, 18.0, 440.0 * scale, 330.0 * scale);
+            let rect = browser_button(browser_row(pill, scale, 0), scale, 0, Action::Pause);
+            let (x, y) = ((rect.0 + rect.2) / 2.0, (rect.1 + rect.3) / 2.0);
+            assert_eq!(hit_browser(pill, scale, x, y, &ui), Some((0, Action::Pause)));
+            ui.browser.pending.push("download-1".into());
+            assert_eq!(hit_browser(pill, scale, x, y, &ui), None);
+            ui.browser.pending.clear();
+            ui.browser.connected = false;
+            assert_eq!(hit_browser(pill, scale, x, y, &ui), None);
+            ui.browser.connected = true;
+        }
+    }
+}
