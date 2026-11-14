@@ -12,8 +12,10 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.93.0
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Test Island
         run: cargo test --locked --features demo
       - name: Build Island

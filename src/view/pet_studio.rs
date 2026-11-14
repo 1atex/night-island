@@ -29,10 +29,12 @@ pub enum PetStudioHit {
 
 impl PetStudio {
     pub fn preview_interval(&self) -> Option<u32> {
-        (self.enabled
-            && self.performance != crate::ui::pet_motion::PetPerformance::Still
-            && crate::ui::feedback::motion_allowed())
-        .then(|| self.performance.interval(false, false, false))
+        self.preview_interval_with_motion(crate::ui::feedback::motion_allowed())
+    }
+
+    fn preview_interval_with_motion(&self, motion: bool) -> Option<u32> {
+        (self.enabled && self.performance != crate::ui::pet_motion::PetPerformance::Still && motion)
+            .then(|| self.performance.interval(false, false, false))
     }
 }
 
@@ -366,14 +368,15 @@ mod tests {
     fn preview_animation_stops_when_closed_or_reduced_and_respects_the_pet_budget() {
         use crate::ui::pet_motion::PetPerformance;
         let mut studio = PetStudio::default();
-        assert_eq!(studio.preview_interval(), None);
+        assert_eq!(studio.preview_interval_with_motion(true), None);
         studio.enabled = true;
         for quality in PetPerformance::ALL {
             studio.performance = quality;
+            assert_eq!(studio.preview_interval_with_motion(false), None);
             if quality == PetPerformance::Still {
-                assert_eq!(studio.preview_interval(), None);
+                assert_eq!(studio.preview_interval_with_motion(true), None);
             } else {
-                assert!(studio.preview_interval().unwrap() >= quality.interval(true, false, true));
+                assert!(studio.preview_interval_with_motion(true).unwrap() >= quality.interval(true, false, true));
             }
         }
     }
