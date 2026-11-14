@@ -11,6 +11,7 @@ impl App {
                 if matches!(
                     id,
                     view::Sid::Character
+                        | view::Sid::PetPerformance
                         | view::Sid::Edge
                         | view::Sid::PillBattery
                         | view::Sid::CoverMode
@@ -55,7 +56,10 @@ impl App {
     }
 
     pub(in crate::island) fn setting_changed(&mut self, id: view::Sid, apply: bool) {
+        self.ui.yandex.legacy_layout = self.settings.wave_legacy_layout;
         self.ui.cfg = self.settings.clone();
+        self.settings.assistant.apply();
+        crate::platform::sounds::configure(&self.settings.sounds);
         crate::island::geometry::SNAP_FIT.store(true, std::sync::atomic::Ordering::Relaxed);
         self.apply_setting(id, apply);
         if self.state == State::Collapsed {
@@ -73,15 +77,90 @@ impl App {
         use view::Sid::*;
         if apply {
             match id {
+                HomeWidgets => {
+                    self.ui.home.widgets = Default::default();
+                    self.ui.home.edit = false;
+                }
+                LiquidIdleTravel => {
+                    self.stop_idle();
+                    self.start_liquid();
+                }
+                LiquidGlass => self.refresh_glass(),
+                CardShadows => self.repaint_expanded(),
+                LegacyIcons => {
+                    crate::ui::icons::set_legacy(self.settings.legacy_icons);
+                    self.repaint_themed_surfaces();
+                    if let Some(dock) = &mut self.desktop_dock {
+                        dock.repaint_icons();
+                    }
+                }
+                MemoryTools if !self.settings.memory_tools => {
+                    self.close_memory_tools();
+                    crate::platform::memory_tools::send(
+                        self.hwnd,
+                        crate::platform::memory_tools::Command::Watch(false),
+                    );
+                }
+                InterfaceFont => {
+                    crate::ui::fonts::set(self.settings.interface_font);
+                    self.apply_layout();
+                    self.repaint_themed_surfaces();
+                    if let Some(dock) = &mut self.desktop_dock {
+                        dock.repaint_icons();
+                    }
+                    self.render_settings_win();
+                }
                 Placement | Size | Edge => self.apply_layout(),
                 Style => self.apply_style(),
                 Tint => {
                     if self.state == State::Expanded {
-                        let _ = self.tint.SetOpacity(if self.settings.acrylic {
-                            self.settings.tint_open
-                        } else {
-                            TINT_OPEN_NO_BLUR
-                        });
+                        let _ = self.tint.SetOpacity(self.body_opacity(true));
+                    }
+                }
+                TopAutoHide | TopTray | TopEnabled | TopApplication | TopWifi | TopBluetooth | TopVolume
+                | TopBattery | TopFullscreen | TopReserve | TopClearControls | TopMicrophone | TopKeyboard
+                | TopWorkspaces | TopAnimations | TopEntrance | TopGap | TopMotion | TopLiquid => {
+                    self.configure_top_panel()
+                }
+                DockExperimentalCapture
+                | DockReplaceTaskbar
+                | DockEnabled
+                | DockAutoHide
+                | DockRunning
+                | DockDragToWindow
+                | DockWindowSwitcher
+                | DockFullscreenAltTab
+                | DockSwitcherStyle
+                | DockAltTab
+                | DockWindowMotion
+                | DockPreview
+                | DockFullscreen
+                | DockEconomy
+                | DockAnimations
+                | DockSeparator
+                | DockShowAdd
+                | DockLockPins
+                | DockIconTiles
+                | DockIconSize
+                | DockZoom
+                | DockOpacity
+                | DockMargin
+                | DockBlur
+                | DockTintHue
+                | DockTintSaturation
+                | DockTintBrightness => self.configure_desktop_dock(),
+                NotificationDigest | NotificationPriority => self.configure_digest(),
+                SystemNotifications => self.configure_system_notifications(),
+                WaveRatings => {
+                    self.ui.yandex.ratings_hidden = !self.settings.wave_ratings;
+                    if self.ui.yandex.ratings_hidden {
+                        self.ui.yandex.show_library = false;
+                    }
+                }
+                WaveSearch => {
+                    self.ui.yandex.search_hidden = !self.settings.wave_search;
+                    if self.ui.yandex.search_hidden {
+                        self.close_wave_search();
                     }
                 }
                 BrowserDownloads => {
@@ -93,12 +172,44 @@ impl App {
                 }
                 ActivityTrack => self.start_activity(),
                 ActivityAi => self.reload_groups(),
+                VpnProvider => {
+                    vpn::set_provider(self.settings.vpn_provider);
+                    self.ui.svoi = vpn::snapshot();
+                    self.ui.vpn = vpn::state();
+                    self.ui.vpn_busy = false;
+                    self.kill_timer(Timer::VpnWait);
+                    self.update_eq();
+                    self.repaint_collapsed();
+                    self.repaint_expanded();
+                }
                 VpnPill => {
                     self.ui.vpn = vpn::state();
                     self.update_eq();
                     self.repaint_collapsed();
                 }
                 MetricsInterval => self.sync_metrics(),
+                AsstEnabled | AsstWake => {
+                    if id == AsstEnabled && !self.settings.assistant.perms.enabled {
+                        self.cancel_voice_input();
+                    }
+                    self.sync_wake();
+                }
+                PetVoiceInput => {
+                    if !self.settings.pet_voice_input && self.pet.desktop.is_some() {
+                        self.cancel_voice_input();
+                    }
+                    if let Some(chat) = &mut self.pet.chat {
+                        chat.window.set_voice_enabled(self.settings.pet_voice_input);
+                    }
+                }
+                PetNotifications => {
+                    if !self.settings.pet_notifications && self.pet_notification_visible() {
+                        self.hide_notification_card();
+                    }
+                    self.maybe_show_notification();
+                }
+                VoiceMusic => self.sync_music_focus(),
+                AsstTtsProvider => self.sync_voice_fields(),
                 AutoHide => {
                     if self.settings.auto_hide {
                         self.schedule_autohide();
@@ -112,18 +223,24 @@ impl App {
                         let _ = self.animate_to(true, false);
                     }
                 }
-                PanelHue | PanelSat | PanelVal | AccentHue | AccentSat => self.apply_theme(),
+                PanelHue | PanelSat | PanelVal | AccentHue | AccentSat => {
+                    self.apply_theme();
+                    self.configure_desktop_dock();
+                }
                 PillOpacity => self.apply_pill_opacity(),
                 PillBlur => self.set_blur(self.state == State::Expanded),
                 Capture => self.apply_capture(),
                 CaptureSelf => capture::set_hide_self(self.settings.capture_self_hidden),
-                GameMode => self.start_game_watch(),
+                GameMode | GameAi | GameWindowed | HideFullscreenYoutube => self.start_game_watch(),
                 Weather => weather::set_enabled(self.settings.weather),
                 Language => {
                     crate::ui::i18n::set_ru(self.settings.language == crate::data::settings::Language::Ru);
                     self.repaint_collapsed();
                 }
-                Character => self.apply_character(),
+                Character | CharacterDetached | PetPerformance | PetAutonomy | PetVoice => {
+                    self.apply_character();
+                    self.sync_pet_studio();
+                }
                 UpdateCheck | UpdateBeta => {
                     update::configure(self.settings.update_check, self.settings.update_beta);
                 }
@@ -138,7 +255,7 @@ impl App {
                         lockkeys::stop();
                     }
                 }
-                EqStyle | Spikes => {
+                EqStyle | Spikes | EqSmooth => {
                     self.apply_layout();
                     self.refresh_eq_shape();
                 }
@@ -151,9 +268,19 @@ impl App {
                     self.stop_idle();
                     self.liquid_tick();
                 }
-                EqStrength | EqGradient => self.refresh_eq_shape(),
-                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | PillWeather
-                | PillBattery | SpikeColor => {
+                EqSources | EqStrength | EqGradient | EqResponse => self.refresh_eq_shape(),
+                PreferPlayingMedia => {
+                    media::configure_priority(self.settings.prefer_playing_media);
+                    self.on_media();
+                }
+                PillUnifiedLayout => {
+                    self.pet.char_key = None;
+                    self.update_eq();
+                    self.repaint_collapsed();
+                    self.char_tick();
+                }
+                MusicEq | MusicTitle | MusicCover | CoverMode | MusicLyrics | MusicProgress | ProgressStyle
+                | PillWeather | PillWeatherSide | PillBattery | SpikeColor => {
                     self.update_eq();
                     self.repaint_collapsed();
                 }

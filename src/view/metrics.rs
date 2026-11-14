@@ -118,6 +118,7 @@ pub(in crate::view) fn paint_metrics_row(p: &Painter, pill: Rect, scale: f32, ui
     let panel = (x + side, top, x + w - side, top + cell_h * rows as f32);
     let cell_w = (panel.2 - panel.0) / cols as f32;
     p.fill_round_rect(panel, 16.0 * scale, rgba(1.0, 1.0, 1.0, 0.06))?;
+    card_depth(p, panel, 16.0 * scale, scale, ui)?;
     let line = rgba(1.0, 1.0, 1.0, 0.09);
     for c in 1..cols {
         let lx = panel.0 + c as f32 * cell_w;

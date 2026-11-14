@@ -1,8 +1,6 @@
 use crate::island::*;
 
-pub(in crate::island) const TINT_OPEN_NO_BLUR: f32 = 0.97;
-
-pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
+pub(crate) fn set_host_backdrop(hwnd: HWND, enabled: bool) -> bool {
     #[repr(C)]
     struct AccentPolicy {
         state: i32,
@@ -23,9 +21,9 @@ pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
     const WCA_ACCENT_POLICY: u32 = 19;
 
     unsafe {
-        let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return };
+        let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return false };
         let Some(proc) = GetProcAddress(user32, windows::core::s!("SetWindowCompositionAttribute")) else {
-            return;
+            return false;
         };
         let set_wca: SetWca = core::mem::transmute(proc);
         let mut policy = AccentPolicy {
@@ -39,25 +37,39 @@ pub(in crate::island) fn set_host_backdrop(hwnd: HWND, enabled: bool) {
             data: &mut policy as *mut _ as *mut _,
             size: size_of::<AccentPolicy>(),
         };
-        set_wca(hwnd, &mut data);
+        set_wca(hwnd, &mut data) != 0
     }
 }
 
 impl App {
     pub(in crate::island) fn repaint_collapsed(&mut self) {
+        self.sync_live_activities();
+        if self.pill_motion.intro.is_some()
+            && (self.ui.notice.is_some()
+                || self.ui.volume.is_some()
+                || (self.settings.live_music_priority && !self.ui.live.is_empty())
+                || view::legacy_download(&self.ui).is_some())
+        {
+            self.cancel_pill_motion();
+            self.update_eq();
+        }
         self.fit_width();
         if self.music.spectrum_running {
             self.place_spectrum();
         }
-        let c = self.pill_rect(false);
-        let _ = self.collapsed.paint(&self.gpu, |p| {
-            let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
-        });
+        if self.pill_motion.intro != Some(super::pill_motion::IntroPhase::Fading) {
+            let c = self.collapsed_surface_rect();
+            let _ = self.collapsed.paint(&self.gpu, |p| {
+                let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
+            });
+        }
+        self.paint_progress_fill();
         self.update_weather_timer();
+        self.maybe_show_notification();
     }
 
     pub(in crate::island) fn apply_pill_opacity(&mut self) {
-        let alpha = self.settings.pill_opacity;
+        let alpha = self.body_opacity(false);
         if self.state != State::Expanded {
             let _ = self.tint.SetOpacity(alpha);
         }
@@ -68,17 +80,69 @@ impl App {
         let _ = self.set_geometry_now(self.win, expanded, hidden);
     }
 
-    pub(in crate::island) fn apply_theme(&mut self) {
-        let (panel, accent) = crate::ui::theme::colors(&self.settings);
-        crate::ui::theme::set(panel, accent);
+    pub(in crate::island) fn sync_glass(&mut self) {
+        crate::ui::glass::Lens::sync(&mut self.glass, &self.backdrop, &self.geometry, self.scale);
+        let size = self.window_size(self.win);
+        let heights = (self.pill(self.win, false, false).1.Y, self.pill(self.win, true, false).1.Y);
+        if let Some(glass) = &mut self.glass {
+            let mut setup = || -> Result<()> {
+                glass.resize(size)?;
+                glass.mount_island(&self._visual, &self.tint, &self.geometry, heights)?;
+                let clip = if self.liquid.body_active.get() { &self.liquid.body_clip } else { &self.liquid.round_clip };
+                glass.set_contour(&clip.Geometry()?)
+            };
+            if let Err(error) = setup() {
+                crate::log_warn!("Could not position the island glass: {error}");
+                self.glass = None;
+            }
+        }
+        let _ = self.tint.SetOpacity(self.body_opacity(self.state == State::Expanded));
+        let _ = self.liquid.bump_fill.SetOpacity(self.body_opacity(false));
+    }
+
+    pub(super) fn body_opacity(&self, open: bool) -> f32 {
+        let configured = if open { self.settings.tint_open } else { self.settings.pill_opacity };
+        if self.glass.is_some() { 0.77 * configured.clamp(0.0, 1.0).sqrt() } else { configured }
+    }
+
+    fn tint_panel(&self) {
         let (r, g, b) = crate::ui::theme::panel_u8();
         if let Ok(brush) = self.compositor.CreateColorBrushWithColor(Color { A: 255, R: r, G: g, B: b }) {
             let _ = self.tint.SetBrush(&brush);
         }
+    }
+
+    pub(in crate::island) fn refresh_glass(&mut self) {
+        if crate::ui::glass::configure(self.settings.liquid_glass_beta) {
+            self.sync_glass();
+            if self.open_motion.is_none() {
+                self.apply_pill_opacity();
+            }
+            self.set_blur(self.state == State::Expanded);
+            self.configure_desktop_dock();
+            self.repaint_themed_surfaces();
+        }
+    }
+
+    pub(in crate::island) fn apply_theme(&mut self) {
+        let (panel, accent) = crate::ui::theme::colors(&self.settings);
+        crate::ui::theme::set(panel, accent);
+        self.tint_panel();
         self.paint_ears();
-        self.paint_bump_with(0.0, 0.0);
+        self.paint_liquid_body(0.0);
         self.apply_accent();
+        self.repaint_themed_surfaces();
+    }
+
+    pub(in crate::island) fn repaint_themed_surfaces(&mut self) {
         self.repaint();
+        self.update_notification_card();
+        if let Some(chat) = &mut self.pet.chat {
+            chat.repaint();
+        }
+        if let Some(panel) = &mut self.top_panel {
+            panel.repaint();
+        }
     }
 
     pub(in crate::island) fn apply_accent(&self) {
@@ -90,6 +154,31 @@ impl App {
         }
     }
 
+    pub(in crate::island) fn progress_fill_active(&self) -> bool {
+        view::pill_progress_fill_on(&self.ui) && media::progress().is_some()
+    }
+
+    pub(in crate::island) fn paint_progress_fill(&self) {
+        let progress = media::progress().filter(|_| view::pill_progress_fill_on(&self.ui));
+        let _ = self.progress_fill.paint(&self.gpu, |p| {
+            if let Some((pos, len)) = progress {
+                let pill = self.pill_rect(false);
+                let ear = if self.docked() && self.edge() == Edge::Top { EAR * self.scale } else { 0.0 };
+                let range = (pill.0 - ear, pill.1, pill.0 + pill.2 + ear, pill.1 + pill.3);
+                let size = self.progress_fill.size();
+                let _ = p.fill_progress_surface(
+                    range,
+                    (size.0 as f32, size.1 as f32),
+                    pos / len,
+                    self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8),
+                    self.settings.vertical(),
+                    self.edge() == Edge::Left,
+                );
+            }
+        });
+        self.paint_ears();
+    }
+
     pub(in crate::island) fn paint_ears(&self) {
         let r = EAR * self.scale;
         for (i, ear) in self.ears.iter().enumerate() {
@@ -98,23 +187,46 @@ impl App {
                     let (r, g, b) = crate::ui::theme::panel();
                     crate::ui::gfx::rgba(r, g, b, 1.0)
                 });
+                if let Some((pos, len)) = media::progress().filter(|_| view::pill_progress_fill_on(&self.ui)) {
+                    let width = self.cw * self.scale;
+                    let left = if i == 0 { 0.0 } else { -width - r };
+                    let _ = p.fill_ear_progress(
+                        r,
+                        i == 0,
+                        (left, left + width + r * 2.0),
+                        pos / len,
+                        self.ui.media.accent.unwrap_or_else(crate::ui::theme::accent_u8),
+                    );
+                }
             });
         }
     }
 
     pub(in crate::island) fn repaint(&self) {
-        let c = self.pill_rect(false);
-        let _ = self.collapsed.paint(&self.gpu, |p| {
-            let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
-        });
+        if self.pill_motion.intro != Some(super::pill_motion::IntroPhase::Fading) {
+            let c = self.collapsed_surface_rect();
+            let _ = self.collapsed.paint(&self.gpu, |p| {
+                let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
+            });
+        }
+        self.paint_progress_fill();
         self.repaint_expanded();
     }
 
     pub(in crate::island) fn repaint_expanded(&self) {
+        self.ui.feedback.set_enabled(crate::ui::feedback::motion_allowed());
         let e = self.pill_full();
         let _ = self.expanded.paint(&self.gpu, |p| {
             let _ = view::paint_expanded(p, e, self.scale, &self.ui, &self.clipboard.clips);
         });
+        if self.state == State::Expanded
+            && (self.ui.feedback.active()
+                || self.ui.home.track_transition.active()
+                || self.ui.home.widgets.motion.borrow().active()
+                || self.ui.home.widgets.editor_active())
+        {
+            self.set_timer(Timer::UiAnim, self.frame_ms());
+        }
         self.update_weather_timer();
     }
 
@@ -129,13 +241,15 @@ impl App {
     pub(in crate::island) fn weather_animating(&self) -> bool {
         let shown = match self.state {
             State::Expanded => self.ui.tab == view::Tab::Weather,
-            State::Collapsed => view::pill_weather_visible(&self.ui),
+            State::Collapsed => view::pill_weather_visible(&self.ui) && !view::pill_progress_fill_on(&self.ui),
             _ => false,
         };
         shown
+            && self.pill_motion.intro.is_none()
+            && !self.notification_card_visible()
             && self.settings.weather
             && self.ui.weather.is_some()
-            && !self.gaming
+            && !self.foreground_hidden()
             && (!self.pill_hidden || (self.ghosted && self.settings.ghost_opacity > 0.0))
             && crate::ui::weather_icons::animations_enabled()
             && unsafe { IsWindowVisible(self.hwnd).as_bool() }
@@ -148,7 +262,7 @@ impl App {
         if self.state == State::Expanded {
             return self.repaint_expanded();
         }
-        let pill = self.pill_rect(false);
+        let pill = self.collapsed_surface_rect();
         if let Some(rect) = view::pill_weather_rect(pill, self.scale, &self.ui) {
             let _ = self
                 .collapsed
@@ -158,28 +272,45 @@ impl App {
     }
 
     pub(in crate::island) fn set_blur(&self, open: bool) {
+        let glass = self.glass.is_some();
         let on = if open {
-            self.settings.acrylic
+            self.settings.acrylic || glass
         } else {
-            self.settings.pill_blur && self.state != State::Hidden && self.state != State::Hiding
+            (glass || self.settings.pill_blur) && self.state != State::Hidden && self.state != State::Hiding
         };
         let _ = self.backdrop.SetIsVisible(on);
-        set_host_backdrop(self.hwnd, on);
-        let _ = self.liquid.bump_blur.SetIsVisible(self.settings.pill_blur);
+        if self.host_backdrop_enabled.get() != Some(on) && set_host_backdrop(self.hwnd, on) {
+            self.host_backdrop_enabled.set(Some(on));
+        }
+        let _ = self.liquid.bump_blur.SetIsVisible(self.settings.pill_blur || glass);
         if self.settings.pill_blur && !open && !self.spikes_active() {
             let amp = if self.liquid.idle_running { IDLE_AMP * self.scale } else { self.liquid.bump_amp };
-            self.paint_bump_with(amp, self.liquid.bump_cx);
+            self.paint_liquid_body(amp);
         }
     }
 
     pub(in crate::island) fn apply_capture(&self) {
+        if let Some(panel) = &self.top_panel {
+            panel.set_capture_hidden(self.settings.capture_hidden);
+        }
+        if let Some(dock) = &self.desktop_dock {
+            dock.set_capture_hidden(self.settings.capture_hidden);
+        }
         let affinity = if self.settings.capture_hidden { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
         unsafe {
             let _ = SetWindowDisplayAffinity(self.hwnd, affinity);
         }
+        if let Some(desktop) = &self.pet.desktop {
+            desktop.set_capture_hidden(self.settings.capture_hidden);
+        }
+        if let Some(chat) = &self.pet.chat {
+            chat.set_capture_hidden(self.settings.capture_hidden);
+        }
+        self.update_notification_card();
     }
 
     pub(in crate::island) fn apply_style(&mut self) {
+        self.set_decoration_through(false);
         if self.liquid_on() {
             self.start_liquid();
         } else {
@@ -187,12 +318,14 @@ impl App {
             self.liquid_tick();
         }
         self.apply_layout();
+        self.refresh_eq_shape();
     }
 
     pub(in crate::island) fn apply_menu_choice(&mut self, id: usize) {
         match id {
             tray::ID_TOGGLE => self.toggle(),
             tray::ID_SETTINGS => self.open_settings_window(),
+            tray::ID_GUIDE => self.open_guide(),
             tray::ID_RESET_POS => self.reset_position(),
             _ => {}
         }

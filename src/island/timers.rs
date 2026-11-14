@@ -7,14 +7,35 @@ thread_local! {
     static FRAME_COST: Cell<f32> = const { Cell::new(0.0) };
 }
 
-#[link(name = "winmm")]
-unsafe extern "system" {
-    fn timeBeginPeriod(period: u32) -> u32;
+const TRIM_EVERY: Duration = Duration::from_secs(180);
+
+thread_local! {
+    static LAST_TRIM: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
-pub(in crate::island) fn raise_timer_resolution() {
-    unsafe {
-        timeBeginPeriod(1);
+impl App {
+    fn trim_memory_when_idle(&mut self) {
+        let quiet = matches!(self.state, State::Collapsed | State::Hidden)
+            && self.recording.is_none()
+            && !dictation::active()
+            && self.agent.is_none();
+        let due = LAST_TRIM.get().is_none_or(|at| at.elapsed() >= TRIM_EVERY);
+        if !quiet || !due {
+            return;
+        }
+        LAST_TRIM.set(Some(Instant::now()));
+        let before = memory::usage();
+        memory::trim();
+        if let (Some(before), Some(after)) = (before, memory::usage())
+            && memory::worth_logging(before, after)
+        {
+            crate::log_info!(
+                "Memory trimmed: working set {} -> {} MB, private {} MB",
+                before.working_mb(),
+                after.working_mb(),
+                after.private_mb()
+            );
+        }
     }
 }
 
@@ -56,10 +77,21 @@ pub(in crate::island) enum Timer {
     Tip = 34,
     SwAnim = 35,
     Weather = 36,
+    WidthMotion = 37,
+    MusicIntro = 38,
+    NotificationStage = 39,
+    NotificationExpire = 40,
+    NotificationHover = 41,
+    TopPanel = 42,
+    WaveSearch = 43,
+    Taskbar = 44,
+    LiveActivity = 45,
+    VoiceMusic = 46,
+    Digest = 47,
 }
 
 impl Timer {
-    const ALL: [Timer; 36] = [
+    const ALL: [Timer; 47] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -96,6 +128,17 @@ impl Timer {
         Timer::Tip,
         Timer::SwAnim,
         Timer::Weather,
+        Timer::WidthMotion,
+        Timer::MusicIntro,
+        Timer::NotificationStage,
+        Timer::NotificationExpire,
+        Timer::NotificationHover,
+        Timer::TopPanel,
+        Timer::WaveSearch,
+        Timer::Taskbar,
+        Timer::LiveActivity,
+        Timer::VoiceMusic,
+        Timer::Digest,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -105,14 +148,23 @@ impl Timer {
 
 impl App {
     pub(in crate::island) fn kill_timer(&self, timer: Timer) {
+        if matches!(timer, Timer::Expand) {
+            self.pointer.expand_pending.set(false);
+        }
         unsafe {
             let _ = KillTimer(Some(self.hwnd), timer as usize);
         }
+        self.frame_timers.update(timer as usize, false);
     }
 
     pub(in crate::island) fn set_timer(&self, timer: Timer, ms: u32) {
-        unsafe {
-            SetTimer(Some(self.hwnd), timer as usize, ms, None);
+        if matches!(timer, Timer::Expand) && self.pointer.expand_pending.replace(true) {
+            return;
+        }
+        if unsafe { SetTimer(Some(self.hwnd), timer as usize, ms, None) } != 0 {
+            self.frame_timers.update(timer as usize, ms <= 17);
+        } else if matches!(timer, Timer::Expand) {
+            self.pointer.expand_pending.set(false);
         }
     }
 
@@ -165,9 +217,19 @@ impl App {
         let started = Instant::now();
         let frame = matches!(
             Timer::from_id(id),
-            Some(Timer::Spectrum | Timer::Liquid | Timer::UiAnim | Timer::Lyric | Timer::Char | Timer::Weather)
+            Some(
+                Timer::Spectrum
+                    | Timer::Liquid
+                    | Timer::UiAnim
+                    | Timer::Lyric
+                    | Timer::Char
+                    | Timer::Weather
+                    | Timer::Progress
+            )
         );
+        let nested = self.frame_timers.begin_dispatch();
         self.on_timer_inner(id);
+        self.frame_timers.end_dispatch(nested);
         if frame {
             FRAME_COST.set(FRAME_COST.get() * 0.8 + started.elapsed().as_secs_f32() * 1000.0 * 0.2);
         }
@@ -177,9 +239,25 @@ impl App {
         let Some(timer) = Timer::from_id(id) else { return };
         self.kill_timer(timer);
         match timer {
+            Timer::Digest => self.finish_digest_wait(),
+            Timer::VoiceMusic => self.sync_music_focus(),
+            Timer::LiveActivity => self.live_activity_tick(),
+            Timer::Taskbar => self.configure_taskbar_replacement(),
+            Timer::TopPanel => self.update_top_panel(false),
+            Timer::NotificationStage => self.notification_stage(),
+            Timer::NotificationExpire => self.dismiss_notification_card(),
+            Timer::WidthMotion => self.width_motion_done(),
+            Timer::MusicIntro => self.music_intro_step(),
+            Timer::Expand if self.character_interacting() => {}
             Timer::Expand if matches!(self.state, State::Hidden | State::Hiding) => self.reveal(),
             Timer::Expand => self.expand(),
-            Timer::Collapse => self.collapse(),
+            Timer::Collapse => {
+                if self.interacting_with_top_panel() || self.ui.home.widgets.interacting() {
+                    self.set_timer(Timer::Collapse, self.settings.close_delay_ms.max(80));
+                } else {
+                    self.collapse();
+                }
+            }
             Timer::Shrink => self.shrink_window(),
             Timer::Autohide => self.hide(),
             Timer::HideDone => self.hide_done(),
@@ -195,14 +273,24 @@ impl App {
             Timer::SwCaret => self.sw_caret_tick(),
             Timer::SwAnim => self.sw_anim_tick(),
             Timer::Weather => self.weather_tick(),
-            Timer::PillBack => self.restore_pill(),
+            Timer::PillBack => self.pill_back_tick(),
             Timer::GhostHold => self.ghost_hold_tick(),
             Timer::Activity => self.on_activity_timer(),
-            Timer::Settle => self.settle_layers(),
+            Timer::Settle => {
+                if self.open_motion.as_ref().is_some_and(|motion| motion.progress.active(Instant::now())) {
+                    self.set_timer(Timer::Settle, self.frame_ms());
+                    return;
+                }
+                if self.cover_flight_until.is_some_and(|until| Instant::now() >= until) {
+                    self.finish_cover_motion();
+                }
+                self.settle_layers();
+            }
             Timer::UiAnim => self.ui_anim_tick(),
             Timer::VpnWait => self.vpn_wait_over(),
             Timer::SteamPoll => self.on_steam_poll(),
             Timer::Tip => self.show_tip(),
+            Timer::WaveSearch => self.submit_wave_search(),
             Timer::Geo => {
                 if self.ui.tab == view::Tab::Weather && self.ui.editing {
                     weather::search(self.hwnd, &self.ui.city.input.text());
@@ -220,17 +308,19 @@ impl App {
                 }
             }
             Timer::Progress => {
-                if self.state == State::Expanded && self.ui.tab == view::Tab::Home {
+                if self.state == State::Expanded && matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) {
                     self.repaint_expanded();
                     self.start_progress_timer();
-                } else if self.state == State::Collapsed && view::progress_strip_on(&self.ui) {
-                    let c = self.pill_rect(false);
+                } else if self.progress_pill_visible() && view::progress_strip_on(&self.ui) {
+                    let c = self.collapsed_surface_rect();
                     let _ = self.collapsed.paint(&self.gpu, |p| {
                         let _ = view::paint_collapsed(p, c, self.scale, &self.ui);
                     });
+                    self.paint_progress_fill();
                     self.start_progress_timer();
                 }
             }
+            Timer::NotificationHover => self.notification_hover(),
             Timer::DlStale => {
                 self.ui.downloading = None;
                 self.update_eq();
@@ -240,12 +330,14 @@ impl App {
                 self.ui.notice = None;
                 self.notice_link = None;
                 self.update_eq();
+                self.maybe_show_notification();
                 self.repaint_collapsed();
             }
             Timer::Volume => {
                 self.ui.volume = None;
                 self.update_eq();
                 self.repaint_collapsed();
+                self.maybe_show_notification();
             }
             Timer::NoteSave => self.save_note(),
             Timer::Clip => self.on_clipboard(),
@@ -263,6 +355,7 @@ impl App {
                 self.refresh_reminder_labels();
                 self.repaint();
                 self.schedule_clock();
+                self.trim_memory_when_idle();
             }
         }
     }

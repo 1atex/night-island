@@ -115,6 +115,22 @@ impl Store {
         .unwrap_or_default()
     }
 
+    pub fn note_for_reminder(&self, reminder: i64) -> Option<i64> {
+        if let Ok(id) = self.conn.query_row(
+            "SELECT id FROM note_items WHERE remind_id = ?1 AND folder = 0 LIMIT 1",
+            [reminder],
+            |r| r.get(0),
+        ) {
+            return Some(id);
+        }
+        let text: String =
+            self.conn.query_row("SELECT text FROM reminders WHERE id = ?1", [reminder], |r| r.get(0)).ok()?;
+        let note = self.note_add(None, false, &text)?;
+        self.note_set_text(note, &text);
+        self.note_set_remind(note, reminder);
+        Some(note)
+    }
+
     pub fn note_remind(&self, id: i64) -> Option<(i64, i64)> {
         self.conn
             .query_row(
@@ -249,6 +265,19 @@ mod tests {
 
     fn store() -> Store {
         Store::in_memory().unwrap()
+    }
+
+    #[test]
+    fn an_assistant_timer_opens_the_same_editable_reminder_sheet() {
+        let store = Store::in_memory().unwrap();
+        let timer = store.reminder_add_id(1000, "Tea timer").unwrap();
+        let note = store.note_for_reminder(timer).unwrap();
+        assert_eq!(store.note_for_reminder(timer), Some(note));
+        assert_eq!(store.note_remind(note), Some((timer, 1000)));
+        assert_eq!(store.note_text(note), "Tea timer");
+        store.reminder_set_due(timer, 2000);
+        assert_eq!(store.note_remind(note), Some((timer, 2000)));
+        assert!(store.note_for_reminder(i64::MAX).is_none());
     }
 
     #[test]

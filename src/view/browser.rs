@@ -10,6 +10,10 @@ pub fn browser_active(ui: &UiState) -> Option<&Download> {
         .or_else(|| ui.browser.items.iter().rev().find(|item| item.state == State::Paused))
 }
 
+pub(in crate::view) fn browser_name_width(ui: &UiState, name: &str) -> f32 {
+    crate::ui::fonts::width(ui.cfg.interface_font, name, 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD).ceil()
+}
+
 pub(in crate::view) fn browser_progress(item: &Download) -> String {
     if item.state == State::Paused {
         crate::ui::i18n::tr("Paused").into_owned()

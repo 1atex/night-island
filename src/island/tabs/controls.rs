@@ -52,6 +52,7 @@ impl App {
 
     pub(in crate::island) fn on_radios(&mut self, bits: usize) {
         self.ui.radios = system::unpack(bits);
+        self.update_top_panel(false);
         if self.ui.tab == view::Tab::Controls {
             self.repaint_expanded();
         }
