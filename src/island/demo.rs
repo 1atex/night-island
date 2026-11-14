@@ -151,3 +151,18 @@ pub(in crate::island) fn apply(hwnd: HWND) {
         });
     }
 }
+
+#[cfg(feature = "demo")]
+pub(in crate::island) fn browser_snapshot(app: &App) {
+    let Some(path) = std::env::var_os("NI_BROWSER_TEST_OUTPUT") else { return };
+    let pill = app.pill_rect(true);
+    let mut buttons = Vec::new();
+    for (offset, item) in app.ui.browser.items.iter().rev().skip(app.ui.browser_scroll).take(view::browser_rows(pill, app.scale)).enumerate() {
+        let rect = view::browser_row(pill, app.scale, offset);
+        for (index, action) in item.actions.iter().enumerate() {
+            buttons.push(serde_json::json!({"id":item.id,"action":action,"rect":view::browser_button(rect,app.scale,index,*action)}));
+        }
+    }
+    let report = serde_json::json!({"state":app.ui.browser,"buttons":buttons,"hwnd":app.hwnd.0 as usize});
+    let _ = std::fs::write(path, report.to_string());
+}

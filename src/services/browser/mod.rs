@@ -8,7 +8,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
 pub const WM_BROWSER: u32 = WM_APP + 39;
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Snapshot {
     pub connected: bool,
     pub items: Vec<Download>,

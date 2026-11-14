@@ -278,7 +278,7 @@ impl App {
         } else if self.ui.tab == view::Tab::Downloads {
             let hit = view::hit_browser(pill, self.scale, fx, fy, &self.ui);
             self.ui.browser_hover = hit.map(|(index, action)| (self.ui.browser.items[index].id.clone(), action));
-            hit.map(|(index, _)| 900 + index)
+            hit.map(|(index, action)| 900 + index * 4 + action as usize)
         } else if self.ui.tab == view::Tab::Home {
             match view::hit_home(pill, self.scale, fx, fy, &self.ui) {
                 Some(view::HomeHit::Action(i)) => Some(i),

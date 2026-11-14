@@ -193,7 +193,7 @@ pub fn tab_settings_group(tab: crate::view::Tab) -> Option<usize> {
         Tab::Controls => "System",
         Tab::Chat | Tab::Ai => "AI",
         Tab::Agy => "Agents",
-        Tab::Steam => "Integrations",
+        Tab::Steam | Tab::Downloads => "Integrations",
         _ => return None,
     };
     GROUPS.iter().position(|g| g.name == name)

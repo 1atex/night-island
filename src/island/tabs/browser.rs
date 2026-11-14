@@ -23,6 +23,8 @@ impl App {
             self.repaint_expanded();
         }
         self.render_settings_win();
+        #[cfg(feature = "demo")]
+        demo::browser_snapshot(self);
     }
 
     pub(in crate::island) fn click_browser(&mut self, x: i32, y: i32) {

@@ -9,12 +9,12 @@ pub fn browser_rows(pill: Rect, scale: f32) -> usize {
     (((pill.3 - 64.0 * scale) / (76.0 * scale)).floor() as usize).max(1)
 }
 
-fn row(pill: Rect, scale: f32, index: usize) -> Rect {
+pub(crate) fn browser_row(pill: Rect, scale: f32, index: usize) -> Rect {
     let y = pill.1 + (60.0 + index as f32 * 76.0) * scale;
     (pill.0 + 16.0 * scale, y, pill.0 + pill.2 - 16.0 * scale, y + 68.0 * scale)
 }
 
-fn button(rect: Rect, scale: f32, index: usize, action: Action) -> Rect {
+pub(crate) fn browser_button(rect: Rect, scale: f32, index: usize, action: Action) -> Rect {
     let width = if action == Action::Reveal { 114.0 } else { 88.0 } * scale;
     let right = rect.2 - 8.0 * scale - index as f32 * 94.0 * scale;
     (right - width, rect.3 - 30.0 * scale, right, rect.3 - 4.0 * scale)
@@ -26,7 +26,7 @@ pub fn hit_browser(pill: Rect, scale: f32, x: f32, y: f32, ui: &UiState) -> Opti
     {
         let index = ui.browser.items.len() - 1 - ui.browser_scroll - offset;
         for (i, action) in item.actions.iter().enumerate() {
-            if inside(button(row(pill, scale, offset), scale, i, *action), x, y) {
+            if inside(browser_button(browser_row(pill, scale, offset), scale, i, *action), x, y) {
                 return Some((index, *action));
             }
         }
@@ -64,7 +64,7 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
     for (offset, item) in
         ui.browser.items.iter().rev().skip(ui.browser_scroll).take(browser_rows(pill, scale)).enumerate()
     {
-        let r = row(pill, scale, offset);
+        let r = browser_row(pill, scale, offset);
         p.fill_round_rect(r, 12.0 * scale, rgba(1.0, 1.0, 1.0, 0.055))?;
         p.text(
             &item.name,
@@ -98,7 +98,7 @@ pub(in crate::view) fn paint_browser(p: &Painter, pill: Rect, scale: f32, ui: &U
             rgba(1.0, 1.0, 1.0, 0.6),
         )?;
         for (i, action) in item.actions.iter().enumerate() {
-            let rect = button(r, scale, i, *action);
+            let rect = browser_button(r, scale, i, *action);
             let hovered = ui.browser_hover.as_ref().is_some_and(|(id, selected)| id == &item.id && selected == action);
             p.fill_round_rect(rect, 13.0 * scale, rgba(1.0, 1.0, 1.0, if hovered { 0.18 } else { 0.08 }))?;
             p.text(action.label(), rect, 11.0 * scale, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER, WHITE)?;
