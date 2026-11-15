@@ -20,6 +20,18 @@ pub enum HubHit {
     Undo,
 }
 
+impl HubHit {
+    pub fn hover(self) -> usize {
+        match self {
+            Self::Search => 2400,
+            Self::Undo => 2401,
+            Self::Request(index, action) => 2500 + index * 4 + action,
+            Self::Activity(index, action) => 2600 + index * 4 + action,
+            Self::Pocket(index, action) => 2700 + index * 4 + action,
+        }
+    }
+}
+
 pub fn hub_rows(pill: Rect, scale: f32) -> usize {
     (((pill.3 - 125.0 * scale) / (88.0 * scale)).floor() as usize).max(1)
 }
@@ -102,8 +114,8 @@ fn label(p: &Painter, text: &str, rect: Rect, scale: f32, size: f32, alpha: f32)
         rgba(1.0, 1.0, 1.0, alpha),
     )
 }
-fn action(p: &Painter, text: &str, rect: Rect, scale: f32, enabled: bool) -> Result<()> {
-    p.fill_round_rect(rect, 13.0 * scale, rgba(1.0, 1.0, 1.0, 0.08))?;
+fn action(p: &Painter, text: &str, rect: Rect, scale: f32, enabled: bool, hovered: bool) -> Result<()> {
+    p.fill_round_rect(rect, 13.0 * scale, rgba(1.0, 1.0, 1.0, if enabled && hovered { 0.18 } else { 0.08 }))?;
     p.text(
         text,
         rect,
@@ -126,10 +138,14 @@ pub(in crate::view) fn paint_hub(p: &Painter, pill: Rect, scale: f32, ui: &UiSta
             1.0,
         )?;
         if ui.hub.undo.is_some() {
-            action(p, "Undo", hub_undo(pill, scale), scale, true)?;
+            action(p, "Undo", hub_undo(pill, scale), scale, true, ui.home.hover_act == Some(HubHit::Undo.hover()))?;
         }
     } else {
-        p.fill_round_rect(header, 19.0 * scale, rgba(1.0, 1.0, 1.0, 0.07))?;
+        p.fill_round_rect(
+            header,
+            19.0 * scale,
+            rgba(1.0, 1.0, 1.0, if ui.home.hover_act == Some(HubHit::Search.hover()) { 0.14 } else { 0.07 }),
+        )?;
         p.glyph(
             '\u{E721}',
             (header.0 + 8.0 * scale, header.1, header.0 + 38.0 * scale, header.3),
@@ -194,6 +210,7 @@ pub(in crate::view) fn paint_hub(p: &Painter, pill: Rect, scale: f32, ui: &UiSta
                     hub_button(row, scale, i),
                     scale,
                     i != 0 || !item.url.is_empty() || !item.source.is_empty(),
+                    ui.home.hover_act == Some(HubHit::Pocket(ui.hub.pocket_scroll + offset, i).hover()),
                 )?;
             }
         }
@@ -241,6 +258,15 @@ pub(in crate::view) fn paint_hub(p: &Painter, pill: Rect, scale: f32, ui: &UiSta
                     hub_button(row, scale, i),
                     scale,
                     ui.browser.connected && !ui.browser.pending.contains(id),
+                    ui.home.hover_act
+                        == Some(
+                            if index < ui.browser.requests.len() {
+                                HubHit::Request(index, i)
+                            } else {
+                                HubHit::Activity(index - ui.browser.requests.len(), i)
+                            }
+                            .hover(),
+                        ),
                 )?;
             }
         }

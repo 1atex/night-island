@@ -341,7 +341,7 @@ impl App {
                 None => view::hit_city(pill, self.scale, fx, fy, self.ui.weather.is_some()).then_some(900),
             }
         } else if matches!(self.ui.tab, view::Tab::Browser | view::Tab::Pocket) {
-            view::hit_hub(pill, self.scale, fx, fy, &self.ui).map(|_| 2400)
+            view::hit_hub(pill, self.scale, fx, fy, &self.ui).map(view::HubHit::hover)
         } else if self.ui.tab == view::Tab::Downloads {
             let hit = view::hit_browser(pill, self.scale, fx, fy, &self.ui);
             self.ui.browser_hover = hit.map(|(index, action)| (self.ui.browser.items[index].id.clone(), action));
