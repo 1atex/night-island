@@ -314,6 +314,7 @@ impl IDropTarget_Impl for Target_Impl {
         let files = pdataobj.as_ref().is_some_and(has_files);
         let text = !files && pdataobj.as_ref().is_some_and(has_text);
         let accept = files || text;
+        crate::log_debug!("drag enter: files={files}, text={text}");
         TEXT_DRAG.set(text);
         self.accepted.set(accept);
         self.effect(accept, pdweffect);
@@ -344,6 +345,7 @@ impl IDropTarget_Impl for Target_Impl {
     ) -> Result<()> {
         let paths = pdataobj.as_ref().map(read_paths).unwrap_or_default();
         let text = if paths.is_empty() { pdataobj.as_ref().and_then(read_text) } else { None };
+        crate::log_debug!("drop: files={}, text={}", paths.len(), text.is_some());
         self.effect(!paths.is_empty() || text.is_some(), pdweffect);
         TEXT_DROP.set(text);
         self.accepted.set(false);
@@ -356,9 +358,14 @@ impl IDropTarget_Impl for Target_Impl {
 
 pub fn register(hwnd: HWND) {
     unsafe {
-        let _ = OleInitialize(None);
+        if let Err(error) = OleInitialize(None).ok() {
+            crate::log_warn!("OLE initialization failed: {error}");
+            return;
+        }
         let target: IDropTarget = Target { hwnd: hwnd.0 as isize, accepted: std::cell::Cell::new(false) }.into();
-        let _ = RegisterDragDrop(hwnd, &target);
+        if let Err(error) = RegisterDragDrop(hwnd, &target) {
+            crate::log_warn!("Drop target registration failed: {error}");
+        }
     }
 }
 
