@@ -27,10 +27,16 @@ impl App {
         ok
     }
     pub(in crate::island) fn open_browser_search(&mut self) {
-        self.open_command();
+        self.restore_pill();
+        self.kill_timer(Timer::Collapse);
+        self.ui.cmd.open = true;
         self.ui.cmd.input.set_text("@");
         self.refresh_cmd();
+        self.expand();
+        self.begin_edit();
         self.repaint_expanded();
+        #[cfg(feature = "demo")]
+        demo::browser_snapshot(self);
     }
     pub(in crate::island) fn update_browser_search(&mut self) {
         if !self.ui.cmd.open || !self.ui.cmd.input.text().starts_with('@') {
