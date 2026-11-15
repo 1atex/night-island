@@ -28,6 +28,7 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Audio" => "Звук",
         "Mute tab" => "Без звука",
         "Unmute tab" => "Со звуком",
         "Applying action…" => "Выполняется…",
@@ -36,7 +37,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Saved to Pocket" => "Сохранено в Карман",
         "Request waiting for a decision" => "Запрос ожидает решения",
         "Open tab" => "К вкладке",
-        "Reject" => "Отбросить",
+        "Reject" => "Отклонить",
         "Forward" => "Пропустить",
         "Edit request" => "Изменить",
         "Make note" => "В заметку",

@@ -45,7 +45,7 @@ impl TabItem {
         self.activity
             .iter()
             .filter_map(|s| match s.as_str() {
-                "audio" => Some("Audio"),
+                "audio" if !self.activity.iter().any(|value| value == "muted") => Some("Audio"),
                 "muted" => Some("Muted"),
                 "camera" => Some("Camera"),
                 "microphone" => Some("Microphone"),
