@@ -22,6 +22,12 @@ A small floating pill at the top of the screen that grows into a panel on hover.
 - Themes, transparency and blur, free or docked position, global hotkeys
 - Russian and English interface
 
+### Night Browser
+
+The [0.4.0 integration preview](https://github.com/1atex/night-island/releases/tag/v0.4.0-browser-preview.1) works with [Night Browser 0.10.0](https://github.com/1atex/night-browser/releases/tag/v0.10.0-preview.1). Enable **Settings → Integrations → Night Browser connection**, then choose the features in the browser's integration settings.
+
+Search browser tabs from any app with `Ctrl+Alt+B` or `@query` in the command bar. Results include cached favicons and workspace/folder paths; sleeping pages load only when selected. Pocket keeps explicitly saved or dragged text and web links locally, with source, copy, note and undo actions. The Browser panel shows active audio/capture sources and held requests, with tab focus/mute and forward/reject/edit controls. Download controls and optional shared colors/motion remain available. Private browser windows are excluded. [Usage and limits](docs/browser-integration.md).
+
 ### Guided setup and memory tools
 
 The setup wizard offers a quick route (layout, essential toggles and Assistant permissions) and a detailed route with hands-on practice and voice-model downloads. You can switch routes without losing your choices. The miniature uses the real player, notification card and pet renderer with isolated sample data: playback controls, seeking, volume and pet dragging do not affect desktop apps. Choices apply only when you finish. Reopen the wizard from **Settings → About**.
@@ -141,6 +147,12 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Se
 - Командная строка на `Alt+Space`: приложения, калькулятор, текстовые утилиты, QR-коды
 - Темы, прозрачность и размытие, свободное или закреплённое положение, глобальные горячие клавиши
 - Интерфейс на русском и английском
+
+### Night Browser
+
+[Preview интеграции 0.4.0](https://github.com/1atex/night-island/releases/tag/v0.4.0-browser-preview.1) работает с [Night Browser 0.10.0](https://github.com/1atex/night-browser/releases/tag/v0.10.0-preview.1). Включи **Настройки → Интеграции → Связь с Night Browser**, затем выбери нужные возможности в настройках интеграции браузера.
+
+`Ctrl+Alt+B` из любого приложения или `@запрос` в командной строке ищет вкладки, показывая favicon и путь папок. Спящие страницы загружаются только после выбора. «Карман» хранит явно сохранённые или перетащенные текст и веб-ссылки: источник, копирование, заметка, удаление с отменой. Панель «Браузер» показывает источники звука/захвата и ожидающие запросы; доступны переход к вкладке, переключение звука, пропуск, отклонение и открытие редактора запроса. Управление загрузками и общие цвета/анимации сохранены. Приватные окна браузера исключены. [Инструкция и ограничения](docs/browser-integration.md).
 
 ### Знакомство и управление памятью
 
