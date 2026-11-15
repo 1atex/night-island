@@ -231,7 +231,7 @@ pub(in crate::view) fn paint_hub(p: &Painter, pill: Rect, scale: f32, ui: &UiSta
                 let item = &ui.browser.activity[index - ui.browser.requests.len()];
                 let mut buttons = vec!["Open tab"];
                 if item.activity.iter().any(|s| s == "audio" || s == "muted") {
-                    buttons.push(if item.activity.iter().any(|s| s == "muted") { "Unmute" } else { "Mute" });
+                    buttons.push(if item.activity.iter().any(|s| s == "muted") { "Unmute tab" } else { "Mute tab" });
                 }
                 (item.title.clone(), item.activity_label(), &item.id, buttons)
             };

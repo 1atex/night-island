@@ -28,6 +28,8 @@ pub fn is_ru() -> bool {
 
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
+        "Mute tab" => "Без звука",
+        "Unmute tab" => "Со звуком",
         "Applying action…" => "Выполняется…",
         "Screen sharing" => "Демонстрация экрана",
         "Pocket is full or unavailable" => "Карман заполнен или хранилище недоступно",
