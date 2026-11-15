@@ -84,9 +84,15 @@ impl App {
     }
 
     pub(in crate::island) fn refresh_screen_time(&mut self) {
+        self.ui.home.widget_activity.clear();
         self.ui.home.screen_secs = if self.settings.activity_track {
-            let today = activity::today();
-            self.store.as_ref().map(|s| s.activity_since(today, 1000).iter().map(|(_, secs)| *secs).sum())
+            self.store.as_ref().map(|store| {
+                let mut apps = store.activity_since(activity::today(), 1000);
+                let total = apps.iter().map(|(_, seconds)| *seconds).sum();
+                apps.sort_by_key(|(_, seconds)| std::cmp::Reverse(*seconds));
+                self.ui.home.widget_activity = apps.into_iter().take(4).collect();
+                total
+            })
         } else {
             None
         };
@@ -204,11 +210,28 @@ impl App {
     }
 
     pub(in crate::island) fn ui_anim_tick(&mut self) {
+        if self.cover_flight_until.is_some_and(|until| Instant::now() >= until) {
+            self.finish_cover_motion();
+        }
+        if !self.ui.home.track_transition.active() {
+            self.ui.home.track_transition.finish();
+        }
         if self.state != State::Expanded {
             self.ui.tab_change = None;
             return;
         }
-        let mut again = false;
+        let live_moving = self.ui.live_changed.is_some_and(|at| at.elapsed().as_millis() < 280);
+        let mut again = self.ui.home.widgets.editor_active()
+            || self.ui.home.widgets.motion.borrow().active()
+            || live_moving
+            || matches!(self.ui.tab, view::Tab::Home | view::Tab::Yandex) && self.ui.yandex.animate_colours();
+        if let Some((_, start)) = self.ui.home.mixer_motion {
+            if start.elapsed().as_millis() >= 220 {
+                self.ui.home.mixer_motion = None;
+            } else {
+                again = true;
+            }
+        }
         if let Some(change) = self.ui.tab_change {
             if change.start.elapsed().as_millis() as u32 >= change.ms {
                 self.ui.tab_change = None;
@@ -233,8 +256,15 @@ impl App {
             again |= moving || self.ui.activity.animating();
         }
         self.repaint_expanded();
+        let preview = if !self.foreground_hidden() && !self.pill_hidden && self.ui.tab == view::Tab::Chat {
+            self.ui.chat.pet.preview_interval()
+        } else {
+            None
+        };
         if again {
             self.set_timer(Timer::UiAnim, self.frame_ms());
+        } else if let Some(interval) = preview {
+            self.set_timer(Timer::UiAnim, interval);
         }
     }
 

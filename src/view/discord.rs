@@ -14,7 +14,13 @@ pub fn discord_strip(ui: &UiState) -> bool {
 pub(in crate::view) fn paint_discord_strip(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Result<()> {
     let z = strip_zone(pill, scale);
     p.fill_round_rect(z, 18.0 * scale, rgba(0.35, 0.4, 0.95, 0.14))?;
-    p.glyph('\u{E8F2}', (z.0 + 8.0 * scale, z.1, z.0 + 32.0 * scale, z.3), 14.0 * scale, rgba(0.6, 0.65, 1.0, 1.0))?;
+    card_depth(p, z, 18.0 * scale, scale, ui)?;
+    p.glyph(
+        crate::ui::icons::DISCORD_GLYPH,
+        (z.0 + 8.0 * scale, z.1, z.0 + 32.0 * scale, z.3),
+        14.0 * scale,
+        rgba(0.6, 0.65, 1.0, 1.0),
+    )?;
     let (left, right) = (z.0 + 36.0 * scale, z.2 - 3.0 * 36.0 * scale - 14.0 * scale);
     let (mut x, y) = (left, z.1 + 8.0 * scale);
     let chip_h = 24.0 * scale;
@@ -85,7 +91,12 @@ pub(in crate::view) fn paint_discord_strip(p: &Painter, pill: Rect, scale: f32, 
         } else {
             glyph
         };
-        p.glyph(g, r, 14.0 * scale, WHITE)?;
+        p.glyph(
+            g,
+            r,
+            14.0 * scale,
+            if n == 2 || ui.discord.voice_available { WHITE } else { rgba(1.0, 1.0, 1.0, 0.3) },
+        )?;
     }
     Ok(())
 }
@@ -117,7 +128,7 @@ pub fn paint_discord_overlay(
     p.fill_round_rect(panel, 18.0 * scale, rgba(pr, pg, pb, 0.94))?;
     p.stroke_round_rect((0.5, 0.5, w - 0.5, h - 0.5), 18.0 * scale, 1.0, rgba(1.0, 1.0, 1.0, 0.12))?;
     p.glyph(
-        '\u{E8F2}',
+        crate::ui::icons::DISCORD_GLYPH,
         (10.0 * scale, 8.0 * scale, 34.0 * scale, 34.0 * scale),
         14.0 * scale,
         rgba(0.6, 0.65, 1.0, 1.0),
@@ -178,7 +189,7 @@ pub fn paint_discord_overlay(
         } else {
             glyph
         };
-        p.glyph(g, r, 14.0 * scale, WHITE)?;
+        p.glyph(g, r, 14.0 * scale, if d.voice_available { WHITE } else { rgba(1.0, 1.0, 1.0, 0.3) })?;
     }
     Ok(())
 }

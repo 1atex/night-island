@@ -20,12 +20,30 @@ impl App {
 
     pub(in crate::island) fn notify_for(&mut self, kind: Notice, glyph: char, text: &str, ms: u32) {
         if self.settings.notify.on(kind) {
-            self.show_notice_for(glyph, text, ms);
+            let card = if kind == Notice::Ai {
+                self.settings.ai_notification_cards
+            } else {
+                self.settings.pet_notifications && self.pet.desktop.is_some()
+            };
+            if card {
+                self.post_local_notification(kind, text);
+            } else {
+                self.show_notice_for(glyph, text, ms);
+            }
         }
     }
 
     pub(in crate::island) fn show_notice_for(&mut self, glyph: char, text: &str, ms: u32) {
+        self.set_notice_for(glyph, text, ms, false);
+    }
+
+    pub(in crate::island) fn show_compact_reply(&mut self, text: &str) {
+        self.set_notice_for('\u{E8F2}', text, 7000, true);
+    }
+
+    fn set_notice_for(&mut self, glyph: char, text: &str, ms: u32, compact: bool) {
         self.react(if glyph == '\u{E783}' { Reaction::Attention } else { Reaction::Done }, 2300);
+        self.system_notices.compact_reply = compact;
         self.notice_link = None;
         self.ui.notice = Some((glyph, text.to_string()));
         self.update_eq();
@@ -81,6 +99,37 @@ impl App {
     }
 
     pub(in crate::island) fn click_collapsed(&mut self, x: i32, y: i32) {
+        if self.pill_motion.intro.is_none()
+            && view::collapsed_vpn_at(self.pill_rect(false), self.scale, &self.ui, x as f32, y as f32).is_some()
+        {
+            return self.toggle_vpn();
+        }
+        if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_attention(&self.ui).is_some() {
+            self.open_tab(view::Tab::Browser);
+            return;
+        }
+        if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_active(&self.ui).is_some() {
+            self.open_tab(view::Tab::Downloads);
+            return;
+        }
+        if self.ui.notice.is_none() && self.ui.volume.is_none() && !self.ui.live.is_empty() {
+            let pill = self.pill_rect(false);
+            let slot = if self.settings.vertical() {
+                view::vertical_slots(&self.ui, self.scale, self.cw * self.scale).live
+            } else {
+                view::music_slots(&self.ui, self.scale, self.cw * self.scale).live
+            };
+            if let Some((offset, length)) = slot {
+                let r = if self.settings.vertical() {
+                    (pill.0, pill.1 + offset, pill.0 + pill.2, pill.1 + offset + length)
+                } else {
+                    (pill.0 + offset, pill.1, pill.0 + offset + length, pill.1 + pill.3)
+                };
+                if x as f32 >= r.0 && x as f32 <= r.2 && y as f32 >= r.1 && y as f32 <= r.3 {
+                    return self.open_live_activity(0);
+                }
+            }
+        }
         if self.recording.is_some() {
             return self.stop_recording();
         }
@@ -98,6 +147,25 @@ impl App {
     }
 
     pub(in crate::island) fn toggle_vpn(&mut self) {
+        if self.settings.vpn_provider == crate::data::settings::VpnProvider::Off {
+            if let Some(group) = view::GROUPS.iter().position(|g| g.name == "Integrations") {
+                self.open_settings_at(group);
+            }
+            return;
+        }
+        if self.settings.vpn_provider == crate::data::settings::VpnProvider::Svoi && self.ui.svoi.access != "allowed" {
+            if !vpn::open_svoi() {
+                self.notify(Notice::Error, view::VPN_GLYPH, "Open SVOI to enable the integration");
+            } else if self.ui.svoi.access == "denied" {
+                self.notify_for(
+                    Notice::Integrations,
+                    view::VPN_GLYPH,
+                    "In SVOI: Settings → Integrations → Allow control from Night Island",
+                    4000,
+                );
+            }
+            return;
+        }
         if self.ui.vpn_busy || !vpn::toggle(self.hwnd) {
             return;
         }
@@ -107,6 +175,34 @@ impl App {
     }
 
     pub(in crate::island) fn on_vpn(&mut self) {
+        if self.settings.vpn_provider == crate::data::settings::VpnProvider::Svoi {
+            let next = vpn::snapshot();
+            if next.verified
+                && next.state == "running"
+                && let Some(active) = &next.active
+            {
+                let key = format!("{}/{}/{:?}", next.instance, active.id, next.started_at);
+                if self.ui.svoi_announced != key {
+                    if let Some(text) = vpn::announced_change(&self.ui.svoi, &next) {
+                        self.show_notice_for(view::VPN_GLYPH, &text, 2200);
+                    }
+                    self.ui.svoi_announced = key;
+                }
+            }
+            if !next.error.is_empty() && next.error != self.ui.svoi.error {
+                self.notify_for(Notice::Error, view::VPN_GLYPH, &next.error, 3500);
+            }
+            self.ui.vpn = next.connected();
+            self.ui.vpn_busy = vpn::switching() || next.busy;
+            self.ui.svoi = next;
+            self.update_eq();
+            self.repaint_collapsed();
+            self.repaint_expanded();
+            if self.ui.sw.group == view::GROUPS.iter().position(|g| g.name == "Integrations").unwrap_or(usize::MAX) {
+                self.render_settings_win();
+            }
+            return;
+        }
         let state = vpn::state();
         let was = self.ui.vpn;
         let result = vpn::take_result();
@@ -155,7 +251,20 @@ impl App {
                 }
                 downloads::Event::Done(path) => {
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    if self.settings.notify.on(Notice::Download) {
+                    if self.settings.notify.on(Notice::Download)
+                        && !self
+                            .ui
+                            .browser_done
+                            .iter()
+                            .any(|(recent, at)| recent == &name && at.elapsed().as_secs() < 10)
+                        && !self.ui.browser.items.iter().any(|item| {
+                            item.name == name
+                                && matches!(
+                                    item.state,
+                                    crate::services::browser::State::Active | crate::services::browser::State::Paused
+                                )
+                        })
+                    {
                         self.show_notice_for('\u{E73E}', &format!("Downloaded {name}"), 7000);
                         self.notice_link = Some(path);
                     }
@@ -187,7 +296,61 @@ impl App {
             return;
         }
         let track_changed = now.title != self.ui.media.title;
+        if now.title != self.ui.media.title || now.source != self.ui.media.source || now.cover != self.ui.media.cover {
+            self.finish_cover_motion();
+        }
+        if (track_changed || now.artist != self.ui.media.artist || now.source != self.ui.media.source)
+            && self.ui.tab != view::Tab::Yandex
+        {
+            if self.pointer.seek_drag {
+                unsafe {
+                    let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+                }
+            }
+            self.pointer.seek_drag = false;
+            self.ui.home.seek = None;
+        }
+        if now.source != self.ui.media.source && self.ui.tab != view::Tab::Yandex {
+            self.pointer.vol_drag = false;
+        }
+        if now.title != self.ui.media.title
+            || now.artist != self.ui.media.artist
+            || now.source != self.ui.media.source
+            || now.cover != self.ui.media.cover
+        {
+            self.ui.home.track_transition.retarget(
+                &self.ui.media,
+                self.state == State::Expanded
+                    && self.ui.tab == view::Tab::Home
+                    && !now.title.is_empty()
+                    && crate::ui::feedback::motion_allowed(),
+            );
+        }
+        let recording_changed = now.recording_key != self.ui.media.recording_key;
         self.ui.media = now;
+        if recording_changed
+            && self.settings_win.is_some()
+            && view::GROUPS.get(self.ui.sw.group).is_some_and(|g| g.name == "Pill and music")
+        {
+            self.render_settings_win();
+        }
+        if self.ui.home.vol_track {
+            match volume::app_volume(&self.ui.media.source) {
+                Some(level) => self.ui.home.app_vol = level,
+                None => self.ui.home.vol_track = false,
+            }
+        }
+        self.start_progress_timer();
+        if self.pill_motion.intro.is_some()
+            && (!self.ui.media.playing
+                || (!self.settings.music_track_intro
+                    && self.pill_motion.track
+                        != (self.ui.media.title.clone(), self.ui.media.artist.clone(), self.ui.media.source.clone())))
+        {
+            self.cancel_pill_motion();
+        }
+        self.maybe_start_music_intro();
+        self.refresh_music_intro();
         if track_changed && self.ui.media.source == "SPOTIFY" {
             spotify::refresh();
         }

@@ -10,7 +10,7 @@ const V_GAP: f32 = 9.0;
 const V_MIN: f32 = 140.0;
 
 const V_COVER: f32 = 30.0;
-const V_WEATHER: f32 = 40.0;
+const V_WEATHER: f32 = 46.0;
 const V_REC: f32 = 36.0;
 const V_AGENT: f32 = 78.0;
 const V_CLOCK: f32 = 38.0;
@@ -20,7 +20,7 @@ const V_DOT: f32 = 15.0;
 
 pub(in crate::view) fn indicators_height(ui: &UiState) -> f32 {
     let dots = usize::from(ui.privacy.mic || ui.mic_muted == Some(true)) + usize::from(ui.privacy.cam);
-    dots as f32 * V_DOT + if vpn_visible(ui) { V_DOT + 2.0 } else { 0.0 }
+    dots as f32 * V_DOT
 }
 
 pub(in crate::view) fn top_reserved(ui: &UiState) -> f32 {
@@ -42,6 +42,7 @@ pub struct VSlots {
     pub bars: Option<(f32, f32)>,
     pub title: Option<(f32, f32)>,
     pub rec: Option<(f32, f32)>,
+    pub live: Option<(f32, f32)>,
     pub agent: Option<(f32, f32)>,
     pub metrics: Option<(f32, f32)>,
     pub clock: (f32, f32),
@@ -51,26 +52,32 @@ pub struct VSlots {
 
 pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
     let top = top_reserved(ui);
+    let bottom = V_PAD + vpn_tail(ui);
     let m = music_slots(ui, 1.0, 0.0);
     let weather = m.weather.map(|_| V_WEATHER);
     let battery = battery_height(ui);
     if !row_pill(ui) {
-        let length = (top + weather.unwrap_or(0.0) + V_CLOCK + battery.unwrap_or(0.0) + 2.0 * V_GAP + V_PAD).max(V_MIN);
+        let length =
+            (top + weather.unwrap_or(0.0) + V_CLOCK + battery.unwrap_or(0.0) + 2.0 * V_GAP + bottom).max(V_MIN);
         let total = if pill_len > 0.0 { pill_len / scale } else { length };
         let at = |y: f32, h: f32| (y * scale, h * scale);
-        let free_top = top + weather.map_or(0.0, |h| h + V_GAP);
-        let free_bottom = total - V_PAD - battery.map_or(0.0, |h| h + V_GAP);
-        let clock_y = ((total - V_CLOCK) / 2.0).clamp(free_top, (free_bottom - V_CLOCK).max(free_top));
+        let free_bottom = total - bottom - battery.map_or(0.0, |h| h + V_GAP);
+        let group_h = V_CLOCK + weather.map_or(0.0, |h| h + V_GAP);
+        let start = top + ((free_bottom - top - group_h) / 2.0).max(0.0);
+        let before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
+        let clock_y = start + if before { weather.map_or(0.0, |h| h + V_GAP) } else { 0.0 };
+        let weather_y = if before { start } else { clock_y + V_CLOCK + V_GAP };
         return VSlots {
             cover: None,
-            weather: weather.map(|h| at(top, h)),
+            weather: weather.map(|h| at(weather_y, h)),
             bars: None,
             title: None,
             rec: None,
+            live: None,
             agent: None,
             metrics: None,
             clock: at(clock_y, V_CLOCK),
-            battery: battery.map(|h| at(total - V_PAD - h, h)),
+            battery: battery.map(|h| at(total - bottom - h, h)),
             length,
         };
     }
@@ -78,14 +85,15 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
     let bars = m.bars.map(|_| BARS_SLOT);
     let title = m.title.map(|_| V_TITLE);
     let rec = m.rec.map(|_| V_REC);
+    let live = m.live.map(|(_, w)| w);
     let agent = m.agent.map(|_| V_AGENT);
     let metrics = m.metrics.map(|(_, w)| w);
-    let heights = [cover, weather, bars, title, rec, agent, metrics, Some(V_CLOCK), battery];
+    let heights = [cover, weather, bars, title, rec, live, agent, metrics, Some(V_CLOCK), battery];
     let count = heights.iter().flatten().count() as f32;
     let content: f32 = heights.iter().flatten().sum::<f32>() + V_GAP * (count - 1.0).max(0.0);
-    let length = (top + content + V_PAD).max(V_MIN);
+    let length = (top + content + bottom).max(V_MIN);
     let total = if pill_len > 0.0 { pill_len / scale } else { length };
-    let mut y = top + (total - top - V_PAD - content).max(0.0) / 2.0;
+    let mut y = top + (total - top - bottom - content).max(0.0) / 2.0;
     let mut place = |h: Option<f32>| {
         h.map(|h| {
             let slot = (y * scale, h * scale);
@@ -94,27 +102,37 @@ pub fn vertical_slots(ui: &UiState, scale: f32, pill_len: f32) -> VSlots {
         })
     };
     let cover = place(cover);
-    let weather = place(weather);
     let bars = place(bars);
     let title = place(title);
     let rec = place(rec);
+    let live = place(live);
     let agent = place(agent);
     let metrics = place(metrics);
+    let before = ui.cfg.pill_weather_side == crate::data::settings::WeatherSide::Left;
+    let weather_left = if before { place(weather) } else { None };
     let clock = place(Some(V_CLOCK)).unwrap_or((0.0, 0.0));
+    let weather = weather_left.or_else(|| if before { None } else { place(weather) });
     let battery = place(battery);
-    VSlots { cover, weather, bars, title, rec, agent, metrics, clock, battery, length }
+    VSlots { cover, weather, bars, title, rec, live, agent, metrics, clock, battery, length }
 }
 
 pub fn vertical_length(ui: &UiState) -> f32 {
     let chars = |s: &str| crate::ui::i18n::tr(s).chars().count() as f32;
     if let Some((_, text)) = &ui.notice {
-        return (46.0 + chars(text) * 7.6 + 16.0).clamp(V_MIN, 460.0);
+        return (46.0 + notice_text_width(ui, text) + 16.0).clamp(V_MIN, 460.0);
     }
     if ui.volume.is_some() {
-        return V_MIN + 20.0;
+        return V_MIN + 20.0 + vpn_tail(ui);
     }
-    if let Some(name) = &ui.downloading {
-        return (top_reserved(ui) + 40.0 + chars(&downloading_label(name)) * 6.9 + 16.0).clamp(V_MIN, 420.0);
+    if let Some(name) = browser_attention(ui) {
+        return (top_reserved(ui) + 64.0 + browser_name_width(ui, &name) + vpn_tail(ui)).clamp(V_MIN, 420.0);
+    }
+    if let Some(item) = browser_active(ui) {
+        return (top_reserved(ui) + 64.0 + browser_name_width(ui, &item.name) + vpn_tail(ui)).clamp(V_MIN, 420.0);
+    }
+    if let Some(name) = legacy_download(ui) {
+        return (top_reserved(ui) + 40.0 + chars(&downloading_label(name)) * 6.9 + 16.0 + vpn_tail(ui))
+            .clamp(V_MIN, 420.0);
     }
     vertical_slots(ui, 1.0, 0.0).length
 }
@@ -139,6 +157,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
         );
     }
     paint_indicators(p, pill, scale, ui)?;
+    let bottom = bottom - vpn_tail(ui) * scale;
     if let Some(level) = ui.volume {
         let level = level.clamp(0.0, 1.0);
         let icon = if level <= 0.001 { '\u{E74F}' } else { '\u{E767}' };
@@ -157,7 +176,47 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
             WHITE,
         );
     }
-    if let Some(name) = &ui.downloading {
+    if let Some(name) = browser_attention(ui) {
+        let start = y + top_reserved(ui) * scale;
+        p.glyph('\u{E769}', (x, start, x + w, start + 28.0 * scale), 15.0 * scale, acc(1.0))?;
+        return along(
+            &name,
+            (x, start + 34.0 * scale, x + w, bottom),
+            12.5,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        );
+    }
+    if let Some(item) = browser_active(ui) {
+        let start = y + top_reserved(ui) * scale;
+        p.glyph('\u{E896}', (x, start, x + w, start + 28.0 * scale), 15.0 * scale, acc(1.0))?;
+        along(
+            &item.name,
+            (x, start + 34.0 * scale, x + w, bottom - 40.0 * scale),
+            12.5,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
+        if let Some(progress) = item.progress() {
+            let track = x + w - 3.0 * scale;
+            p.fill_round_rect(
+                (track, start, track + 2.0 * scale, start + (bottom - start) * progress),
+                scale,
+                rgba(1.0, 1.0, 1.0, 0.65),
+            )?;
+        }
+        return along(
+            &browser_progress(item),
+            (x, bottom - 36.0 * scale, x + w, bottom),
+            11.0,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_TEXT_ALIGNMENT_CENTER,
+            rgba(1.0, 1.0, 1.0, 0.6),
+        );
+    }
+    if let Some(name) = legacy_download(ui) {
         let start = y + top_reserved(ui) * scale;
         p.glyph('\u{E896}', (x, start, x + w, start + 28.0 * scale), 15.0 * scale, acc(1.0))?;
         return along(
@@ -174,22 +233,36 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
     if let (Some(s), Some(cover)) = (slots.cover, &ui.media.cover) {
         let side = (w - 14.0 * scale).min(V_COVER * scale);
         let top = y + s.0;
-        p.cover((cx - side / 2.0, top, cx + side / 2.0, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
+        if !ui.cover_in_flight && !ui.track_in_flight {
+            p.cover((cx - side / 2.0, top, cx + side / 2.0, top + side), 6.0 * scale, cover, ui.cfg.cover_mode)?;
+        }
     }
     if let (Some(s), Some(wx)) = (slots.weather, &ui.weather) {
         let r = slot(s);
         paint_pill_weather_icon(p, pill, scale, ui)?;
         p.text(
             &format!("{}°", wx.temp.round() as i32),
-            (r.0, r.1 + 22.0 * scale, r.2, r.3),
-            12.5 * scale,
+            (r.0, r.1 + 26.0 * scale, r.2, r.3),
+            row_text_size(ui) * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_CENTER,
             rgba(1.0, 1.0, 1.0, 0.85),
         )?;
     }
-    if let Some(s) = slots.title {
-        along(&ui.media.title, slot(s), 12.5, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING, WHITE)?;
+    if let Some(s) = slots.title
+        && !ui.track_in_flight
+    {
+        along(
+            &ui.media.title,
+            slot(s),
+            row_text_size(ui),
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
+            WHITE,
+        )?;
+    }
+    if let Some(s) = slots.live {
+        p.rotated(slot(s), ccw, |p, rect| paint_live_chip(p, rect, scale, ui))?;
     }
     if let (Some(s), Some(secs)) = (slots.rec, ui.recording_secs) {
         let r = slot(s);
@@ -239,7 +312,7 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
         p.text(
             text,
             (r.0, top, r.2, top + half),
-            15.0 * scale,
+            clock_text_size(ui) * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_CENTER,
             WHITE,

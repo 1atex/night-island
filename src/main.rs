@@ -9,7 +9,13 @@ mod ui;
 mod view;
 
 fn main() -> windows_core::Result<()> {
-    if services::agents::handle_cli() {
+    if platform::vpn::handle_cli() {
+        return Ok(());
+    }
+    if platform::localvoice::run_helper() {
+        return Ok(());
+    }
+    if platform::taskbar::handle_cli() || services::agents::handle_cli() {
         return Ok(());
     }
     island::run()

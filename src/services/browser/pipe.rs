@@ -1,0 +1,484 @@
+use super::{
+    Command, SHARED, Snapshot, WM_BROWSER_SHOW, appearance_frame, change,
+    model::{Frame, MAX_FRAME, parse},
+    update,
+};
+use std::collections::{HashMap, VecDeque};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, HLOCAL, HWND, INVALID_HANDLE_VALUE,
+    LocalFree,
+};
+use windows::Win32::Security::Authorization::{
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+};
+use windows::Win32::Security::{
+    GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+};
+use windows::Win32::Storage::FileSystem::{
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+};
+use windows::Win32::System::IO::{
+    CancelIoEx, CreateIoCompletionPort, GetQueuedCompletionStatus, OVERLAPPED, PostQueuedCompletionStatus,
+};
+use windows::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
+    PIPE_WAIT,
+};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
+};
+use windows::core::{HSTRING, PWSTR};
+
+struct Handle(HANDLE);
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+struct Descriptor(PSECURITY_DESCRIPTOR);
+impl Drop for Descriptor {
+    fn drop(&mut self) {
+        unsafe {
+            LocalFree(Some(HLOCAL(self.0.0)));
+        }
+    }
+}
+
+fn sid(process: HANDLE) -> Option<String> {
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(process, TOKEN_QUERY, &mut token).ok()?;
+        let token = Handle(token);
+        let mut needed = 0;
+        let _ = GetTokenInformation(token.0, TokenUser, None, 0, &mut needed);
+        if needed == 0 || needed > 65536 {
+            return None;
+        }
+        let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
+        GetTokenInformation(token.0, TokenUser, Some(buffer.as_mut_ptr().cast()), needed, &mut needed).ok()?;
+        let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
+        let mut text = PWSTR::null();
+        ConvertSidToStringSidW(user.User.Sid, &mut text).ok()?;
+        let value = text.to_string().ok();
+        LocalFree(Some(HLOCAL(text.0.cast())));
+        value
+    }
+}
+
+fn peer(pipe: HANDLE, owner: &str) -> bool {
+    unsafe {
+        let mut pid = 0;
+        if GetNamedPipeClientProcessId(pipe, &mut pid).is_err() {
+            return false;
+        }
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+        let process = Handle(process);
+        let mut path = vec![0u16; 32768];
+        let mut size = path.len() as u32;
+        if QueryFullProcessImageNameW(process.0, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut size).is_err() {
+            return false;
+        }
+        let path = String::from_utf16_lossy(&path[..size as usize]);
+        let valid = path.rsplit('\\').next().is_some_and(|name| name.eq_ignore_ascii_case("NightBrowser.exe"))
+            && sid(process.0).as_deref() == Some(owner);
+        if valid && let Ok(mut shared) = SHARED.lock() {
+            shared.peer_pid = pid;
+        }
+        valid
+    }
+}
+
+pub(super) const APPEARANCE_CHANGED: usize = 3;
+
+pub(super) fn signal(port: usize, key: usize) {
+    if port != 0 {
+        unsafe {
+            let _ = PostQueuedCompletionStatus(HANDLE(port as _), 0, key, None);
+        }
+    }
+}
+
+pub(super) fn start(hwnd: HWND) {
+    let Ok(port) = (unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, None, 0, 1) }) else { return };
+    let raw = port.0 as usize;
+    let owner = hwnd.0 as isize;
+    if let Ok(mut shared) = SHARED.lock() {
+        shared.port = raw;
+        shared.thread = Some(std::thread::spawn(move || {
+            let port = Handle(HANDLE(raw as _));
+            if run(port.0, owner).is_none() {
+                update(owner, Snapshot { error: true, ..Default::default() });
+            }
+            if let Ok(mut shared) = SHARED.lock()
+                && shared.port == raw
+            {
+                shared.port = 0;
+            }
+        }));
+    }
+}
+
+fn completion(port: HANDLE, timeout: u32) -> (bool, u32, usize, *mut OVERLAPPED) {
+    let mut count = 0;
+    let mut key = usize::MAX;
+    let mut ptr = std::ptr::null_mut();
+    let ok = unsafe { GetQueuedCompletionStatus(port, &mut count, &mut key, &mut ptr, timeout).is_ok() };
+    (ok, count, key, ptr)
+}
+
+fn pending(result: windows::core::Result<()>) -> bool {
+    result.is_ok() || unsafe { GetLastError() == ERROR_IO_PENDING }
+}
+
+struct Connection {
+    pipe: Handle,
+    accept: Box<OVERLAPPED>,
+    read: Box<OVERLAPPED>,
+    write: Box<OVERLAPPED>,
+    accepting: bool,
+    reading: bool,
+    writing: bool,
+    buffer: Box<[u8; 4096]>,
+    output: Vec<u8>,
+    queue: VecDeque<Vec<u8>>,
+}
+
+impl Connection {
+    fn read(&mut self) -> bool {
+        self.reading = pending(unsafe { ReadFile(self.pipe.0, Some(&mut *self.buffer), None, Some(&mut *self.read)) });
+        self.reading
+    }
+    fn write(&mut self) -> bool {
+        if self.writing || self.queue.is_empty() {
+            return true;
+        }
+        self.output = self.queue.pop_front().unwrap();
+        self.writing = pending(unsafe { WriteFile(self.pipe.0, Some(&self.output), None, Some(&mut *self.write)) });
+        self.writing
+    }
+    fn send(&mut self, value: serde_json::Value) -> bool {
+        if self.queue.len() >= 16 {
+            return false;
+        }
+        let mut bytes = value.to_string().into_bytes();
+        bytes.push(b'\n');
+        self.queue.push_back(bytes);
+        self.write()
+    }
+    fn finish(&mut self, port: HANDLE) -> bool {
+        unsafe {
+            let _ = CancelIoEx(self.pipe.0, None);
+        }
+        let mut quit = false;
+        loop {
+            let pending = self.accepting || self.reading || self.writing;
+            let (ok, _, key, ptr) = completion(port, if pending { u32::MAX } else { 0 });
+            if ptr == &mut *self.accept {
+                self.accepting = false;
+            }
+            if ptr == &mut *self.read {
+                self.reading = false;
+            }
+            if ptr == &mut *self.write {
+                self.writing = false;
+            }
+            if !ok && ptr.is_null() {
+                break;
+            }
+            if key == 0 {
+                quit = true;
+            }
+        }
+        quit
+    }
+}
+
+fn run(port: HANDLE, hwnd: isize) -> Option<()> {
+    let owner = sid(unsafe { GetCurrentProcess() })?;
+    let name = HSTRING::from(format!("\\\\.\\pipe\\NightIsland.Browser.v1.{owner}"));
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &HSTRING::from(format!("D:P(A;;GA;;;{owner})")),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            None,
+        )
+        .ok()?;
+    }
+    let descriptor = Descriptor(descriptor);
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor.0.0,
+        bInheritHandle: false.into(),
+    };
+    loop {
+        let pipe = unsafe {
+            CreateNamedPipeW(
+                &name,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1,
+                4096,
+                32768,
+                0,
+                Some(&attributes),
+            )
+        };
+        if pipe == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut connection = Connection {
+            pipe: Handle(pipe),
+            accept: Box::default(),
+            read: Box::default(),
+            write: Box::default(),
+            accepting: false,
+            reading: false,
+            writing: false,
+            buffer: Box::new([0; 4096]),
+            output: Vec::new(),
+            queue: VecDeque::new(),
+        };
+        unsafe {
+            CreateIoCompletionPort(pipe, Some(port), 2, 1).ok()?;
+        }
+        let accepted = unsafe { ConnectNamedPipe(pipe, Some(&mut *connection.accept)) };
+        let ready = accepted.is_err() && unsafe { GetLastError() == ERROR_PIPE_CONNECTED };
+        connection.accepting = !ready && pending(accepted);
+        if !ready && !connection.accepting {
+            return None;
+        }
+        let mut quit = false;
+        let mut connected = ready;
+        if connection.accepting {
+            loop {
+                let (ok, _, key, ptr) = completion(port, u32::MAX);
+                if key == 0 {
+                    quit = true;
+                    break;
+                }
+                if ptr == &mut *connection.accept {
+                    connection.accepting = false;
+                    connected = ok;
+                    break;
+                }
+                if !ok {
+                    break;
+                }
+            }
+        }
+        if !quit && connected && peer(pipe, &owner) {
+            quit = session(&mut connection, port, hwnd);
+        }
+        quit |= connection.finish(port);
+        update(hwnd, Snapshot::default());
+        if let Ok(mut shared) = SHARED.lock() {
+            shared.commands.clear();
+            shared.outgoing.clear();
+            shared.pocket.clear();
+            shared.peer_pid = 0;
+        }
+        if quit {
+            return Some(());
+        }
+    }
+}
+
+fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
+    if !c.read() {
+        return false;
+    }
+    let mut hello = false;
+    let mut appearance_enabled = false;
+    let mut show_enabled = false;
+    let mut hub_enabled = false;
+    let mut last_show = None::<std::time::Instant>;
+    let mut input = Vec::new();
+    let mut requests = HashMap::<String, (String, std::time::Instant)>::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let timeout = if hello {
+            requests
+                .values()
+                .map(|(_, until)| {
+                    until.saturating_duration_since(std::time::Instant::now()).as_millis().min(30000) as u32
+                })
+                .min()
+                .unwrap_or(u32::MAX)
+        } else {
+            deadline.saturating_duration_since(std::time::Instant::now()).as_millis().min(5000) as u32
+        };
+        let (ok, count, key, ptr) = completion(port, timeout);
+        if ptr == &mut *c.read {
+            c.reading = false;
+        }
+        if ptr == &mut *c.write {
+            c.writing = false;
+        }
+        if key == 0 {
+            return true;
+        }
+        if !ok {
+            return false;
+        }
+        if key == APPEARANCE_CHANGED {
+            if hello && appearance_enabled && !c.send(appearance_frame()) {
+                return false;
+            }
+        } else if key == 4 {
+            let frames = SHARED.lock().map(|mut shared| std::mem::take(&mut shared.outgoing)).unwrap_or_default();
+            for frame in frames {
+                if !hello || !hub_enabled {
+                    continue;
+                }
+                if matches!(frame["type"].as_str(), Some("tab-action" | "request-action" | "open-link")) {
+                    if requests.len() >= 16 {
+                        return false;
+                    }
+                    requests.insert(
+                        frame["request"].as_str().unwrap_or("").into(),
+                        (
+                            frame["id"].as_str().or_else(|| frame["url"].as_str()).unwrap_or("").into(),
+                            std::time::Instant::now() + std::time::Duration::from_secs(30),
+                        ),
+                    );
+                }
+                if !c.send(frame) {
+                    return false;
+                }
+            }
+        } else if key == 1 {
+            let commands = SHARED.lock().map(|mut shared| std::mem::take(&mut shared.commands)).unwrap_or_default();
+            for Command { id, action, request } in commands {
+                if !hello || requests.len() >= 16 {
+                    continue;
+                }
+                requests.insert(
+                    request.clone(),
+                    (id.clone(), std::time::Instant::now() + std::time::Duration::from_secs(30)),
+                );
+                if !c.send(serde_json::json!({"v":1,"type":"command","id":id,"action":action,"request":request})) {
+                    return false;
+                }
+            }
+        } else if ptr == &mut *c.read {
+            c.reading = false;
+            if count == 0 {
+                return false;
+            }
+            input.extend_from_slice(&c.buffer[..count as usize]);
+            if input.len() >= MAX_FRAME {
+                return false;
+            }
+            while let Some(end) = input.iter().position(|b| *b == b'\n') {
+                let frame = parse(&input[..end]);
+                input.drain(..=end);
+                match frame {
+                    Some(Frame::Hello { capabilities, .. }) if !hello => {
+                        hello = true;
+                        appearance_enabled = capabilities.iter().any(|cap| cap == "appearance");
+                        show_enabled = capabilities.iter().any(|cap| cap == "show-downloads");
+                        hub_enabled = capabilities.iter().any(|cap| cap == "tabs");
+                        if !c.send(serde_json::json!({"v":1,"type":"hello","capabilities":["downloads","show-downloads","appearance","tabs","pocket","activity","requests"]})) {
+                            return false;
+                        }
+                        update(hwnd, Snapshot { connected: true, ..Default::default() });
+                        if appearance_enabled && !c.send(appearance_frame()) {
+                            return false;
+                        }
+                    }
+                    Some(Frame::Show { panel, .. })
+                        if hello && show_enabled && (panel == "downloads" || hub_enabled) =>
+                    {
+                        let now = std::time::Instant::now();
+                        if last_show.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_millis(500)) {
+                            last_show = Some(now);
+                            unsafe {
+                                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                                    Some(HWND(hwnd as _)),
+                                    WM_BROWSER_SHOW,
+                                    windows::Win32::Foundation::WPARAM(match panel.as_str() {
+                                        "browser" => 1,
+                                        "pocket" => 2,
+                                        _ => 0,
+                                    }),
+                                    windows::Win32::Foundation::LPARAM(0),
+                                );
+                            }
+                        }
+                    }
+                    Some(Frame::Features { tabs, pocket, activity, requests, .. }) if hello && hub_enabled => {
+                        change(hwnd, |state| {
+                            state.features = super::Features { tabs, pocket, activity, requests };
+                        });
+                    }
+                    Some(Frame::Tabs { request, items, .. }) if hello && hub_enabled => {
+                        change(hwnd, |state| {
+                            if state.query == request {
+                                state.tabs = items;
+                                state.searching = false;
+                            }
+                        });
+                    }
+                    Some(Frame::Activity { tabs, requests, .. }) if hello && hub_enabled => {
+                        change(hwnd, |state| {
+                            state.activity = tabs;
+                            state.requests = requests;
+                        });
+                    }
+                    Some(Frame::Pocket { request, item, .. }) if hello && hub_enabled => {
+                        let queued = if let Ok(mut shared) = SHARED.lock()
+                            && shared.state.features.pocket
+                            && shared.pocket.len() < 8
+                        {
+                            shared.pocket.push_back((request.clone(), item));
+                            true
+                        } else {
+                            false
+                        };
+                        if queued {
+                            unsafe {
+                                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                                    Some(HWND(hwnd as _)),
+                                    super::WM_BROWSER,
+                                    windows::Win32::Foundation::WPARAM(0),
+                                    windows::Win32::Foundation::LPARAM(0),
+                                );
+                            }
+                        } else if !c
+                            .send(serde_json::json!({"v":1,"type":"pocket-result","request":request,"ok":false}))
+                        {
+                            return false;
+                        }
+                    }
+                    Some(Frame::Downloads { items, .. }) if hello => {
+                        change(hwnd, |state| {
+                            state.items = items;
+                        });
+                    }
+                    Some(Frame::Result { request, ok, .. }) if hello => {
+                        if let Some((id, _)) = requests.remove(&request) {
+                            change(hwnd, |state| {
+                                state.pending.retain(|pending| pending != &id);
+                                state.error = !ok;
+                            });
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            if !c.read() {
+                return false;
+            }
+        } else if ptr == &mut *c.write {
+            c.writing = false;
+            if count as usize != c.output.len() || !c.write() {
+                return false;
+            }
+        }
+    }
+}

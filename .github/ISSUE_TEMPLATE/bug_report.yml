@@ -1,0 +1,37 @@
+name: Bug report / Сообщение об ошибке
+description: Something does not work / Что-то работает неправильно
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / Что произошло
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / Шаги воспроизведения
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / Ожидаемое поведение
+  - type: input
+    id: version
+    attributes:
+      label: Night Island version / Версия
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version / Версия Windows
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or logs / Скриншоты или логи

@@ -6,6 +6,7 @@ impl App {
         self.refresh_reminder_labels();
         self.schedule_reminder();
         self.refresh_note_remind();
+        self.repaint_collapsed();
     }
 
     pub(in crate::island) fn refresh_reminder_labels(&mut self) {
@@ -48,10 +49,16 @@ impl App {
         let now = chrono::Local::now().timestamp();
         let due = self.reminders.iter().filter(|r| r.due <= now + 1).min_by_key(|r| r.due);
         let Some(r) = due else { return self.schedule_reminder() };
+        if self.foreground_hidden() && !self.settings.notification_priority {
+            self.kill_timer(Timer::Remind);
+            return;
+        }
         self.ui.remind.alert = Some((r.id, r.text.clone()));
         self.ui.cmd.open = false;
-        unsafe {
-            let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(MB_ICONASTERISK);
+        crate::platform::sounds::play(crate::platform::sounds::Cue::Reminder, 100);
+        if self.foreground_hidden() {
+            self.hidden_timer_card(self.ui.remind.alert.as_ref().unwrap().1.clone());
+            return;
         }
         self.kill_timer(Timer::Collapse);
         self.expand();

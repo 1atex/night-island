@@ -18,3 +18,5 @@ desktop.ini
 
 release.key
 *.release-key
+
+/outputs/

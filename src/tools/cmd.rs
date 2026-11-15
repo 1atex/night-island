@@ -12,6 +12,8 @@ use crate::view::Ctl;
 pub const MAX_ITEMS: usize = 5;
 
 pub enum Action {
+    None,
+    BrowserTab(String),
     Launch { launch: String, path: PathBuf },
     Copy(String),
     System(Ctl),
@@ -332,6 +334,11 @@ pub fn shell_open(target: &str, verb: Option<&str>) {
             SW_SHOWNORMAL,
         );
     }
+}
+
+pub fn shell_run(program: &str, args: &str) -> bool {
+    let (program, args) = (HSTRING::from(program), HSTRING::from(args));
+    unsafe { ShellExecuteW(None, w!("open"), &program, &args, None, SW_SHOWNORMAL).0 as isize > 32 }
 }
 
 pub fn reveal(path: &std::path::Path) {

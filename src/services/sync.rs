@@ -7,7 +7,8 @@ use sha2::{Digest, Sha256};
 use crate::services::proto::{Lyrics, LyricsPut, LyricsReply};
 use crate::services::{http, integrations};
 
-pub const BASE: &str = "https://backend.night-watchers.com/api/v2/night_island";
+pub const HOST: &str = env!("NI_BACKEND_HOST");
+pub const BASE: &str = concat!("https://", env!("NI_BACKEND_HOST"), "/api/v2/night_island");
 const USER_AGENT: &str = "NightIsland/0.1";
 const ID_DOMAIN: &[u8] = b"night-island/lyrics/v1\0";
 const PUT_DOMAIN: &[u8] = b"night-island/lyrics-put/v1\0";

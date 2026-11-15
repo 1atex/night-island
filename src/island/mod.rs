@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::mem::size_of;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use windows::UI::Color;
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{
-    AnimationIterationBehavior, CompositionAnimation, CompositionColorBrush, CompositionPathGeometry,
-    CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual,
+    AnimationIterationBehavior, CompositionAnimation, CompositionColorBrush, CompositionGeometricClip,
+    CompositionPathGeometry, CompositionRoundedRectangleGeometry, Compositor, ContainerVisual, SpriteVisual,
 };
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
@@ -40,6 +40,7 @@ use crate::platform::dnd;
 use crate::platform::downloads;
 use crate::platform::lockkeys;
 use crate::platform::media;
+use crate::platform::memory;
 use crate::platform::metrics;
 use crate::platform::privacy;
 use crate::platform::recognize;
@@ -71,27 +72,38 @@ use crate::ui::tray;
 use crate::view;
 use windows_numerics::{Vector2, Vector3};
 
-mod appearance;
+pub(crate) mod appearance;
 mod character;
+mod companion_chat;
+mod cover_motion;
 mod demo;
+mod desktop_dock;
 mod editing;
 mod geometry;
 mod hotkeys;
 mod input;
 mod liquid;
+mod live;
 mod lyric;
+mod memory_tools;
 mod motion;
+mod pet_studio;
 mod pill;
+mod pill_motion;
+mod profile_transfer;
 mod settings_win;
 mod startup;
+mod system_notifications;
 mod tabs;
 mod timers;
+mod top_panel;
 mod voice;
+mod voice_info;
 mod window;
 
 use self::{
-    appearance::*, character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*,
-    tabs::ClipboardState, timers::Timer, window::*,
+    character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*, tabs::ClipboardState,
+    timers::Timer, window::*,
 };
 pub use startup::run;
 
@@ -118,16 +130,27 @@ struct App {
     scale: f32,
     compositor: Compositor,
     geometry: CompositionRoundedRectangleGeometry,
+    open_motion: Option<motion::OpenMotion>,
     state: State,
     win: Win,
+    desktop_bounds: Option<((f32, f32), view::Rect)>,
     pointer: Pointer,
     settings: Settings,
     dpi_scale: f32,
     _target: DesktopWindowTarget,
     _visual: ContainerVisual,
     backdrop: SpriteVisual,
+    host_backdrop_enabled: Cell<Option<bool>>,
+    frame_timers: crate::platform::frame_timers::FrameTimers,
+    glass: Option<crate::ui::glass::Lens>,
     tint: SpriteVisual,
     settings_win: Option<HWND>,
+    windows_taskbar: Option<crate::platform::taskbar::TaskbarGuard>,
+    desktop_dock: Option<crate::ui::desktop_dock::Dock>,
+    top_panel: Option<crate::ui::top_panel::TopPanel>,
+    top_panel_poll: Instant,
+    top_panel_radios: Instant,
+    top_panel_data: crate::ui::top_panel::Snapshot,
     power_last: Option<(u8, bool)>,
     lock_pending: Vec<u16>,
     ui: view::UiState,
@@ -137,17 +160,28 @@ struct App {
     overlay: Option<overlay::Overlay>,
     want_dock_dialog: bool,
     want_chat_dialog: bool,
+    want_header_menu: bool,
     pending_power: Option<(voicecmd::Power, std::time::Instant)>,
+    pending_ask: Option<(voicecmd::Command, std::time::Instant)>,
+    wake_session: bool,
+    agent: Option<crate::services::assistant::agent::Run>,
+    dialog: Vec<crate::services::assistant::agent::Exchange>,
+    run_serial: u64,
+    last_spoken: String,
     reminders: Vec<Reminder>,
     recording: Option<recorder::Recording>,
     notice_link: Option<std::path::PathBuf>,
     pet: Pet,
     prev_foreground: HWND,
     cw: f32,
+    pill_motion: pill_motion::PillMotion,
+    system_notices: system_notifications::SystemNotices,
     pending_high_surrogate: Option<u16>,
     music: MusicBars,
     gaming: bool,
+    excluded_foreground: bool,
     pill_hidden: bool,
+    ghost_stage: u8,
     metrics_on: Option<u32>,
     steam_game: Option<(u32, std::time::Instant)>,
     ghosted: bool,
@@ -156,7 +190,10 @@ struct App {
     liquid: Liquid,
     ears: [Layer; 2],
     collapsed: Layer,
+    progress_fill: Layer,
     expanded: Layer,
+    cover_layer: Layer,
+    cover_flight_until: Option<Instant>,
 }
 
 thread_local! {

@@ -16,11 +16,20 @@ impl Combo {
         Self { mods, vk }
     }
 
+    pub const NONE: Combo = Combo::new(0, 0);
+
+    pub fn is_none(self) -> bool {
+        self == Self::NONE
+    }
+
     pub fn valid(self) -> bool {
         self.mods != 0 && self.mods & !(ALT | CTRL | SHIFT | WIN) == 0 && valid_vk(self.vk)
     }
 
     pub fn text(self) -> String {
+        if self.is_none() {
+            return "Not set".into();
+        }
         let mut out = String::new();
         for (bit, name) in [(CTRL, "Ctrl"), (ALT, "Alt"), (SHIFT, "Shift"), (WIN, "Win")] {
             if self.mods & bit != 0 {
@@ -93,10 +102,11 @@ pub enum Hotkey {
     Rec = 11,
     HidePill = 12,
     Dictate = 13,
+    BrowserTabs = 14,
 }
 
 impl Hotkey {
-    pub const ALL: [Hotkey; 13] = [
+    pub const ALL: [Hotkey; 14] = [
         Hotkey::Toggle,
         Hotkey::Clipboard,
         Hotkey::PlainPaste,
@@ -110,6 +120,7 @@ impl Hotkey {
         Hotkey::Rec,
         Hotkey::HidePill,
         Hotkey::Dictate,
+        Hotkey::BrowserTabs,
     ];
 
     pub fn from_id(id: i32) -> Option<Hotkey> {
@@ -131,6 +142,7 @@ impl Hotkey {
             Hotkey::Rec => "rec",
             Hotkey::HidePill => "hide_pill",
             Hotkey::Dictate => "dictate",
+            Hotkey::BrowserTabs => "browser_tabs",
         }
     }
 
@@ -149,6 +161,7 @@ impl Hotkey {
             Hotkey::Rec => "Screen recording",
             Hotkey::HidePill => "Hide the pill for a few seconds",
             Hotkey::Dictate => "Dictate by voice",
+            Hotkey::BrowserTabs => "Find a browser tab",
         }
     }
 
@@ -168,6 +181,7 @@ impl Hotkey {
             Hotkey::Rec => (CTRL | ALT, 'R' as u32),
             Hotkey::HidePill => (CTRL, 'E' as u32),
             Hotkey::Dictate => (CTRL | ALT, 'D' as u32),
+            Hotkey::BrowserTabs => (CTRL | ALT, 'B' as u32),
         };
         Combo::new(mods, vk)
     }
