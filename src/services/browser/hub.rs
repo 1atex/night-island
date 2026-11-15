@@ -70,7 +70,7 @@ impl RequestItem {
         identifier(&self.id)
             && !self.method.is_empty()
             && self.method.len() <= 20
-            && self.method.bytes().all(|b| b.is_ascii_uppercase() || b == b'-')
+            && self.method.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
             && self.host.chars().count() <= 160
             && !self.host.chars().any(char::is_control)
     }
