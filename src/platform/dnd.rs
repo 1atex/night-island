@@ -358,7 +358,7 @@ impl IDropTarget_Impl for Target_Impl {
 
 pub fn register(hwnd: HWND) {
     unsafe {
-        if let Err(error) = OleInitialize(None).ok() {
+        if let Err(error) = OleInitialize(None) {
             crate::log_warn!("OLE initialization failed: {error}");
             return;
         }
