@@ -1,4 +1,6 @@
+mod hub;
 mod model;
+pub use hub::{Features, RequestItem, TabItem};
 mod pipe;
 pub use model::{Action, Download, State};
 use std::collections::VecDeque;
@@ -40,6 +42,12 @@ pub struct Snapshot {
     pub items: Vec<Download>,
     pub error: bool,
     pub pending: Vec<String>,
+    pub features: Features,
+    pub tabs: Vec<TabItem>,
+    pub query: String,
+    pub searching: bool,
+    pub activity: Vec<TabItem>,
+    pub requests: Vec<RequestItem>,
 }
 
 #[derive(Clone)]
@@ -53,6 +61,9 @@ struct Shared {
     state: Snapshot,
     appearance: Appearance,
     commands: VecDeque<Command>,
+    outgoing: VecDeque<serde_json::Value>,
+    pocket: VecDeque<(String, crate::data::pocket::PocketItem)>,
+    peer_pid: u32,
     port: usize,
     sequence: u64,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -60,8 +71,22 @@ struct Shared {
 
 static SHARED: Mutex<Shared> = Mutex::new(Shared {
     appearance: Appearance { panel: [0; 3], accent: [166, 179, 255], motion: true },
-    state: Snapshot { connected: false, items: Vec::new(), error: false, pending: Vec::new() },
+    state: Snapshot {
+        connected: false,
+        items: Vec::new(),
+        error: false,
+        pending: Vec::new(),
+        features: Features { tabs: false, pocket: false, activity: false, requests: false },
+        tabs: Vec::new(),
+        query: String::new(),
+        searching: false,
+        activity: Vec::new(),
+        requests: Vec::new(),
+    },
     commands: VecDeque::new(),
+    outgoing: VecDeque::new(),
+    pocket: VecDeque::new(),
+    peer_pid: 0,
     port: 0,
     sequence: 0,
     thread: None,
@@ -78,6 +103,9 @@ pub fn configure(hwnd: HWND, enabled: bool) {
         }
         shared.port = 0;
         shared.commands.clear();
+        shared.outgoing.clear();
+        shared.pocket.clear();
+        shared.peer_pid = 0;
         shared.state = Snapshot::default();
         shared.thread.take()
     } else {
@@ -123,5 +151,98 @@ fn change(hwnd: isize, action: impl FnOnce(&mut Snapshot)) {
     }
     unsafe {
         let _ = PostMessageW(Some(HWND(hwnd as _)), WM_BROWSER, WPARAM(0), LPARAM(0));
+    }
+}
+
+pub fn search_tabs(query: &str) -> bool {
+    let Ok(mut shared) = SHARED.lock() else { return false };
+    if !shared.state.connected || !shared.state.features.tabs {
+        return false;
+    }
+    shared.sequence = shared.sequence.wrapping_add(1);
+    let request = format!("hub-{}", shared.sequence);
+    shared.state.query = request.clone();
+    shared.state.searching = true;
+    shared.state.tabs.clear();
+    shared.outgoing.retain(|frame| frame["type"] != "tab-query");
+    if shared.outgoing.len() >= 16 {
+        return false;
+    }
+    shared.outgoing.push_back(serde_json::json!({"v":1,"type":"tab-query","request":request,"query":query.chars().take(128).collect::<String>()}));
+    pipe::signal(shared.port, 4);
+    true
+}
+
+pub fn hub_action(kind: &str, id: &str, action: &str) -> bool {
+    let Ok(mut shared) = SHARED.lock() else { return false };
+    let valid = match kind {
+        "tab-action" => {
+            ["focus", "mute"].contains(&action)
+                && (shared.state.features.tabs || shared.state.features.activity)
+                && shared.state.tabs.iter().chain(&shared.state.activity).any(|tab| tab.id == id)
+        }
+        "request-action" => {
+            shared.state.features.requests
+                && ["forward", "abort", "edit"].contains(&action)
+                && shared.state.requests.iter().any(|r| r.id == id)
+        }
+        "open-link" => shared.state.features.pocket && crate::data::pocket::web_url(id),
+        _ => false,
+    };
+    if !valid
+        || !shared.state.connected
+        || shared.outgoing.len() >= 16
+        || shared.state.pending.len() >= 16
+        || shared.state.pending.iter().any(|pending| pending == id)
+    {
+        return false;
+    }
+    shared.sequence = shared.sequence.wrapping_add(1);
+    let request = format!("hub-{}", shared.sequence);
+    shared.state.pending.push(id.into());
+    shared.state.error = false;
+    let frame = if kind == "open-link" {
+        serde_json::json!({"v":1,"type":kind,"url":id,"request":request})
+    } else {
+        serde_json::json!({"v":1,"type":kind,"id":id,"action":action,"request":request})
+    };
+    if shared.peer_pid != 0 && (action == "focus" || action == "edit" || kind == "open-link") {
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(shared.peer_pid);
+        }
+    }
+    shared.outgoing.push_back(frame);
+    pipe::signal(shared.port, 4);
+    true
+}
+
+pub fn take_pocket() -> Vec<(String, crate::data::pocket::PocketItem)> {
+    SHARED.lock().map(|mut s| s.pocket.drain(..).collect()).unwrap_or_default()
+}
+
+pub fn pocket_result(request: &str, ok: bool) {
+    if let Ok(mut shared) = SHARED.lock()
+        && shared.state.connected
+        && shared.outgoing.len() < 16
+    {
+        shared.outgoing.push_back(serde_json::json!({"v":1,"type":"pocket-result","request":request,"ok":ok}));
+        pipe::signal(shared.port, 4);
+    }
+}
+
+pub fn end_search() {
+    if let Ok(mut shared) = SHARED.lock()
+        && !shared.state.query.is_empty()
+    {
+        shared.state.query.clear();
+        shared.state.tabs.clear();
+        shared.state.searching = false;
+        shared.sequence = shared.sequence.wrapping_add(1);
+        let request = format!("hub-{}", shared.sequence);
+        shared.outgoing.retain(|frame| frame["type"] != "tab-query");
+        if shared.outgoing.len() < 16 {
+            shared.outgoing.push_back(serde_json::json!({"v":1,"type":"tab-query-end","request":request}));
+            pipe::signal(shared.port, 4);
+        }
     }
 }

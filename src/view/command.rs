@@ -21,7 +21,7 @@ pub fn cmd_field(pill: Rect, scale: f32) -> (Rect, Rect) {
     (frame, inner)
 }
 
-pub(in crate::view) fn cmd_row_rect(pill: Rect, scale: f32, i: usize) -> Rect {
+pub(crate) fn cmd_row_rect(pill: Rect, scale: f32, i: usize) -> Rect {
     let (x, y, w, _) = pill;
     let top = y + (CMD_LIST_TOP + i as f32 * (ROW_H + ROW_GAP)) * scale;
     (x + SIDE_PAD * scale, top, x + w - SIDE_PAD * scale, top + ROW_H * scale)
@@ -64,7 +64,7 @@ pub(in crate::view) fn paint_command(p: &Painter, pill: Rect, scale: f32, ui: &U
     let text = ui.cmd.input.text();
     if text.is_empty() {
         p.text(
-            "Search apps, calculate, run commands",
+            "Search apps, calculate, @browser tabs",
             inner,
             CMD_FONT * scale,
             DWRITE_FONT_WEIGHT_NORMAL,
@@ -94,7 +94,7 @@ pub(in crate::view) fn paint_command(p: &Painter, pill: Rect, scale: f32, ui: &U
     if ui.cmd.items.is_empty() {
         let (x, y, w, _) = pill;
         return p.text(
-            "Apps  ·  2+2  ·  10 km to mi  ·  lock  ·  wifi  ·  /files  ·  ?ask AI",
+            "Apps  ·  2+2  ·  10 km to mi  ·  lock  ·  wifi  ·  @tabs  ·  /files  ·  ?ask AI",
             (x, y + CMD_LIST_TOP * scale, x + w, y + (CMD_LIST_TOP + 40.0) * scale),
             13.0 * scale,
             DWRITE_FONT_WEIGHT_NORMAL,
@@ -128,6 +128,25 @@ pub(in crate::view) fn paint_command(p: &Painter, pill: Rect, scale: f32, ui: &U
             None => {
                 p.glyph(item.glyph, (row.0 + 6.0 * scale, row.1, row.0 + 36.0 * scale, row.3), 17.0 * scale, acc(1.0))?
             }
+        }
+        if matches!(item.action, cmd::Action::BrowserTab(_)) {
+            p.text(
+                &item.title,
+                (row.0 + 44.0 * scale, row.1 + 3.0 * scale, row.2 - 12.0 * scale, row.1 + 26.0 * scale),
+                14.0 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                WHITE,
+            )?;
+            p.text(
+                &item.hint,
+                (row.0 + 44.0 * scale, row.1 + 26.0 * scale, row.2 - 12.0 * scale, row.3 - 2.0 * scale),
+                11.0 * scale,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_TEXT_ALIGNMENT_LEADING,
+                rgba(1.0, 1.0, 1.0, 0.55),
+            )?;
+            continue;
         }
         let is_app = matches!(item.action, cmd::Action::Launch { .. });
         if is_app && selected {

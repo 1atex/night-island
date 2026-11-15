@@ -13,3 +13,5 @@ pub mod usage;
 pub mod desktop_dock;
 
 pub mod top_panel;
+
+pub mod pocket;

@@ -1019,7 +1019,7 @@ impl WeatherSide {
 pub const HEADER_TAB_LIMIT: usize = HIDEABLE_TABS.len();
 pub const DEFAULT_HEADER_TABS: [&str; 5] = ["Clipboard", "Text", "Note", "Weather", "Record"];
 
-pub const HIDEABLE_TABS: [&str; 14] = [
+pub const HIDEABLE_TABS: [&str; 16] = [
     "Clipboard",
     "Text",
     "Note",
@@ -1034,6 +1034,8 @@ pub const HIDEABLE_TABS: [&str; 14] = [
     "Notifications",
     "My Wave",
     "Downloads",
+    "Browser",
+    "Pocket",
 ];
 
 impl Settings {

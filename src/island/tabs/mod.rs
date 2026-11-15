@@ -4,6 +4,7 @@ mod activity;
 mod agents;
 mod agy;
 mod browser;
+mod browser_hub;
 mod chat;
 mod clipboard;
 mod command;
@@ -41,6 +42,9 @@ impl App {
         self.ui.notes.armed_delete = false;
         let from = self.ui.tab;
         self.ui.tab = tab;
+        if tab == view::Tab::Pocket {
+            self.reload_pocket();
+        }
         self.remember_tab(tab);
         self.start_tab_change(from, tab);
         self.ui.home.dev_menu = None;

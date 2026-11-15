@@ -167,7 +167,9 @@ impl App {
                 BrowserDownloads => {
                     crate::services::browser::configure(self.hwnd, self.settings.browser_downloads);
                     self.on_browser();
-                    if !self.settings.browser_downloads && self.ui.tab == view::Tab::Downloads {
+                    if !self.settings.browser_downloads
+                        && matches!(self.ui.tab, view::Tab::Downloads | view::Tab::Browser)
+                    {
                         self.select_tab(view::Tab::Home);
                     }
                 }

@@ -175,9 +175,42 @@ pub(in crate::island) fn browser_snapshot(app: &App) {
             buttons.push(serde_json::json!({"id":item.id,"action":action,"rect":view::browser_button(rect,app.scale,index,*action)}));
         }
     }
+    let mut hub_buttons = Vec::new();
+    if app.ui.tab == view::Tab::Pocket {
+        for (offset, (index, item)) in app
+            .ui
+            .hub
+            .pocket
+            .iter()
+            .enumerate()
+            .skip(app.ui.hub.pocket_scroll)
+            .take(view::hub_rows(pill, app.scale))
+            .enumerate()
+        {
+            for action in 0..4 {
+                hub_buttons.push(serde_json::json!({"kind":"pocket","index":index,"id":item.id,"action":action,"rect":view::hub_button(view::hub_row(pill,app.scale,offset),app.scale,action)}));
+            }
+        }
+    } else if app.ui.tab == view::Tab::Browser {
+        let count = app.ui.browser.requests.len() + app.ui.browser.activity.len();
+        for (offset, index) in (app.ui.hub.scroll..count).take(view::hub_rows(pill, app.scale)).enumerate() {
+            let request = index < app.ui.browser.requests.len();
+            let id = if request {
+                &app.ui.browser.requests[index].id
+            } else {
+                &app.ui.browser.activity[index - app.ui.browser.requests.len()].id
+            };
+            for action in 0..if request { 3 } else { 2 } {
+                hub_buttons.push(serde_json::json!({"kind":if request {"request"} else {"activity"},"id":id,"action":action,"rect":view::hub_button(view::hub_row(pill,app.scale,offset),app.scale,action)}));
+            }
+        }
+    }
+    let command_items=app.ui.cmd.items.iter().enumerate().map(|(index,item)|serde_json::json!({"title":item.title,"hint":item.hint,"rect":view::cmd_row_rect(pill,app.scale,index)})).collect::<Vec<_>>();
     let collapsed = app.pill_rect(false);
     let report = serde_json::json!({"state":app.ui.browser,"buttons":buttons,"hwnd":app.hwnd.0 as usize,
         "expanded":app.state == State::Expanded,"tab":view::tab_name(app.ui.tab),
+        "hub_buttons":hub_buttons,"pocket":app.ui.hub.pocket,"undo":view::hub_undo(pill,app.scale),
+        "command":{"open":app.ui.cmd.open,"query":app.ui.cmd.input.text(),"items":command_items},
         "pin":view::pin_rect(pill, app.scale),
         "collapsed":[collapsed.0,collapsed.1,collapsed.0+collapsed.2,collapsed.1+collapsed.3]});
     let _ = std::fs::write(path, report.to_string());

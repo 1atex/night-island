@@ -104,6 +104,10 @@ impl App {
         {
             return self.toggle_vpn();
         }
+        if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_attention(&self.ui).is_some() {
+            self.open_tab(view::Tab::Browser);
+            return;
+        }
         if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_active(&self.ui).is_some() {
             self.open_tab(view::Tab::Downloads);
             return;

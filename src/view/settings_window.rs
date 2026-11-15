@@ -240,7 +240,7 @@ pub fn tab_settings_group(tab: crate::view::Tab) -> Option<usize> {
         Tab::Controls => "System",
         Tab::Chat | Tab::Ai => "Assistant",
         Tab::Agy => "Agents",
-        Tab::Steam | Tab::Downloads => "Integrations",
+        Tab::Steam | Tab::Downloads | Tab::Browser | Tab::Pocket => "Integrations",
         _ => return None,
     };
     GROUPS.iter().position(|g| g.name == name)
@@ -523,7 +523,7 @@ fn integration_items(ui: &UiState) -> Vec<Item> {
     let mut out = vec![
         Item::Heading("Integrations"),
         Item::Section("Night Browser"),
-        Item::Row(Sid::BrowserDownloads, "Night Browser downloads", Kind::Toggle),
+        Item::Row(Sid::BrowserDownloads, "Night Browser integration", Kind::Toggle),
         Item::Note("Enable Island in the browser integration settings. Private downloads stay private."),
         Item::Service {
             name: "Night Browser",

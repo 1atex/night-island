@@ -29,6 +29,37 @@ pub fn is_ru() -> bool {
 fn phrase(s: &str) -> Option<&'static str> {
     Some(match s {
         "Applying action…" => "Выполняется…",
+        "Screen sharing" => "Демонстрация экрана",
+        "Pocket is full or unavailable" => "Карман заполнен или хранилище недоступно",
+        "Saved to Pocket" => "Сохранено в Карман",
+        "Request waiting for a decision" => "Запрос ожидает решения",
+        "Open tab" => "К вкладке",
+        "Reject" => "Отбросить",
+        "Forward" => "Пропустить",
+        "Edit request" => "Изменить",
+        "Make note" => "В заметку",
+        "Open source" => "Источник",
+        "Playing tabs and paused requests appear here" => {
+            "Здесь появятся звучащие вкладки, звонки и перехваченные запросы"
+        }
+        "Enable tabs and activity in browser integration settings" => {
+            "Включи вкладки и активность в настройках интеграции браузера"
+        }
+        "Drag a link or text here, or save from the browser menu" => {
+            "Перетащи ссылку или текст сюда либо сохрани через меню браузера"
+        }
+        "Drop to save in Pocket" => "Отпусти, чтобы сохранить в Карман",
+        "Apps  ·  2+2  ·  10 km to mi  ·  lock  ·  wifi  ·  @tabs  ·  /files  ·  ?ask AI" => {
+            "Приложения · 2+2 · @вкладки · /файлы · ?вопрос"
+        }
+        "Search apps, calculate, @browser tabs" => "Приложения, расчёты, @вкладки браузера",
+        "Looking for tabs…" => "Ищем вкладки…",
+        "No matching tabs" => "Вкладки не найдены",
+        "Enable tab search in browser integration settings" => "Включи поиск вкладок в настройках браузера",
+        "Find a browser tab" => "Найти вкладку в браузере",
+        "Night Browser integration" => "Связь с Night Browser",
+        "Pocket" => "Карман",
+        "Browser" => "Браузер",
         "Night Browser downloads" => "Загрузки Night Browser",
         "Enable Island in the browser integration settings. Private downloads stay private." => {
             "Включи Island в настройках интеграций браузера. Приватные загрузки не передаются."

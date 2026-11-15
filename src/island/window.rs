@@ -450,6 +450,7 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
                     a.open_tab(view::Tab::Clipboard);
                 }),
                 Some(Hotkey::PlainPaste) => with_app(|a| a.plain_paste()),
+                Some(Hotkey::BrowserTabs) => with_app(|a| a.open_browser_search()),
                 Some(Hotkey::Command) => with_app(|a| {
                     a.restore_pill();
                     a.toggle_command();
@@ -474,7 +475,11 @@ pub(in crate::island) extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: W
         crate::services::browser::WM_BROWSER_SHOW => {
             with_app(|a| {
                 if a.settings.browser_downloads && crate::services::browser::snapshot().connected {
-                    a.select_tab(view::Tab::Downloads);
+                    a.select_tab(match wparam.0 {
+                        1 => view::Tab::Browser,
+                        2 => view::Tab::Pocket,
+                        _ => view::Tab::Downloads,
+                    });
                     a.expand();
                     unsafe {
                         let _ = SetForegroundWindow(a.hwnd);

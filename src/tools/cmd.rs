@@ -12,6 +12,8 @@ use crate::view::Ctl;
 pub const MAX_ITEMS: usize = 5;
 
 pub enum Action {
+    None,
+    BrowserTab(String),
     Launch { launch: String, path: PathBuf },
     Copy(String),
     System(Ctl),

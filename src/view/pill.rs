@@ -233,6 +233,7 @@ pub fn music_pill(ui: &UiState) -> bool {
         && ui.volume.is_none()
         && legacy_download(ui).is_none()
         && browser_active(ui).is_none()
+        && browser_attention(ui).is_none()
 }
 
 pub fn row_pill(ui: &UiState) -> bool {
@@ -241,7 +242,8 @@ pub fn row_pill(ui: &UiState) -> bool {
             && ui.notice.is_none()
             && ui.volume.is_none()
             && legacy_download(ui).is_none()
-            && browser_active(ui).is_none())
+            && browser_active(ui).is_none()
+            && browser_attention(ui).is_none())
 }
 
 pub(in crate::view) fn rec_slot(secs: u32) -> f32 {
@@ -417,6 +419,9 @@ pub fn collapsed_width(ui: &UiState, base: f32) -> f32 {
     }
     if ui.volume.is_some() {
         return base + vpn_tail(ui);
+    }
+    if let Some(name) = browser_attention(ui) {
+        return (ui.char_inset + 64.0 + browser_name_width(ui, &name) + vpn_tail(ui)).clamp(base.min(420.0), 420.0);
     }
     if let Some(item) = browser_active(ui) {
         return (ui.char_inset + 78.0 + browser_name_width(ui, &item.name) + vpn_tail(ui))
@@ -611,6 +616,7 @@ pub fn pill_weather_visible(ui: &UiState) -> bool {
         && ui.volume.is_none()
         && legacy_download(ui).is_none()
         && browser_active(ui).is_none()
+        && browser_attention(ui).is_none()
 }
 
 pub fn pill_weather_rect(pill: Rect, scale: f32, ui: &UiState) -> Option<Rect> {
@@ -681,6 +687,18 @@ fn paint_collapsed_body(p: &Painter, pill: Rect, scale: f32, ui: &UiState) -> Re
             12.5 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_TRAILING,
+            WHITE,
+        );
+    }
+    if let Some(name) = browser_attention(ui) {
+        let shift = indicators_width(ui, scale) + inset;
+        p.glyph('\u{E769}', (x + 10.0 * scale + shift, y, x + 38.0 * scale + shift, y + h), 15.0 * scale, acc(1.0))?;
+        return p.text(
+            &name,
+            (x + 40.0 * scale + shift, y, end - 12.0 * scale, y + h),
+            12.5 * scale,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
             WHITE,
         );
     }

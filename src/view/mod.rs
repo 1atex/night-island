@@ -20,6 +20,7 @@ use crate::ui::gfx::{Painter, WHITE, rgba};
 mod activity;
 mod agy;
 mod browser;
+mod browser_hub;
 mod chat;
 mod clipboard;
 mod command;
@@ -60,10 +61,10 @@ mod yandex;
 pub use self::reorder::Reorder;
 pub use self::tips::content_tip;
 pub use self::{
-    activity::*, agy::*, browser::*, chat::*, clipboard::*, command::*, companion_popup::*, controls::*, discord::*,
-    frame::*, home::*, integrations::*, metrics::*, mixer::*, music_intro::*, note::*, notifications::*, pill::*,
-    pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*, steam::*, text::*, weather::*,
-    widgets::*, yandex::*,
+    activity::*, agy::*, browser::*, browser_hub::*, chat::*, clipboard::*, command::*, companion_popup::*,
+    controls::*, discord::*, frame::*, home::*, integrations::*, metrics::*, mixer::*, music_intro::*, note::*,
+    notifications::*, pill::*, pill_vertical::*, privacy::*, record::*, remind::*, settings::*, settings_window::*,
+    steam::*, text::*, weather::*, widgets::*, yandex::*,
 };
 pub use guide::*;
 pub use home_widgets::*;
@@ -96,9 +97,11 @@ pub enum Tab {
     Yandex,
     Settings,
     Downloads,
+    Browser,
+    Pocket,
 }
 
-pub const TABS: [(Tab, char, &str); 18] = [
+pub const TABS: [(Tab, char, &str); 20] = [
     (Tab::Home, '\u{E80F}', "Home"),
     (Tab::Clipboard, '\u{E77F}', "Clipboard"),
     (Tab::Text, '\u{E8E9}', "Text"),
@@ -116,6 +119,8 @@ pub const TABS: [(Tab, char, &str); 18] = [
     (Tab::Notifications, '\u{EA8F}', "Notifications"),
     (Tab::Yandex, crate::ui::icons::YANDEX_MUSIC_GLYPH, "My Wave"),
     (Tab::Settings, '\u{E713}', "Settings"),
+    (Tab::Browser, '\u{E774}', "Browser"),
+    (Tab::Pocket, '\u{E8B7}', "Pocket"),
     (Tab::Downloads, '\u{E896}', "Downloads"),
 ];
 
@@ -200,6 +205,7 @@ pub struct UiState {
     pub downloading: Option<String>,
     pub browser: crate::services::browser::Snapshot,
     pub browser_scroll: usize,
+    pub hub: BrowserHubUi,
     pub browser_done: Vec<(String, std::time::Instant)>,
     pub browser_hover: Option<(String, crate::services::browser::Action)>,
     pub char_inset: f32,
@@ -284,6 +290,7 @@ impl UiState {
             downloading: None,
             browser: Default::default(),
             browser_scroll: 0,
+            hub: BrowserHubUi::default(),
             browser_done: Vec::new(),
             browser_hover: None,
             char_inset: 0.0,

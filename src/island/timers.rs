@@ -251,7 +251,12 @@ impl App {
             Timer::Expand if self.character_interacting() => {}
             Timer::Expand if matches!(self.state, State::Hidden | State::Hiding) => self.reveal(),
             Timer::Expand => {
-                if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_active(&self.ui).is_some() {
+                if self.ui.notice.is_none() && self.ui.volume.is_none() && view::browser_attention(&self.ui).is_some() {
+                    self.select_tab(view::Tab::Browser);
+                } else if self.ui.notice.is_none()
+                    && self.ui.volume.is_none()
+                    && view::browser_active(&self.ui).is_some()
+                {
                     self.select_tab(view::Tab::Downloads);
                 }
                 self.expand();

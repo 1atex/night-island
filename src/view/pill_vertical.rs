@@ -124,6 +124,9 @@ pub fn vertical_length(ui: &UiState) -> f32 {
     if ui.volume.is_some() {
         return V_MIN + 20.0 + vpn_tail(ui);
     }
+    if let Some(name) = browser_attention(ui) {
+        return (top_reserved(ui) + 64.0 + browser_name_width(ui, &name) + vpn_tail(ui)).clamp(V_MIN, 420.0);
+    }
     if let Some(item) = browser_active(ui) {
         return (top_reserved(ui) + 64.0 + browser_name_width(ui, &item.name) + vpn_tail(ui)).clamp(V_MIN, 420.0);
     }
@@ -170,6 +173,18 @@ pub(in crate::view) fn paint_collapsed_vertical(p: &Painter, pill: Rect, scale: 
             12.0 * scale,
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_TEXT_ALIGNMENT_CENTER,
+            WHITE,
+        );
+    }
+    if let Some(name) = browser_attention(ui) {
+        let start = y + top_reserved(ui) * scale;
+        p.glyph('\u{E769}', (x, start, x + w, start + 28.0 * scale), 15.0 * scale, acc(1.0))?;
+        return along(
+            &name,
+            (x, start + 34.0 * scale, x + w, bottom),
+            12.5,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD,
+            DWRITE_TEXT_ALIGNMENT_LEADING,
             WHITE,
         );
     }

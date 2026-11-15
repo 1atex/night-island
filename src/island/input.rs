@@ -340,6 +340,8 @@ impl App {
                 Some(i) => Some(910 + i),
                 None => view::hit_city(pill, self.scale, fx, fy, self.ui.weather.is_some()).then_some(900),
             }
+        } else if matches!(self.ui.tab, view::Tab::Browser | view::Tab::Pocket) {
+            view::hit_hub(pill, self.scale, fx, fy, &self.ui).map(|_| 2400)
         } else if self.ui.tab == view::Tab::Downloads {
             let hit = view::hit_browser(pill, self.scale, fx, fy, &self.ui);
             self.ui.browser_hover = hit.map(|(index, action)| (self.ui.browser.items[index].id.clone(), action));
@@ -547,6 +549,7 @@ impl App {
             view::Tab::Activity => self.click_activity(x, y),
             view::Tab::Steam => self.click_steam(x, y),
             view::Tab::Downloads => self.click_browser(x, y),
+            view::Tab::Browser | view::Tab::Pocket => self.click_hub(x, y),
             view::Tab::Settings => {}
         }
     }
@@ -640,7 +643,9 @@ impl App {
             }
             return;
         }
-        let rows = if self.ui.tab == view::Tab::Downloads {
+        let rows = if matches!(self.ui.tab, view::Tab::Browser | view::Tab::Pocket) {
+            view::hub_rows(self.pill_rect(true), self.scale)
+        } else if self.ui.tab == view::Tab::Downloads {
             view::browser_rows(self.pill_rect(true), self.scale)
         } else if self.ui.tab == view::Tab::Agy {
             view::agy_rows()
@@ -683,6 +688,10 @@ impl App {
             view::Tab::Agy => (self.ui.agy.chats.len(), &mut self.ui.agy.scroll),
             view::Tab::Privacy => (self.ui.privacy_log.rows.len(), &mut self.ui.privacy_log.scroll),
             view::Tab::Downloads => (self.ui.browser.items.len(), &mut self.ui.browser_scroll),
+            view::Tab::Browser => {
+                (self.ui.browser.activity.len() + self.ui.browser.requests.len(), &mut self.ui.hub.scroll)
+            }
+            view::Tab::Pocket => (self.ui.hub.pocket.len(), &mut self.ui.hub.pocket_scroll),
             _ => return,
         };
         let max = len.saturating_sub(rows);

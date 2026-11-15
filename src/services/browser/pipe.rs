@@ -82,8 +82,12 @@ fn peer(pipe: HANDLE, owner: &str) -> bool {
             return false;
         }
         let path = String::from_utf16_lossy(&path[..size as usize]);
-        path.rsplit('\\').next().is_some_and(|name| name.eq_ignore_ascii_case("NightBrowser.exe"))
-            && sid(process.0).as_deref() == Some(owner)
+        let valid = path.rsplit('\\').next().is_some_and(|name| name.eq_ignore_ascii_case("NightBrowser.exe"))
+            && sid(process.0).as_deref() == Some(owner);
+        if valid && let Ok(mut shared) = SHARED.lock() {
+            shared.peer_pid = pid;
+        }
+        valid
     }
 }
 
@@ -274,6 +278,9 @@ fn run(port: HANDLE, hwnd: isize) -> Option<()> {
         update(hwnd, Snapshot::default());
         if let Ok(mut shared) = SHARED.lock() {
             shared.commands.clear();
+            shared.outgoing.clear();
+            shared.pocket.clear();
+            shared.peer_pid = 0;
         }
         if quit {
             return Some(());
@@ -288,6 +295,7 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
     let mut hello = false;
     let mut appearance_enabled = false;
     let mut show_enabled = false;
+    let mut hub_enabled = false;
     let mut last_show = None::<std::time::Instant>;
     let mut input = Vec::new();
     let mut requests = HashMap::<String, (String, std::time::Instant)>::new();
@@ -321,6 +329,28 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
             if hello && appearance_enabled && !c.send(appearance_frame()) {
                 return false;
             }
+        } else if key == 4 {
+            let frames = SHARED.lock().map(|mut shared| std::mem::take(&mut shared.outgoing)).unwrap_or_default();
+            for frame in frames {
+                if !hello || !hub_enabled {
+                    continue;
+                }
+                if matches!(frame["type"].as_str(), Some("tab-action" | "request-action" | "open-link")) {
+                    if requests.len() >= 16 {
+                        return false;
+                    }
+                    requests.insert(
+                        frame["request"].as_str().unwrap_or("").into(),
+                        (
+                            frame["id"].as_str().or_else(|| frame["url"].as_str()).unwrap_or("").into(),
+                            std::time::Instant::now() + std::time::Duration::from_secs(30),
+                        ),
+                    );
+                }
+                if !c.send(frame) {
+                    return false;
+                }
+            }
         } else if key == 1 {
             let commands = SHARED.lock().map(|mut shared| std::mem::take(&mut shared.commands)).unwrap_or_default();
             for Command { id, action, request } in commands {
@@ -352,7 +382,8 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
                         hello = true;
                         appearance_enabled = capabilities.iter().any(|cap| cap == "appearance");
                         show_enabled = capabilities.iter().any(|cap| cap == "show-downloads");
-                        if !c.send(serde_json::json!({"v":1,"type":"hello","capabilities":["downloads","show-downloads","appearance"]})) {
+                        hub_enabled = capabilities.iter().any(|cap| cap == "tabs");
+                        if !c.send(serde_json::json!({"v":1,"type":"hello","capabilities":["downloads","show-downloads","appearance","tabs","pocket","activity","requests"]})) {
                             return false;
                         }
                         update(hwnd, Snapshot { connected: true, ..Default::default() });
@@ -360,7 +391,9 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
                             return false;
                         }
                     }
-                    Some(Frame::Show { .. }) if hello && show_enabled => {
+                    Some(Frame::Show { panel, .. })
+                        if hello && show_enabled && (panel == "downloads" || hub_enabled) =>
+                    {
                         let now = std::time::Instant::now();
                         if last_show.is_none_or(|at| now.duration_since(at) >= std::time::Duration::from_millis(500)) {
                             last_show = Some(now);
@@ -368,10 +401,58 @@ fn session(c: &mut Connection, port: HANDLE, hwnd: isize) -> bool {
                                 let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
                                     Some(HWND(hwnd as _)),
                                     WM_BROWSER_SHOW,
+                                    windows::Win32::Foundation::WPARAM(match panel.as_str() {
+                                        "browser" => 1,
+                                        "pocket" => 2,
+                                        _ => 0,
+                                    }),
+                                    windows::Win32::Foundation::LPARAM(0),
+                                );
+                            }
+                        }
+                    }
+                    Some(Frame::Features { tabs, pocket, activity, requests, .. }) if hello && hub_enabled => {
+                        change(hwnd, |state| {
+                            state.features = super::Features { tabs, pocket, activity, requests };
+                        });
+                    }
+                    Some(Frame::Tabs { request, items, .. }) if hello && hub_enabled => {
+                        change(hwnd, |state| {
+                            if state.query == request {
+                                state.tabs = items;
+                                state.searching = false;
+                            }
+                        });
+                    }
+                    Some(Frame::Activity { tabs, requests, .. }) if hello && hub_enabled => {
+                        change(hwnd, |state| {
+                            state.activity = tabs;
+                            state.requests = requests;
+                        });
+                    }
+                    Some(Frame::Pocket { request, item, .. }) if hello && hub_enabled => {
+                        let queued = if let Ok(mut shared) = SHARED.lock()
+                            && shared.state.features.pocket
+                            && shared.pocket.len() < 8
+                        {
+                            shared.pocket.push_back((request.clone(), item));
+                            true
+                        } else {
+                            false
+                        };
+                        if queued {
+                            unsafe {
+                                let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                                    Some(HWND(hwnd as _)),
+                                    super::WM_BROWSER,
                                     windows::Win32::Foundation::WPARAM(0),
                                     windows::Win32::Foundation::LPARAM(0),
                                 );
                             }
+                        } else if !c
+                            .send(serde_json::json!({"v":1,"type":"pocket-result","request":request,"ok":false}))
+                        {
+                            return false;
                         }
                     }
                     Some(Frame::Downloads { items, .. }) if hello => {

@@ -3,6 +3,17 @@ use crate::island::*;
 impl App {
     pub(in crate::island) fn refresh_cmd(&mut self) {
         let text = self.ui.cmd.input.text();
+        if let Some(query) = text.strip_prefix('@') {
+            everything::cancel();
+            self.ui.cmd.files_shown = false;
+            crate::services::browser::search_tabs(query);
+            self.ui.browser = crate::services::browser::snapshot();
+            self.ui.cmd.sel = 0;
+            self.update_browser_search();
+            self.ui.cmd.ai_pending = false;
+            return;
+        }
+        crate::services::browser::end_search();
         if cmd::is_file_search(&text) && self.ui.cmd.files_shown {
             cmd::start_file_search(self.hwnd, &text);
         } else {
@@ -36,6 +47,7 @@ impl App {
     }
 
     pub(in crate::island) fn close_command(&mut self, restore_focus: bool) {
+        crate::services::browser::end_search();
         self.ui.cmd.open = false;
         self.ui.armed = None;
         self.end_edit(restore_focus);
@@ -45,6 +57,13 @@ impl App {
     pub(in crate::island) fn run_cmd(&mut self, index: usize, ctrl: bool, shift: bool) {
         let Some(item) = self.ui.cmd.items.get(index) else { return };
         match &item.action {
+            cmd::Action::None => {}
+            cmd::Action::BrowserTab(id) => {
+                let id = id.clone();
+                if crate::services::browser::hub_action("tab-action", &id, "focus") {
+                    self.close_command(false);
+                }
+            }
             cmd::Action::Launch { launch, path } => {
                 let (launch, path) = (launch.clone(), path.clone());
                 if ctrl && !path.as_os_str().is_empty() {

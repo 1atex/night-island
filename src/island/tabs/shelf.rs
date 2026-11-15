@@ -4,6 +4,11 @@ impl App {
     pub(in crate::island) fn on_dnd_enter(&mut self) {
         self.kill_timer(Timer::Collapse);
         self.expand();
+        if dnd::text_dragging() {
+            self.ui.hub.drop_hot = true;
+            self.select_tab(view::Tab::Pocket);
+            return self.repaint_expanded();
+        }
         if self.ui.tab == view::Tab::Chat && self.ui.chat.keyed {
             self.ui.chat.drop_hot = true;
             self.ui.chat.list_open = false;
@@ -15,6 +20,9 @@ impl App {
     }
 
     pub(in crate::island) fn on_dnd_leave(&mut self) {
+        if std::mem::take(&mut self.ui.hub.drop_hot) {
+            self.repaint_expanded();
+        }
         if std::mem::take(&mut self.ui.chat.drop_hot) {
             self.repaint_expanded();
         }
@@ -24,6 +32,10 @@ impl App {
     }
 
     pub(in crate::island) fn on_dnd_drop(&mut self) {
+        if let Some(item) = dnd::take_text() {
+            self.save_pocket(&item);
+            return self.on_dnd_leave();
+        }
         self.react(Reaction::File, 2600);
         if self.ui.tab == view::Tab::Chat && self.ui.chat.keyed {
             self.ui.chat.drop_hot = false;
