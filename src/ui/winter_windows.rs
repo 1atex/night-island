@@ -9,6 +9,21 @@ pub(super) struct WindowEdge {
     pub maximized: bool,
 }
 
+fn desktop_or_overlay(class: &str, style: isize) -> bool {
+    style & WS_EX_TRANSPARENT.0 as isize != 0
+        || (class == "CEF-OSC-WIDGET" && style & WS_EX_TOOLWINDOW.0 as isize != 0)
+        || matches!(
+            class,
+            "Progman"
+                | "WorkerW"
+                | "NightIsland.Winter"
+                | "NightIsland.Window"
+                | "NightIsland.DesktopDock"
+                | "NightIsland.TopPanel"
+                | "NightIsland.Companion"
+        )
+}
+
 pub(super) fn window_edges() -> Vec<WindowEdge> {
     unsafe extern "system" fn each(hwnd: HWND, data: LPARAM) -> BOOL {
         let out = unsafe { &mut *(data.0 as *mut Vec<WindowEdge>) };
@@ -18,16 +33,7 @@ pub(super) fn window_edges() -> Vec<WindowEdge> {
             }
             let mut class = [0u16; 128];
             let len = GetClassNameW(hwnd, &mut class) as usize;
-            if matches!(
-                String::from_utf16_lossy(&class[..len]).as_str(),
-                "Progman"
-                    | "WorkerW"
-                    | "NightIsland.Winter"
-                    | "NightIsland.Window"
-                    | "NightIsland.DesktopDock"
-                    | "NightIsland.TopPanel"
-                    | "NightIsland.Companion"
-            ) {
+            if desktop_or_overlay(&String::from_utf16_lossy(&class[..len]), GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) {
                 return true.into();
             }
             let mut cloaked = 0u32;
@@ -56,4 +62,19 @@ pub(super) fn window_edges() -> Vec<WindowEdge> {
         let _ = EnumWindows(Some(each), LPARAM((&raw mut out) as isize));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn passive_overlays_do_not_hide_the_desktop_snow() {
+        assert!(desktop_or_overlay("CEF-OSC-WIDGET", 0x800a8));
+        assert!(desktop_or_overlay("CEF-OSC-WIDGET", 0x8080080));
+        assert!(desktop_or_overlay("AnyOverlay", (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as isize));
+        assert!(!desktop_or_overlay("MozillaWindowClass", 0));
+        assert!(!desktop_or_overlay("CabinetWClass", WS_EX_APPWINDOW.0 as isize));
+        assert!(!desktop_or_overlay("Chrome_WidgetWin_1", 0x240100));
+        assert!(!desktop_or_overlay("NightIsland.Settings", 0x100));
+    }
 }

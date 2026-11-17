@@ -61,6 +61,7 @@ struct Scene {
     ink: CompositionColorBrush,
     interactive: bool,
     suppressed: bool,
+    presented: bool,
     mask: CompositionPathGeometry,
     factory: ID2D1Factory,
     exclusions: Vec<RECT>,
@@ -167,7 +168,7 @@ impl Scene {
             let target = unsafe { c.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, true)? };
             target.SetRoot(&root)?;
             let mask = c.CreatePathGeometry()?;
-            root.SetClip(&c.CreateGeometricClipWithGeometry(&mask)?)?;
+            let clip = c.CreateGeometricClipWithGeometry(&mask)?;
             let factory: ID2D1Factory = unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
             let white = c.CreateColorBrushWithColor(Color { A: 255, R: 238, G: 247, B: 255 })?;
             let ink = c.CreateColorBrushWithColor(Color { A: 255, R: 40, G: 54, B: 69 })?;
@@ -186,12 +187,14 @@ impl Scene {
                 flakes_layer.Shapes()?.Append(&dot.shape)?;
                 flakes.push(dot);
             }
+            flakes_layer.SetClip(&clip)?;
             root.Children()?.InsertAtTop(&flakes_layer)?;
             let piles = c.CreateShapeVisual()?;
             piles.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             root.Children()?.InsertAtTop(&piles)?;
             let balls = c.CreateShapeVisual()?;
             balls.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+            balls.SetClip(&clip)?;
             root.Children()?.InsertAtTop(&balls)?;
             Ok(Box::new(Self {
                 hwnd,
@@ -210,6 +213,7 @@ impl Scene {
                 ink,
                 interactive: settings.interactive,
                 suppressed: false,
+                presented: false,
                 mask,
                 factory,
                 exclusions: Vec::new(),
@@ -219,7 +223,6 @@ impl Scene {
             Ok(mut scene) => {
                 unsafe {
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&raw mut *scene) as isize);
-                    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 }
                 Ok(scene)
             }
@@ -403,11 +406,20 @@ impl Scene {
             let mut active = 0;
             for drift in &self.snow.drifts {
                 let width = drift.ledge.width / drift.depths.len() as f32;
-                for (i, depth) in drift.depths.iter().enumerate().filter(|(_, v)| **v > 0.1) {
+                for (i, _) in drift.depths.iter().enumerate().filter(|(_, v)| **v > 0.1) {
                     if active == self.pile_dots.len() {
                         let bead = dot(&self.compositor, &self.white, 1.0, 1.0)?;
                         self.piles.Shapes()?.Append(&bead.shape)?;
                         self.pile_dots.push(bead);
+                    }
+                    let center = drift.ledge.x + (i as f32 + 0.5) * width;
+                    if drift.ledge.id == -1
+                        && self.blocked(POINT {
+                            x: self.bounds.left + (center * self.scale) as i32,
+                            y: self.bounds.top + (drift.ledge.y * self.scale - 1.0) as i32,
+                        })
+                    {
+                        continue;
                     }
                     let bead = &self.pile_dots[active];
                     let start = i.saturating_sub(2);
@@ -416,7 +428,7 @@ impl Scene {
                     bead._geometry.SetRadius(Vector2 { X: width * 1.4, Y: smooth })?;
                     bead.shape.SetOffset(Vector2 {
                         X: drift.ledge.x + (i as f32 + 0.5) * width,
-                        Y: drift.ledge.y - 0.5 * depth,
+                        Y: drift.ledge.y - smooth,
                     })?;
                     active += 1;
                 }
@@ -463,6 +475,12 @@ impl Scene {
                 Y: if head { 2.0 } else { 0.0 },
             })?;
             beads[3].shape.SetOffset(Vector2 { X: ball.x + ball.radius * 0.15, Y: ball.y + ball.radius * 0.18 })?;
+        }
+        if !self.presented {
+            unsafe {
+                let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+            }
+            self.presented = true;
         }
         Ok(())
     }

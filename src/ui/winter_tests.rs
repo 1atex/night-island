@@ -166,6 +166,24 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         png.set_depth(png::BitDepth::Eight);
         png.write_header().unwrap().write_image_data(&pixels).unwrap();
     }
+    scene.update_mask(vec![bounds])?;
+    scene.render(0.033, settings, true)?;
+    for _ in 0..5 {
+        unsafe {
+            DwmFlush()?;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let roof = unsafe {
+        let screen = GetDC(None);
+        let color = GetPixel(screen, 400, 156).0;
+        ReleaseDC(None, screen);
+        color
+    };
+    assert!(
+        (roof & 255) > 180 && ((roof >> 8) & 255) > 180 && ((roof >> 16) & 255) > 180,
+        "A covered desktop must keep the foreground island's snow cap visible: {roof:x}"
+    );
     let hwnd = scene.hwnd;
     drop(scene);
     assert!(!unsafe { IsWindow(Some(hwnd)) }.as_bool());
