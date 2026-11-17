@@ -14,6 +14,11 @@ pub struct WinterSettings {
     pub plow: bool,
     pub island_plow: bool,
     pub plow_interval_secs: u32,
+    pub plow_size: u32,
+    pub plow_ground: bool,
+    pub plow_snowballs: bool,
+    pub window_shake: bool,
+    pub inside_windows: bool,
 }
 
 impl Default for WinterSettings {
@@ -32,6 +37,11 @@ impl Default for WinterSettings {
             plow: true,
             island_plow: true,
             plow_interval_secs: 90,
+            plow_size: 100,
+            plow_ground: true,
+            plow_snowballs: true,
+            window_shake: true,
+            inside_windows: false,
         }
     }
 }

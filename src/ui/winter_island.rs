@@ -1,6 +1,6 @@
 use super::winter_model::Ledge;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct Chip {
     pub x: f32,
     pub y: f32,
@@ -8,6 +8,10 @@ pub(super) struct Chip {
     pub vy: f32,
     pub radius: f32,
     pub life: f32,
+    pub angle: f32,
+    pub spin: f32,
+    pub source: isize,
+    pub previous_y: f32,
 }
 
 #[derive(Default)]
@@ -34,14 +38,18 @@ impl IslandSnow {
                 self.chips.push(Chip {
                     x: before.x + t * before.width,
                     y: before.surface_y(before.x + t * before.width) - 1.0,
-                    vx: side * (38.0 + (i % 5) as f32 * 9.0),
+                    vx: side * (55.0 + (i as f32 * 2.17).sin().abs() * 95.0),
                     vy: if before.y < 16.0 || !expanded {
                         12.0 + (i % 7) as f32 * 3.0
                     } else {
                         -28.0 - (i % 7) as f32 * 6.0
                     },
-                    radius: 1.3 + (i % 4) as f32 * 0.55,
+                    radius: 0.9 + (i as f32 * 1.73).sin().abs() * 2.2,
                     life: 1.0,
+                    angle: i as f32 * 0.7,
+                    spin: side * (2.0 + (i % 5) as f32),
+                    source: -2,
+                    previous_y: before.surface_y(before.x + t * before.width) - 1.0,
                 });
             }
             self.coverage = if expanded { 0.28 } else { 0.55 };
@@ -54,17 +62,81 @@ impl IslandSnow {
         emitted
     }
 
-    pub fn step(&mut self, dt: f32) {
-        let dt = dt.clamp(0.0, 0.05);
-        self.coverage += (1.0 - self.coverage) * (1.0 - (-dt * 1.4).exp());
-        for chip in &mut self.chips {
-            chip.vy += 155.0 * dt;
-            chip.x += chip.vx * dt;
-            chip.y += chip.vy * dt;
-            chip.life = (chip.life - dt * 0.9).max(0.0);
+    pub fn match_cover(&mut self, drift: &super::winter_model::Drift) {
+        for chip in self.chips.iter_mut().filter(|c| c.life == 1.0) {
+            let bin = (((chip.x - drift.ledge.x) / drift.ledge.width * drift.depths.len() as f32).max(0.0) as usize)
+                .min(drift.depths.len() - 1);
+            let depth = drift.depths[bin];
+            if depth < 0.4 {
+                chip.life = 0.0;
+                continue;
+            }
+            chip.radius = chip.radius.min(depth * 0.75);
+            chip.y -= depth * 0.5;
+            chip.previous_y = chip.y;
         }
         self.chips.retain(|c| c.life > 0.0);
     }
+
+    pub fn step(&mut self, dt: f32) {
+        let dt = dt.clamp(0.0, 0.05);
+        self.coverage += (1.0 - self.coverage) * (1.0 - (-dt * 1.4).exp());
+        advance(&mut self.chips, dt);
+    }
+}
+
+pub(super) fn advance(chips: &mut Vec<Chip>, dt: f32) {
+    let dt = dt.clamp(0.0, 0.05);
+    for chip in chips.iter_mut() {
+        chip.previous_y = chip.y;
+        let drag = (-dt * (0.5 / chip.radius.max(0.5))).exp();
+        chip.vx *= drag;
+        chip.vy += 320.0 * dt;
+        chip.x += chip.vx * dt;
+        chip.y += chip.vy * dt;
+        chip.angle += chip.spin * dt;
+        chip.life = (chip.life - dt * 0.65).max(0.0);
+    }
+    chips.retain(|c| c.life > 0.0);
+}
+
+pub(super) fn land(chips: &mut Vec<Chip>, drifts: &mut [super::winter_model::Drift]) {
+    let mut fragments = Vec::new();
+    for chip in chips.iter_mut() {
+        if chip.vy <= 0.0 {
+            continue;
+        }
+        let hit = drifts
+            .iter_mut()
+            .filter(|d| {
+                d.ledge.id != chip.source
+                    && chip.x >= d.ledge.x
+                    && chip.x < d.ledge.x + d.ledge.width
+                    && chip.previous_y <= d.ledge.surface_y(chip.x)
+                    && chip.y >= d.ledge.surface_y(chip.x)
+            })
+            .min_by(|a, b| a.ledge.surface_y(chip.x).total_cmp(&b.ledge.surface_y(chip.x)));
+        let Some(drift) = hit else { continue };
+        let bin = (((chip.x - drift.ledge.x) / drift.ledge.width * drift.depths.len() as f32) as usize)
+            .min(drift.depths.len() - 1);
+        drift.depths[bin] = (drift.depths[bin] + chip.radius * 0.15).min(12.0);
+        if chip.radius > 2.0 && chip.life > 0.4 && fragments.len() < 16 {
+            fragments.push(Chip {
+                y: drift.ledge.surface_y(chip.x) - 1.0,
+                previous_y: drift.ledge.surface_y(chip.x) - 1.0,
+                vy: -chip.vy * 0.22,
+                vx: chip.vx * 0.6,
+                spin: -chip.spin * 1.4,
+                radius: chip.radius * 0.55,
+                life: chip.life * 0.5,
+                source: drift.ledge.id,
+                ..*chip
+            });
+        }
+        chip.life = 0.0;
+    }
+    chips.retain(|c| c.life > 0.0);
+    chips.extend(fragments.into_iter().take(96usize.saturating_sub(chips.len())));
 }
 
 #[cfg(test)]
@@ -124,5 +196,36 @@ mod transition_tests {
             snow.step(1.0 / 60.0);
         }
         assert!(snow.chips.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod physics_tests {
+    use super::super::winter_model::Snow;
+    use super::*;
+    #[test]
+    fn fragments_rotate_accelerate_and_break_up_on_a_lower_roof() {
+        let mut snow = Snow::new(800.0, 600.0, 0, 17);
+        snow.ledges(vec![Ledge { id: 77, x: 0.0, y: 100.0, width: 800.0, ..Default::default() }]);
+        let mut chips = vec![Chip {
+            x: 300.0,
+            y: 60.0,
+            previous_y: 60.0,
+            radius: 3.0,
+            vx: 20.0,
+            vy: 100.0,
+            spin: 4.0,
+            life: 1.0,
+            source: -2,
+            ..Default::default()
+        }];
+        advance(&mut chips, 0.05);
+        assert!(chips[0].angle > 0.0 && chips[0].vy > 100.0);
+        for _ in 0..30 {
+            advance(&mut chips, 1.0 / 60.0);
+            land(&mut chips, &mut snow.drifts);
+        }
+        assert!(snow.drifts[0].depths.iter().sum::<f32>() > 0.0);
+        assert!(chips.iter().all(|c| c.radius < 2.0));
     }
 }

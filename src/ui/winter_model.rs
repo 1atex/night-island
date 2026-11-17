@@ -51,6 +51,8 @@ pub struct Snow {
     pub held: Option<usize>,
     pub starter_cover: bool,
     pub island_cap: bool,
+    pub island_plowed: Vec<f32>,
+    pub window_shake: bool,
     pub dynamics: bool,
     pub crumbs: Vec<super::winter_island::Chip>,
     width: f32,
@@ -70,6 +72,8 @@ impl Snow {
             held: None,
             starter_cover: false,
             island_cap: false,
+            island_plowed: Vec::new(),
+            window_shake: true,
             width,
             height,
             random: seed.max(1),
@@ -126,9 +130,11 @@ impl Snow {
                     }
                 }
                 if self.dynamics
-                    && ledge.id != -2
-                    && motion.0.hypot(motion.1) > 120.0
-                    && drift.shed_distance > 24.0
+                    && self.window_shake
+                    && ledge.id >= 0
+                    && dx.hypot(dy) > 0.1
+                    && motion.0.hypot(motion.1) > 35.0
+                    && drift.shed_distance > 8.0
                     && self.crumbs.len() < 96
                 {
                     drift.shed_distance = 0.0;
@@ -146,6 +152,10 @@ impl Snow {
                             vy: (-motion.1 * 0.2).clamp(-100.0, 100.0) - 15.0,
                             radius: (*depth * 0.35).clamp(0.7, 2.2),
                             life: 1.0,
+                            source: ledge.id,
+                            previous_y: ledge.surface_y(x) - *depth,
+                            spin: (i as f32 * 3.3).sin() * 7.0,
+                            ..Default::default()
                         });
                         *depth *= 0.9;
                     }
@@ -178,11 +188,15 @@ impl Snow {
     pub fn step(&mut self, dt: f32, accumulate: bool) {
         let dt = dt.clamp(0.0, 0.05);
         self.time += dt;
+        for cooldown in &mut self.island_plowed {
+            *cooldown = (*cooldown - dt).max(0.0);
+        }
         if self.island_cap
             && let Some(drift) = self.drifts.iter_mut().find(|d| d.ledge.id == -2)
         {
             for (i, depth) in drift.depths.iter_mut().enumerate() {
-                let baseline = 3.0 + 0.8 * (i as f32 * 0.7).sin();
+                let recovery = 1.0 - (self.island_plowed.get(i).copied().unwrap_or(0.0) / 3.0).clamp(0.0, 1.0);
+                let baseline = (3.0 + 0.8 * (i as f32 * 0.7).sin()) * recovery;
                 if *depth < baseline {
                     *depth += (baseline - *depth) * (1.0 - (-dt * 2.0).exp());
                 }
@@ -224,6 +238,10 @@ impl Snow {
                                 vy: 10.0,
                                 radius: 0.8,
                                 life: 0.8,
+                                source: drift.ledge.id,
+                                previous_y: drift.ledge.surface_y(x) - 1.0,
+                                spin: side * 4.0,
+                                ..Default::default()
                             });
                         }
                     }
@@ -253,7 +271,9 @@ impl Snow {
                     let bin = ((f.x - drift.ledge.x) / drift.ledge.width * drift.depths.len() as f32) as usize;
                     let bin = bin.min(drift.depths.len() - 1);
                     let depth = &mut drift.depths[bin];
-                    *depth = (*depth + 1.8).min(12.0);
+                    if drift.ledge.id != -2 || self.island_plowed.get(bin).copied().unwrap_or(0.0) <= 3.0 {
+                        *depth = (*depth + 1.8).min(12.0);
+                    }
                 }
                 true
             } else {
@@ -270,13 +290,8 @@ impl Snow {
         }
         super::winter_physics::advance(&mut self.balls, &self.drifts, self.held, (self.width, self.height), dt);
         self.last_dt = dt.max(1.0 / 240.0);
-        for crumb in &mut self.crumbs {
-            crumb.vy += 220.0 * dt;
-            crumb.x += crumb.vx * dt;
-            crumb.y += crumb.vy * dt;
-            crumb.life = (crumb.life - dt).max(0.0);
-        }
-        self.crumbs.retain(|c| c.life > 0.0);
+        super::winter_island::advance(&mut self.crumbs, dt);
+        super::winter_island::land(&mut self.crumbs, &mut self.drifts);
         if !accumulate {
             for drift in &mut self.drifts {
                 if drift.ledge.id != -2 || !self.island_cap {
@@ -512,6 +527,27 @@ mod quiet_island_tests {
             }]);
             snow.step(1.0 / 60.0, true);
             assert!(snow.crumbs.is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod window_shake_tests {
+    use super::*;
+    #[test]
+    fn small_window_movements_shed_snow_and_can_be_disabled() {
+        for enabled in [true, false] {
+            let mut snow = Snow::new(800.0, 600.0, 0, 17);
+            snow.starter_cover = true;
+            snow.window_shake = enabled;
+            for x in [100.0, 106.0, 112.0] {
+                snow.ledges(vec![Ledge { id: 42, x, y: 300.0, width: 400.0, radius: 0.0 }]);
+                snow.step(1.0 / 60.0, true);
+            }
+            assert_eq!(!snow.crumbs.is_empty(), enabled);
+            if enabled {
+                assert!(snow.crumbs.iter().all(|c| c.spin.is_finite() && c.vx.abs() > 0.0));
+            }
         }
     }
 }

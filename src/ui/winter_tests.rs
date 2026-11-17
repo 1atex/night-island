@@ -242,6 +242,10 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
             "Rear snow must be hidden under the front window"
         );
     }
+    assert!(
+        scene.plow_spans.iter().any(|s| s.surface == 42),
+        "A rear window with an exposed edge must remain on the cleaning route"
+    );
     let ledge = scene.snow.drifts.iter().find(|d| d.ledge.id == -2).unwrap().ledge;
     scene.island.follow(Some(ledge), false, true);
     scene.island.follow(Some(ledge), true, true);
@@ -270,11 +274,12 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     let mut cap = super::super::winter_cap::Cap::new(&compositor, &scene.white, &empty)?;
     cap.update(&scene.factory, &empty, 1.0 / 60.0, 1.0, (0.0, 0.0))?;
     assert!(cap.area < 0.01, "An empty curved surface must never generate white patches");
-    scene.plow_layer.SetClip(&scene.cap_clip)?;
+    scene.plow_layer.SetClip(&scene.plow_clip)?;
+    scene.update_mask(Vec::new())?;
     scene.plow_visual.place(Some(super::super::winter_plow::Pose {
         x: 200.0 / s,
         y: 160.0 / s,
-        scale: 1.0 / s,
+        scale: 2.0 / s,
         direction: 1.0,
         surface: 77,
         travel: 40.0,
@@ -292,7 +297,7 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     }
     let truck = unsafe {
         let dc = GetDC(None);
-        let color = GetPixel(dc, 281, 266).0;
+        let color = GetPixel(dc, 290, 247).0;
         ReleaseDC(None, dc);
         color
     };
@@ -305,6 +310,8 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         vy: 0.0,
         radius: 3.0 / s,
         life: 1.0,
+        previous_y: 50.0 / s,
+        ..Default::default()
     }];
     scene.render(1.0 / 60.0, WinterSettings { plow: false, ..settings }, false)?;
     for _ in 0..4 {
@@ -327,6 +334,40 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     assert!(
         (particle & 255) > 220 && ((particle >> 8) & 255) > 220,
         "Island transition particles must remain visible over a fully covered desktop: {particle:x}"
+    );
+    scene.island.chips.clear();
+    scene.snow.crumbs = vec![super::super::winter_island::Chip {
+        x: 50.0 / s,
+        y: 50.0 / s,
+        previous_y: 50.0 / s,
+        radius: 3.0 / s,
+        life: 1.0,
+        ..Default::default()
+    }];
+    scene.render(1.0 / 60.0, WinterSettings { plow: false, ..settings }, false)?;
+    assert!(scene.chip_layer.Clip().is_ok());
+    scene.render(1.0 / 60.0, WinterSettings { plow: false, inside_windows: true, ..settings }, false)?;
+    assert!(scene.chip_layer.Clip().is_err());
+    for _ in 0..4 {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            DwmFlush()?;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let inward = unsafe {
+        let dc = GetDC(None);
+        let color = GetPixel(dc, 130, 170).0;
+        ReleaseDC(None, dc);
+        color
+    };
+    assert!(
+        (inward & 255) > 220 && ((inward >> 8) & 255) > 220,
+        "Opted-in shaken snow must remain visible inside the window: {inward:x}"
     );
     let hwnd = scene.hwnd;
     drop(scene);

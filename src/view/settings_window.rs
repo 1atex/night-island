@@ -63,11 +63,16 @@ const ANIMATIONS: [(Sid, &str, Kind); 10] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 25] = [
+const APPEARANCE: [(Sid, &str, Kind); 30] = [
     (Sid::Winter, "Winter desktop", Kind::Toggle),
     (Sid::WinterPlow, "Snowplow", Kind::Toggle),
     (Sid::WinterIslandPlow, "Mini snowplow on the island", Kind::Toggle),
     (Sid::WinterPlowInterval, "Snowplow interval", Kind::Slider),
+    (Sid::WinterPlowSize, "Snowplow size", Kind::Slider),
+    (Sid::WinterPlowGround, "Clear snow at the bottom of the screen", Kind::Toggle),
+    (Sid::WinterPlowSnowballs, "Snowplow rolls snow into balls", Kind::Toggle),
+    (Sid::WinterWindowShake, "Shake snow off moving windows", Kind::Toggle),
+    (Sid::WinterInsideWindows, "Let shaken snow fall inside windows", Kind::Toggle),
     (Sid::WinterPhysics, "Snow inertia and crumbling", Kind::Toggle),
     (Sid::WinterIslandCap, "Permanent snow cap on the island", Kind::Toggle),
     (Sid::WinterIslandShake, "Shake snow off when the island opens and closes", Kind::Toggle),

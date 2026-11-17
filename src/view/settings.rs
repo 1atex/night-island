@@ -18,6 +18,11 @@ pub enum Sid {
     WinterPlow,
     WinterIslandPlow,
     WinterPlowInterval,
+    WinterPlowSize,
+    WinterPlowGround,
+    WinterPlowSnowballs,
+    WinterWindowShake,
+    WinterInsideWindows,
 
     CardShadows,
     LegacyIcons,
@@ -366,6 +371,7 @@ pub(in crate::view) fn setting_row(pill: Rect, scale: f32, index: usize) -> (Rec
 pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
     match id {
         Sid::WinterPlowInterval => (15.0, 600.0, 15.0),
+        Sid::WinterPlowSize => (50.0, 200.0, 10.0),
         Sid::TopGap => (12.0, 160.0, 2.0),
         Sid::TopMotion => (160.0, 800.0, 20.0),
         Sid::DockIconSize => (32.0, 72.0, 2.0),
@@ -404,6 +410,7 @@ pub(in crate::view) fn slider_range(id: Sid) -> (f32, f32, f32) {
 pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
     match id {
         Sid::WinterPlowInterval => c.winter.plow_interval_secs as f32,
+        Sid::WinterPlowSize => c.winter.plow_size as f32,
         Sid::TopGap => c.top_panel.island_gap as f32,
         Sid::TopMotion => c.top_panel.motion_ms as f32,
         Sid::DockIconSize => c.desktop_dock.icon_size as f32,
@@ -453,6 +460,7 @@ pub(in crate::view) fn slider_value(id: Sid, c: &Settings) -> f32 {
 pub(in crate::view) fn slider_text(id: Sid, v: f32) -> String {
     match id {
         Sid::WinterPlowInterval => format!("{v:.0} s"),
+        Sid::WinterPlowSize => format!("{v:.0}%"),
         Sid::TopGap => format!("{v:.0} px"),
         Sid::TopMotion => format!("{v:.0} ms"),
         Sid::DockIconSize | Sid::DockMargin => format!("{v:.0} px"),
@@ -483,6 +491,7 @@ pub fn slider_apply(id: Sid, c: &mut Settings, norm: f32) {
     let v = (raw / step).round() * step;
     match id {
         Sid::WinterPlowInterval => c.winter.plow_interval_secs = v as u32,
+        Sid::WinterPlowSize => c.winter.plow_size = v as u32,
         Sid::TopGap => c.top_panel.island_gap = v as u32,
         Sid::TopMotion => c.top_panel.motion_ms = v as u32,
         Sid::DockIconSize => c.desktop_dock.icon_size = v as u32,
@@ -552,6 +561,10 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::WinterPhysics => c.winter.physics,
         Sid::WinterPlow => c.winter.plow,
         Sid::WinterIslandPlow => c.winter.island_plow,
+        Sid::WinterPlowGround => c.winter.plow_ground,
+        Sid::WinterPlowSnowballs => c.winter.plow_snowballs,
+        Sid::WinterWindowShake => c.winter.window_shake,
+        Sid::WinterInsideWindows => c.winter.inside_windows,
 
         Sid::CardShadows => c.card_shadows,
         Sid::LegacyIcons => c.legacy_icons,
@@ -715,6 +728,10 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::WinterPhysics => c.winter.physics = on,
         Sid::WinterPlow => c.winter.plow = on,
         Sid::WinterIslandPlow => c.winter.island_plow = on,
+        Sid::WinterPlowGround => c.winter.plow_ground = on,
+        Sid::WinterPlowSnowballs => c.winter.plow_snowballs = on,
+        Sid::WinterWindowShake => c.winter.window_shake = on,
+        Sid::WinterInsideWindows => c.winter.inside_windows = on,
 
         Sid::CardShadows => c.card_shadows = on,
         Sid::LegacyIcons => c.legacy_icons = on,

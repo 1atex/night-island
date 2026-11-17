@@ -80,8 +80,10 @@ struct Scene {
     plow: super::winter_plow::Plow,
     plow_visual: super::winter_plow::Vehicle,
     plow_layer: ContainerVisual,
-    cap_clip: CompositionGeometricClip,
+    plow_clip: CompositionGeometricClip,
+    plow_spans: Vec<super::winter_plow::Span>,
     chip_mask: CompositionPathGeometry,
+    chip_clip: CompositionGeometricClip,
     protected_island: Option<RECT>,
 }
 
@@ -218,7 +220,8 @@ impl Scene {
             let chip_layer = c.CreateShapeVisual()?;
             chip_layer.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             let chip_mask = c.CreatePathGeometry()?;
-            chip_layer.SetClip(&c.CreateGeometricClipWithGeometry(&chip_mask)?)?;
+            let chip_clip = c.CreateGeometricClipWithGeometry(&chip_mask)?;
+            chip_layer.SetClip(&chip_clip)?;
             root.Children()?.InsertAtTop(&chip_layer)?;
             let island_chip_layer = c.CreateShapeVisual()?;
             island_chip_layer.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
@@ -265,8 +268,10 @@ impl Scene {
                 plow: Default::default(),
                 plow_visual,
                 plow_layer,
-                cap_clip,
+                plow_clip: clip.clone(),
+                plow_spans: Vec::new(),
                 chip_mask,
+                chip_clip,
                 protected_island: None,
             }))
         })();
@@ -339,6 +344,7 @@ impl Scene {
 
     fn update_caps(&mut self, windows: &[WindowEdge]) -> Result<()> {
         let mut regions = Vec::new();
+        let mut plow_spans = Vec::new();
         for drift in &self.snow.drifts {
             let d = drift.ledge;
             let left = d.x * self.scale + self.bounds.left as f32;
@@ -352,6 +358,13 @@ impl Scene {
                 Vec::new()
             };
             for (a, b) in occlusion::exposed_spans(left, right, roof, &front) {
+                if b - a > 24.0 * self.scale {
+                    plow_spans.push(super::winter_plow::Span {
+                        surface: d.id,
+                        left: ((a - left) / (right - left)).clamp(0.0, 1.0),
+                        right: ((b - left) / (right - left)).clamp(0.0, 1.0),
+                    });
+                }
                 regions.push((
                     (a - self.bounds.left as f32) / self.scale,
                     d.y - 32.0,
@@ -360,6 +373,7 @@ impl Scene {
                 ));
             }
         }
+        self.plow_spans = plow_spans;
         if self.cap_regions == regions && self.cap_mask.Path().is_ok() {
             return Ok(());
         }
@@ -509,6 +523,12 @@ impl Scene {
         self.snow.island_cap = settings.island_cap;
         self.snow.step(dt, settings.accumulate);
         self.island.step(dt);
+        super::winter_island::land(&mut self.island.chips, &mut self.snow.drifts);
+        if settings.inside_windows {
+            self.chip_layer.SetClip(None::<&CompositionClip>)?;
+        } else {
+            self.chip_layer.SetClip(&self.chip_clip)?;
+        }
         for (flake, dot) in self.snow.flakes.iter().zip(&self.flakes) {
             dot.shape.SetOffset(Vector2 { X: flake.x, Y: flake.y })?;
         }
@@ -606,25 +626,14 @@ impl Scene {
         }
         render_chips(&self.compositor, &self.island_chip_layer, &mut self.island_dots, &self.island.chips)?;
         render_chips(&self.compositor, &self.chip_layer, &mut self.chips, &self.snow.crumbs)?;
-        let eligible: Vec<isize> = self
-            .snow
-            .drifts
+        let eligible: Vec<super::winter_plow::Span> = self
+            .plow_spans
             .iter()
-            .filter(|d| {
-                let ledge = d.ledge;
-                let center = ledge.x + ledge.width * 0.5;
-                ledge.id != -1
-                    && (ledge.id != -2 || settings.island_plow)
-                    && ledge.width > 40.0
-                    && self
-                        .cap_regions
-                        .iter()
-                        .any(|&(l, t, r, b)| center >= l && center < r && ledge.y - 1.0 >= t && ledge.y - 1.0 < b)
-            })
-            .map(|d| d.ledge.id)
+            .copied()
+            .filter(|s| (s.surface != -2 || settings.island_plow) && (s.surface != -1 || settings.plow_ground))
             .collect();
         let pose = if settings.plow {
-            self.plow.step(&mut self.snow, &eligible, dt, settings.plow_interval_secs)
+            self.plow.step(&mut self.snow, &eligible, dt, settings)
         } else {
             self.plow.reset();
             None
@@ -632,7 +641,7 @@ impl Scene {
         if pose.is_some_and(|p| p.surface == -2) {
             self.plow_layer.SetClip(None::<&CompositionClip>)?;
         } else {
-            self.plow_layer.SetClip(&self.cap_clip)?;
+            self.plow_layer.SetClip(&self.plow_clip)?;
         }
         self.plow_visual.place(pose)?;
         if !self.presented {
@@ -659,7 +668,9 @@ fn render_chips(
             dots.push((bead, brush));
         }
         let (bead, brush) = &dots[index];
-        bead._geometry.SetRadius(Vector2 { X: chip.radius, Y: chip.radius * 0.7 })?;
+        bead._geometry
+            .SetRadius(Vector2 { X: chip.radius, Y: chip.radius * (0.55 + chip.spin.abs() * 0.025).min(0.9) })?;
+        bead.shape.SetRotationAngle(chip.angle)?;
         bead.shape.SetOffset(Vector2 { X: chip.x, Y: chip.y })?;
         brush.SetColor(Color { A: (chip.life * 255.0) as u8, R: 238, G: 247, B: 255 })?;
     }
@@ -775,10 +786,14 @@ impl Winter {
                 }
             }
             {
+                scene.snow.window_shake = self.settings.window_shake;
                 scene.ledges(island, visible, self.settings.windows, dock, windows, island_radius);
                 scene.rounded_windows = windows.iter().map(|w| (w.rect, w.radius)).collect();
                 let ledge = scene.snow.drifts.iter().find(|d| d.ledge.id == -2).map(|d| d.ledge);
                 if scene.island.follow(ledge, expanded, self.settings.island_shake) {
+                    if let Some(drift) = scene.snow.drifts.iter().find(|d| d.ledge.id == -2) {
+                        scene.island.match_cover(drift);
+                    }
                     unsafe {
                         let _ = SetWindowPos(
                             scene.hwnd,
