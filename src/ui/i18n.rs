@@ -94,6 +94,7 @@ fn phrase(s: &str) -> Option<&'static str> {
         "Permanent snow cap on the island" => "Постоянная снежная шапка острова",
         "Shake snow off when the island opens" => "Стряхивать снег при раскрытии острова",
         "Start with a light dusting of snow" => "Лёгкий снежный покров с самого начала",
+        "Snow inertia and crumbling" => "Инерция и осыпание снега",
         "Winter desktop" => "Зимний рабочий стол",
         "More snowflakes" => "Густой снегопад",
         "Snow economy mode (30 fps)" => "Экономный снегопад (30 кадров/с)",

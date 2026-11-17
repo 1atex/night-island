@@ -68,7 +68,7 @@ mod tests {
     use super::*;
     #[test]
     fn opening_shakes_once_and_restores_the_cap_without_resets() {
-        let ledge = Some(Ledge { id: -2, x: 100.0, y: 20.0, width: 220.0 });
+        let ledge = Some(Ledge { id: -2, x: 100.0, y: 20.0, width: 220.0, ..Default::default() });
         let mut snow = IslandSnow::default();
         snow.follow(ledge, false, true);
         assert_eq!(snow.coverage, 1.0);

@@ -87,7 +87,7 @@ impl App {
                     self.start_liquid();
                 }
                 Winter | WinterDense | WinterEconomy | WinterWindows | WinterAccumulate | WinterInteractive
-                | WinterIslandCap | WinterIslandShake | WinterStarterCover => self.configure_winter(),
+                | WinterIslandCap | WinterIslandShake | WinterStarterCover | WinterPhysics => self.configure_winter(),
                 LiquidGlass => self.refresh_glass(),
                 CardShadows => self.repaint_expanded(),
                 LegacyIcons => {

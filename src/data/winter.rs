@@ -10,6 +10,7 @@ pub struct WinterSettings {
     pub island_cap: bool,
     pub island_shake: bool,
     pub starter_cover: bool,
+    pub physics: bool,
 }
 
 impl Default for WinterSettings {
@@ -24,6 +25,7 @@ impl Default for WinterSettings {
             island_cap: true,
             island_shake: true,
             starter_cover: true,
+            physics: true,
         }
     }
 }

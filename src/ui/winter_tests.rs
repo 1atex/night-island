@@ -72,10 +72,10 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         Scene::new(&compositor, Monitor { device: "test".into(), bounds, work: bounds, primary: true }, settings)?;
     let s = scene.scale;
     scene.snow.ledges(vec![
-        Ledge { id: -1, x: 0.0, y: 500.0 / s, width: 800.0 / s },
-        Ledge { id: -2, x: 280.0 / s, y: 40.0 / s, width: 240.0 / s },
-        Ledge { id: 42, x: 108.0 / s, y: 180.0 / s, width: 424.0 / s },
-        Ledge { id: -3, x: 192.0 / s, y: 415.0 / s, width: 416.0 / s },
+        Ledge { id: -1, x: 0.0, y: 500.0 / s, width: 800.0 / s, ..Default::default() },
+        Ledge { id: -2, x: 280.0 / s, y: 40.0 / s, width: 240.0 / s, ..Default::default() },
+        Ledge { id: 42, x: 108.0 / s, y: 180.0 / s, width: 424.0 / s, ..Default::default() },
+        Ledge { id: -3, x: 192.0 / s, y: 415.0 / s, width: 416.0 / s, ..Default::default() },
     ]);
     for (index, drift) in scene.snow.drifts.iter_mut().enumerate() {
         for (bin, depth) in drift.depths.iter_mut().enumerate() {
@@ -83,9 +83,9 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         }
     }
     scene.snow.balls = vec![
-        Ball { x: 650.0 / s, y: 469.0 / s, radius: 30.0 / s, velocity: 0.0, support: Some(-1) },
-        Ball { x: 650.0 / s, y: 422.0 / s, radius: 21.0 / s, velocity: 0.0, support: Some(-1) },
-        Ball { x: 650.0 / s, y: 390.0 / s, radius: 15.0 / s, velocity: 0.0, support: Some(-1) },
+        Ball { x: 650.0 / s, y: 469.0 / s, radius: 30.0 / s, velocity: 0.0, support: Some(-1), ..Default::default() },
+        Ball { x: 650.0 / s, y: 422.0 / s, radius: 21.0 / s, velocity: 0.0, support: Some(-1), ..Default::default() },
+        Ball { x: 650.0 / s, y: 390.0 / s, radius: 15.0 / s, velocity: 0.0, support: Some(-1), ..Default::default() },
     ];
     scene.update_mask(vec![
         RECT { left: 180, top: 301, right: 620, bottom: 500 },
@@ -95,7 +95,7 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     scene.render(0.033, settings, true)?;
     let shape = scene.flakes[0].shape.clone();
     let first_y = shape.Offset()?.Y;
-    let pile = scene.pile_dots[0].shape.clone();
+    let pile = scene.caps[0].shape.clone();
     let until = Instant::now() + Duration::from_millis(800);
     while Instant::now() < until {
         scene.render(0.033, settings, true)?;
@@ -111,7 +111,7 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     }
     assert_eq!(shape, scene.flakes[0].shape);
     assert!((shape.Offset()?.Y - first_y).abs() > 5.0, "Snowflakes must keep moving across rendered frames");
-    assert_eq!(pile, scene.pile_dots[0].shape);
+    assert_eq!(pile, scene.caps[0].shape);
     assert_eq!(scene.ball_dots.len(), 3);
     assert!(scene.ball_dots[2][1]._geometry.Radius()?.X > 0.0);
     assert_ne!(unsafe { GetWindowLongPtrW(scene.hwnd, GWL_EXSTYLE) } & WS_EX_TRANSPARENT.0 as isize, 0);
@@ -177,7 +177,7 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     }
     let roof = unsafe {
         let screen = GetDC(None);
-        let color = GetPixel(screen, 400, 156).0;
+        let color = (152..160).map(|y| GetPixel(screen, 400, y).0).max_by_key(|c| c & 255).unwrap();
         ReleaseDC(None, screen);
         color
     };
@@ -189,36 +189,42 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         handle: 77,
         rect: RECT { left: 380, top: 280, right: 680, bottom: 540 },
         maximized: false,
+        radius: 8.0,
     };
     let rear = occlusion::WindowEdge {
         handle: 42,
         rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
         maximized: false,
+        radius: 8.0,
     };
     let island = (350.0, 160.0, 260.0, 38.0);
-    scene.ledges(island, true, true, None, &[front, rear]);
+    scene.ledges(island, true, true, None, &[front, rear], 16.0);
     scene.snow.drifts.iter_mut().find(|d| d.ledge.id == 42).unwrap().depths.fill(7.0);
     for left in [380, 220, 460, 180] {
         front = occlusion::WindowEdge {
             handle: 77,
             rect: RECT { left, top: 280, right: left + 300, bottom: 540 },
             maximized: false,
+            radius: 8.0,
         };
         let rear = occlusion::WindowEdge {
             handle: 42,
             rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
             maximized: false,
+            radius: 8.0,
         };
-        scene.ledges(island, true, true, None, &[front, rear]);
+        scene.ledges(island, true, true, None, &[front, rear], 16.0);
         let front = occlusion::WindowEdge {
             handle: 77,
             rect: RECT { left, top: 280, right: left + 300, bottom: 540 },
             maximized: false,
+            radius: 8.0,
         };
         let rear = occlusion::WindowEdge {
             handle: 42,
             rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
             maximized: false,
+            radius: 8.0,
         };
         scene.update_caps(&[front, rear])?;
         let rear = scene.snow.drifts.iter().find(|d| d.ledge.id == 42).unwrap();
@@ -234,7 +240,7 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     scene.island.follow(Some(ledge), false, true);
     scene.island.follow(Some(ledge), true, true);
     scene.render(1.0 / 60.0, settings, true)?;
-    assert_eq!(scene.chips.len(), 32);
+    assert!(scene.chips.len() >= 32 && scene.chips.len() <= 128);
     let chip = scene.chips[0].0.shape.Offset()?;
     for _ in 0..12 {
         scene.render(1.0 / 60.0, settings, false)?;
@@ -244,7 +250,16 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         scene.render(1.0 / 60.0, settings, false)?;
     }
     assert!(scene.island.chips.is_empty());
-    assert!(scene.chips.iter().all(|(c, _)| c._geometry.Radius().unwrap().X == 0.0));
+    assert!(scene.chips[scene.snow.crumbs.len()..].iter().all(|(c, _)| c._geometry.Radius().unwrap().X == 0.0));
+    let empty = super::super::winter_model::Drift {
+        ledge: Ledge { id: 909, x: 10.0, y: 10.0, width: 250.0, radius: 16.0 },
+        depths: vec![0.0; 20],
+        motion: (0.0, 0.0),
+        shed_distance: 0.0,
+    };
+    let mut cap = super::super::winter_cap::Cap::new(&compositor, &scene.white, &empty)?;
+    cap.update(&scene.factory, &empty, 1.0 / 60.0, 1.0, (0.0, 0.0))?;
+    assert!(cap.area < 0.01, "An empty curved surface must never generate white patches");
     let hwnd = scene.hwnd;
     drop(scene);
     assert!(!unsafe { IsWindow(Some(hwnd)) }.as_bool());

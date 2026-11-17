@@ -7,6 +7,7 @@ pub(super) struct WindowEdge {
     pub handle: isize,
     pub rect: RECT,
     pub maximized: bool,
+    pub radius: f32,
 }
 
 fn desktop_or_overlay(class: &str, style: isize) -> bool {
@@ -52,7 +53,23 @@ pub(super) fn window_edges() -> Vec<WindowEdge> {
                 size_of::<RECT>() as u32,
             );
             if rect.right > rect.left && rect.bottom > rect.top {
-                out.push(WindowEdge { handle: hwnd.0 as isize, rect, maximized: IsZoomed(hwnd).as_bool() });
+                let mut preference = 0u32;
+                let rounded = DwmGetWindowAttribute(
+                    hwnd,
+                    windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE,
+                    (&raw mut preference).cast(),
+                    4,
+                )
+                .is_ok();
+                let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) as f32 / 96.0;
+                let radius = if !rounded || preference == 1 {
+                    0.0
+                } else if preference == 3 {
+                    4.0 * dpi
+                } else {
+                    8.0 * dpi
+                };
+                out.push(WindowEdge { handle: hwnd.0 as isize, rect, maximized: IsZoomed(hwnd).as_bool(), radius });
             }
         }
         (out.len() < 256).into()

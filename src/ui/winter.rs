@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use windows::UI::Color;
@@ -46,7 +45,6 @@ pub struct Winter {
 struct Dot {
     _geometry: CompositionEllipseGeometry,
     shape: CompositionSpriteShape,
-    height: Cell<f32>,
 }
 
 struct Scene {
@@ -59,9 +57,10 @@ struct Scene {
     flakes: Vec<Dot>,
     flakes_layer: ShapeVisual,
     piles: ShapeVisual,
-    pile_dots: Vec<Dot>,
+    caps: Vec<super::winter_cap::Cap>,
+    rounded_windows: Vec<(RECT, f32)>,
     balls: ShapeVisual,
-    ball_dots: Vec<[Dot; 4]>,
+    ball_dots: Vec<[Dot; 7]>,
     compositor: Compositor,
     white: CompositionColorBrush,
     ink: CompositionColorBrush,
@@ -228,7 +227,8 @@ impl Scene {
                 flakes,
                 flakes_layer,
                 piles,
-                pile_dots: Vec::new(),
+                caps: Vec::new(),
+                rounded_windows: Vec::new(),
                 balls,
                 ball_dots: Vec::new(),
                 compositor: c.clone(),
@@ -270,8 +270,9 @@ impl Scene {
         island: (f32, f32, f32, f32),
         island_visible: bool,
         on_windows: bool,
-        dock: Option<(f32, f32, f32, f32)>,
+        dock: Option<(f32, f32, f32, f32, f32)>,
         windows: &[WindowEdge],
+        island_radius: f32,
     ) {
         let s = self.scale;
         let mut ledges = vec![Ledge {
@@ -279,8 +280,9 @@ impl Scene {
             x: 0.0,
             y: (self.bounds.bottom - self.bounds.top) as f32 / s,
             width: (self.bounds.right - self.bounds.left) as f32 / s,
+            ..Default::default()
         }];
-        let mut add = |id, x: f32, y: f32, width: f32| {
+        let mut add = |id, x: f32, y: f32, width: f32, radius: f32| {
             if y >= self.bounds.top as f32
                 && y < self.bounds.bottom as f32
                 && x + width > self.bounds.left as f32
@@ -293,20 +295,21 @@ impl Scene {
                     x: (left - self.bounds.left as f32) / s,
                     y: (y - self.bounds.top as f32) / s,
                     width: (right - left) / s,
+                    radius: radius / s,
                 });
             }
         };
         if island_visible {
-            add(-2, island.0 + 10.0, island.1 + 2.0, (island.2 - 20.0).max(1.0));
+            add(-2, island.0, island.1, island.2, island_radius);
         }
-        if let Some((x, y, width, _)) = dock {
-            add(-3, x, y, width);
+        if let Some((x, y, width, _, radius)) = dock {
+            add(-3, x, y, width, radius);
         }
         if on_windows {
             for window in windows {
                 if !window.maximized {
                     let r = window.rect;
-                    add(window.handle, r.left as f32 + 8.0, r.top as f32, (r.right - r.left - 16).max(1) as f32);
+                    add(window.handle, r.left as f32, r.top as f32, (r.right - r.left).max(1) as f32, window.radius);
                 }
             }
         }
@@ -332,7 +335,7 @@ impl Scene {
                     (a - self.bounds.left as f32) / self.scale,
                     d.y - 32.0,
                     (b - self.bounds.left as f32) / self.scale,
-                    d.y + 0.5,
+                    d.y + d.radius + 0.5,
                 ));
             }
         }
@@ -383,12 +386,23 @@ impl Scene {
                 {
                     continue;
                 }
-                let hole = self.factory.CreateRectangleGeometry(&D2D_RECT_F {
-                    left: (rect.left - self.bounds.left) as f32 / self.scale,
-                    top: (rect.top - self.bounds.top) as f32 / self.scale,
-                    right: (rect.right - self.bounds.left) as f32 / self.scale,
-                    bottom: (rect.bottom - self.bounds.top) as f32 / self.scale,
-                })?;
+                let radius = self
+                    .rounded_windows
+                    .iter()
+                    .find(|(r, _)| r.left == rect.left && r.right == rect.right && r.bottom == rect.bottom)
+                    .map_or(0.0, |(_, r)| *r / self.scale);
+                let hole = self.factory.CreateRoundedRectangleGeometry(
+                    &windows::Win32::Graphics::Direct2D::D2D1_ROUNDED_RECT {
+                        rect: D2D_RECT_F {
+                            left: (rect.left - self.bounds.left) as f32 / self.scale,
+                            top: (rect.top - self.bounds.top) as f32 / self.scale,
+                            right: (rect.right - self.bounds.left) as f32 / self.scale,
+                            bottom: (rect.bottom - self.bounds.top) as f32 / self.scale,
+                        },
+                        radiusX: radius,
+                        radiusY: radius,
+                    },
+                )?;
                 let path = self.factory.CreatePathGeometry()?;
                 let sink = path.Open()?;
                 outside.CombineWithGeometry(&hole, D2D1_COMBINE_MODE_EXCLUDE, None, 0.25, &sink)?;
@@ -469,6 +483,7 @@ impl Scene {
         }
         self.snow
             .drag((cursor.x - self.bounds.left) as f32 / self.scale, (cursor.y - self.bounds.top) as f32 / self.scale);
+        self.snow.dynamics = settings.physics;
         self.snow.starter_cover = settings.starter_cover;
         self.snow.island_cap = settings.island_cap;
         self.snow.step(dt, settings.accumulate);
@@ -476,93 +491,99 @@ impl Scene {
         for (flake, dot) in self.snow.flakes.iter().zip(&self.flakes) {
             dot.shape.SetOffset(Vector2 { X: flake.x, Y: flake.y })?;
         }
-        {
-            let mut active = 0;
+        let changed = self.caps.len() != self.snow.drifts.len()
+            || self.caps.iter().any(|c| !self.snow.drifts.iter().any(|d| d.ledge.id == c.id));
+        if changed {
+            self.caps.retain(|c| self.snow.drifts.iter().any(|d| d.ledge.id == c.id));
             for drift in &self.snow.drifts {
-                let width = drift.ledge.width / drift.depths.len() as f32;
-                for (i, _) in drift.depths.iter().enumerate().filter(|(_, v)| **v > 0.1) {
-                    if active == self.pile_dots.len() {
-                        let bead = dot(&self.compositor, &self.white, 1.0, 1.0)?;
-                        self.piles.Shapes()?.Append(&bead.shape)?;
-                        self.pile_dots.push(bead);
-                    }
-                    let center = drift.ledge.x + (i as f32 + 0.5) * width;
-                    if drift.ledge.id == -1
-                        && self.blocked(POINT {
-                            x: self.bounds.left + (center * self.scale) as i32,
-                            y: self.bounds.top + (drift.ledge.y * self.scale - 1.0) as i32,
-                        })
-                    {
-                        continue;
-                    }
-                    let bead = &self.pile_dots[active];
-                    let start = i.saturating_sub(2);
-                    let end = (i + 3).min(drift.depths.len());
-                    let mut smooth = drift.depths[start..end].iter().sum::<f32>() / (end - start) as f32;
-                    if drift.ledge.id == -2 {
-                        smooth *= self.island.coverage.max(0.28);
-                        let t = (i as f32 + 0.5) / drift.depths.len() as f32;
-                        smooth *= (t * (1.0 - t) * 8.0).clamp(0.25, 1.0);
-                        let cx = (cursor.x - self.bounds.left) as f32 / self.scale;
-                        let cy = (cursor.y - self.bounds.top) as f32 / self.scale;
-                        let distance = (center - cx).hypot(drift.ledge.y - cy);
-                        smooth *= 1.0 - 0.15 * (1.0 - distance / 60.0).clamp(0.0, 1.0);
-                    }
-                    let current = bead.height.get();
-                    let smooth = current + (smooth - current) * (1.0 - (-dt.max(0.001) * 18.0).exp());
-                    bead.height.set(smooth);
-                    bead._geometry.SetRadius(Vector2 { X: width * 1.4, Y: smooth })?;
-                    bead.shape.SetOffset(Vector2 {
-                        X: drift.ledge.x + (i as f32 + 0.5) * width,
-                        Y: drift.ledge.y - smooth,
-                    })?;
-                    active += 1;
+                if !self.caps.iter().any(|c| c.id == drift.ledge.id) {
+                    self.caps.push(super::winter_cap::Cap::new(&self.compositor, &self.white, drift)?);
                 }
             }
-            for bead in &self.pile_dots[active..] {
-                bead._geometry.SetRadius(Vector2::default())?;
+            self.piles.Shapes()?.Clear()?;
+            for cap in &self.caps {
+                self.piles.Shapes()?.Append(&cap.shape)?;
+            }
+        }
+        let cursor =
+            ((cursor.x - self.bounds.left) as f32 / self.scale, (cursor.y - self.bounds.top) as f32 / self.scale);
+        for cap in &mut self.caps {
+            if let Some(drift) = self.snow.drifts.iter().find(|d| d.ledge.id == cap.id) {
+                cap.update(
+                    &self.factory,
+                    drift,
+                    dt,
+                    if cap.id == -2 { self.island.coverage.max(0.28) } else { 1.0 },
+                    cursor,
+                )?;
             }
         }
         for (index, ball) in self.snow.balls.iter().enumerate() {
             if index == self.ball_dots.len() {
                 let nose = self.compositor.CreateColorBrushWithColor(Color { A: 255, R: 244, G: 143, B: 67 })?;
+                let grain = self.compositor.CreateColorBrushWithColor(Color { A: 80, R: 255, G: 255, B: 255 })?;
                 let beads = [
                     dot(&self.compositor, &self.white, 1.0, 1.0)?,
                     dot(&self.compositor, &self.ink, 1.5, 1.5)?,
                     dot(&self.compositor, &self.ink, 1.5, 1.5)?,
                     dot(&self.compositor, &nose, 1.0, 1.0)?,
+                    dot(&self.compositor, &grain, 1.0, 1.0)?,
+                    dot(&self.compositor, &grain, 1.0, 1.0)?,
+                    dot(&self.compositor, &grain, 1.0, 1.0)?,
                 ];
+                let skin = self.compositor.CreateRadialGradientBrush()?;
+                skin.SetEllipseCenter(Vector2 { X: 0.32, Y: 0.25 })?;
+                skin.SetEllipseRadius(Vector2 { X: 0.85, Y: 0.9 })?;
+                for (at, color) in [
+                    (0.0, Color { A: 255, R: 249, G: 253, B: 255 }),
+                    (0.6, Color { A: 255, R: 229, G: 241, B: 251 }),
+                    (1.0, Color { A: 255, R: 179, G: 209, B: 234 }),
+                ] {
+                    skin.ColorStops()?
+                        .Append(&self.compositor.CreateColorGradientStopWithOffsetAndColor(at, color)?)?;
+                }
+                beads[0].shape.SetFillBrush(&skin)?;
                 for bead in &beads {
                     self.balls.Shapes()?.Append(&bead.shape)?;
                 }
                 self.ball_dots.push(beads);
             }
             let beads = &self.ball_dots[index];
-            beads[0]._geometry.SetRadius(Vector2 { X: ball.radius, Y: ball.radius })?;
-            beads[0].shape.SetOffset(Vector2 { X: ball.x, Y: ball.y })?;
-            let head = !self
-                .snow
-                .balls
-                .iter()
-                .any(|b| b.y < ball.y && (b.x - ball.x).abs() < 3.0 && ball.y - b.y < ball.radius + b.radius + 3.0)
-                && self.snow.balls.iter().any(|b| {
-                    b.radius > ball.radius
-                        && (b.x - ball.x).abs() < 3.0
-                        && b.y > ball.y
-                        && b.y - ball.y < b.radius + ball.radius + 3.0
-                });
+            let rx = ball.radius * (1.0 + ball.squash);
+            let ry = ball.radius / (1.0 + ball.squash);
+            let center_y = ball.y + ball.radius - ry;
+            beads[0]._geometry.SetRadius(Vector2 { X: rx, Y: ry })?;
+            beads[0].shape.SetOffset(Vector2 { X: ball.x, Y: center_y })?;
+            for (i, grain) in beads[4..].iter().enumerate() {
+                let angle = ball.angle + i as f32 * 2.1;
+                grain.shape.SetOffset(Vector2 {
+                    X: ball.x + rx * 0.52 * angle.cos(),
+                    Y: center_y + ry * 0.52 * angle.sin(),
+                })?;
+                grain._geometry.SetRadius(Vector2 { X: ball.radius * 0.07, Y: ball.radius * 0.05 })?;
+            }
+            let above = self.snow.balls.iter().any(|b| {
+                b.parent == Some(index)
+                    || (b.y < ball.y && (b.x - ball.x).abs() < 3.0 && ball.y - b.y < ball.radius + b.radius + 3.0)
+            });
+            let below =
+                ball.parent.is_some()
+                    || self.snow.balls.iter().any(|b| {
+                        (b.x - ball.x).abs() < 3.0 && b.y > ball.y && b.y - ball.y < b.radius + ball.radius + 3.0
+                    });
+            let head = !above && below;
             for (bead, dx) in beads[1..3].iter().zip([-0.28, 0.28]) {
                 bead._geometry
                     .SetRadius(Vector2 { X: if head { 1.5 } else { 0.0 }, Y: if head { 1.5 } else { 0.0 } })?;
-                bead.shape.SetOffset(Vector2 { X: ball.x + ball.radius * dx, Y: ball.y - ball.radius * 0.15 })?;
+                bead.shape.SetOffset(Vector2 { X: ball.x + ball.radius * dx, Y: center_y - ry * 0.15 })?;
             }
             beads[3]._geometry.SetRadius(Vector2 {
                 X: if head { ball.radius * 0.28 } else { 0.0 },
                 Y: if head { 2.0 } else { 0.0 },
             })?;
-            beads[3].shape.SetOffset(Vector2 { X: ball.x + ball.radius * 0.15, Y: ball.y + ball.radius * 0.18 })?;
+            beads[3].shape.SetOffset(Vector2 { X: ball.x + ball.radius * 0.15, Y: center_y + ry * 0.18 })?;
         }
-        for (index, chip) in self.island.chips.iter().enumerate() {
+        for (index, chip) in self.island.chips.iter().chain(self.snow.crumbs.iter()).enumerate() {
             if index == self.chips.len() {
                 let brush = self.compositor.CreateColorBrushWithColor(Color { A: 255, R: 238, G: 247, B: 255 })?;
                 let bead = dot(&self.compositor, &brush, chip.radius, chip.radius)?;
@@ -574,7 +595,7 @@ impl Scene {
             bead.shape.SetOffset(Vector2 { X: chip.x, Y: chip.y })?;
             brush.SetColor(Color { A: (chip.life * 255.0) as u8, R: 238, G: 247, B: 255 })?;
         }
-        for (bead, _) in &self.chips[self.island.chips.len()..] {
+        for (bead, _) in &self.chips[self.island.chips.len() + self.snow.crumbs.len()..] {
             bead._geometry.SetRadius(Vector2::default())?;
         }
         if !self.presented {
@@ -592,7 +613,7 @@ fn dot(c: &Compositor, brush: &CompositionColorBrush, x: f32, y: f32) -> Result<
     geometry.SetRadius(Vector2 { X: x, Y: y })?;
     let shape = c.CreateSpriteShapeWithGeometry(&geometry)?;
     shape.SetFillBrush(brush)?;
-    Ok(Dot { _geometry: geometry, shape, height: Cell::new(0.0) })
+    Ok(Dot { _geometry: geometry, shape })
 }
 
 impl Winter {
@@ -628,8 +649,9 @@ impl Winter {
         &mut self,
         island: (f32, f32, f32, f32),
         visible: bool,
-        dock: Option<(f32, f32, f32, f32)>,
+        dock: Option<(f32, f32, f32, f32, f32)>,
         expanded: bool,
+        island_radius: f32,
     ) -> Result<()> {
         if self.topology.elapsed() >= Duration::from_secs(2) {
             self.topology = Instant::now();
@@ -692,7 +714,8 @@ impl Winter {
                 }
             }
             {
-                scene.ledges(island, visible, self.settings.windows, dock, windows);
+                scene.ledges(island, visible, self.settings.windows, dock, windows, island_radius);
+                scene.rounded_windows = windows.iter().map(|w| (w.rect, w.radius)).collect();
                 let ledge = scene.snow.drifts.iter().find(|d| d.ledge.id == -2).map(|d| d.ledge);
                 scene.island.follow(ledge, expanded, self.settings.island_shake);
                 scene.update_caps(windows)?;
@@ -706,7 +729,7 @@ impl Winter {
                         bottom: (island.1 + island.3).ceil() as i32,
                     });
                 }
-                if let Some((x, y, width, height)) = dock {
+                if let Some((x, y, width, height, _)) = dock {
                     exclusions.push(RECT {
                         left: (x - 12.0 * scene.scale).floor() as i32,
                         top: (y + 2.0).floor() as i32,

@@ -63,8 +63,9 @@ const ANIMATIONS: [(Sid, &str, Kind); 10] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 21] = [
+const APPEARANCE: [(Sid, &str, Kind); 22] = [
     (Sid::Winter, "Winter desktop", Kind::Toggle),
+    (Sid::WinterPhysics, "Snow inertia and crumbling", Kind::Toggle),
     (Sid::WinterIslandCap, "Permanent snow cap on the island", Kind::Toggle),
     (Sid::WinterIslandShake, "Shake snow off when the island opens", Kind::Toggle),
     (Sid::WinterStarterCover, "Start with a light dusting of snow", Kind::Toggle),

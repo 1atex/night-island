@@ -40,3 +40,7 @@ pub mod top_panel;
 mod top_panel_space;
 
 mod winter_island;
+
+mod winter_physics;
+
+mod winter_cap;
