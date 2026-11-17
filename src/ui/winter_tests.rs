@@ -87,8 +87,13 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         Ball { x: 650.0 / s, y: 422.0 / s, radius: 21.0 / s, velocity: 0.0, support: Some(-1) },
         Ball { x: 650.0 / s, y: 390.0 / s, radius: 15.0 / s, velocity: 0.0, support: Some(-1) },
     ];
+    scene.update_mask(vec![
+        RECT { left: 180, top: 301, right: 620, bottom: 500 },
+        RECT { left: 400, top: 340, right: 660, bottom: 480 },
+    ])?;
     scene.render(0.033, settings, true)?;
     let shape = scene.flakes[0].shape.clone();
+    let first_y = shape.Offset()?.Y;
     let pile = scene.pile_dots[0].shape.clone();
     let until = Instant::now() + Duration::from_millis(800);
     while Instant::now() < until {
@@ -104,6 +109,7 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         std::thread::sleep(Duration::from_millis(33));
     }
     assert_eq!(shape, scene.flakes[0].shape);
+    assert!((shape.Offset()?.Y - first_y).abs() > 5.0, "Snowflakes must keep moving across rendered frames");
     assert_eq!(pile, scene.pile_dots[0].shape);
     assert_eq!(scene.ball_dots.len(), 3);
     assert!(scene.ball_dots[2][1]._geometry.Radius()?.X > 0.0);
@@ -139,6 +145,15 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
             let _ = DeleteObject(bitmap.into());
             let _ = DeleteDC(mem);
             ReleaseDC(None, screen);
+        }
+        for y in 190..250 {
+            for x in 120..400 {
+                let pixel = &pixels[(y * 800 + x) * 4..][..3];
+                assert!(
+                    pixel.iter().all(|v| *v < 180),
+                    "No snow may appear inside the working area of a window at {x},{y}: {pixel:?}"
+                );
+            }
         }
         let snow_pixels = pixels.chunks_exact(4).filter(|p| p[0] > 180 && p[1] > 180 && p[2] > 180).count();
         assert!(snow_pixels > 1000, "Composition must draw the snow and snowman: {snow_pixels}");

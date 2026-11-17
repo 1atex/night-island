@@ -1142,3 +1142,52 @@ fn native_foreground_rules_restore_visibility_without_game_mode() -> Result<()> 
     assert!(!visible());
     Ok(())
 }
+
+#[test]
+#[ignore = "Checks repeated Windows timer deliveries for the real winter entry point"]
+fn native_winter_timer_keeps_delivering_frames() -> Result<()> {
+    unsafe {
+        RoInitialize(RO_INIT_SINGLETHREADED)?;
+    }
+    struct Runtime;
+    impl Drop for Runtime {
+        fn drop(&mut self) {
+            unsafe {
+                RoUninitialize();
+            }
+        }
+    }
+    let _runtime = Runtime;
+    let _queue = unsafe {
+        CreateDispatcherQueueController(DispatcherQueueOptions {
+            dwSize: size_of::<DispatcherQueueOptions>() as u32,
+            threadType: DQTYPE_THREAD_CURRENT,
+            apartmentType: DQTAT_COM_NONE,
+        })?
+    };
+    let owner = window(WS_EX_NOREDIRECTIONBITMAP)?;
+    let mut app = App::new_visuals(owner.0, 1.0, Settings::default())?;
+    app.settings.winter.enabled = true;
+    app.configure_winter();
+    assert!(app.winter.is_some());
+    for _ in 0..4 {
+        let until = Instant::now() + Duration::from_secs(2);
+        let mut delivered = false;
+        while Instant::now() < until {
+            let mut msg = MSG::default();
+            if unsafe { PeekMessageW(&mut msg, Some(owner.0), WM_TIMER, WM_TIMER, PM_REMOVE) }.as_bool()
+                && msg.wParam.0 == Timer::Winter as usize
+            {
+                app.on_timer(msg.wParam.0);
+                delivered = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(delivered, "Winter must schedule the next frame after the dispatcher kills its timer");
+    }
+    app.settings.winter.enabled = false;
+    app.configure_winter();
+    assert!(app.winter.is_none());
+    Ok(())
+}

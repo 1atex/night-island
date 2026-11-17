@@ -19,6 +19,15 @@ use crate::platform::desktop_dock::{self as desktop, Monitor};
 mod tests;
 
 use crate::data::winter::WinterSettings;
+use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_COMBINE_MODE_EXCLUDE, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1CreateFactory, ID2D1Factory, ID2D1Geometry,
+};
+
+#[path = "winter_windows.rs"]
+mod occlusion;
+
+use occlusion::{WindowEdge, window_edges};
 
 pub struct Winter {
     #[allow(clippy::vec_box)]
@@ -52,6 +61,9 @@ struct Scene {
     ink: CompositionColorBrush,
     interactive: bool,
     suppressed: bool,
+    mask: CompositionPathGeometry,
+    factory: ID2D1Factory,
+    exclusions: Vec<RECT>,
 }
 
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -65,7 +77,11 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         match msg {
             WM_NCHITTEST => {
                 return LRESULT(
-                    if scene.interactive && unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } < 0 && scene.snow.hit(x, y) {
+                    if scene.interactive
+                        && !scene.blocked(cursor)
+                        && unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } < 0
+                        && scene.snow.hit(x, y)
+                    {
                         HTCLIENT as isize
                     } else {
                         HTTRANSPARENT as isize
@@ -150,6 +166,9 @@ impl Scene {
             })?;
             let target = unsafe { c.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, true)? };
             target.SetRoot(&root)?;
+            let mask = c.CreatePathGeometry()?;
+            root.SetClip(&c.CreateGeometricClipWithGeometry(&mask)?)?;
+            let factory: ID2D1Factory = unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
             let white = c.CreateColorBrushWithColor(Color { A: 255, R: 238, G: 247, B: 255 })?;
             let ink = c.CreateColorBrushWithColor(Color { A: 255, R: 40, G: 54, B: 69 })?;
             let snow = Snow::new(
@@ -191,6 +210,9 @@ impl Scene {
                 ink,
                 interactive: settings.interactive,
                 suppressed: false,
+                mask,
+                factory,
+                exclusions: Vec::new(),
             }))
         })();
         match result {
@@ -215,7 +237,8 @@ impl Scene {
         island: (f32, f32, f32, f32),
         island_visible: bool,
         on_windows: bool,
-        dock: Option<(f32, f32, f32)>,
+        dock: Option<(f32, f32, f32, f32)>,
+        windows: &[WindowEdge],
     ) {
         let s = self.scale;
         let mut ledges = vec![Ledge {
@@ -243,33 +266,14 @@ impl Scene {
         if island_visible {
             add(-2, island.0 + 10.0, island.1 + 2.0, (island.2 - 20.0).max(1.0));
         }
-        if let Some((x, y, width)) = dock {
+        if let Some((x, y, width, _)) = dock {
             add(-3, x, y, width);
         }
         if on_windows {
             let mut front: Vec<RECT> = Vec::new();
-            for window in desktop::cached_windows().into_iter().take(20) {
-                let hwnd = HWND(window.handle as *mut _);
-                let mut r = RECT::default();
-                if window.minimized
-                    || unsafe { IsIconic(hwnd).as_bool() }
-                    || !unsafe { IsWindowVisible(hwnd).as_bool() }
-                    || unsafe { GetWindowRect(hwnd, &mut r) }.is_err()
-                {
-                    continue;
-                }
-                let _ = unsafe {
-                    windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(
-                        hwnd,
-                        windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS,
-                        (&raw mut r).cast(),
-                        size_of::<RECT>() as u32,
-                    )
-                };
-                if r.right - r.left < 120 || r.bottom - r.top < 80 {
-                    continue;
-                }
-                if !unsafe { IsZoomed(hwnd).as_bool() } {
+            for window in windows {
+                let r = window.rect;
+                if !window.maximized {
                     let mut spans = vec![(r.left + 8, r.right - 8)];
                     for cover in &front {
                         if cover.top > r.top + 4 || cover.bottom <= r.top {
@@ -310,11 +314,64 @@ impl Scene {
         self.snow.ledges(ledges);
     }
 
+    fn update_mask(&mut self, exclusions: Vec<RECT>) -> Result<()> {
+        if exclusions == self.exclusions && self.mask.Path().is_ok() {
+            return Ok(());
+        }
+        unsafe {
+            let stage = self.factory.CreateRectangleGeometry(&D2D_RECT_F {
+                left: 0.0,
+                top: 0.0,
+                right: (self.bounds.right - self.bounds.left) as f32 / self.scale,
+                bottom: (self.bounds.bottom - self.bounds.top) as f32 / self.scale,
+            })?;
+            let mut outside: ID2D1Geometry = stage.cast()?;
+
+            for rect in &exclusions {
+                if rect.right <= self.bounds.left
+                    || rect.left >= self.bounds.right
+                    || rect.bottom <= self.bounds.top
+                    || rect.top >= self.bounds.bottom
+                {
+                    continue;
+                }
+                let hole = self.factory.CreateRectangleGeometry(&D2D_RECT_F {
+                    left: (rect.left - self.bounds.left) as f32 / self.scale,
+                    top: (rect.top - self.bounds.top) as f32 / self.scale,
+                    right: (rect.right - self.bounds.left) as f32 / self.scale,
+                    bottom: (rect.bottom - self.bounds.top) as f32 / self.scale,
+                })?;
+                let path = self.factory.CreatePathGeometry()?;
+                let sink = path.Open()?;
+                outside.CombineWithGeometry(&hole, D2D1_COMBINE_MODE_EXCLUDE, None, 0.25, &sink)?;
+                sink.Close()?;
+                outside = path.cast()?;
+            }
+            let path = self.factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            outside.Simplify(
+                windows::Win32::Graphics::Direct2D::D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
+                None,
+                0.25,
+                &sink,
+            )?;
+            sink.Close()?;
+            self.mask.SetPath(&super::gfx::composition_path(&path)?)?;
+        }
+        self.exclusions = exclusions;
+        Ok(())
+    }
+
+    fn blocked(&self, point: POINT) -> bool {
+        self.exclusions.iter().any(|r| point.x >= r.left && point.x < r.right && point.y >= r.top && point.y < r.bottom)
+    }
+
     fn render(&mut self, dt: f32, settings: WinterSettings, refresh: bool) -> Result<()> {
         let mut cursor = POINT::default();
         let _ = unsafe { GetCursorPos(&mut cursor) };
         let alt = settings.interactive && unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } < 0;
         let catch = alt
+            && !self.blocked(cursor)
             && self.snow.hit(
                 (cursor.x - self.bounds.left) as f32 / self.scale,
                 (cursor.y - self.bounds.top) as f32 / self.scale,
@@ -446,7 +503,12 @@ impl Winter {
         true
     }
 
-    pub fn tick(&mut self, island: (f32, f32, f32, f32), visible: bool, dock: Option<(f32, f32, f32)>) -> Result<()> {
+    pub fn tick(
+        &mut self,
+        island: (f32, f32, f32, f32),
+        visible: bool,
+        dock: Option<(f32, f32, f32, f32)>,
+    ) -> Result<()> {
         if self.topology.elapsed() >= Duration::from_secs(2) {
             self.topology = Instant::now();
             let monitors = desktop::monitors();
@@ -466,10 +528,11 @@ impl Winter {
         }
         let dt = self.frame.elapsed().as_secs_f32();
         self.frame = Instant::now();
-        let refresh = self.refresh.elapsed() >= Duration::from_millis(150);
+        let refresh = self.refresh.elapsed() >= Duration::from_millis(100);
         if refresh {
             self.refresh = Instant::now();
         }
+        let windows = if refresh { window_edges() } else { Vec::new() };
         let foreground = unsafe { GetForegroundWindow() };
         let mut rect = RECT::default();
         let mut class = [0u16; 128];
@@ -505,7 +568,26 @@ impl Winter {
                 continue;
             }
             if refresh {
-                scene.ledges(island, visible, self.settings.windows, dock);
+                scene.ledges(island, visible, self.settings.windows, dock, &windows);
+                let mut exclusions: Vec<RECT> =
+                    windows.iter().map(|w| RECT { top: w.rect.top + 1, ..w.rect }).collect();
+                if visible {
+                    exclusions.push(RECT {
+                        left: island.0.floor() as i32,
+                        top: (island.1 + 2.0).floor() as i32,
+                        right: (island.0 + island.2).ceil() as i32,
+                        bottom: (island.1 + island.3).ceil() as i32,
+                    });
+                }
+                if let Some((x, y, width, height)) = dock {
+                    exclusions.push(RECT {
+                        left: (x - 12.0 * scene.scale).floor() as i32,
+                        top: (y + 2.0).floor() as i32,
+                        right: (x + width + 12.0 * scene.scale).ceil() as i32,
+                        bottom: (y + height).ceil() as i32,
+                    });
+                }
+                scene.update_mask(exclusions)?;
             }
             scene.render(dt, self.settings, refresh)?;
         }

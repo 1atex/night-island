@@ -33,5 +33,8 @@ impl App {
             self.winter.take();
             self.kill_timer(Timer::Winter);
         }
+        if self.winter.is_some() {
+            self.set_timer(Timer::Winter, if self.settings.winter.economy { 50 } else { 33 });
+        }
     }
 }

@@ -1535,15 +1535,16 @@ extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) ->
 }
 
 impl Dock {
-    pub fn snow_ledge(&self) -> Option<(f32, f32, f32)> {
+    pub fn snow_ledge(&self) -> Option<(f32, f32, f32, f32)> {
         if !unsafe { IsWindowVisible(self.state.hwnd) }.as_bool() {
             return None;
         }
-        let (left, top, right, _) = self.state.panel;
+        let (left, top, right, bottom) = self.state.panel;
         Some((
             self.state.origin.0 as f32 + left + 12.0 * self.state.scale,
             self.state.origin.1 as f32 + top,
             (right - left - 24.0 * self.state.scale).max(1.0),
+            bottom - top,
         ))
     }
 
