@@ -78,3 +78,46 @@ mod tests {
         assert!(!desktop_or_overlay("NightIsland.Settings", 0x100));
     }
 }
+
+pub(super) fn exposed_spans(left: f32, right: f32, roof: f32, front: &[RECT]) -> Vec<(f32, f32)> {
+    let mut spans = vec![(left, right)];
+    for cover in front {
+        if cover.top as f32 >= roof || cover.bottom as f32 <= roof - 24.0 {
+            continue;
+        }
+        spans = spans
+            .into_iter()
+            .flat_map(|(a, b)| {
+                let l = cover.left as f32;
+                let r = cover.right as f32;
+                let mut remaining = Vec::new();
+                if r <= a || l >= b {
+                    remaining.push((a, b));
+                } else {
+                    if l > a {
+                        remaining.push((a, l));
+                    }
+                    if r < b {
+                        remaining.push((r, b));
+                    }
+                }
+                remaining
+            })
+            .collect();
+    }
+    spans
+}
+
+#[cfg(test)]
+mod movement_tests {
+    use super::*;
+    #[test]
+    fn front_windows_clip_caps_without_changing_the_rear_windows_identity() {
+        let front = RECT { left: 180, top: 90, right: 320, bottom: 260 };
+        assert_eq!(exposed_spans(100.0, 400.0, 180.0, &[front]), vec![(100.0, 180.0), (320.0, 400.0)]);
+        let moved = RECT { left: 240, right: 380, ..front };
+        assert_eq!(exposed_spans(100.0, 400.0, 180.0, &[moved]), vec![(100.0, 240.0), (380.0, 400.0)]);
+        assert_eq!(exposed_spans(100.0, 400.0, 180.0, &[]), vec![(100.0, 400.0)]);
+        assert!(exposed_spans(100.0, 400.0, 180.0, &[RECT { left: 0, right: 800, ..front }]).is_empty());
+    }
+}

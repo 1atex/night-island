@@ -38,3 +38,5 @@ mod dock_window_motion;
 pub mod shortcut_editor;
 pub mod top_panel;
 mod top_panel_space;
+
+mod winter_island;

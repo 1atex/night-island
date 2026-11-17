@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use windows::UI::Color;
@@ -11,6 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Interface, Result, w};
 use windows_numerics::{Vector2, Vector3};
 
+use super::winter_island::IslandSnow;
 use super::winter_model::{Ledge, Snow};
 use crate::platform::desktop_dock::{self as desktop, Monitor};
 
@@ -37,11 +39,14 @@ pub struct Winter {
     frame: Instant,
     topology: Instant,
     compositor: Compositor,
+    windows: Vec<WindowEdge>,
+    revision: u32,
 }
 
 struct Dot {
     _geometry: CompositionEllipseGeometry,
     shape: CompositionSpriteShape,
+    height: Cell<f32>,
 }
 
 struct Scene {
@@ -50,8 +55,9 @@ struct Scene {
     scale: f32,
     snow: Snow,
     _target: DesktopWindowTarget,
-    root: ContainerVisual,
+    _root: ContainerVisual,
     flakes: Vec<Dot>,
+    flakes_layer: ShapeVisual,
     piles: ShapeVisual,
     pile_dots: Vec<Dot>,
     balls: ShapeVisual,
@@ -65,6 +71,13 @@ struct Scene {
     mask: CompositionPathGeometry,
     factory: ID2D1Factory,
     exclusions: Vec<RECT>,
+    cap_mask: CompositionPathGeometry,
+    cap_regions: Vec<(f32, f32, f32, f32)>,
+    island: IslandSnow,
+    chips: Vec<(Dot, CompositionColorBrush)>,
+    chip_layer: ShapeVisual,
+    chip_mask: CompositionPathGeometry,
+    protected_island: Option<RECT>,
 }
 
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -172,12 +185,14 @@ impl Scene {
             let factory: ID2D1Factory = unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
             let white = c.CreateColorBrushWithColor(Color { A: 255, R: 238, G: 247, B: 255 })?;
             let ink = c.CreateColorBrushWithColor(Color { A: 255, R: 40, G: 54, B: 69 })?;
-            let snow = Snow::new(
+            let mut snow = Snow::new(
                 (bounds.right - bounds.left) as f32 / scale,
                 (bounds.bottom - bounds.top) as f32 / scale,
                 if settings.dense { 220 } else { 90 },
                 (bounds.left as u64).wrapping_add(73471),
             );
+            snow.starter_cover = settings.starter_cover;
+            snow.island_cap = settings.island_cap;
             let flakes_layer = c.CreateShapeVisual()?;
             flakes_layer.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             let mut flakes = Vec::new();
@@ -191,7 +206,14 @@ impl Scene {
             root.Children()?.InsertAtTop(&flakes_layer)?;
             let piles = c.CreateShapeVisual()?;
             piles.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+            let cap_mask = c.CreatePathGeometry()?;
+            piles.SetClip(&c.CreateGeometricClipWithGeometry(&cap_mask)?)?;
             root.Children()?.InsertAtTop(&piles)?;
+            let chip_layer = c.CreateShapeVisual()?;
+            chip_layer.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+            let chip_mask = c.CreatePathGeometry()?;
+            chip_layer.SetClip(&c.CreateGeometricClipWithGeometry(&chip_mask)?)?;
+            root.Children()?.InsertAtTop(&chip_layer)?;
             let balls = c.CreateShapeVisual()?;
             balls.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             balls.SetClip(&clip)?;
@@ -202,8 +224,9 @@ impl Scene {
                 scale,
                 snow,
                 _target: target,
-                root,
+                _root: root,
                 flakes,
+                flakes_layer,
                 piles,
                 pile_dots: Vec::new(),
                 balls,
@@ -217,6 +240,13 @@ impl Scene {
                 mask,
                 factory,
                 exclusions: Vec::new(),
+                cap_mask,
+                cap_regions: Vec::new(),
+                island: IslandSnow::default(),
+                chips: Vec::new(),
+                chip_layer,
+                chip_mask,
+                protected_island: None,
             }))
         })();
         match result {
@@ -273,48 +303,63 @@ impl Scene {
             add(-3, x, y, width);
         }
         if on_windows {
-            let mut front: Vec<RECT> = Vec::new();
             for window in windows {
-                let r = window.rect;
                 if !window.maximized {
-                    let mut spans = vec![(r.left + 8, r.right - 8)];
-                    for cover in &front {
-                        if cover.top > r.top + 4 || cover.bottom <= r.top {
-                            continue;
-                        }
-                        spans = spans
-                            .into_iter()
-                            .flat_map(|(a, b)| {
-                                let mut remaining = Vec::new();
-                                if cover.right <= a || cover.left >= b {
-                                    remaining.push((a, b));
-                                } else {
-                                    if cover.left > a {
-                                        remaining.push((a, cover.left));
-                                    }
-                                    if cover.right < b {
-                                        remaining.push((cover.right, b));
-                                    }
-                                }
-                                remaining
-                            })
-                            .collect();
-                    }
-                    for (part, (left, right)) in spans.into_iter().take(8).enumerate() {
-                        if right - left > 24 {
-                            add(
-                                window.handle.wrapping_mul(16).wrapping_add(part as isize),
-                                left as f32,
-                                r.top as f32,
-                                (right - left) as f32,
-                            );
-                        }
-                    }
+                    let r = window.rect;
+                    add(window.handle, r.left as f32 + 8.0, r.top as f32, (r.right - r.left - 16).max(1) as f32);
                 }
-                front.push(r);
             }
         }
         self.snow.ledges(ledges);
+    }
+
+    fn update_caps(&mut self, windows: &[WindowEdge]) -> Result<()> {
+        let mut regions = Vec::new();
+        for drift in &self.snow.drifts {
+            let d = drift.ledge;
+            let left = d.x * self.scale + self.bounds.left as f32;
+            let right = (d.x + d.width) * self.scale + self.bounds.left as f32;
+            let roof = d.y * self.scale + self.bounds.top as f32;
+            let front: Vec<RECT> = if d.id == -1 {
+                windows.iter().map(|w| w.rect).collect()
+            } else if d.id >= 0 {
+                windows.iter().take_while(|w| w.handle != d.id).map(|w| w.rect).collect()
+            } else {
+                Vec::new()
+            };
+            for (a, b) in occlusion::exposed_spans(left, right, roof, &front) {
+                regions.push((
+                    (a - self.bounds.left as f32) / self.scale,
+                    d.y - 32.0,
+                    (b - self.bounds.left as f32) / self.scale,
+                    d.y + 0.5,
+                ));
+            }
+        }
+        if self.cap_regions == regions && self.cap_mask.Path().is_ok() {
+            return Ok(());
+        }
+        unsafe {
+            use windows::Win32::Graphics::Direct2D::Common::{
+                D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, D2D1_FILL_MODE_WINDING,
+            };
+            let path = self.factory.CreatePathGeometry()?;
+            let sink = path.Open()?;
+            sink.SetFillMode(D2D1_FILL_MODE_WINDING);
+            for &(left, top, right, bottom) in &regions {
+                sink.BeginFigure(Vector2 { X: left, Y: top }, D2D1_FIGURE_BEGIN_FILLED);
+                sink.AddLines(&[
+                    Vector2 { X: right, Y: top },
+                    Vector2 { X: right, Y: bottom },
+                    Vector2 { X: left, Y: bottom },
+                ]);
+                sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            }
+            sink.Close()?;
+            self.cap_mask.SetPath(&super::gfx::composition_path(&path)?)?;
+        }
+        self.cap_regions = regions;
+        Ok(())
     }
 
     fn update_mask(&mut self, exclusions: Vec<RECT>) -> Result<()> {
@@ -360,6 +405,27 @@ impl Scene {
             )?;
             sink.Close()?;
             self.mask.SetPath(&super::gfx::composition_path(&path)?)?;
+            if let Some(rect) = self.protected_island {
+                let protected = self.factory.CreateRectangleGeometry(&D2D_RECT_F {
+                    left: (rect.left - self.bounds.left) as f32 / self.scale,
+                    top: (rect.top - self.bounds.top) as f32 / self.scale,
+                    right: (rect.right - self.bounds.left) as f32 / self.scale,
+                    bottom: (rect.bottom - self.bounds.top) as f32 / self.scale,
+                })?;
+                let reveal = self.factory.CreatePathGeometry()?;
+                let sink = reveal.Open()?;
+                outside.CombineWithGeometry(
+                    &protected,
+                    windows::Win32::Graphics::Direct2D::D2D1_COMBINE_MODE_UNION,
+                    None,
+                    0.25,
+                    &sink,
+                )?;
+                sink.Close()?;
+                self.chip_mask.SetPath(&super::gfx::composition_path(&reveal)?)?;
+            } else {
+                self.chip_mask.SetPath(&super::gfx::composition_path(&path)?)?;
+            }
         }
         self.exclusions = exclusions;
         Ok(())
@@ -367,9 +433,14 @@ impl Scene {
 
     fn blocked(&self, point: POINT) -> bool {
         self.exclusions.iter().any(|r| point.x >= r.left && point.x < r.right && point.y >= r.top && point.y < r.bottom)
+            && !self.cap_regions.iter().any(|&(l, t, r, b)| {
+                let x = (point.x - self.bounds.left) as f32 / self.scale;
+                let y = (point.y - self.bounds.top) as f32 / self.scale;
+                x >= l && x < r && y >= t && y < b
+            })
     }
 
-    fn render(&mut self, dt: f32, settings: WinterSettings, refresh: bool) -> Result<()> {
+    fn render(&mut self, dt: f32, settings: WinterSettings, _refresh: bool) -> Result<()> {
         let mut cursor = POINT::default();
         let _ = unsafe { GetCursorPos(&mut cursor) };
         let alt = settings.interactive && unsafe { GetAsyncKeyState(VK_MENU.0 as i32) } < 0;
@@ -398,11 +469,14 @@ impl Scene {
         }
         self.snow
             .drag((cursor.x - self.bounds.left) as f32 / self.scale, (cursor.y - self.bounds.top) as f32 / self.scale);
+        self.snow.starter_cover = settings.starter_cover;
+        self.snow.island_cap = settings.island_cap;
         self.snow.step(dt, settings.accumulate);
+        self.island.step(dt);
         for (flake, dot) in self.snow.flakes.iter().zip(&self.flakes) {
             dot.shape.SetOffset(Vector2 { X: flake.x, Y: flake.y })?;
         }
-        if refresh || self.snow.held.is_some() {
+        {
             let mut active = 0;
             for drift in &self.snow.drifts {
                 let width = drift.ledge.width / drift.depths.len() as f32;
@@ -424,7 +498,19 @@ impl Scene {
                     let bead = &self.pile_dots[active];
                     let start = i.saturating_sub(2);
                     let end = (i + 3).min(drift.depths.len());
-                    let smooth = drift.depths[start..end].iter().sum::<f32>() / (end - start) as f32;
+                    let mut smooth = drift.depths[start..end].iter().sum::<f32>() / (end - start) as f32;
+                    if drift.ledge.id == -2 {
+                        smooth *= self.island.coverage.max(0.28);
+                        let t = (i as f32 + 0.5) / drift.depths.len() as f32;
+                        smooth *= (t * (1.0 - t) * 8.0).clamp(0.25, 1.0);
+                        let cx = (cursor.x - self.bounds.left) as f32 / self.scale;
+                        let cy = (cursor.y - self.bounds.top) as f32 / self.scale;
+                        let distance = (center - cx).hypot(drift.ledge.y - cy);
+                        smooth *= 1.0 - 0.15 * (1.0 - distance / 60.0).clamp(0.0, 1.0);
+                    }
+                    let current = bead.height.get();
+                    let smooth = current + (smooth - current) * (1.0 - (-dt.max(0.001) * 18.0).exp());
+                    bead.height.set(smooth);
                     bead._geometry.SetRadius(Vector2 { X: width * 1.4, Y: smooth })?;
                     bead.shape.SetOffset(Vector2 {
                         X: drift.ledge.x + (i as f32 + 0.5) * width,
@@ -476,6 +562,21 @@ impl Scene {
             })?;
             beads[3].shape.SetOffset(Vector2 { X: ball.x + ball.radius * 0.15, Y: ball.y + ball.radius * 0.18 })?;
         }
+        for (index, chip) in self.island.chips.iter().enumerate() {
+            if index == self.chips.len() {
+                let brush = self.compositor.CreateColorBrushWithColor(Color { A: 255, R: 238, G: 247, B: 255 })?;
+                let bead = dot(&self.compositor, &brush, chip.radius, chip.radius)?;
+                self.chip_layer.Shapes()?.Append(&bead.shape)?;
+                self.chips.push((bead, brush));
+            }
+            let (bead, brush) = &self.chips[index];
+            bead._geometry.SetRadius(Vector2 { X: chip.radius, Y: chip.radius * 0.7 })?;
+            bead.shape.SetOffset(Vector2 { X: chip.x, Y: chip.y })?;
+            brush.SetColor(Color { A: (chip.life * 255.0) as u8, R: 238, G: 247, B: 255 })?;
+        }
+        for (bead, _) in &self.chips[self.island.chips.len()..] {
+            bead._geometry.SetRadius(Vector2::default())?;
+        }
         if !self.presented {
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
@@ -491,7 +592,7 @@ fn dot(c: &Compositor, brush: &CompositionColorBrush, x: f32, y: f32) -> Result<
     geometry.SetRadius(Vector2 { X: x, Y: y })?;
     let shape = c.CreateSpriteShapeWithGeometry(&geometry)?;
     shape.SetFillBrush(brush)?;
-    Ok(Dot { _geometry: geometry, shape })
+    Ok(Dot { _geometry: geometry, shape, height: Cell::new(0.0) })
 }
 
 impl Winter {
@@ -507,6 +608,8 @@ impl Winter {
             frame: Instant::now(),
             topology: Instant::now(),
             compositor: c.clone(),
+            windows: Vec::new(),
+            revision: 0,
         })
     }
 
@@ -526,6 +629,7 @@ impl Winter {
         island: (f32, f32, f32, f32),
         visible: bool,
         dock: Option<(f32, f32, f32, f32)>,
+        expanded: bool,
     ) -> Result<()> {
         if self.topology.elapsed() >= Duration::from_secs(2) {
             self.topology = Instant::now();
@@ -546,11 +650,16 @@ impl Winter {
         }
         let dt = self.frame.elapsed().as_secs_f32();
         self.frame = Instant::now();
-        let refresh = self.refresh.elapsed() >= Duration::from_millis(100);
+        let revision = crate::platform::winevent::layout_revision();
+        let refresh = self.refresh.elapsed() >= Duration::from_millis(100) || revision != self.revision;
+        self.revision = revision;
         if refresh {
             self.refresh = Instant::now();
         }
-        let windows = if refresh { window_edges() } else { Vec::new() };
+        if refresh {
+            self.windows = window_edges();
+        }
+        let windows = &self.windows;
         let foreground = unsafe { GetForegroundWindow() };
         let mut rect = RECT::default();
         let mut class = [0u16; 128];
@@ -565,7 +674,7 @@ impl Winter {
                 && rect.bottom >= scene.bounds.bottom;
             if full != scene.suppressed {
                 scene.suppressed = full;
-                scene.root.SetIsVisible(!full)?;
+                scene.flakes_layer.SetIsVisible(!full)?;
                 if full {
                     unsafe {
                         SetWindowLongPtrW(
@@ -576,17 +685,17 @@ impl Winter {
                     }
                 }
             }
-            if full {
-                if scene.snow.held.is_some() {
-                    scene.snow.release();
-                    unsafe {
-                        let _ = PostMessageW(Some(scene.hwnd), WM_CANCELMODE, WPARAM(0), LPARAM(0));
-                    }
+            if full && scene.snow.held.is_some() {
+                scene.snow.release();
+                unsafe {
+                    let _ = PostMessageW(Some(scene.hwnd), WM_CANCELMODE, WPARAM(0), LPARAM(0));
                 }
-                continue;
             }
-            if refresh {
-                scene.ledges(island, visible, self.settings.windows, dock, &windows);
+            {
+                scene.ledges(island, visible, self.settings.windows, dock, windows);
+                let ledge = scene.snow.drifts.iter().find(|d| d.ledge.id == -2).map(|d| d.ledge);
+                scene.island.follow(ledge, expanded, self.settings.island_shake);
+                scene.update_caps(windows)?;
                 let mut exclusions: Vec<RECT> =
                     windows.iter().map(|w| RECT { top: w.rect.top + 1, ..w.rect }).collect();
                 if visible {
@@ -605,6 +714,12 @@ impl Winter {
                         bottom: (y + height).ceil() as i32,
                     });
                 }
+                scene.protected_island = visible.then_some(RECT {
+                    left: island.0.floor() as i32,
+                    top: island.1.floor() as i32,
+                    right: (island.0 + island.2).ceil() as i32,
+                    bottom: (island.1 + island.3).ceil() as i32,
+                });
                 scene.update_mask(exclusions)?;
             }
             scene.render(dt, self.settings, refresh)?;

@@ -11,6 +11,9 @@ pub enum Sid {
     WinterWindows,
     WinterAccumulate,
     WinterInteractive,
+    WinterIslandCap,
+    WinterIslandShake,
+    WinterStarterCover,
 
     CardShadows,
     LegacyIcons,
@@ -535,6 +538,9 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
         Sid::WinterWindows => c.winter.windows,
         Sid::WinterAccumulate => c.winter.accumulate,
         Sid::WinterInteractive => c.winter.interactive,
+        Sid::WinterIslandCap => c.winter.island_cap,
+        Sid::WinterIslandShake => c.winter.island_shake,
+        Sid::WinterStarterCover => c.winter.starter_cover,
 
         Sid::CardShadows => c.card_shadows,
         Sid::LegacyIcons => c.legacy_icons,
@@ -692,6 +698,9 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
         Sid::WinterWindows => c.winter.windows = on,
         Sid::WinterAccumulate => c.winter.accumulate = on,
         Sid::WinterInteractive => c.winter.interactive = on,
+        Sid::WinterIslandCap => c.winter.island_cap = on,
+        Sid::WinterIslandShake => c.winter.island_shake = on,
+        Sid::WinterStarterCover => c.winter.starter_cover = on,
 
         Sid::CardShadows => c.card_shadows = on,
         Sid::LegacyIcons => c.legacy_icons = on,

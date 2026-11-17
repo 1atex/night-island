@@ -12,6 +12,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 pub const WM_FOREGROUND: u32 = WM_APP + 40;
 
 static TARGET: AtomicIsize = AtomicIsize::new(0);
+static LAYOUT_REVISION: AtomicU32 = AtomicU32::new(0);
+
+pub fn layout_revision() -> u32 {
+    LAYOUT_REVISION.load(Ordering::Relaxed)
+}
+
 static LAST_LAYOUT_EVENT: AtomicU32 = AtomicU32::new(0);
 static PENDING: AtomicBool = AtomicBool::new(false);
 static HOOKS: Mutex<Vec<isize>> = Mutex::new(Vec::new());
@@ -25,6 +31,17 @@ unsafe extern "system" fn on_event(
     _thread: u32,
     time: u32,
 ) {
+    if object == 0
+        && matches!(
+            event,
+            EVENT_OBJECT_LOCATIONCHANGE
+                | EVENT_SYSTEM_FOREGROUND
+                | EVENT_SYSTEM_MINIMIZESTART
+                | EVENT_SYSTEM_MINIMIZEEND
+        )
+    {
+        LAYOUT_REVISION.fetch_add(1, Ordering::Relaxed);
+    }
     if matches!(event, EVENT_OBJECT_LOCATIONCHANGE | EVENT_OBJECT_NAMECHANGE) {
         if object != 0 || hwnd != unsafe { GetForegroundWindow() } {
             return;
@@ -61,7 +78,7 @@ pub fn start(window: HWND) {
         (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
         (EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_DESKTOPSWITCH),
     ] {
-        let flags = if matches!(from, EVENT_OBJECT_LOCATIONCHANGE | EVENT_OBJECT_NAMECHANGE) {
+        let flags = if from == EVENT_OBJECT_NAMECHANGE {
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
         } else {
             WINEVENT_OUTOFCONTEXT

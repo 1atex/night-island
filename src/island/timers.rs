@@ -227,6 +227,7 @@ impl App {
                     | Timer::Char
                     | Timer::Weather
                     | Timer::Progress
+                    | Timer::Winter
             )
         );
         let nested = self.frame_timers.begin_dispatch();

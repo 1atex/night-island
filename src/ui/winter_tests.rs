@@ -91,6 +91,7 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         RECT { left: 180, top: 301, right: 620, bottom: 500 },
         RECT { left: 400, top: 340, right: 660, bottom: 480 },
     ])?;
+    scene.update_caps(&[])?;
     scene.render(0.033, settings, true)?;
     let shape = scene.flakes[0].shape.clone();
     let first_y = shape.Offset()?.Y;
@@ -184,6 +185,66 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         (roof & 255) > 180 && ((roof >> 8) & 255) > 180 && ((roof >> 16) & 255) > 180,
         "A covered desktop must keep the foreground island's snow cap visible: {roof:x}"
     );
+    let mut front = occlusion::WindowEdge {
+        handle: 77,
+        rect: RECT { left: 380, top: 280, right: 680, bottom: 540 },
+        maximized: false,
+    };
+    let rear = occlusion::WindowEdge {
+        handle: 42,
+        rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
+        maximized: false,
+    };
+    let island = (350.0, 160.0, 260.0, 38.0);
+    scene.ledges(island, true, true, None, &[front, rear]);
+    scene.snow.drifts.iter_mut().find(|d| d.ledge.id == 42).unwrap().depths.fill(7.0);
+    for left in [380, 220, 460, 180] {
+        front = occlusion::WindowEdge {
+            handle: 77,
+            rect: RECT { left, top: 280, right: left + 300, bottom: 540 },
+            maximized: false,
+        };
+        let rear = occlusion::WindowEdge {
+            handle: 42,
+            rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
+            maximized: false,
+        };
+        scene.ledges(island, true, true, None, &[front, rear]);
+        let front = occlusion::WindowEdge {
+            handle: 77,
+            rect: RECT { left, top: 280, right: left + 300, bottom: 540 },
+            maximized: false,
+        };
+        let rear = occlusion::WindowEdge {
+            handle: 42,
+            rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
+            maximized: false,
+        };
+        scene.update_caps(&[front, rear])?;
+        let rear = scene.snow.drifts.iter().find(|d| d.ledge.id == 42).unwrap();
+        assert!(rear.depths.iter().all(|v| *v == 7.0), "Occlusion changes must preserve snow on the same window");
+        let x = (left.max(180) + 20 - 80) as f32 / s;
+        let y = (299 - 120) as f32 / s;
+        assert!(
+            !scene.cap_regions.iter().any(|&(l, t, r, b)| x >= l && x < r && y >= t && y < b),
+            "Rear snow must be hidden under the front window"
+        );
+    }
+    let ledge = scene.snow.drifts.iter().find(|d| d.ledge.id == -2).unwrap().ledge;
+    scene.island.follow(Some(ledge), false, true);
+    scene.island.follow(Some(ledge), true, true);
+    scene.render(1.0 / 60.0, settings, true)?;
+    assert_eq!(scene.chips.len(), 32);
+    let chip = scene.chips[0].0.shape.Offset()?;
+    for _ in 0..12 {
+        scene.render(1.0 / 60.0, settings, false)?;
+    }
+    assert_ne!(scene.chips[0].0.shape.Offset()?, chip);
+    for _ in 0..100 {
+        scene.render(1.0 / 60.0, settings, false)?;
+    }
+    assert!(scene.island.chips.is_empty());
+    assert!(scene.chips.iter().all(|(c, _)| c._geometry.Radius().unwrap().X == 0.0));
     let hwnd = scene.hwnd;
     drop(scene);
     assert!(!unsafe { IsWindow(Some(hwnd)) }.as_bool());

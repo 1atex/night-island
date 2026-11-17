@@ -34,6 +34,8 @@ pub struct Snow {
     pub drifts: Vec<Drift>,
     pub balls: Vec<Ball>,
     pub held: Option<usize>,
+    pub starter_cover: bool,
+    pub island_cap: bool,
     width: f32,
     height: f32,
     random: u64,
@@ -47,6 +49,8 @@ impl Snow {
             drifts: Vec::new(),
             balls: Vec::new(),
             held: None,
+            starter_cover: false,
+            island_cap: false,
             width,
             height,
             random: seed.max(1),
@@ -90,8 +94,13 @@ impl Snow {
                 }
                 drift.ledge = ledge;
             } else if ledge.width > 1.0 {
-                self.drifts
-                    .push(Drift { ledge, depths: vec![0.0; (ledge.width / 12.0).ceil().clamp(2.0, 96.0) as usize] });
+                self.drifts.push(Drift {
+                    ledge,
+                    depths: vec![
+                        if self.starter_cover || (ledge.id == -2 && self.island_cap) { 2.5 } else { 0.0 };
+                        (ledge.width / 12.0).ceil().clamp(2.0, 96.0) as usize
+                    ],
+                });
             }
         }
         for ball in &mut self.balls {
@@ -108,6 +117,16 @@ impl Snow {
     pub fn step(&mut self, dt: f32, accumulate: bool) {
         let dt = dt.clamp(0.0, 0.05);
         self.time += dt;
+        if self.island_cap
+            && let Some(drift) = self.drifts.iter_mut().find(|d| d.ledge.id == -2)
+        {
+            for (i, depth) in drift.depths.iter_mut().enumerate() {
+                let baseline = 3.0 + 0.8 * (i as f32 * 0.7).sin();
+                if *depth < baseline {
+                    *depth += (baseline - *depth) * (1.0 - (-dt * 2.0).exp());
+                }
+            }
+        }
         for index in 0..self.flakes.len() {
             let f = &mut self.flakes[index];
             let before = f.y;
@@ -191,7 +210,9 @@ impl Snow {
         }
         if !accumulate {
             for drift in &mut self.drifts {
-                drift.depths.fill(0.0);
+                if drift.ledge.id != -2 || !self.island_cap {
+                    drift.depths.fill(0.0);
+                }
             }
         }
     }
@@ -231,7 +252,7 @@ impl Snow {
             for (bin, depth) in drift.depths.iter_mut().enumerate() {
                 let center = drift.ledge.x + (bin as f32 + 0.5) * drift.ledge.width / count;
                 if (center - x).abs() < ball.radius + 8.0 {
-                    ball.radius = (ball.radius.powi(3) + *depth * 18.0).cbrt().min(32.0);
+                    ball.radius = (ball.radius.powi(2) + *depth * 18.0).sqrt().min(32.0);
                     *depth = 0.0;
                 }
             }
@@ -356,5 +377,25 @@ mod tests {
         assert_eq!(snow.flakes.len(), 90);
         assert!(snow.drifts.iter().all(|d| d.depths.iter().all(|v| *v == 0.0)));
         assert!(snow.flakes.iter().all(|f| f.x.is_finite() && f.x >= 0.0 && f.x < 800.0 && f.y <= 600.0));
+    }
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use super::*;
+    #[test]
+    fn a_light_cover_is_collectable_and_the_island_recovers_after_rolling() {
+        let mut snow = Snow::new(800.0, 600.0, 90, 91);
+        snow.starter_cover = true;
+        snow.island_cap = true;
+        snow.ledges(vec![Ledge { id: -2, x: 100.0, y: 100.0, width: 300.0 }]);
+        assert!(snow.hit(150.0, 98.0));
+        snow.grab(150.0, 98.0);
+        snow.drag(180.0, 98.0);
+        assert!(snow.balls[0].radius > 4.0);
+        snow.release();
+        snow.drifts[0].depths.fill(0.0);
+        snow.step(1.0 / 60.0, false);
+        assert!(snow.drifts[0].depths.iter().all(|v| *v > 0.0));
     }
 }

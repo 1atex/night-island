@@ -7,10 +7,23 @@ pub struct WinterSettings {
     pub windows: bool,
     pub accumulate: bool,
     pub interactive: bool,
+    pub island_cap: bool,
+    pub island_shake: bool,
+    pub starter_cover: bool,
 }
 
 impl Default for WinterSettings {
     fn default() -> Self {
-        Self { enabled: false, dense: false, economy: false, windows: true, accumulate: true, interactive: true }
+        Self {
+            enabled: false,
+            dense: false,
+            economy: false,
+            windows: true,
+            accumulate: true,
+            interactive: true,
+            island_cap: true,
+            island_shake: true,
+            starter_cover: true,
+        }
     }
 }

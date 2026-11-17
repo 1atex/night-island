@@ -1167,6 +1167,39 @@ fn native_winter_timer_keeps_delivering_frames() -> Result<()> {
     };
     let owner = window(WS_EX_NOREDIRECTIONBITMAP)?;
     let mut app = App::new_visuals(owner.0, 1.0, Settings::default())?;
+    crate::platform::winevent::start(owner.0);
+    struct Hooks;
+    impl Drop for Hooks {
+        fn drop(&mut self) {
+            crate::platform::winevent::stop();
+        }
+    }
+    let _hooks = Hooks;
+    let moving = window(WS_EX_NOREDIRECTIONBITMAP)?;
+    unsafe {
+        let _ = ShowWindow(moving.0, SW_SHOWNOACTIVATE);
+        SetWindowPos(moving.0, None, 120, 180, 300, 200, SWP_NOACTIVATE | SWP_NOZORDER)?;
+    }
+    let before = crate::platform::winevent::layout_revision();
+    unsafe {
+        SetWindowPos(moving.0, None, 220, 260, 300, 200, SWP_NOACTIVATE | SWP_NOZORDER)?;
+    }
+    let until = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < until && crate::platform::winevent::layout_revision() == before {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_ne!(
+        crate::platform::winevent::layout_revision(),
+        before,
+        "Window movement must invalidate snow geometry without waiting for polling"
+    );
     app.settings.winter.enabled = true;
     app.configure_winter();
     assert!(app.winter.is_some());
