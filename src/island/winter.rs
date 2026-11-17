@@ -22,13 +22,13 @@ impl App {
             Err(error) => crate::log_warn!("Winter desktop unavailable: {error}"),
         }
     }
-    pub(in crate::island) fn winter_tick(&mut self) {
+    pub(in crate::island) fn winter_island_geometry(&self, now: Instant) -> (view::Rect, f32) {
         let mut radius = self.pill(self.win, self.state == State::Expanded, false).2.X;
         let mut rect = self.pill_screen(self.state == State::Expanded);
         if let Some(motion) = &self.open_motion {
             let closed = self.pill_screen(false);
             let opened = self.pill_screen(true);
-            let p = motion.progress.value(Instant::now());
+            let p = motion.progress.value(now);
             radius = self.pill(self.win, false, false).2.X
                 + (self.pill(self.win, true, false).2.X - self.pill(self.win, false, false).2.X) * p;
             rect = (
@@ -38,6 +38,22 @@ impl App {
                 closed.3 + (opened.3 - closed.3) * p,
             );
         }
+        if self.open_motion.is_none()
+            && let Some(width) = self.pill_motion.width
+        {
+            rect = width.at(now);
+            if self.docked() && self.edge() == Edge::Top {
+                let cut = (self.pill_screen(false).1 - rect.1).max(0.0);
+                rect.1 += cut;
+                rect.3 -= cut;
+                radius = 0.0;
+            }
+        }
+        (rect, radius)
+    }
+
+    pub(in crate::island) fn winter_tick(&mut self) {
+        let (rect, radius) = self.winter_island_geometry(Instant::now());
         let visible = self.state != State::Hidden;
         let dock = self.desktop_dock.as_ref().and_then(|dock| dock.snow_ledge());
         if let Some(winter) = &mut self.winter

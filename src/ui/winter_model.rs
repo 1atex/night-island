@@ -126,6 +126,7 @@ impl Snow {
                     }
                 }
                 if self.dynamics
+                    && ledge.id != -2
                     && motion.0.hypot(motion.1) > 120.0
                     && drift.shed_distance > 24.0
                     && self.crumbs.len() < 96
@@ -209,7 +210,8 @@ impl Snow {
                     for (index, side) in [(0, -1.0), (count - 1, 1.0)] {
                         let before = drift.depths[index];
                         drift.depths[index] *= (-dt * 1.7).exp();
-                        if before > 0.8
+                        if drift.ledge.id != -2
+                            && before > 0.8
                             && (self.time * 4.0).floor() != ((self.time - dt) * 4.0).floor()
                             && self.crumbs.len() < 96
                         {
@@ -490,5 +492,26 @@ mod cover_tests {
         snow.drifts[0].depths.fill(0.0);
         snow.step(1.0 / 60.0, false);
         assert!(snow.drifts[0].depths.iter().all(|v| *v > 0.0));
+    }
+}
+
+#[cfg(test)]
+mod quiet_island_tests {
+    use super::*;
+    #[test]
+    fn a_regenerating_or_resizing_island_never_sheds_ambient_crumbs() {
+        let mut snow = Snow::new(800.0, 600.0, 0, 42);
+        snow.island_cap = true;
+        for frame in 0..600 {
+            snow.ledges(vec![Ledge {
+                id: -2,
+                x: 100.0,
+                y: 8.0,
+                width: 200.0 + (frame as f32 * 0.1).sin() * 70.0,
+                radius: 16.0,
+            }]);
+            snow.step(1.0 / 60.0, true);
+            assert!(snow.crumbs.is_empty());
+        }
     }
 }

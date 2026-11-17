@@ -8,6 +8,11 @@ pub(super) struct WindowEdge {
     pub rect: RECT,
     pub maximized: bool,
     pub radius: f32,
+    pub snow_cap: bool,
+}
+
+fn snow_cap(class: &str) -> bool {
+    !class.starts_with("NightIsland.") || class == "NightIsland.Settings"
 }
 
 fn desktop_or_overlay(class: &str, style: isize) -> bool {
@@ -69,7 +74,14 @@ pub(super) fn window_edges() -> Vec<WindowEdge> {
                 } else {
                     8.0 * dpi
                 };
-                out.push(WindowEdge { handle: hwnd.0 as isize, rect, maximized: IsZoomed(hwnd).as_bool(), radius });
+                let snow_cap = snow_cap(&String::from_utf16_lossy(&class[..len]));
+                out.push(WindowEdge {
+                    handle: hwnd.0 as isize,
+                    rect,
+                    maximized: IsZoomed(hwnd).as_bool(),
+                    snow_cap,
+                    radius,
+                });
             }
         }
         (out.len() < 256).into()
@@ -84,6 +96,15 @@ pub(super) fn window_edges() -> Vec<WindowEdge> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn companion_panels_never_receive_snow_on_their_transparent_window_bounds() {
+        for class in ["NightIsland.CompanionControls", "NightIsland.MiniChat", "NightIsland.DockPreview"] {
+            assert!(!snow_cap(class));
+        }
+        assert!(snow_cap("NightIsland.Settings"));
+        assert!(snow_cap("CabinetWClass"));
+    }
+
     #[test]
     fn passive_overlays_do_not_hide_the_desktop_snow() {
         assert!(desktop_or_overlay("CEF-OSC-WIDGET", 0x800a8));

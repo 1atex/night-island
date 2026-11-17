@@ -1200,6 +1200,22 @@ fn native_winter_timer_keeps_delivering_frames() -> Result<()> {
         before,
         "Window movement must invalidate snow geometry without waiting for polling"
     );
+    app.settings.placement = Placement::Floating;
+    let now = Instant::now();
+    let from = app.pill_screen(false);
+    let to = (from.0 - 80.0, from.1, from.2 + 160.0, from.3);
+    let tween = crate::island::pill_motion::WidthTween {
+        from,
+        to,
+        room: to.2,
+        start: now - Duration::from_millis(140),
+        duration: 360,
+    };
+    app.pill_motion.width = Some(tween);
+    let snow = app.winter_island_geometry(now).0;
+    assert!((snow.2 - tween.at(now).2).abs() < 0.01, "Snow must follow the current width animation sample");
+    assert!(snow.2 > from.2 && snow.2 < to.2);
+    app.pill_motion.width = None;
     app.settings.winter.enabled = true;
     app.configure_winter();
     assert!(app.winter.is_some());

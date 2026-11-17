@@ -11,6 +11,9 @@ pub struct WinterSettings {
     pub island_shake: bool,
     pub starter_cover: bool,
     pub physics: bool,
+    pub plow: bool,
+    pub island_plow: bool,
+    pub plow_interval_secs: u32,
 }
 
 impl Default for WinterSettings {
@@ -26,6 +29,9 @@ impl Default for WinterSettings {
             island_shake: true,
             starter_cover: true,
             physics: true,
+            plow: true,
+            island_plow: true,
+            plow_interval_secs: 90,
         }
     }
 }

@@ -19,35 +19,39 @@ pub(super) struct IslandSnow {
 }
 
 impl IslandSnow {
-    pub fn follow(&mut self, ledge: Option<Ledge>, expanded: bool, shake: bool) {
+    pub fn follow(&mut self, ledge: Option<Ledge>, expanded: bool, shake: bool) -> bool {
+        let emitted = self.ledge.is_some() && ledge.is_some() && expanded != self.expanded && shake;
         if self.ledge.is_none() {
             self.coverage = 1.0;
         }
-        if expanded
-            && !self.expanded
+        if expanded != self.expanded
             && shake
             && let Some(before) = self.ledge
         {
-            self.chips.clear();
-            for i in 0..32 {
+            for i in 0..(64 - self.chips.len()).min(32) {
                 let t = (i as f32 + 0.5) / 32.0;
                 let side = (t - 0.5) * 2.0;
                 self.chips.push(Chip {
                     x: before.x + t * before.width,
-                    y: before.y - 3.0,
+                    y: before.surface_y(before.x + t * before.width) - 1.0,
                     vx: side * (38.0 + (i % 5) as f32 * 9.0),
-                    vy: -28.0 - (i % 7) as f32 * 6.0,
+                    vy: if before.y < 16.0 || !expanded {
+                        12.0 + (i % 7) as f32 * 3.0
+                    } else {
+                        -28.0 - (i % 7) as f32 * 6.0
+                    },
                     radius: 1.3 + (i % 4) as f32 * 0.55,
                     life: 1.0,
                 });
             }
-            self.coverage = 0.28;
+            self.coverage = if expanded { 0.28 } else { 0.55 };
         }
         self.expanded = expanded;
         self.ledge = ledge;
         if ledge.is_none() {
             self.chips.clear();
         }
+        emitted
     }
 
     pub fn step(&mut self, dt: f32) {
@@ -88,6 +92,37 @@ mod tests {
         assert!(snow.coverage > 0.99);
         snow.follow(ledge, false, false);
         snow.follow(ledge, true, false);
+        assert!(snow.chips.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+    #[test]
+    fn resting_is_silent_and_opening_and_closing_each_emit_a_single_burst() {
+        let ledge = Some(Ledge { id: -2, x: 100.0, y: 8.0, width: 220.0, radius: 16.0 });
+        let mut snow = IslandSnow::default();
+        assert!(!snow.follow(ledge, false, true));
+        for _ in 0..300 {
+            snow.follow(ledge, false, true);
+            snow.step(1.0 / 60.0);
+        }
+        assert!(snow.chips.is_empty());
+        assert!(snow.follow(ledge, true, true));
+        assert_eq!(snow.chips.len(), 32);
+        assert!(snow.chips.iter().all(|c| c.vy > 0.0));
+        for _ in 0..300 {
+            snow.follow(ledge, true, true);
+            snow.step(1.0 / 60.0);
+        }
+        assert!(snow.chips.is_empty());
+        assert!(snow.follow(ledge, false, true));
+        assert_eq!(snow.chips.len(), 32);
+        for _ in 0..300 {
+            snow.follow(ledge, false, true);
+            snow.step(1.0 / 60.0);
+        }
         assert!(snow.chips.is_empty());
     }
 }

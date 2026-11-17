@@ -75,6 +75,12 @@ struct Scene {
     island: IslandSnow,
     chips: Vec<(Dot, CompositionColorBrush)>,
     chip_layer: ShapeVisual,
+    island_chip_layer: ShapeVisual,
+    island_dots: Vec<(Dot, CompositionColorBrush)>,
+    plow: super::winter_plow::Plow,
+    plow_visual: super::winter_plow::Vehicle,
+    plow_layer: ContainerVisual,
+    cap_clip: CompositionGeometricClip,
     chip_mask: CompositionPathGeometry,
     protected_island: Option<RECT>,
 }
@@ -206,13 +212,22 @@ impl Scene {
             let piles = c.CreateShapeVisual()?;
             piles.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             let cap_mask = c.CreatePathGeometry()?;
-            piles.SetClip(&c.CreateGeometricClipWithGeometry(&cap_mask)?)?;
+            let cap_clip = c.CreateGeometricClipWithGeometry(&cap_mask)?;
+            piles.SetClip(&cap_clip)?;
             root.Children()?.InsertAtTop(&piles)?;
             let chip_layer = c.CreateShapeVisual()?;
             chip_layer.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             let chip_mask = c.CreatePathGeometry()?;
             chip_layer.SetClip(&c.CreateGeometricClipWithGeometry(&chip_mask)?)?;
             root.Children()?.InsertAtTop(&chip_layer)?;
+            let island_chip_layer = c.CreateShapeVisual()?;
+            island_chip_layer.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+            root.Children()?.InsertAtTop(&island_chip_layer)?;
+            let plow_visual = super::winter_plow::Vehicle::new(c)?;
+            let plow_layer = c.CreateContainerVisual()?;
+            plow_layer.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+            plow_layer.Children()?.InsertAtTop(&plow_visual.root)?;
+            root.Children()?.InsertAtTop(&plow_layer)?;
             let balls = c.CreateShapeVisual()?;
             balls.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             balls.SetClip(&clip)?;
@@ -245,6 +260,12 @@ impl Scene {
                 island: IslandSnow::default(),
                 chips: Vec::new(),
                 chip_layer,
+                island_chip_layer,
+                island_dots: Vec::new(),
+                plow: Default::default(),
+                plow_visual,
+                plow_layer,
+                cap_clip,
                 chip_mask,
                 protected_island: None,
             }))
@@ -307,7 +328,7 @@ impl Scene {
         }
         if on_windows {
             for window in windows {
-                if !window.maximized {
+                if !window.maximized && window.snow_cap {
                     let r = window.rect;
                     add(window.handle, r.left as f32, r.top as f32, (r.right - r.left).max(1) as f32, window.radius);
                 }
@@ -583,21 +604,37 @@ impl Scene {
             })?;
             beads[3].shape.SetOffset(Vector2 { X: ball.x + ball.radius * 0.15, Y: center_y + ry * 0.18 })?;
         }
-        for (index, chip) in self.island.chips.iter().chain(self.snow.crumbs.iter()).enumerate() {
-            if index == self.chips.len() {
-                let brush = self.compositor.CreateColorBrushWithColor(Color { A: 255, R: 238, G: 247, B: 255 })?;
-                let bead = dot(&self.compositor, &brush, chip.radius, chip.radius)?;
-                self.chip_layer.Shapes()?.Append(&bead.shape)?;
-                self.chips.push((bead, brush));
-            }
-            let (bead, brush) = &self.chips[index];
-            bead._geometry.SetRadius(Vector2 { X: chip.radius, Y: chip.radius * 0.7 })?;
-            bead.shape.SetOffset(Vector2 { X: chip.x, Y: chip.y })?;
-            brush.SetColor(Color { A: (chip.life * 255.0) as u8, R: 238, G: 247, B: 255 })?;
+        render_chips(&self.compositor, &self.island_chip_layer, &mut self.island_dots, &self.island.chips)?;
+        render_chips(&self.compositor, &self.chip_layer, &mut self.chips, &self.snow.crumbs)?;
+        let eligible: Vec<isize> = self
+            .snow
+            .drifts
+            .iter()
+            .filter(|d| {
+                let ledge = d.ledge;
+                let center = ledge.x + ledge.width * 0.5;
+                ledge.id != -1
+                    && (ledge.id != -2 || settings.island_plow)
+                    && ledge.width > 40.0
+                    && self
+                        .cap_regions
+                        .iter()
+                        .any(|&(l, t, r, b)| center >= l && center < r && ledge.y - 1.0 >= t && ledge.y - 1.0 < b)
+            })
+            .map(|d| d.ledge.id)
+            .collect();
+        let pose = if settings.plow {
+            self.plow.step(&mut self.snow, &eligible, dt, settings.plow_interval_secs)
+        } else {
+            self.plow.reset();
+            None
+        };
+        if pose.is_some_and(|p| p.surface == -2) {
+            self.plow_layer.SetClip(None::<&CompositionClip>)?;
+        } else {
+            self.plow_layer.SetClip(&self.cap_clip)?;
         }
-        for (bead, _) in &self.chips[self.island.chips.len() + self.snow.crumbs.len()..] {
-            bead._geometry.SetRadius(Vector2::default())?;
-        }
+        self.plow_visual.place(pose)?;
         if !self.presented {
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
@@ -606,6 +643,30 @@ impl Scene {
         }
         Ok(())
     }
+}
+
+fn render_chips(
+    c: &Compositor,
+    layer: &ShapeVisual,
+    dots: &mut Vec<(Dot, CompositionColorBrush)>,
+    chips: &[super::winter_island::Chip],
+) -> Result<()> {
+    for (index, chip) in chips.iter().enumerate() {
+        if index == dots.len() {
+            let brush = c.CreateColorBrushWithColor(Color { A: 255, R: 238, G: 247, B: 255 })?;
+            let bead = dot(c, &brush, chip.radius, chip.radius)?;
+            layer.Shapes()?.Append(&bead.shape)?;
+            dots.push((bead, brush));
+        }
+        let (bead, brush) = &dots[index];
+        bead._geometry.SetRadius(Vector2 { X: chip.radius, Y: chip.radius * 0.7 })?;
+        bead.shape.SetOffset(Vector2 { X: chip.x, Y: chip.y })?;
+        brush.SetColor(Color { A: (chip.life * 255.0) as u8, R: 238, G: 247, B: 255 })?;
+    }
+    for (bead, _) in &dots[chips.len()..] {
+        bead._geometry.SetRadius(Vector2::default())?;
+    }
+    Ok(())
 }
 
 fn dot(c: &Compositor, brush: &CompositionColorBrush, x: f32, y: f32) -> Result<Dot> {
@@ -717,7 +778,19 @@ impl Winter {
                 scene.ledges(island, visible, self.settings.windows, dock, windows, island_radius);
                 scene.rounded_windows = windows.iter().map(|w| (w.rect, w.radius)).collect();
                 let ledge = scene.snow.drifts.iter().find(|d| d.ledge.id == -2).map(|d| d.ledge);
-                scene.island.follow(ledge, expanded, self.settings.island_shake);
+                if scene.island.follow(ledge, expanded, self.settings.island_shake) {
+                    unsafe {
+                        let _ = SetWindowPos(
+                            scene.hwnd,
+                            Some(HWND_TOPMOST),
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                        );
+                    }
+                }
                 scene.update_caps(windows)?;
                 let mut exclusions: Vec<RECT> =
                     windows.iter().map(|w| RECT { top: w.rect.top + 1, ..w.rect }).collect();

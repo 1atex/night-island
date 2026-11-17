@@ -189,12 +189,14 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
         handle: 77,
         rect: RECT { left: 380, top: 280, right: 680, bottom: 540 },
         maximized: false,
+        snow_cap: true,
         radius: 8.0,
     };
     let rear = occlusion::WindowEdge {
         handle: 42,
         rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
         maximized: false,
+        snow_cap: true,
         radius: 8.0,
     };
     let island = (350.0, 160.0, 260.0, 38.0);
@@ -205,12 +207,14 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
             handle: 77,
             rect: RECT { left, top: 280, right: left + 300, bottom: 540 },
             maximized: false,
+            snow_cap: true,
             radius: 8.0,
         };
         let rear = occlusion::WindowEdge {
             handle: 42,
             rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
             maximized: false,
+            snow_cap: true,
             radius: 8.0,
         };
         scene.ledges(island, true, true, None, &[front, rear], 16.0);
@@ -218,12 +222,14 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
             handle: 77,
             rect: RECT { left, top: 280, right: left + 300, bottom: 540 },
             maximized: false,
+            snow_cap: true,
             radius: 8.0,
         };
         let rear = occlusion::WindowEdge {
             handle: 42,
             rect: RECT { left: 180, top: 300, right: 620, bottom: 500 },
             maximized: false,
+            snow_cap: true,
             radius: 8.0,
         };
         scene.update_caps(&[front, rear])?;
@@ -240,12 +246,16 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     scene.island.follow(Some(ledge), false, true);
     scene.island.follow(Some(ledge), true, true);
     scene.render(1.0 / 60.0, settings, true)?;
-    assert!(scene.chips.len() >= 32 && scene.chips.len() <= 128);
-    let chip = scene.chips[0].0.shape.Offset()?;
+    assert!(scene.island_dots.len() >= 32 && scene.island_dots.len() <= 64);
+    assert!(
+        scene.island_chip_layer.Clip().is_err(),
+        "Island transition particles must remain visible above fullscreen applications"
+    );
+    let chip = scene.island_dots[0].0.shape.Offset()?;
     for _ in 0..12 {
         scene.render(1.0 / 60.0, settings, false)?;
     }
-    assert_ne!(scene.chips[0].0.shape.Offset()?, chip);
+    assert_ne!(scene.island_dots[0].0.shape.Offset()?, chip);
     for _ in 0..100 {
         scene.render(1.0 / 60.0, settings, false)?;
     }
@@ -260,6 +270,64 @@ fn native_winter_retains_shapes_and_releases_its_windows() -> Result<()> {
     let mut cap = super::super::winter_cap::Cap::new(&compositor, &scene.white, &empty)?;
     cap.update(&scene.factory, &empty, 1.0 / 60.0, 1.0, (0.0, 0.0))?;
     assert!(cap.area < 0.01, "An empty curved surface must never generate white patches");
+    scene.plow_layer.SetClip(&scene.cap_clip)?;
+    scene.plow_visual.place(Some(super::super::winter_plow::Pose {
+        x: 200.0 / s,
+        y: 160.0 / s,
+        scale: 1.0 / s,
+        direction: 1.0,
+        surface: 77,
+        travel: 40.0,
+    }))?;
+    for _ in 0..4 {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            DwmFlush()?;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let truck = unsafe {
+        let dc = GetDC(None);
+        let color = GetPixel(dc, 281, 266).0;
+        ReleaseDC(None, dc);
+        color
+    };
+    assert!(((truck >> 8) & 255) > 120, "The snowplow must be visible in stage coordinates: {truck:x}");
+    scene.update_mask(vec![bounds])?;
+    scene.island.chips = vec![super::super::winter_island::Chip {
+        x: 50.0 / s,
+        y: 50.0 / s,
+        vx: 0.0,
+        vy: 0.0,
+        radius: 3.0 / s,
+        life: 1.0,
+    }];
+    scene.render(1.0 / 60.0, WinterSettings { plow: false, ..settings }, false)?;
+    for _ in 0..4 {
+        unsafe {
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            DwmFlush()?;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let particle = unsafe {
+        let dc = GetDC(None);
+        let color = GetPixel(dc, 130, 170).0;
+        ReleaseDC(None, dc);
+        color
+    };
+    assert!(
+        (particle & 255) > 220 && ((particle >> 8) & 255) > 220,
+        "Island transition particles must remain visible over a fully covered desktop: {particle:x}"
+    );
     let hwnd = scene.hwnd;
     drop(scene);
     assert!(!unsafe { IsWindow(Some(hwnd)) }.as_bool());
