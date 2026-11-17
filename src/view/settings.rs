@@ -5,6 +5,13 @@ pub enum Sid {
     BrowserDownloads,
     InterfaceFont,
     LiquidGlass,
+    Winter,
+    WinterDense,
+    WinterEconomy,
+    WinterWindows,
+    WinterAccumulate,
+    WinterInteractive,
+
     CardShadows,
     LegacyIcons,
     HeaderIcons,
@@ -522,6 +529,13 @@ pub(in crate::view) fn toggle_value(id: Sid, c: &Settings) -> bool {
     }
     match id {
         Sid::LiquidGlass => c.liquid_glass_beta,
+        Sid::Winter => c.winter.enabled,
+        Sid::WinterDense => c.winter.dense,
+        Sid::WinterEconomy => c.winter.economy,
+        Sid::WinterWindows => c.winter.windows,
+        Sid::WinterAccumulate => c.winter.accumulate,
+        Sid::WinterInteractive => c.winter.interactive,
+
         Sid::CardShadows => c.card_shadows,
         Sid::LegacyIcons => c.legacy_icons,
         Sid::HeaderIcons => c.header_icons,
@@ -672,6 +686,13 @@ pub fn toggle_set(id: Sid, c: &mut Settings, on: bool) {
     }
     match id {
         Sid::LiquidGlass => c.liquid_glass_beta = on,
+        Sid::Winter => c.winter.enabled = on,
+        Sid::WinterDense => c.winter.dense = on,
+        Sid::WinterEconomy => c.winter.economy = on,
+        Sid::WinterWindows => c.winter.windows = on,
+        Sid::WinterAccumulate => c.winter.accumulate = on,
+        Sid::WinterInteractive => c.winter.interactive = on,
+
         Sid::CardShadows => c.card_shadows = on,
         Sid::LegacyIcons => c.legacy_icons = on,
         Sid::HeaderIcons => c.header_icons = on,

@@ -63,7 +63,13 @@ const ANIMATIONS: [(Sid, &str, Kind); 10] = [
     (Sid::FrameRate, "Frame rate", Kind::Cycle),
 ];
 
-const APPEARANCE: [(Sid, &str, Kind); 12] = [
+const APPEARANCE: [(Sid, &str, Kind); 18] = [
+    (Sid::Winter, "Winter desktop", Kind::Toggle),
+    (Sid::WinterDense, "More snowflakes", Kind::Toggle),
+    (Sid::WinterEconomy, "Snow economy mode (20 fps)", Kind::Toggle),
+    (Sid::WinterWindows, "Snow on window edges", Kind::Toggle),
+    (Sid::WinterAccumulate, "Accumulate snow on the island and dock", Kind::Toggle),
+    (Sid::WinterInteractive, "Alt + drag snow to roll snowballs and stack a snowman", Kind::Toggle),
     (Sid::InterfaceFont, "Interface font", Kind::Cycle),
     (Sid::LegacyIcons, "Classic interface icons", Kind::Toggle),
     (Sid::HeaderIcons, "Icons beside tab names", Kind::Toggle),

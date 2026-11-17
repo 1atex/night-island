@@ -109,6 +109,7 @@ pub fn run() -> Result<()> {
         with_app(|app| app.configure_system_notifications());
         with_app(|app| app.configure_desktop_dock());
         with_app(|app| app.configure_top_panel());
+        with_app(|app| app.configure_winter());
 
         let failed = with_app_value(|a| register_hotkeys(hwnd, &a.settings)).unwrap_or_default();
         if !failed.is_empty() {
@@ -316,6 +317,7 @@ impl App {
             dpi_scale,
             settings_win: None,
             desktop_dock: None,
+            winter: None,
             windows_taskbar: None,
             top_panel: None,
             top_panel_poll: Instant::now(),

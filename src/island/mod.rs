@@ -100,6 +100,7 @@ mod top_panel;
 mod voice;
 mod voice_info;
 mod window;
+mod winter;
 
 use self::{
     character::*, editing::*, geometry::*, hotkeys::*, input::Pointer, liquid::*, motion::*, tabs::ClipboardState,
@@ -147,6 +148,7 @@ struct App {
     settings_win: Option<HWND>,
     windows_taskbar: Option<crate::platform::taskbar::TaskbarGuard>,
     desktop_dock: Option<crate::ui::desktop_dock::Dock>,
+    winter: Option<crate::ui::winter::Winter>,
     top_panel: Option<crate::ui::top_panel::TopPanel>,
     top_panel_poll: Instant,
     top_panel_radios: Instant,

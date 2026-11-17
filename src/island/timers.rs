@@ -88,10 +88,11 @@ pub(in crate::island) enum Timer {
     LiveActivity = 45,
     VoiceMusic = 46,
     Digest = 47,
+    Winter = 48,
 }
 
 impl Timer {
-    const ALL: [Timer; 47] = [
+    const ALL: [Timer; 48] = [
         Timer::Expand,
         Timer::Collapse,
         Timer::Shrink,
@@ -139,6 +140,7 @@ impl Timer {
         Timer::LiveActivity,
         Timer::VoiceMusic,
         Timer::Digest,
+        Timer::Winter,
     ];
 
     fn from_id(id: usize) -> Option<Timer> {
@@ -361,6 +363,7 @@ impl App {
                 self.ui.steam.armed = None;
                 self.repaint_expanded();
             }
+            Timer::Winter => self.winter_tick(),
             Timer::Clock => {
                 self.refresh_reminder_labels();
                 self.repaint();
